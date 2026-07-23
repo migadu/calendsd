@@ -1,0 +1,44 @@
+{
+    "test": "Sabre\\DAV\\HttpCopyTest::testCopyCollToExisting",
+    "seq": 15,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "COPY",
+        "url": "/coll1",
+        "headers": {
+            "Destination": [
+                "/file2"
+            ],
+            "Depth": [
+                "infinity"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

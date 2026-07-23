@@ -1,0 +1,41 @@
+{
+    "test": "Sabre\\DAV\\HTTPPreferParsingTest::testproppatchMinimal",
+    "seq": 2,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PROPPATCH",
+        "url": "/",
+        "headers": {
+            "Prefer": [
+                "return-minimal"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:propertyupdate xmlns:d=\"DAV:\">\n    <d:set>\n        <d:prop>\n            <d:something>nope!</d:something>\n        </d:prop>\n    </d:set>\n</d:propertyupdate>"
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ]
+        },
+        "body": ""
+    }
+}

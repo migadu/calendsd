@@ -1,0 +1,44 @@
+{
+    "test": "Sabre\\DAV\\HTTPPreferParsingTest::testproppatchMinimalError",
+    "seq": 3,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PROPPATCH",
+        "url": "/",
+        "headers": {
+            "Prefer": [
+                "return-minimal"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:propertyupdate xmlns:d=\"DAV:\">\n    <d:set>\n        <d:prop>\n            <d:something>nope!</d:something>\n        </d:prop>\n    </d:set>\n</d:propertyupdate>"
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\"><d:response><d:href>/</d:href><d:propstat><d:prop><d:something/></d:prop><d:status>HTTP/1.1 403 Forbidden</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

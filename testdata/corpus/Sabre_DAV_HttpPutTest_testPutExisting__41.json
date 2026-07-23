@@ -1,0 +1,40 @@
+{
+    "test": "Sabre\\DAV\\HttpPutTest::testPutExisting",
+    "seq": 41,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PUT",
+        "url": "/file1",
+        "headers": [],
+        "body": "bar"
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ],
+            "ETag": [
+                "\"37b51d194a7513e45b56f6524f2d51f2\""
+            ]
+        },
+        "body": ""
+    }
+}

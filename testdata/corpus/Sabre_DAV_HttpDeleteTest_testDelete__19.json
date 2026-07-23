@@ -1,0 +1,37 @@
+{
+    "test": "Sabre\\DAV\\HttpDeleteTest::testDelete",
+    "seq": 19,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "DELETE",
+        "url": "/file1",
+        "headers": [],
+        "body": ""
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

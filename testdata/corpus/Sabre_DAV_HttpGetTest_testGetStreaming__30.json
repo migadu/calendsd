@@ -1,0 +1,40 @@
+{
+    "test": "Sabre\\DAV\\HttpGetTest::testGetStreaming",
+    "seq": 30,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "GET",
+        "url": "/streaming",
+        "headers": [],
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Last-Modified": [
+                "Thu, 23 Jul 2026 12:28:17 GMT"
+            ],
+            "Content-Type": [
+                "application/octet-stream"
+            ]
+        },
+        "body": "stream"
+    }
+}

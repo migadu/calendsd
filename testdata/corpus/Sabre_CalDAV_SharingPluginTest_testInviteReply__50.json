@@ -1,0 +1,78 @@
+{
+    "test": "Sabre\\CalDAV\\SharingPluginTest::testInviteReply",
+    "seq": 50,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": true,
+        "setupCalDAVSharing": true,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [
+            {
+                "principaluri": "principals/user1",
+                "id": 1,
+                "uri": "cal1"
+            },
+            {
+                "principaluri": "principals/user1",
+                "id": 2,
+                "uri": "cal2",
+                "share-access": 3
+            },
+            {
+                "principaluri": "principals/user1",
+                "id": 3,
+                "uri": "cal3"
+            }
+        ],
+        "caldavCalendarObjects": [],
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "POST",
+        "url": "/calendars/user1",
+        "headers": {
+            "Content-Type": [
+                "text/xml"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<cs:invite-reply xmlns:cs=\"http://calendarserver.org/ns/\" xmlns:d=\"DAV:\">\n    <cs:hosturl><d:href>/principals/owner</d:href></cs:hosturl>\n    <cs:invite-accepted />\n</cs:invite-reply>\n"
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "X-Sabre-Status": [
+                "everything-went-well"
+            ],
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<cs:shared-as xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\" xmlns:cal=\"urn:ietf:params:xml:ns:caldav\" xmlns:cs=\"http://calendarserver.org/ns/\"><d:href>/calendars/calendars/blabla/calendar</d:href></cs:shared-as>"
+    }
+}

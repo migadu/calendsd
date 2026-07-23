@@ -1,0 +1,79 @@
+{
+    "test": "Sabre\\CalDAV\\JCalTransformTest::testGet",
+    "seq": 32,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [
+            {
+                "id": 1,
+                "principaluri": "principals/user1",
+                "uri": "foo"
+            }
+        ],
+        "caldavCalendarObjects": {
+            "1": {
+                "bar.ics": {
+                    "uri": "bar.ics",
+                    "calendarid": 1,
+                    "calendardata": "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                    "lastmodified": null
+                }
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "GET",
+        "url": "/calendars/user1/foo/bar.ics",
+        "headers": {
+            "Accept": [
+                "application/calendar+json"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/calendar+json"
+            ],
+            "ETag": [
+                "\"905e8d8f1ff5cd69d44dbc5ed7270b3b\""
+            ],
+            "Content-Length": [
+                35
+            ]
+        },
+        "body": "[\"vcalendar\",[],[[\"vevent\",[],[]]]]"
+    }
+}

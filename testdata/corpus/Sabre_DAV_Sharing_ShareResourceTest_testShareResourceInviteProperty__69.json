@@ -1,0 +1,47 @@
+{
+    "test": "Sabre\\DAV\\Sharing\\ShareResourceTest::testShareResourceInviteProperty",
+    "seq": 69,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PROPFIND",
+        "url": "/shareable",
+        "headers": {
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:propfind xmlns:D=\"DAV:\">\n  <D:prop>\n    <D:invite />\n    <D:share-access />\n    <D:share-resource-uri />\n  </D:prop>\n</D:propfind>"
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ],
+            "DAV": [
+                "1, 3, extended-mkcol, resource-sharing"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\"><d:response><d:href>/shareable</d:href><d:propstat><d:prop><d:invite><d:sharee><d:href>mailto:eric@example.com</d:href><d:prop><d:displayname>Eric York</d:displayname></d:prop><d:share-access><d:read-write/></d:share-access><d:invite-noresponse/></d:sharee></d:invite><d:share-access><d:shared-owner/></d:share-access><d:share-resource-uri><d:href>urn:example:bar</d:href></d:share-resource-uri></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

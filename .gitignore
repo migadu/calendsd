@@ -1,0 +1,13 @@
+# direnv / nix
+.direnv/
+.dev/
+
+# reference sabre checkout dependencies
+dav/vendor/
+
+# go
+/calserver
+*.test
+
+# local claude settings
+.claude/

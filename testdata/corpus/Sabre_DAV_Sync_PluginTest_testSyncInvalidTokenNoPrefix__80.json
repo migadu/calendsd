@@ -1,0 +1,41 @@
+{
+    "test": "Sabre\\DAV\\Sync\\PluginTest::testSyncInvalidTokenNoPrefix",
+    "seq": 80,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "REPORT",
+        "url": "/coll/",
+        "headers": {
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:sync-collection xmlns:D=\"DAV:\">\n     <D:sync-token>invalid</D:sync-token>\n     <D:sync-level>1</D:sync-level>\n      <D:prop>\n        <D:getcontentlength/>\n      </D:prop>\n</D:sync-collection>"
+    },
+    "response": {
+        "status": 403,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<d:error xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n  <s:sabredav-version>4.7.1</s:sabredav-version>\n  <s:exception>Sabre\\DAV\\Exception\\InvalidSyncToken</s:exception>\n  <s:message>Invalid or unknown sync token</s:message>\n  <s:file>/Users/michael/Documents/Projects/calserver/dav/lib/DAV/Sync/Plugin.php</s:file>\n  <s:line>112</s:line>\n  <s:code>0</s:code>\n  <s:stacktrace>#0 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Sync/Plugin.php(60): Sabre\\DAV\\Sync\\Plugin-&gt;syncCollection('coll', Object(Sabre\\DAV\\Xml\\Request\\SyncCollectionReport))\n#1 /Users/michael/Documents/Projects/calserver/dav/vendor/sabre/event/lib/WildcardEmitterTrait.php(89): Sabre\\DAV\\Sync\\Plugin-&gt;Sabre\\DAV\\Sync\\{closure}('{DAV:}sync-coll...', Object(Sabre\\DAV\\Xml\\Request\\SyncCollectionReport), 'coll')\n#2 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/CorePlugin.php(692): Sabre\\DAV\\Server-&gt;emit('report', Array)\n#3 /Users/michael/Documents/Projects/calserver/dav/vendor/sabre/event/lib/WildcardEmitterTrait.php(89): Sabre\\DAV\\CorePlugin-&gt;httpReport(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#4 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(472): Sabre\\DAV\\Server-&gt;emit('method:REPORT', Array)\n#5 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(253): Sabre\\DAV\\Server-&gt;invokeMethod(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#6 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(321): Sabre\\DAV\\Server-&gt;start()\n#7 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/AbstractDAVServerTestCase.php(214): Sabre\\DAV\\Server-&gt;exec()\n#8 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/DAV/Sync/PluginTest.php(408): Sabre\\AbstractDAVServerTestCase-&gt;request(Object(Sabre\\HTTP\\Request))\n#9 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1617): Sabre\\DAV\\Sync\\PluginTest-&gt;testSyncInvalidTokenNoPrefix()\n#10 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1223): PHPUnit\\Framework\\TestCase-&gt;runTest()\n#11 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestResult.php(729): PHPUnit\\Framework\\TestCase-&gt;runBare()\n#12 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(973): PHPUnit\\Framework\\TestResult-&gt;run(Object(Sabre\\DAV\\Sync\\PluginTest))\n#13 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestCase-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#14 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#15 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/TestRunner.php(651): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#16 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(146): PHPUnit\\TextUI\\TestRunner-&gt;run(Object(PHPUnit\\Framework\\TestSuite), Array, Array, true)\n#17 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(99): PHPUnit\\TextUI\\Command-&gt;run(Array, true)\n#18 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/phpunit(107): PHPUnit\\TextUI\\Command::main()\n#19 /Users/michael/Documents/Projects/calserver/dav/vendor/bin/phpunit(122): include('/Users/michael/...')\n#20 {main}</s:stacktrace>\n  <d:valid-sync-token/>\n</d:error>\n"
+    }
+}

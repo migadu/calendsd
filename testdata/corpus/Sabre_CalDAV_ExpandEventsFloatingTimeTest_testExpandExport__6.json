@@ -1,0 +1,78 @@
+{
+    "test": "Sabre\\CalDAV\\ExpandEventsFloatingTimeTest::testExpandExport",
+    "seq": 6,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": true,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [
+            {
+                "id": 1,
+                "name": "Calendar",
+                "principaluri": "principals/user1",
+                "uri": "calendar1",
+                "{urn:ietf:params:xml:ns:caldav}calendar-timezone": "BEGIN:VCALENDAR\nVERSION:2.0\nCALSCALE:GREGORIAN\nBEGIN:VTIMEZONE\nTZID:Europe/Berlin\nBEGIN:DAYLIGHT\nTZOFFSETFROM:+0100\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\nDTSTART:19810329T020000\nTZNAME:GMT+2\nTZOFFSETTO:+0200\nEND:DAYLIGHT\nBEGIN:STANDARD\nTZOFFSETFROM:+0200\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\nDTSTART:19961027T030000\nTZNAME:GMT+1\nTZOFFSETTO:+0100\nEND:STANDARD\nEND:VTIMEZONE\nEND:VCALENDAR"
+            }
+        ],
+        "caldavCalendarObjects": {
+            "1": {
+                "event.ics": {
+                    "calendardata": "BEGIN:VCALENDAR\nVERSION:2.0\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nCREATED:20140701T143658Z\nUID:dba46fe8-1631-4d98-a575-97963c364dfe\nDTEND:20141108T073000\nTRANSP:OPAQUE\nSUMMARY:Floating Time event, starting 05:30am Europe/Berlin\nDTSTART:20141108T053000\nDTSTAMP:20140701T143706Z\nSEQUENCE:1\nEND:VEVENT\nEND:VCALENDAR\n"
+                }
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "GET",
+        "url": "/calendars/user1/calendar1?export&start=1&end=2000000000&expand=1",
+        "headers": {
+            "Depth": [
+                1
+            ],
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Disposition": [
+                "attachment; filename=\"calendar1-2026-07-23.ics\""
+            ],
+            "Content-Type": [
+                "text/calendar"
+            ]
+        },
+        "body": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Sabre//Sabre VObject 4.6.1//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\nCREATED:20140701T143658Z\r\nUID:dba46fe8-1631-4d98-a575-97963c364dfe\r\nDTEND:20141108T063000Z\r\nTRANSP:OPAQUE\r\nSUMMARY:Floating Time event, starting 05:30am Europe/Berlin\r\nDTSTART:20141108T043000Z\r\nDTSTAMP:20140701T143706Z\r\nSEQUENCE:1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
+}

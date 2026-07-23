@@ -1,0 +1,46 @@
+{
+    "test": "Sabre\\DAV\\HttpGetTest::testGet",
+    "seq": 24,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "GET",
+        "url": "/file1",
+        "headers": [],
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Last-Modified": [
+                "Thu, 23 Jul 2026 12:28:17 GMT"
+            ],
+            "ETag": [
+                "\"acbd18db4cc2f85cedef654fccc4a4d8\""
+            ],
+            "Content-Type": [
+                "application/octet-stream"
+            ],
+            "Content-Length": [
+                3
+            ]
+        },
+        "body": "foo"
+    }
+}

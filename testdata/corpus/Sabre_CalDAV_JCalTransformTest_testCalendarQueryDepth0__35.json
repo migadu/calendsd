@@ -1,0 +1,76 @@
+{
+    "test": "Sabre\\CalDAV\\JCalTransformTest::testCalendarQueryDepth0",
+    "seq": 35,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [
+            {
+                "id": 1,
+                "principaluri": "principals/user1",
+                "uri": "foo"
+            }
+        ],
+        "caldavCalendarObjects": {
+            "1": {
+                "bar.ics": {
+                    "uri": "bar.ics",
+                    "calendarid": 1,
+                    "calendardata": "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                    "lastmodified": null
+                }
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "REPORT",
+        "url": "/calendars/user1/foo/bar.ics",
+        "headers": {
+            "Depth": [
+                "0"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<c:calendar-query xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:d=\"DAV:\">\n    <d:prop>\n        <c:calendar-data content-type=\"application/calendar+json\" />\n    </d:prop>\n    <c:filter>\n        <c:comp-filter name=\"VCALENDAR\" />\n    </c:filter>\n</c:calendar-query>"
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\" xmlns:cal=\"urn:ietf:params:xml:ns:caldav\" xmlns:cs=\"http://calendarserver.org/ns/\"><d:response><d:href>/calendars/user1/foo/bar.ics</d:href><d:propstat><d:prop><cal:calendar-data>[&quot;vcalendar&quot;,[],[[&quot;vevent&quot;,[],[]]]]</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

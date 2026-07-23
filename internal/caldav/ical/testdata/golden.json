@@ -1,0 +1,82 @@
+{
+    "allday.ics": {
+        "etag": "b3ae9c5957dac1047029521f3d5a8d5d",
+        "size": 188,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767225600,
+        "lastOccurence": 1767312000,
+        "uid": "allday-1"
+    },
+    "duration.ics": {
+        "etag": "c3d7d928f60ebc58bf987de07c67c9b5",
+        "size": 204,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1767274200,
+        "uid": "duration-1"
+    },
+    "exdate.ics": {
+        "etag": "5bf5513fdfc17e5fca85413cc2bb0348",
+        "size": 286,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1768482000,
+        "uid": "exdate-1"
+    },
+    "finite-rrule.ics": {
+        "etag": "81664f000007fcb5e6379461fffda98d",
+        "size": 235,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1768482000,
+        "uid": "finite-1"
+    },
+    "infinite-rrule.ics": {
+        "etag": "e61c019bcf5c842b8fdabb3a943da017",
+        "size": 230,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 2145916800,
+        "uid": "infinite-1"
+    },
+    "point.ics": {
+        "etag": "f7a758b8c67b7a43559f6b45fe310102",
+        "size": 182,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1767268800,
+        "uid": "point-1"
+    },
+    "simple.ics": {
+        "etag": "acd1846fcd3564ea0d7988c05d5664dd",
+        "size": 208,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1767272400,
+        "uid": "simple-1"
+    },
+    "tzid.ics": {
+        "etag": "6c926c0962b1ea9dc4de4ce3b982214e",
+        "size": 242,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780300800,
+        "lastOccurence": 1780304400,
+        "uid": "tzid-1"
+    },
+    "until-rrule.ics": {
+        "etag": "fda9256831ab1f2dfe4d12124b151a33",
+        "size": 248,
+        "componentType": "VEVENT",
+        "firstOccurence": 1767268800,
+        "lastOccurence": 1769691600,
+        "uid": "until-1"
+    },
+    "vtodo.ics": {
+        "etag": "269207801ca16b08893e4bd56b379b61",
+        "size": 156,
+        "componentType": "VTODO",
+        "firstOccurence": null,
+        "lastOccurence": null,
+        "uid": "todo-1"
+    }
+}

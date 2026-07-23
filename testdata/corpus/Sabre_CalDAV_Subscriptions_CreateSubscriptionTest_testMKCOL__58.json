@@ -1,0 +1,58 @@
+{
+    "test": "Sabre\\CalDAV\\Subscriptions\\CreateSubscriptionTest::testMKCOL",
+    "seq": 58,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": true,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "MKCOL",
+        "url": "/calendars/user1/subscription1",
+        "headers": {
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": "<A:mkcol xmlns:A=\"DAV:\">\n    <A:set>\n        <A:prop>\n            <B:subscribed-strip-attachments xmlns:B=\"http://calendarserver.org/ns/\" />\n            <B:subscribed-strip-todos xmlns:B=\"http://calendarserver.org/ns/\" />\n            <A:resourcetype>\n                <A:collection />\n                <B:subscribed xmlns:B=\"http://calendarserver.org/ns/\" />\n            </A:resourcetype>\n            <E:calendar-color xmlns:E=\"http://apple.com/ns/ical/\">#1C4587FF</E:calendar-color>\n            <A:displayname>Jewish holidays</A:displayname>\n            <C:calendar-description xmlns:C=\"urn:ietf:params:xml:ns:caldav\">Foo</C:calendar-description>\n            <E:calendar-order xmlns:E=\"http://apple.com/ns/ical/\">19</E:calendar-order>\n            <B:source xmlns:B=\"http://calendarserver.org/ns/\">\n                <A:href>webcal://www.example.org/</A:href>\n            </B:source>\n            <E:refreshrate xmlns:E=\"http://apple.com/ns/ical/\">P1W</E:refreshrate>\n            <B:subscribed-strip-alarms xmlns:B=\"http://calendarserver.org/ns/\" />\n        </A:prop>\n    </A:set>\n</A:mkcol>"
+    },
+    "response": {
+        "status": 201,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

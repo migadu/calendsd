@@ -1,0 +1,44 @@
+{
+    "test": "Sabre\\DAV\\HttpCopyTest::testCopyFileToExistinBlockedCreateDestination",
+    "seq": 11,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "COPY",
+        "url": "/file1",
+        "headers": {
+            "Destination": [
+                "/file2"
+            ],
+            "Depth": [
+                "infinity"
+            ],
+            "Overwrite": [
+                "T"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 500,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ]
+        },
+        "body": ""
+    }
+}

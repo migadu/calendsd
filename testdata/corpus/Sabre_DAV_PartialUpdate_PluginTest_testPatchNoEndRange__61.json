@@ -1,0 +1,47 @@
+{
+    "test": "Sabre\\DAV\\PartialUpdate\\PluginTest::testPatchNoEndRange",
+    "seq": 61,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PATCH",
+        "url": "/partial",
+        "headers": {
+            "X-Update-Range": [
+                "bytes=3-"
+            ],
+            "Content-Type": [
+                "application/x-sabredav-partialupdate"
+            ],
+            "Content-Length": [
+                "3"
+            ]
+        },
+        "body": "bbb"
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

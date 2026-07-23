@@ -1,0 +1,47 @@
+{
+    "test": "Sabre\\DAV\\HTTPPreferParsingTest::testpropfindMinimal",
+    "seq": 1,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PROPFIND",
+        "url": "/",
+        "headers": {
+            "Prefer": [
+                "return-minimal"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:propfind xmlns:d=\"DAV:\">\n    <d:prop>\n        <d:something />\n        <d:resourcetype />\n    </d:prop>\n</d:propfind>"
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ],
+            "DAV": [
+                "1, 3, extended-mkcol"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\"><d:response><d:href>/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

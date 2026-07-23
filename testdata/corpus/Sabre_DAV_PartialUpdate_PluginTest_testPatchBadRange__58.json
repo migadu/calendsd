@@ -1,0 +1,47 @@
+{
+    "test": "Sabre\\DAV\\PartialUpdate\\PluginTest::testPatchBadRange",
+    "seq": 58,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "PATCH",
+        "url": "/partial",
+        "headers": {
+            "X-Update-Range": [
+                "bytes=3-4"
+            ],
+            "Content-Type": [
+                "application/x-sabredav-partialupdate"
+            ],
+            "Content-Length": [
+                "3"
+            ]
+        },
+        "body": "bbb"
+    },
+    "response": {
+        "status": 416,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<d:error xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n  <s:sabredav-version>4.7.1</s:sabredav-version>\n  <s:exception>Sabre\\DAV\\Exception\\RequestedRangeNotSatisfiable</s:exception>\n  <s:message>Actual data length (3) is not consistent with begin (3) and end (4) offsets</s:message>\n  <s:file>/Users/michael/Documents/Projects/calserver/dav/lib/DAV/PartialUpdate/Plugin.php</s:file>\n  <s:line>136</s:line>\n  <s:code>0</s:code>\n  <s:stacktrace>#0 /Users/michael/Documents/Projects/calserver/dav/vendor/sabre/event/lib/WildcardEmitterTrait.php(89): Sabre\\DAV\\PartialUpdate\\Plugin-&gt;httpPatch(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#1 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(472): Sabre\\DAV\\Server-&gt;emit('method:PATCH', Array)\n#2 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(253): Sabre\\DAV\\Server-&gt;invokeMethod(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#3 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(321): Sabre\\DAV\\Server-&gt;start()\n#4 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/AbstractDAVServerTestCase.php(214): Sabre\\DAV\\Server-&gt;exec()\n#5 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/DAV/PartialUpdate/PluginTest.php(79): Sabre\\AbstractDAVServerTestCase-&gt;request(Object(Sabre\\HTTP\\Request))\n#6 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1617): Sabre\\DAV\\PartialUpdate\\PluginTest-&gt;testPatchBadRange()\n#7 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1223): PHPUnit\\Framework\\TestCase-&gt;runTest()\n#8 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestResult.php(729): PHPUnit\\Framework\\TestCase-&gt;runBare()\n#9 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(973): PHPUnit\\Framework\\TestResult-&gt;run(Object(Sabre\\DAV\\PartialUpdate\\PluginTest))\n#10 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestCase-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#11 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#12 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/TestRunner.php(651): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#13 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(146): PHPUnit\\TextUI\\TestRunner-&gt;run(Object(PHPUnit\\Framework\\TestSuite), Array, Array, true)\n#14 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(99): PHPUnit\\TextUI\\Command-&gt;run(Array, true)\n#15 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/phpunit(107): PHPUnit\\TextUI\\Command::main()\n#16 /Users/michael/Documents/Projects/calserver/dav/vendor/bin/phpunit(122): include('/Users/michael/...')\n#17 {main}</s:stacktrace>\n</d:error>\n"
+    }
+}

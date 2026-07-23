@@ -1,0 +1,40 @@
+{
+    "test": "Sabre\\DAV\\HttpHeadTest::testHEADCollection",
+    "seq": 32,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "HEAD",
+        "url": "/dir",
+        "headers": [],
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "text/plain"
+            ],
+            "X-Sabre-Real-Status": [
+                501
+            ]
+        },
+        "body": ""
+    }
+}

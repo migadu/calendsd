@@ -1,0 +1,7 @@
+Vendored reference checkout of sabre/dav.
+
+upstream: https://github.com/sabre-io/dav
+commit:   4e433ee91b39100450c28caaf8e0501223fb762a (master, 4.5.0-141-g4e433ee9)
+
+Local modifications: corpus extraction shim (tests/Sabre/CorpusRecorder.php,
+hooked in tests/Sabre/AbstractDAVServerTestCase.php) — see PLAN.md §7.

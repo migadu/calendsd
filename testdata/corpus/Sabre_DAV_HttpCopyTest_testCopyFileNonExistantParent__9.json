@@ -1,0 +1,44 @@
+{
+    "test": "Sabre\\DAV\\HttpCopyTest::testCopyFileNonExistantParent",
+    "seq": 9,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "COPY",
+        "url": "/file1",
+        "headers": {
+            "Destination": [
+                "/notfound/file2"
+            ],
+            "Depth": [
+                "infinity"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 409,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<d:error xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n  <s:sabredav-version>4.7.1</s:sabredav-version>\n  <s:exception>Sabre\\DAV\\Exception\\Conflict</s:exception>\n  <s:message>The destination node is not found</s:message>\n  <s:file>/Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php</s:file>\n  <s:line>763</s:line>\n  <s:code>0</s:code>\n  <s:stacktrace>#0 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/CorePlugin.php(645): Sabre\\DAV\\Server-&gt;getCopyAndMoveInfo(Object(Sabre\\HTTP\\Request))\n#1 /Users/michael/Documents/Projects/calserver/dav/vendor/sabre/event/lib/WildcardEmitterTrait.php(89): Sabre\\DAV\\CorePlugin-&gt;httpCopy(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#2 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(472): Sabre\\DAV\\Server-&gt;emit('method:COPY', Array)\n#3 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(253): Sabre\\DAV\\Server-&gt;invokeMethod(Object(Sabre\\HTTP\\Request), Object(Sabre\\HTTP\\Response))\n#4 /Users/michael/Documents/Projects/calserver/dav/lib/DAV/Server.php(321): Sabre\\DAV\\Server-&gt;start()\n#5 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/AbstractDAVServerTestCase.php(214): Sabre\\DAV\\Server-&gt;exec()\n#6 /Users/michael/Documents/Projects/calserver/dav/tests/Sabre/DAV/HttpCopyTest.php(102): Sabre\\AbstractDAVServerTestCase-&gt;request(Object(Sabre\\HTTP\\Request))\n#7 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1617): Sabre\\DAV\\HttpCopyTest-&gt;testCopyFileNonExistantParent()\n#8 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(1223): PHPUnit\\Framework\\TestCase-&gt;runTest()\n#9 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestResult.php(729): PHPUnit\\Framework\\TestCase-&gt;runBare()\n#10 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestCase.php(973): PHPUnit\\Framework\\TestResult-&gt;run(Object(Sabre\\DAV\\HttpCopyTest))\n#11 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestCase-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#12 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/Framework/TestSuite.php(685): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#13 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/TestRunner.php(651): PHPUnit\\Framework\\TestSuite-&gt;run(Object(PHPUnit\\Framework\\TestResult))\n#14 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(146): PHPUnit\\TextUI\\TestRunner-&gt;run(Object(PHPUnit\\Framework\\TestSuite), Array, Array, true)\n#15 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/src/TextUI/Command.php(99): PHPUnit\\TextUI\\Command-&gt;run(Array, true)\n#16 /Users/michael/Documents/Projects/calserver/dav/vendor/phpunit/phpunit/phpunit(107): PHPUnit\\TextUI\\Command::main()\n#17 /Users/michael/Documents/Projects/calserver/dav/vendor/bin/phpunit(122): include('/Users/michael/...')\n#18 {main}</s:stacktrace>\n</d:error>\n"
+    }
+}

@@ -1,0 +1,41 @@
+{
+    "test": "Sabre\\DAV\\PropertyStorage\\PluginTest::testMove",
+    "seq": 62,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": true,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "MOVE",
+        "url": "/files/source",
+        "headers": {
+            "Destination": [
+                "/files/dest"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 201,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

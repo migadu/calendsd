@@ -1,0 +1,41 @@
+{
+    "test": "Sabre\\DAV\\Sharing\\ShareResourceTest::testShareResourceRemoveAccess",
+    "seq": 66,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "POST",
+        "url": "/shareable",
+        "headers": {
+            "Content-Type": [
+                "application/davsharing+xml; charset=\"utf-8\""
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:share-resource xmlns:D=\"DAV:\">\n <D:sharee>\n   <D:href>mailto:eric@example.com</D:href>\n   <D:prop>\n     <D:displayname>Eric York</D:displayname>\n   </D:prop>\n   <D:comment>Shared workspace</D:comment>\n   <D:share-access>\n     <D:read-write />\n   </D:share-access>\n </D:sharee>\n</D:share-resource>"
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "X-Sabre-Status": [
+                "everything-went-well"
+            ]
+        },
+        "body": ""
+    }
+}

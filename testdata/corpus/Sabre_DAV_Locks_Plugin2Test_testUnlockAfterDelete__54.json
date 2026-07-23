@@ -1,0 +1,41 @@
+{
+    "test": "Sabre\\DAV\\Locks\\Plugin2Test::testUnlockAfterDelete",
+    "seq": 54,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": false,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": true,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": null,
+        "caldavCalendars": [],
+        "caldavCalendarObjects": []
+    },
+    "request": {
+        "method": "DELETE",
+        "url": "/file.txt",
+        "headers": {
+            "If": [
+                "(<opaquelocktoken:9c74e371-f6c4-4b82-a68e-314461eb1c67>)"
+            ]
+        },
+        "body": ""
+    },
+    "response": {
+        "status": 204,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Length": [
+                "0"
+            ]
+        },
+        "body": ""
+    }
+}

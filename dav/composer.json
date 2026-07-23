@@ -1,0 +1,80 @@
+{
+    "name": "sabre/dav",
+    "type": "library",
+    "description": "WebDAV Framework for PHP",
+    "keywords": ["Framework", "WebDAV", "CalDAV", "CardDAV", "iCalendar"],
+    "homepage": "https://sabre.io/",
+    "license" : "BSD-3-Clause",
+    "authors": [
+        {
+            "name": "Evert Pot",
+            "email": "me@evertpot.com",
+            "homepage" : "https://evertpot.com/",
+            "role" : "Developer"
+        }
+    ],
+    "require": {
+        "php": "^7.4.0 || ^8.0",
+        "ext-ctype": "*",
+        "ext-date": "*",
+        "ext-dom": "*",
+        "ext-iconv": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-pcre": "*",
+        "ext-simplexml": "*",
+        "ext-spl": "*",
+        "lib-libxml": ">=2.7.0",
+        "psr/log": "^1.0 || ^2.0 || ^3.0",
+        "sabre/event": "^6.0",
+        "sabre/http": "^7.0",
+        "sabre/vobject": "^4.5"
+    },
+    "require-dev" : {
+        "ext-sqlite3": "*",
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "monolog/monolog": "^2.9",
+        "phpstan/phpstan": "^2.2",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpunit/phpunit": "^9.6"
+    },
+    "suggest" : {
+        "ext-curl" : "*",
+        "ext-pdo" : "*",
+        "ext-imap": "*"
+    },
+    "autoload": {
+        "psr-4" : {
+            "Sabre\\" : "lib/"
+        }
+    },
+    "autoload-dev" : {
+        "psr-4" : {
+            "Sabre\\" : "tests/Sabre/"
+        }
+    },
+    "support" : {
+        "forum" : "https://groups.google.com/group/sabredav-discuss",
+        "source" : "https://github.com/fruux/sabre-dav"
+    },
+    "bin" : [
+        "bin/sabredav",
+        "bin/naturalselection"
+    ],
+    "scripts": {
+        "phpstan": [
+            "phpstan analyse lib tests --memory-limit 256M"
+        ],
+        "cs-fixer": [
+            "php-cs-fixer fix"
+        ],
+        "phpunit": [
+            "phpunit --configuration tests/phpunit.xml tests"
+        ],
+        "test": [
+            "composer phpstan",
+            "composer cs-fixer",
+            "composer phpunit"
+        ]
+    }
+}

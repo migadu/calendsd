@@ -1,0 +1,60 @@
+{
+    "test": "Sabre\\CalDAV\\Schedule\\DeliverNewEventTest::testDelivery",
+    "seq": 37,
+    "setup": {
+        "setupCalDAV": true,
+        "setupCardDAV": false,
+        "setupACL": true,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": true,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "GET",
+        "url": "/calendars/user1/default/foo.ics",
+        "headers": [],
+        "body": ""
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "text/calendar; charset=utf-8"
+            ],
+            "ETag": [
+                "\"261e691cd4e506429854acf4e18264f6\""
+            ],
+            "Content-Length": [
+                720
+            ]
+        },
+        "body": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Apple Inc.//Mac OS X 10.9.1//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\nCREATED:20140109T204404Z\r\nUID:AADC6438-18CF-4B52-8DD2-EF9AD75ADE83\r\nDTEND;TZID=America/Toronto:20140107T110000\r\nTRANSP:OPAQUE\r\nATTENDEE;CN=Administrator;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:user1.\r\n sabredav@sabredav.org\r\nATTENDEE;CN=Roxy Kesh;CUTYPE=INDIVIDUAL;EMAIL=user2.sabredav@sabrdav.org;PA\r\n RTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE;SCHEDULE-STATUS=1.2:mai\r\n lto:user2.sabredav@sabredav.org\r\nSUMMARY:Just testing!\r\nDTSTART;TZID=America/Toronto:20140107T100000\r\nDTSTAMP:20140109T204422Z\r\nORGANIZER;CN=Administrator:mailto:user1.sabredav@sabredav.org\r\nSEQUENCE:4\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
+}
