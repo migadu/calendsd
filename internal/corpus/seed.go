@@ -62,7 +62,7 @@ type seedBackends struct {
 // seedCalDAV parses the caldavCalendars/caldavCalendarObjects fixtures into
 // a mock calendar backend.
 func seedCalDAV(rec *Record) (caldav.Backend, error) {
-	backend := &caldav.MockBackend{Objects: map[string]map[string]*caldav.ObjectInfo{}}
+	backend := &caldav.MockBackend{Objects: map[caldav.CalendarID]map[string]*caldav.ObjectInfo{}}
 
 	if len(rec.Setup.Calendars) > 0 {
 		var entries []map[string]any
@@ -74,7 +74,7 @@ func seedCalDAV(rec *Record) (caldav.Backend, error) {
 			for k, v := range entry {
 				switch k {
 				case "id":
-					info.ID = jsonID(v)
+					info.ID = caldav.CalendarID{Calendar: jsonID(v)}
 				case "uri":
 					info.URI, _ = v.(string)
 				case "principaluri":
@@ -105,11 +105,12 @@ func seedCalDAV(rec *Record) (caldav.Backend, error) {
 			return nil, fmt.Errorf("parsing caldavCalendarObjects: %w", err)
 		}
 		for calID, objects := range perCalendar {
-			backend.Objects[calID] = map[string]*caldav.ObjectInfo{}
+			id := caldav.CalendarID{Calendar: calID}
+			backend.Objects[id] = map[string]*caldav.ObjectInfo{}
 			for uri, obj := range objects {
-				backend.Objects[calID][uri] = &caldav.ObjectInfo{
+				backend.Objects[id][uri] = &caldav.ObjectInfo{
 					URI:          uri,
-					CalendarID:   calID,
+					CalendarID:   id,
 					CalendarData: []byte(obj.CalendarData),
 				}
 			}

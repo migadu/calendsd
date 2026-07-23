@@ -16,11 +16,19 @@ Postgres 16, sqlc) is on PATH.
 ```sh
 scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), sabre schema loaded
 php -S 127.0.0.1:8081 scripts/sabre-server.php   # reference sabre instance
-go run ./cmd/calserver           # Go server (default :8080)
+go run ./cmd/calserver -db "postgres:///calserver?host=$PGHOST"  # Go server (default :8080)
 ```
 
-Credentials: `admin` / `admin` (Digest, realm `SabreDAV` — the realm is baked
-into `users.digesta1`, see PLAN.md §5).
+Credentials: `admin` / `admin` (Basic or Digest, realm `SabreDAV` — the realm
+is baked into `users.digesta1`, see PLAN.md §5).
+
+The **live parity test** (the §5 acceptance gate) spins up a fresh database,
+a real sabre instance, and the Go server, then cross-reads/writes through
+both:
+
+```sh
+PARITY=1 go test ./internal/storage/ -run TestParity -v
+```
 
 ## Test corpus
 

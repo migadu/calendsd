@@ -9,13 +9,21 @@ import (
 	"encoding/xml"
 )
 
+// CalendarID addresses a calendar by the sabre backend convention: the
+// shared calendars row plus the per-principal calendarinstances row
+// (PLAN.md §5). In-memory backends leave Instance empty.
+type CalendarID struct {
+	Calendar string
+	Instance string
+}
+
 // CalendarInfo describes one calendar of a principal. Props carries
 // clark-named calendar properties (displayname, supported-calendar-
 // component-set, calendar-timezone, ...), mirroring the array rows sabre's
 // backends return.
 type CalendarInfo struct {
 	// ID is the backend's calendar identifier.
-	ID string
+	ID CalendarID
 	// URI is the calendar's path segment inside the calendar home.
 	URI string
 	// PrincipalURI owns the calendar.
@@ -28,7 +36,7 @@ type CalendarInfo struct {
 // sabre backends return.
 type ObjectInfo struct {
 	URI          string
-	CalendarID   string
+	CalendarID   CalendarID
 	CalendarData []byte
 	// ETag, if empty, is derived from CalendarData (md5, quoted).
 	ETag string
@@ -50,20 +58,20 @@ type Backend interface {
 	// CalendarsForUser lists the calendars owned by a principal.
 	CalendarsForUser(principalURI string) ([]CalendarInfo, error)
 	// CreateCalendar makes a new calendar and returns its ID.
-	CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (string, error)
+	CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error)
 	// DeleteCalendar removes a calendar with its objects.
-	DeleteCalendar(calendarID string) error
+	DeleteCalendar(calendarID CalendarID) error
 
 	// CalendarObjects lists all objects of a calendar.
-	CalendarObjects(calendarID string) ([]ObjectInfo, error)
+	CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error)
 	// CalendarObject fetches one object, or nil if absent.
-	CalendarObject(calendarID, objectURI string) (*ObjectInfo, error)
+	CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error)
 	// CreateCalendarObject stores a new object, returning its quoted etag.
-	CreateCalendarObject(calendarID, objectURI string, data []byte) (string, error)
+	CreateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error)
 	// UpdateCalendarObject replaces an object, returning its quoted etag.
-	UpdateCalendarObject(calendarID, objectURI string, data []byte) (string, error)
+	UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error)
 	// DeleteCalendarObject removes an object.
-	DeleteCalendarObject(calendarID, objectURI string) error
+	DeleteCalendarObject(calendarID CalendarID, objectURI string) error
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
@@ -71,7 +79,7 @@ type Backend interface {
 type MockBackend struct {
 	Calendars []CalendarInfo
 	// Objects maps calendar ID → object URI → object.
-	Objects map[string]map[string]*ObjectInfo
+	Objects map[CalendarID]map[string]*ObjectInfo
 
 	nextID int
 }
@@ -86,9 +94,9 @@ func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, err
 	return out, nil
 }
 
-func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (string, error) {
+func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error) {
 	m.nextID++
-	id := "mock-" + hex.EncodeToString([]byte{byte(m.nextID)})
+	id := CalendarID{Calendar: "mock-" + hex.EncodeToString([]byte{byte(m.nextID)})}
 	info := CalendarInfo{ID: id, URI: calendarURI, PrincipalURI: principalURI, Props: map[xml.Name]any{}}
 	for k, v := range props {
 		info.Props[k] = v
@@ -97,7 +105,7 @@ func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map
 	return id, nil
 }
 
-func (m *MockBackend) DeleteCalendar(calendarID string) error {
+func (m *MockBackend) DeleteCalendar(calendarID CalendarID) error {
 	for i, c := range m.Calendars {
 		if c.ID == calendarID {
 			m.Calendars = append(m.Calendars[:i], m.Calendars[i+1:]...)
@@ -108,7 +116,7 @@ func (m *MockBackend) DeleteCalendar(calendarID string) error {
 	return nil
 }
 
-func (m *MockBackend) CalendarObjects(calendarID string) ([]ObjectInfo, error) {
+func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error) {
 	var out []ObjectInfo
 	for _, o := range m.Objects[calendarID] {
 		out = append(out, *o)
@@ -116,7 +124,7 @@ func (m *MockBackend) CalendarObjects(calendarID string) ([]ObjectInfo, error) {
 	return out, nil
 }
 
-func (m *MockBackend) CalendarObject(calendarID, objectURI string) (*ObjectInfo, error) {
+func (m *MockBackend) CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error) {
 	o, exists := m.Objects[calendarID][objectURI]
 	if !exists {
 		return nil, nil
@@ -125,9 +133,9 @@ func (m *MockBackend) CalendarObject(calendarID, objectURI string) (*ObjectInfo,
 	return &copied, nil
 }
 
-func (m *MockBackend) CreateCalendarObject(calendarID, objectURI string, data []byte) (string, error) {
+func (m *MockBackend) CreateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
 	if m.Objects == nil {
-		m.Objects = map[string]map[string]*ObjectInfo{}
+		m.Objects = map[CalendarID]map[string]*ObjectInfo{}
 	}
 	if m.Objects[calendarID] == nil {
 		m.Objects[calendarID] = map[string]*ObjectInfo{}
@@ -137,11 +145,11 @@ func (m *MockBackend) CreateCalendarObject(calendarID, objectURI string, data []
 	return o.QuotedETag(), nil
 }
 
-func (m *MockBackend) UpdateCalendarObject(calendarID, objectURI string, data []byte) (string, error) {
+func (m *MockBackend) UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
 	return m.CreateCalendarObject(calendarID, objectURI, data)
 }
 
-func (m *MockBackend) DeleteCalendarObject(calendarID, objectURI string) error {
+func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI string) error {
 	delete(m.Objects[calendarID], objectURI)
 	return nil
 }
