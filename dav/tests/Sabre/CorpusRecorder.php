@@ -81,6 +81,39 @@ class CorpusRecorder
                 'children' => array_map([self::class, 'serializeNode'], $node->getChildren()),
             ];
         }
+        if ($node instanceof DAV\Sync\MockSyncCollection) {
+            $changeLog = [];
+            foreach ($node->changeLog as $token => $change) {
+                $changeLog[] = [
+                    'token' => $token,
+                    'added' => $change['added'],
+                    'modified' => $change['modified'],
+                    'deleted' => $change['deleted'],
+                ];
+            }
+
+            return [
+                'type' => 'synccollection',
+                'name' => $node->getName(),
+                'token' => $node->token,
+                'changeLog' => $changeLog,
+                'children' => array_map([self::class, 'serializeNode'], $node->getChildren()),
+            ];
+        }
+        if ($node instanceof \Sabre\DAV\SimpleFile) {
+            return [
+                'type' => 'simplefile',
+                'name' => $node->getName(),
+                'contents' => $node->get(),
+            ];
+        }
+        if ($node instanceof \Sabre\DAV\SimpleCollection) {
+            return [
+                'type' => 'collection',
+                'name' => $node->getName(),
+                'children' => array_map([self::class, 'serializeNode'], $node->getChildren()),
+            ];
+        }
         if ($node instanceof DAV\Mock\StreamingFile) {
             $ref = new \ReflectionClass(DAV\Mock\File::class);
             $p = $ref->getProperty('contents');

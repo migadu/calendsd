@@ -232,6 +232,20 @@ func (c *Calendar) PropPatch(pp *dav.PropPatch) {
 // Owner returns the owning principal.
 func (c *Calendar) Owner() string { return c.Info.PrincipalURI }
 
+// SyncToken implements dav.SyncCollection from the backend-provided
+// {http://sabredav.org/ns}sync-token property.
+func (c *Calendar) SyncToken() string {
+	if v, ok := c.Info.Props[xml.Name{Space: "http://sabredav.org/ns", Local: "sync-token"}].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// Changes implements dav.SyncCollection.
+func (c *Calendar) Changes(syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+	return c.backend.ChangesForCalendar(c.Info.ID, syncToken, syncLevel, limit)
+}
+
 // ACL mirrors sabre Calendar::getACL (owner + proxies read/write,
 // authenticated free-busy).
 func (c *Calendar) ACL() []acl.ACE {

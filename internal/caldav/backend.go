@@ -7,6 +7,8 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
+
+	"calserver/internal/dav"
 )
 
 // CalendarID addresses a calendar by the sabre backend convention: the
@@ -72,6 +74,10 @@ type Backend interface {
 	UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error)
 	// DeleteCalendarObject removes an object.
 	DeleteCalendarObject(calendarID CalendarID, objectURI string) error
+
+	// ChangesForCalendar returns changes since syncToken ("" = initial
+	// sync); nil means sync is unsupported or the token is unknown.
+	ChangesForCalendar(calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
@@ -152,4 +158,9 @@ func (m *MockBackend) UpdateCalendarObject(calendarID CalendarID, objectURI stri
 func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI string) error {
 	delete(m.Objects[calendarID], objectURI)
 	return nil
+}
+
+// ChangesForCalendar reports no sync support, like sabre's plain mock.
+func (m *MockBackend) ChangesForCalendar(CalendarID, string, int, int) (*dav.ChangeSet, error) {
+	return nil, nil
 }

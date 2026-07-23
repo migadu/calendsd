@@ -2,6 +2,7 @@ package dav
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -118,5 +119,89 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 			}
 		}
 	}
-	return true, nil
+
+	return true, s.checkIfConditions(r, path)
+}
+
+// IfCondition is one parsed tagged-list of an If header (RFC 4918 §10.4).
+type IfCondition struct {
+	URI    string
+	Tokens []IfToken
+}
+
+// IfToken is one (state-token + etag) clause of a condition.
+type IfToken struct {
+	Negate bool
+	Token  string
+	ETag   string
+	// Valid is set by TokenValidator plugins (e.g. the sync plugin).
+	Valid bool
+}
+
+// TokenValidator lets plugins mark state tokens in If conditions as valid.
+// Replaces sabre's validateTokens event.
+type TokenValidator interface {
+	ValidateTokens(conditions []IfCondition)
+}
+
+// checkIfConditions evaluates the If header: for each condition, at least
+// one clause must hold. Port of the tail of sabre's checkPreconditions.
+func (s *Server) checkIfConditions(r *http.Request, path string) error {
+	conditions := s.parseIfConditions(r, path)
+	if len(conditions) == 0 {
+		return nil
+	}
+	for _, p := range s.plugins {
+		if tv, ok := p.(TokenValidator); ok {
+			tv.ValidateTokens(conditions)
+		}
+	}
+
+nextCondition:
+	for _, cond := range conditions {
+		for _, token := range cond.Tokens {
+			tokenValid := token.Valid || token.Token == ""
+			etagValid := token.ETag == ""
+			if token.ETag != "" && tokenValid {
+				if node, err := s.Tree.NodeForPath(cond.URI); err == nil {
+					if file, isFile := node.(File); isFile && file.ETag() == token.ETag {
+						etagValid = true
+					}
+				}
+			}
+			if (tokenValid && etagValid) != token.Negate {
+				continue nextCondition
+			}
+		}
+		return ErrPreconditionFailed("Failed to find a valid token/etag combination for %s", cond.URI)
+	}
+	return nil
+}
+
+// ifHeaderRe is sabre's getIfConditions regex, verbatim.
+var ifHeaderRe = regexp.MustCompile(`(?i)(?:<(?P<uri>.*?)>\s)?\((?P<not>Not\s)?(?:<(?P<token>[^>]*)>)?(?:\s?)(?:\[(?P<etag>[^\]]*)\])?\)`)
+
+func (s *Server) parseIfConditions(r *http.Request, requestPath string) []IfCondition {
+	header := r.Header.Get("If")
+	if header == "" {
+		return nil
+	}
+	var conditions []IfCondition
+	for _, m := range ifHeaderRe.FindAllStringSubmatch(header, -1) {
+		uri, not, token, etag := m[1], m[2], m[3], m[4]
+		ifToken := IfToken{Negate: not != "", Token: token, ETag: etag}
+		if uri == "" && len(conditions) > 0 {
+			last := &conditions[len(conditions)-1]
+			last.Tokens = append(last.Tokens, ifToken)
+			continue
+		}
+		realURI := requestPath
+		if uri != "" {
+			if stripped, err := s.stripBase(uri); err == nil {
+				realURI = stripped
+			}
+		}
+		conditions = append(conditions, IfCondition{URI: realURI, Tokens: []IfToken{ifToken}})
+	}
+	return conditions
 }

@@ -47,5 +47,6 @@ func New(db *sql.DB, cfg Config) *dav.Server {
 	))
 	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 	srv.AddPlugin(&caldav.Plugin{})
+	srv.AddPlugin(&dav.SyncPlugin{})
 	return srv
 }

@@ -32,14 +32,46 @@
             "type": "roots",
             "roots": [
                 {
-                    "type": "node",
-                    "class": "Sabre\\DAV\\Sync\\MockSyncCollection",
-                    "name": "coll"
+                    "type": "synccollection",
+                    "name": "coll",
+                    "token": 2,
+                    "changeLog": [
+                        {
+                            "token": 1,
+                            "added": [
+                                "file1.txt"
+                            ],
+                            "modified": [],
+                            "deleted": []
+                        },
+                        {
+                            "token": 2,
+                            "added": [],
+                            "modified": [
+                                "file2.txt"
+                            ],
+                            "deleted": [
+                                "file3.txt"
+                            ]
+                        }
+                    ],
+                    "children": [
+                        {
+                            "type": "simplefile",
+                            "name": "file1.txt",
+                            "contents": "foo"
+                        },
+                        {
+                            "type": "simplefile",
+                            "name": "file2.txt",
+                            "contents": "bar"
+                        }
+                    ]
                 },
                 {
-                    "type": "node",
-                    "class": "Sabre\\DAV\\SimpleCollection",
-                    "name": "normalcoll"
+                    "type": "collection",
+                    "name": "normalcoll",
+                    "children": []
                 }
             ]
         }

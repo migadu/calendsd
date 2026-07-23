@@ -38,6 +38,9 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 		return nil, err
 	}
 	srv := dav.NewServer("/", root)
+	// The sync plugin is part of the standard server (sabre's test harness
+	// adds it in the sync suite; it is inert elsewhere).
+	srv.AddPlugin(&dav.SyncPlugin{})
 
 	if rec.Setup.SetupCalDAV {
 		srv.AddPlugin(&caldav.Plugin{})
@@ -218,6 +221,25 @@ func seedNode(t *Tree, backends *seedBackends) (dav.Node, error) {
 			f.SetLastModified(time.Unix(t.LastModified, 0))
 		}
 		return f, nil
+	case "simplefile":
+		return mock.NewSimpleFile(t.Name, t.Contents), nil
+	case "synccollection":
+		sc := mock.NewSyncCollection(t.Name)
+		sc.Token = t.Token
+		for _, entry := range t.ChangeLog {
+			sc.ChangeLog = append(sc.ChangeLog, mock.ChangeEntry{
+				Token: entry.Token, Added: entry.Added,
+				Modified: entry.Modified, Deleted: entry.Deleted,
+			})
+		}
+		for _, child := range t.Children {
+			node, err := seedNode(child, backends)
+			if err != nil {
+				return nil, err
+			}
+			sc.Attach(node)
+		}
+		return sc, nil
 	case "streamingfile":
 		size := int64(-1)
 		if t.Size != nil {

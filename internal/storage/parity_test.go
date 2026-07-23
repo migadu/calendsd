@@ -167,6 +167,30 @@ func TestParity(t *testing.T) {
 		}
 	})
 
+	t.Run("SabreWriteVisibleInGoSync", func(t *testing.T) {
+		// The Go server's own sync-collection REPORT must interoperate
+		// with sabre-issued tokens and sabre-written changes.
+		tokenBefore := sabreSyncToken(t, sabreClient)
+		status, _, _ := sabreClient.do(t, "PUT", "/calendars/admin/default/parity3.ics",
+			strings.ReplaceAll(goWrittenICS, "parity-2", "parity-3"), "Content-Type", "text/calendar")
+		if status != 201 {
+			t.Fatalf("sabre PUT status = %d", status)
+		}
+		syncBody := fmt.Sprintf(`<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:"><d:sync-token>%s</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`, tokenBefore)
+		status, body, _ := goClient.do(t, "REPORT", "/calendars/admin/default/", syncBody, "Content-Type", "application/xml")
+		if status != 207 {
+			t.Fatalf("Go sync REPORT status = %d, body %s", status, body)
+		}
+		if !strings.Contains(body, "parity3.ics") {
+			t.Errorf("Go sync REPORT does not list the sabre-written object:\n%s", body)
+		}
+		// Both servers must agree on the resulting token.
+		goToken := regexp.MustCompile(`<d:sync-token>([^<]+)</d:sync-token>`).FindStringSubmatch(body)
+		if goToken == nil || goToken[1] != sabreSyncToken(t, sabreClient) {
+			t.Errorf("Go sync token %v does not match sabre's %s", goToken, sabreSyncToken(t, sabreClient))
+		}
+	})
+
 	t.Run("GoDeleteVisibleInSabreSync", func(t *testing.T) {
 		tokenBefore := sabreSyncToken(t, sabreClient)
 		status, body, _ := goClient.do(t, "DELETE", "/calendars/admin/default/parity2.ics", "")

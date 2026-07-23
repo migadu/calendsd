@@ -29,14 +29,27 @@
             "type": "roots",
             "roots": [
                 {
-                    "type": "node",
-                    "class": "Sabre\\DAV\\Sync\\MockSyncCollection",
-                    "name": "coll"
+                    "type": "synccollection",
+                    "name": "coll",
+                    "token": null,
+                    "changeLog": [],
+                    "children": [
+                        {
+                            "type": "simplefile",
+                            "name": "file1.txt",
+                            "contents": "foo"
+                        },
+                        {
+                            "type": "simplefile",
+                            "name": "file2.txt",
+                            "contents": "bar"
+                        }
+                    ]
                 },
                 {
-                    "type": "node",
-                    "class": "Sabre\\DAV\\SimpleCollection",
-                    "name": "normalcoll"
+                    "type": "collection",
+                    "name": "normalcoll",
+                    "children": []
                 }
             ]
         }

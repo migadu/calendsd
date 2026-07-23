@@ -29,7 +29,7 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "foo",
-                    "lastModified": 1784811750
+                    "lastModified": 1784817650
                 },
                 {
                     "type": "collection",
@@ -52,7 +52,7 @@
                 "4.7.1"
             ],
             "Last-Modified": [
-                "Thu, 23 Jul 2026 13:02:30 GMT"
+                "Thu, 23 Jul 2026 14:40:50 GMT"
             ],
             "ETag": [
                 "\"acbd18db4cc2f85cedef654fccc4a4d8\""

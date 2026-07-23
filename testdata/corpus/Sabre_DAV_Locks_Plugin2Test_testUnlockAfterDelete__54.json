@@ -21,7 +21,7 @@
         "url": "/file.txt",
         "headers": {
             "If": [
-                "(<opaquelocktoken:1915836a-1cae-434c-9b7f-ba47506cb1d3>)"
+                "(<opaquelocktoken:70617f7f-287c-435a-803b-121e5be38dfe>)"
             ]
         },
         "body": "",

@@ -29,7 +29,7 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "foo",
-                    "lastModified": 1784811750
+                    "lastModified": 1784817650
                 },
                 {
                     "type": "collection",
@@ -39,13 +39,13 @@
                             "type": "file",
                             "name": "subfile",
                             "contents": "bar",
-                            "lastModified": 1784811750
+                            "lastModified": 1784817650
                         },
                         {
                             "type": "file",
                             "name": "subfile2",
                             "contents": "baz",
-                            "lastModified": 1784811750
+                            "lastModified": 1784817650
                         }
                     ]
                 }

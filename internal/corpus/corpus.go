@@ -73,6 +73,14 @@ type Tree struct {
 	FailMode any `json:"failMode"`
 	// Size is a streamingfile's advertised size; null means unknown.
 	Size *int64 `json:"size"`
+	// Token/ChangeLog carry a synccollection's sync state.
+	Token     int `json:"token"`
+	ChangeLog []struct {
+		Token    int      `json:"token"`
+		Added    []string `json:"added"`
+		Modified []string `json:"modified"`
+		Deleted  []string `json:"deleted"`
+	} `json:"changeLog"`
 	// Properties maps clark-notation names to values; PHP encodes an
 	// empty map as [].
 	Properties any     `json:"properties"`
