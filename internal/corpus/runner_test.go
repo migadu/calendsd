@@ -1,10 +1,12 @@
 package corpus
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -17,7 +19,7 @@ import (
 // test registers programmatically — state the recorder cannot capture. They
 // are excluded from the corpus permanently.
 var unreplayable = map[string]string{
-	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandExport`:           "uses the ICSExportPlugin (?export), out of MVP scope",
+	`Sabre\CalDAV\ICSExportPluginTest::testACLIntegrationBlocked`:           "registers the ACL plugin inline",
 	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimal`:                 "registers custom propPatch listener",
 	`Sabre\DAV\HttpCopyTest::testCopyFileToExistinBlockedCreateDestination`: "registers beforeBind interceptor",
 	`Sabre\DAV\HttpMoveTest::testMoveToExistingBlockedDeleteSource`:         "registers beforeUnbind interceptor",
@@ -29,6 +31,24 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
+	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandExport`:                      true,
+	`Sabre\CalDAV\ICSExportPluginTest::testACLIntegrationNotBlocked`:                   true,
+	`Sabre\CalDAV\ICSExportPluginTest::testBadEndParam`:                                true,
+	`Sabre\CalDAV\ICSExportPluginTest::testBadStartParam`:                              true,
+	`Sabre\CalDAV\ICSExportPluginTest::testBeforeMethod`:                               true,
+	`Sabre\CalDAV\ICSExportPluginTest::testBeforeMethodNoVersion`:                      true,
+	`Sabre\CalDAV\ICSExportPluginTest::testContentDisposition`:                         true,
+	`Sabre\CalDAV\ICSExportPluginTest::testContentDispositionBadChars`:                 true,
+	`Sabre\CalDAV\ICSExportPluginTest::testContentDispositionJson`:                     true,
+	`Sabre\CalDAV\ICSExportPluginTest::testExpand`:                                     true,
+	`Sabre\CalDAV\ICSExportPluginTest::testExpandNoStart`:                              true,
+	`Sabre\CalDAV\ICSExportPluginTest::testFilterComponentBadComponent`:                true,
+	`Sabre\CalDAV\ICSExportPluginTest::testFilterComponentVEVENT`:                      true,
+	`Sabre\CalDAV\ICSExportPluginTest::testFilterComponentVTODO`:                       true,
+	`Sabre\CalDAV\ICSExportPluginTest::testFilterStartEnd`:                             true,
+	`Sabre\CalDAV\ICSExportPluginTest::testJCal`:                                       true,
+	`Sabre\CalDAV\ICSExportPluginTest::testJCalInUrl`:                                  true,
+	`Sabre\CalDAV\ICSExportPluginTest::testNegotiateDefault`:                           true,
 	`Sabre\CalDAV\ExpandEventsDTSTARTandDTENDTest::testExpand`:                         true,
 	`Sabre\CalDAV\ExpandEventsDTSTARTandDTENDbyDayTest::testExpandRecurringByDayEvent`: true,
 	`Sabre\CalDAV\ExpandEventsDoubleEventsTest::testExpand`:                            true,
@@ -119,7 +139,6 @@ var outOfScopePrefixes = []string{
 	`Sabre\CalDAV\Schedule\`,
 	`Sabre\CalDAV\SharingPluginTest`,
 	`Sabre\CalDAV\Subscriptions\`,
-	`Sabre\CalDAV\ICSExportPluginTest`,
 	`Sabre\CalDAV\JCalTransformTest`,
 }
 
@@ -235,8 +254,19 @@ func replayOne(srv *dav.Server, rec *Record) []string {
 			out = append(out, fmt.Sprintf("%s: ETag = %q, sabre = %q", label, got, want[0]))
 		}
 	}
+	if want := rec.Response.Headers["Content-Disposition"]; len(want) > 0 {
+		// The filename embeds the extraction date; mask it.
+		got := maskDate(w.Header().Get("Content-Disposition"))
+		if got != maskDate(want[0]) {
+			out = append(out, fmt.Sprintf("%s: Content-Disposition = %q, sabre = %q", label, got, want[0]))
+		}
+	}
 	return out
 }
+
+var dateRe = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+
+func maskDate(s string) string { return dateRe.ReplaceAllString(s, "DATE") }
 
 func orSlash(u string) string {
 	if u == "" {
@@ -260,6 +290,26 @@ func diffBodies(got, want string) string {
 		}
 		return ""
 	}
+	// jCal (and other JSON) bodies compare structurally with volatile
+	// bits masked and unordered property lists sorted.
+	var gotJSON, wantJSON any
+	if json.Unmarshal([]byte(got), &gotJSON) == nil && json.Unmarshal([]byte(want), &wantJSON) == nil {
+		g, w := canonJSON(gotJSON), canonJSON(wantJSON)
+		gb, _ := json.Marshal(g)
+		wb, _ := json.Marshal(w)
+		if string(gb) != string(wb) {
+			return fmt.Sprintf("JSON bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", gb, wb)
+		}
+		return ""
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "BEGIN:VCALENDAR") &&
+		strings.HasPrefix(strings.TrimSpace(want), "BEGIN:VCALENDAR") {
+		cGot, cWant := canonicalizeICS(got), canonicalizeICS(want)
+		if cGot != cWant {
+			return fmt.Sprintf("iCalendar bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)
+		}
+		return ""
+	}
 	if looksLikeXML(got) && looksLikeXML(want) {
 		cGot, errG := davxml.CanonicalizeFunc(strings.NewReader(got), canonicalizeICS)
 		cWant, errW := davxml.CanonicalizeFunc(strings.NewReader(want), canonicalizeICS)
@@ -271,6 +321,47 @@ func diffBodies(got, want string) string {
 		}
 	}
 	return fmt.Sprintf("bodies differ:\n--- ours ---\n%q\n--- sabre ---\n%q", got, want)
+}
+
+// canonJSON normalizes parsed jCal for semantic comparison: prodid values
+// are masked (ours differs from sabre's) and jCal property lists — which are
+// sets in spirit — are sorted by canonical form.
+func canonJSON(v any) any {
+	switch value := v.(type) {
+	case []any:
+		// A jCal property entry: ["prodid", {...}, "text", "..."].
+		if len(value) == 4 {
+			if name, isString := value[0].(string); isString && name == "prodid" {
+				return []any{"prodid", value[1], value[2], "MASKED"}
+			}
+		}
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = canonJSON(item)
+		}
+		// A jCal component: [name, [props], [components]] — sort both sets.
+		if len(out) == 3 {
+			if _, isString := out[0].(string); isString {
+				if props, ok := out[1].([]any); ok {
+					sortByJSON(props)
+				}
+				if comps, ok := out[2].([]any); ok {
+					sortByJSON(comps)
+				}
+			}
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func sortByJSON(items []any) {
+	sort.Slice(items, func(i, j int) bool {
+		a, _ := json.Marshal(items[i])
+		b, _ := json.Marshal(items[j])
+		return string(a) < string(b)
+	})
 }
 
 // errorException extracts the sabre exception class from a {DAV:}error body.

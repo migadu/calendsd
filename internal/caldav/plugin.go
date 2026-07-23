@@ -46,10 +46,13 @@ func (p *Plugin) Features() []string { return []string{"calendar-access"} }
 func (p *Plugin) Methods(path string) []string { return []string{"MKCALENDAR"} }
 
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
-	if r.Method != "MKCALENDAR" {
-		return false, nil
+	switch r.Method {
+	case "MKCALENDAR":
+		return true, p.mkcalendar(w, r)
+	case "GET":
+		return p.handleExport(w, r)
 	}
-	return true, p.mkcalendar(w, r)
+	return false, nil
 }
 
 // mkcalendar creates a calendar collection (RFC 4791 §5.3.1).

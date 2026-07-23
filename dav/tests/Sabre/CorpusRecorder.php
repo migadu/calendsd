@@ -198,6 +198,21 @@ class CorpusRecorder
             $state[$prop] = self::jsonable($p->getValue($test));
         }
 
+        // Tests may create calendars through the backend after setup; the
+        // backend's *live* state supersedes the constructor fixtures.
+        $p = $ref->getProperty('caldavBackend');
+        $p->setAccessible(true);
+        $backend = $p->getValue($test);
+        if ($backend instanceof CalDAV\Backend\Mock) {
+            $bref = new \ReflectionClass(CalDAV\Backend\Mock::class);
+            $cp = $bref->getProperty('calendars');
+            $cp->setAccessible(true);
+            $state['caldavCalendars'] = self::jsonable(array_values($cp->getValue($backend)));
+            $dp = $bref->getProperty('calendarData');
+            $dp->setAccessible(true);
+            $state['caldavCalendarObjects'] = self::jsonable($dp->getValue($backend));
+        }
+
         // The principal fixture set lives in the mock principal backend.
         $p = $ref->getProperty('principalBackend');
         $p->setAccessible(true);

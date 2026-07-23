@@ -19,6 +19,18 @@ func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*go
 	out.Props.SetText(goical.PropVersion, "2.0")
 	out.Props.SetText(goical.PropProductID, "-//calserver//calserver//EN")
 	out.Props.SetText("CALSCALE", "GREGORIAN")
+	// Other calendar-level properties (X-WR-CALNAME, ...) survive
+	// expansion, like vobject.
+	for name, props := range cal.Props {
+		switch name {
+		case goical.PropVersion, goical.PropProductID, "CALSCALE":
+			continue
+		}
+		for _, p := range props {
+			cp := p
+			out.Props.Add(&cp)
+		}
+	}
 
 	// Group VEVENTs by UID: master + overridden instances (RECURRENCE-ID).
 	type eventGroup struct {
