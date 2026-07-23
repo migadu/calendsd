@@ -3,6 +3,7 @@
 package dav
 
 import (
+	"encoding/xml"
 	"io"
 	"time"
 )
@@ -14,6 +15,8 @@ type Node interface {
 	Name() string
 	// SetName renames the node.
 	SetName(name string) error
+	// Delete removes the node (recursively for collections).
+	Delete() error
 	// LastModified returns the node's last modification time.
 	// Nodes without a known mtime return the zero time.
 	LastModified() time.Time
@@ -33,8 +36,6 @@ type Collection interface {
 	CreateFile(name string, data io.Reader) (etag string, err error)
 	// CreateDirectory creates a new child collection.
 	CreateDirectory(name string) error
-	// Delete removes this collection and all its children.
-	Delete() error
 }
 
 // File is a leaf node carrying a payload. Port of sabre's IFile.
@@ -52,4 +53,17 @@ type File interface {
 	// ETag returns the current entity tag surrounded by double-quotes,
 	// or "" if unknown.
 	ETag() string
+}
+
+// PropNode is a node with custom (dead or protected) properties.
+// Port of sabre's IProperties.
+type PropNode interface {
+	Node
+	// Props returns values for the requested properties; absent entries
+	// mean the node doesn't have that property. An empty request slice
+	// asks for all properties (allprop).
+	Props(names []xml.Name) (map[xml.Name]any, error)
+	// PropPatch is invoked during PROPPATCH; the node registers handlers
+	// for the mutations it supports.
+	PropPatch(pp *PropPatch)
 }

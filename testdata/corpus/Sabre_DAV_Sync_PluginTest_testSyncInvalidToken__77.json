@@ -1,6 +1,6 @@
 {
     "test": "Sabre\\DAV\\Sync\\PluginTest::testSyncInvalidToken",
-    "seq": 79,
+    "seq": 77,
     "setup": {
         "setupCalDAV": false,
         "setupCardDAV": false,
@@ -24,7 +24,22 @@
                 "application/xml"
             ]
         },
-        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:sync-collection xmlns:D=\"DAV:\">\n     <D:sync-token>http://sabre.io/ns/sync/invalid</D:sync-token>\n     <D:sync-level>1</D:sync-level>\n      <D:prop>\n        <D:getcontentlength/>\n      </D:prop>\n</D:sync-collection>"
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:sync-collection xmlns:D=\"DAV:\">\n     <D:sync-token>http://sabre.io/ns/sync/invalid</D:sync-token>\n     <D:sync-level>1</D:sync-level>\n      <D:prop>\n        <D:getcontentlength/>\n      </D:prop>\n</D:sync-collection>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\Sync\\MockSyncCollection",
+                    "name": "coll"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\SimpleCollection",
+                    "name": "normalcoll"
+                }
+            ]
+        }
     },
     "response": {
         "status": 403,

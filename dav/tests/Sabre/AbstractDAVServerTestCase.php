@@ -207,7 +207,7 @@ abstract class AbstractDAVServerTestCase extends TestCase
         $response = new Response();
 
         // Corpus extraction shim for the Go port; no-op unless CORPUS_DIR is set.
-        $corpusRequest = CorpusRecorder::snapshotRequest($request);
+        $corpusRequest = CorpusRecorder::snapshotRequest($this, $request);
 
         $this->server->httpRequest = $request;
         $this->server->httpResponse = $response;

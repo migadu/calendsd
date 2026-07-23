@@ -24,7 +24,11 @@
                 "return-minimal"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<d:propertyupdate xmlns:d=\"DAV:\">\n    <d:set>\n        <d:prop>\n            <d:something>nope!</d:something>\n        </d:prop>\n    </d:set>\n</d:propertyupdate>"
+        "body": "<?xml version=\"1.0\"?>\n<d:propertyupdate xmlns:d=\"DAV:\">\n    <d:set>\n        <d:prop>\n            <d:something>nope!</d:something>\n        </d:prop>\n    </d:set>\n</d:propertyupdate>",
+        "tree": {
+            "type": "roots",
+            "roots": []
+        }
     },
     "response": {
         "status": 207,

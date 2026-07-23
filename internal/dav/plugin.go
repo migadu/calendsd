@@ -29,3 +29,10 @@ type MethodProvider interface {
 	// request was handled and the response written.
 	HandleMethod(w http.ResponseWriter, r *http.Request) (handled bool, err error)
 }
+
+// PropFindHook lets a plugin contribute property values during PROPFIND.
+// Replaces sabre's propFind event.
+type PropFindHook interface {
+	// PropFind may resolve properties on the PropFind object.
+	PropFind(pf *PropFind, node Node) error
+}

@@ -37,7 +37,22 @@
         "method": "PUT",
         "url": "/calendars/user1/default/foo.ics",
         "headers": [],
-        "body": "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Apple Inc.//Mac OS X 10.9.1//EN\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nCREATED:20140109T204404Z\nUID:AADC6438-18CF-4B52-8DD2-EF9AD75ADE83\nDTEND;TZID=America/Toronto:20140107T110000\nTRANSP:OPAQUE\nATTENDEE;CN=\"Administrator\";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:user1.sabredav@sabredav.org\nATTENDEE;CN=\"Roxy Kesh\";CUTYPE=INDIVIDUAL;EMAIL=\"user2.sabredav@sabrdav.org\";\n PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:user2.sabredav@sabredav.org\nSUMMARY:Just testing!\nDTSTART;TZID=America/Toronto:20140107T100000\nDTSTAMP:20140109T204422Z\nORGANIZER;CN=\"Administrator\":mailto:user1.sabredav@sabredav.org\nSEQUENCE:4\nEND:VEVENT\nEND:VCALENDAR"
+        "body": "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Apple Inc.//Mac OS X 10.9.1//EN\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nCREATED:20140109T204404Z\nUID:AADC6438-18CF-4B52-8DD2-EF9AD75ADE83\nDTEND;TZID=America/Toronto:20140107T110000\nTRANSP:OPAQUE\nATTENDEE;CN=\"Administrator\";CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:user1.sabredav@sabredav.org\nATTENDEE;CN=\"Roxy Kesh\";CUTYPE=INDIVIDUAL;EMAIL=\"user2.sabredav@sabrdav.org\";\n PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:user2.sabredav@sabredav.org\nSUMMARY:Just testing!\nDTSTART;TZID=America/Toronto:20140107T100000\nDTSTAMP:20140109T204422Z\nORGANIZER;CN=\"Administrator\":mailto:user1.sabredav@sabredav.org\nSEQUENCE:4\nEND:VEVENT\nEND:VCALENDAR",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 201,

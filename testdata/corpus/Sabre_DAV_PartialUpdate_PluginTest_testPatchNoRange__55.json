@@ -20,7 +20,17 @@
         "method": "PATCH",
         "url": "/partial",
         "headers": [],
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\PartialUpdate\\FileMock",
+                    "name": "partial"
+                }
+            ]
+        }
     },
     "response": {
         "status": 400,

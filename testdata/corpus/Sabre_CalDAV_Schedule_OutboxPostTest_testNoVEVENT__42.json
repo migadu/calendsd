@@ -47,7 +47,22 @@
                 "text/calendar"
             ]
         },
-        "body": "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nEND:VTIMEZONE\r\nEND:VCALENDAR"
+        "body": "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nEND:VTIMEZONE\r\nEND:VCALENDAR",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 400,

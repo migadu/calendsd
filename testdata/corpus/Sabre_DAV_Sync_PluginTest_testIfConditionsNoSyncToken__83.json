@@ -1,6 +1,6 @@
 {
     "test": "Sabre\\DAV\\Sync\\PluginTest::testIfConditionsNoSyncToken",
-    "seq": 85,
+    "seq": 83,
     "setup": {
         "setupCalDAV": false,
         "setupCardDAV": false,
@@ -24,7 +24,22 @@
                 "</coll> (<opaquelocktoken:foo>)"
             ]
         },
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\Sync\\MockSyncCollection",
+                    "name": "coll"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\SimpleCollection",
+                    "name": "normalcoll"
+                }
+            ]
+        }
     },
     "response": {
         "status": 412,

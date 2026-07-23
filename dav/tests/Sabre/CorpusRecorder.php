@@ -22,10 +22,12 @@ class CorpusRecorder
     private static int $seq = 0;
 
     /**
-     * Captures the request before Server::exec() consumes its body stream.
+     * Captures the request before Server::exec() consumes its body stream,
+     * plus the DAV tree state at this moment (pre-request, so replaying a
+     * test's records in sequence can seed from the first record's tree).
      * Returns null when recording is disabled.
      */
-    public static function snapshotRequest($request): ?array
+    public static function snapshotRequest(AbstractDAVServerTestCase $test, $request): ?array
     {
         if (!getenv('CORPUS_DIR')) {
             return null;
@@ -39,7 +41,77 @@ class CorpusRecorder
             'url' => $request->getUrl(),
             'headers' => $request->getHeaders(),
             'body' => $body,
+            'tree' => self::serializeTree($test),
         ];
+    }
+
+    /**
+     * Serializes the test's DAV tree. Only sabre's Mock node types are
+     * representable; anything else is tagged so the Go runner knows the
+     * record needs backend-based seeding (or cannot be replayed yet).
+     */
+    private static function serializeTree(AbstractDAVServerTestCase $test)
+    {
+        $ref = new \ReflectionClass(AbstractDAVServerTestCase::class);
+        $p = $ref->getProperty('tree');
+        $p->setAccessible(true);
+        $tree = $p->getValue($test);
+        if (is_array($tree)) {
+            return ['type' => 'roots', 'roots' => array_map([self::class, 'serializeNode'], $tree)];
+        }
+
+        return self::serializeNode($tree);
+    }
+
+    private static function serializeNode($node): array
+    {
+        if ($node instanceof DAV\Mock\PropertiesCollection) {
+            return [
+                'type' => 'propscollection',
+                'name' => $node->getName(),
+                'failMode' => $node->failMode,
+                'properties' => self::jsonable($node->properties),
+                'children' => array_map([self::class, 'serializeNode'], $node->getChildren()),
+            ];
+        }
+        if ($node instanceof DAV\Mock\Collection) {
+            return [
+                'type' => 'collection',
+                'name' => $node->getName(),
+                'children' => array_map([self::class, 'serializeNode'], $node->getChildren()),
+            ];
+        }
+        if ($node instanceof DAV\Mock\StreamingFile) {
+            $ref = new \ReflectionClass(DAV\Mock\File::class);
+            $p = $ref->getProperty('contents');
+            $p->setAccessible(true);
+            $contents = $p->getValue($node);
+            if (is_resource($contents)) {
+                $pos = ftell($contents);
+                rewind($contents);
+                $data = stream_get_contents($contents);
+                fseek($contents, $pos);
+            } else {
+                $data = $contents;
+            }
+
+            return [
+                'type' => 'streamingfile',
+                'name' => $node->getName(),
+                'contents' => $data,
+                'size' => $node->getSize(),
+            ];
+        }
+        if ($node instanceof DAV\Mock\File) {
+            return [
+                'type' => 'file',
+                'name' => $node->getName(),
+                'contents' => $node->get(),
+                'lastModified' => $node->getLastModified(),
+            ];
+        }
+
+        return ['type' => 'node', 'class' => get_class($node), 'name' => $node->getName()];
     }
 
     public static function record(AbstractDAVServerTestCase $test, ?array $requestData, $response): void

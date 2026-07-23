@@ -1,6 +1,6 @@
 {
     "test": "Sabre\\DAV\\Sync\\PluginTest::testIfConditionsNot",
-    "seq": 84,
+    "seq": 82,
     "setup": {
         "setupCalDAV": false,
         "setupCardDAV": false,
@@ -24,7 +24,22 @@
                 "</coll> (Not <http://sabre.io/ns/sync/2>)"
             ]
         },
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\Sync\\MockSyncCollection",
+                    "name": "coll"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\SimpleCollection",
+                    "name": "normalcoll"
+                }
+            ]
+        }
     },
     "response": {
         "status": 403,

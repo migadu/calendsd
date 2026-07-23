@@ -30,7 +30,17 @@
                 "3"
             ]
         },
-        "body": "bbb"
+        "body": "bbb",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\PartialUpdate\\FileMock",
+                    "name": "partial"
+                }
+            ]
+        }
     },
     "response": {
         "status": 416,

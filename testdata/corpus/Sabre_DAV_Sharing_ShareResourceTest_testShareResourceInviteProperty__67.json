@@ -1,6 +1,6 @@
 {
     "test": "Sabre\\DAV\\Sharing\\ShareResourceTest::testShareResourceInviteProperty",
-    "seq": 69,
+    "seq": 67,
     "setup": {
         "setupCalDAV": false,
         "setupCardDAV": false,
@@ -24,7 +24,17 @@
                 "application/xml"
             ]
         },
-        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:propfind xmlns:D=\"DAV:\">\n  <D:prop>\n    <D:invite />\n    <D:share-access />\n    <D:share-resource-uri />\n  </D:prop>\n</D:propfind>"
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:propfind xmlns:D=\"DAV:\">\n  <D:prop>\n    <D:invite />\n    <D:share-access />\n    <D:share-resource-uri />\n  </D:prop>\n</D:propfind>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\Mock\\SharedNode",
+                    "name": "shareable"
+                }
+            ]
+        }
     },
     "response": {
         "status": 207,

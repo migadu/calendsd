@@ -58,7 +58,22 @@
                 "text/xml"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<cs:invite-reply xmlns:cs=\"http://calendarserver.org/ns/\" xmlns:d=\"DAV:\">\n</cs:invite-reply>\n"
+        "body": "<?xml version=\"1.0\"?>\n<cs:invite-reply xmlns:cs=\"http://calendarserver.org/ns/\" xmlns:d=\"DAV:\">\n</cs:invite-reply>\n",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 400,

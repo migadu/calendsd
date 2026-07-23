@@ -24,7 +24,24 @@
                 "/files/dest"
             ]
         },
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "collection",
+                    "name": "files",
+                    "children": [
+                        {
+                            "type": "file",
+                            "name": "source",
+                            "contents": "",
+                            "lastModified": 1784811750
+                        }
+                    ]
+                }
+            ]
+        }
     },
     "response": {
         "status": 201,

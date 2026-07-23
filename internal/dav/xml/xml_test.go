@@ -155,8 +155,8 @@ func TestMultistatusMarshal(t *testing.T) {
 				Href: "/calendars/admin/work/",
 				Propstats: []Propstat{
 					{Status: 200, Props: []Property{
-						{Name: xml.Name{Space: NSDav, Local: "displayname"}, Text: "Work & Fun"},
-						{Name: xml.Name{Space: NSCalDAV, Local: "calendar-timezone"}, Text: "UTC"},
+						{Name: xml.Name{Space: NSDav, Local: "displayname"}, Value: Text("Work & Fun")},
+						{Name: xml.Name{Space: NSCalDAV, Local: "calendar-timezone"}, Value: Text("UTC")},
 					}},
 					{Status: 404, Props: []Property{
 						{Name: xml.Name{Space: NSDav, Local: "getcontentlength"}},

@@ -41,7 +41,22 @@
                 "application/xml"
             ]
         },
-        "body": "<B:mkcalendar xmlns:B=\"urn:ietf:params:xml:ns:caldav\">\n    <A:set xmlns:A=\"DAV:\">\n        <A:prop>\n            <B:supported-calendar-component-set>\n                <B:comp name=\"VEVENT\" />\n            </B:supported-calendar-component-set>\n            <C:subscribed-strip-alarms xmlns:C=\"http://calendarserver.org/ns/\" />\n            <C:subscribed-strip-attachments xmlns:C=\"http://calendarserver.org/ns/\" />\n            <A:resourcetype>\n                <A:collection />\n                <C:subscribed xmlns:C=\"http://calendarserver.org/ns/\" />\n            </A:resourcetype>\n            <D:refreshrate xmlns:D=\"http://apple.com/ns/ical/\">P1W</D:refreshrate>\n            <C:source xmlns:C=\"http://calendarserver.org/ns/\">\n                <A:href>webcal://www.example.org/</A:href>\n            </C:source>\n            <D:calendar-color xmlns:D=\"http://apple.com/ns/ical/\">#1C4587FF</D:calendar-color>\n            <D:calendar-order xmlns:D=\"http://apple.com/ns/ical/\">19</D:calendar-order>\n            <B:calendar-description>Foo</B:calendar-description>\n            <C:subscribed-strip-todos xmlns:C=\"http://calendarserver.org/ns/\" />\n            <A:displayname>Jewish holidays</A:displayname>\n        </A:prop>\n    </A:set>\n</B:mkcalendar>"
+        "body": "<B:mkcalendar xmlns:B=\"urn:ietf:params:xml:ns:caldav\">\n    <A:set xmlns:A=\"DAV:\">\n        <A:prop>\n            <B:supported-calendar-component-set>\n                <B:comp name=\"VEVENT\" />\n            </B:supported-calendar-component-set>\n            <C:subscribed-strip-alarms xmlns:C=\"http://calendarserver.org/ns/\" />\n            <C:subscribed-strip-attachments xmlns:C=\"http://calendarserver.org/ns/\" />\n            <A:resourcetype>\n                <A:collection />\n                <C:subscribed xmlns:C=\"http://calendarserver.org/ns/\" />\n            </A:resourcetype>\n            <D:refreshrate xmlns:D=\"http://apple.com/ns/ical/\">P1W</D:refreshrate>\n            <C:source xmlns:C=\"http://calendarserver.org/ns/\">\n                <A:href>webcal://www.example.org/</A:href>\n            </C:source>\n            <D:calendar-color xmlns:D=\"http://apple.com/ns/ical/\">#1C4587FF</D:calendar-color>\n            <D:calendar-order xmlns:D=\"http://apple.com/ns/ical/\">19</D:calendar-order>\n            <B:calendar-description>Foo</B:calendar-description>\n            <C:subscribed-strip-todos xmlns:C=\"http://calendarserver.org/ns/\" />\n            <A:displayname>Jewish holidays</A:displayname>\n        </A:prop>\n    </A:set>\n</B:mkcalendar>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 201,

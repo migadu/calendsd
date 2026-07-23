@@ -1,6 +1,6 @@
 {
     "test": "Sabre\\DAV\\Sharing\\ShareResourceTest::testShareResourceUnknownDoc",
-    "seq": 72,
+    "seq": 70,
     "setup": {
         "setupCalDAV": false,
         "setupCardDAV": false,
@@ -24,7 +24,17 @@
                 "application/davsharing+xml; charset=\"utf-8\""
             ]
         },
-        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:blablabla xmlns:D=\"DAV:\" />"
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<D:blablabla xmlns:D=\"DAV:\" />",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAV\\Mock\\SharedNode",
+                    "name": "shareable"
+                }
+            ]
+        }
     },
     "response": {
         "status": 400,

@@ -1,0 +1,79 @@
+package dav
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+)
+
+// Error is a protocol error carrying the HTTP status and the sabre exception
+// identity. Wire compatibility: sabre serializes errors as {DAV:}error with a
+// {http://sabredav.org/ns}exception class name that clients (and the corpus)
+// can observe, so the port preserves those names.
+type Error struct {
+	Status int
+	// Exception is the sabre exception class name, e.g.
+	// "Sabre\DAV\Exception\NotFound".
+	Exception string
+	Message   string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("%d %s: %s", e.Status, http.StatusText(e.Status), e.Message)
+}
+
+func davError(status int, exception, format string, args ...any) *Error {
+	return &Error{
+		Status:    status,
+		Exception: `Sabre\DAV\Exception\` + exception,
+		Message:   fmt.Sprintf(format, args...),
+	}
+}
+
+// The constructors below mirror sabre's lib/DAV/Exception/* classes.
+
+func ErrNotFound(format string, args ...any) *Error {
+	return davError(http.StatusNotFound, "NotFound", format, args...)
+}
+
+func ErrForbidden(format string, args ...any) *Error {
+	return davError(http.StatusForbidden, "Forbidden", format, args...)
+}
+
+func ErrConflict(format string, args ...any) *Error {
+	return davError(http.StatusConflict, "Conflict", format, args...)
+}
+
+func ErrBadRequest(format string, args ...any) *Error {
+	return davError(http.StatusBadRequest, "BadRequest", format, args...)
+}
+
+func ErrPreconditionFailed(format string, args ...any) *Error {
+	return davError(http.StatusPreconditionFailed, "PreconditionFailed", format, args...)
+}
+
+func ErrUnsupportedMediaType(format string, args ...any) *Error {
+	return davError(http.StatusUnsupportedMediaType, "UnsupportedMediaType", format, args...)
+}
+
+func ErrMethodNotAllowed(format string, args ...any) *Error {
+	return davError(http.StatusMethodNotAllowed, "MethodNotAllowed", format, args...)
+}
+
+func ErrNotImplemented(format string, args ...any) *Error {
+	return davError(http.StatusNotImplemented, "NotImplemented", format, args...)
+}
+
+// AsError extracts a protocol *Error, wrapping unknown errors as 500s the way
+// sabre wraps uncaught exceptions.
+func AsError(err error) *Error {
+	var de *Error
+	if errors.As(err, &de) {
+		return de
+	}
+	return &Error{
+		Status:    http.StatusInternalServerError,
+		Exception: `Exception`,
+		Message:   err.Error(),
+	}
+}

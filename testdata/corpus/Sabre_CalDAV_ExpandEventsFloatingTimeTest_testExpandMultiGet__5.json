@@ -58,7 +58,22 @@
                 "application/xml"
             ]
         },
-        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<C:calendar-multiget xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n    <D:prop>\n        <C:calendar-data>\n            <C:expand start=\"20141107T230000Z\" end=\"20141108T225959Z\"/>\n        </C:calendar-data>\n        <D:getetag/>\n    </D:prop>\n    <D:href>/calendars/user1/calendar1/event.ics</D:href>\n</C:calendar-multiget>"
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<C:calendar-multiget xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n    <D:prop>\n        <C:calendar-data>\n            <C:expand start=\"20141107T230000Z\" end=\"20141108T225959Z\"/>\n        </C:calendar-data>\n        <D:getetag/>\n    </D:prop>\n    <D:href>/calendars/user1/calendar1/event.ics</D:href>\n</C:calendar-multiget>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 207,

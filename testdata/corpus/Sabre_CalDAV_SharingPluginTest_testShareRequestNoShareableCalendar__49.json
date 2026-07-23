@@ -58,7 +58,22 @@
                 "text/xml"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<cs:share xmlns:cs=\"http://calendarserver.org/ns/\" xmlns:d=\"DAV:\">\n    <cs:set>\n        <d:href>mailto:joe@example.org</d:href>\n        <cs:common-name>Joe Shmoe</cs:common-name>\n        <cs:read-write />\n    </cs:set>\n    <cs:remove>\n        <d:href>mailto:nancy@example.org</d:href>\n    </cs:remove>\n</cs:share>\n"
+        "body": "<?xml version=\"1.0\"?>\n<cs:share xmlns:cs=\"http://calendarserver.org/ns/\" xmlns:d=\"DAV:\">\n    <cs:set>\n        <d:href>mailto:joe@example.org</d:href>\n        <cs:common-name>Joe Shmoe</cs:common-name>\n        <cs:read-write />\n    </cs:set>\n    <cs:remove>\n        <d:href>mailto:nancy@example.org</d:href>\n    </cs:remove>\n</cs:share>\n",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 403,

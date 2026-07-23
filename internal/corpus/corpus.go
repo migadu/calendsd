@@ -49,12 +49,36 @@ type Setup struct {
 	Principals      json.RawMessage `json:"principals"`
 }
 
-// Request is the captured HTTP request.
+// Request is the captured HTTP request, plus the DAV tree fixture state at
+// snapshot time (pre-request).
 type Request struct {
 	Method  string  `json:"method"`
 	URL     string  `json:"url"`
 	Headers Headers `json:"headers"`
 	Body    string  `json:"body"`
+	Tree    *Tree   `json:"tree"`
+}
+
+// Tree is a serialized DAV tree fixture from the recorder.
+type Tree struct {
+	// Type is one of file, collection, propscollection, roots, or node
+	// (an arbitrary PHP class the recorder couldn't serialize).
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Contents string `json:"contents"`
+	// LastModified is a Unix timestamp (sabre mock files default to the
+	// extraction time; getlastmodified comparisons must mask it).
+	LastModified int64 `json:"lastModified"`
+	// FailMode is false or a mode string (PHP's loose typing).
+	FailMode any `json:"failMode"`
+	// Size is a streamingfile's advertised size; null means unknown.
+	Size *int64 `json:"size"`
+	// Properties maps clark-notation names to values; PHP encodes an
+	// empty map as [].
+	Properties any     `json:"properties"`
+	Children   []*Tree `json:"children"`
+	Class      string  `json:"class"`
+	Roots      []*Tree `json:"roots"`
 }
 
 // Response is the reference implementation's response.

@@ -20,7 +20,30 @@
         "method": "HEAD",
         "url": "/dir",
         "headers": [],
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "collection",
+            "name": "root",
+            "children": [
+                {
+                    "type": "file",
+                    "name": "file1",
+                    "contents": "foo",
+                    "lastModified": 1784811750
+                },
+                {
+                    "type": "collection",
+                    "name": "dir",
+                    "children": []
+                },
+                {
+                    "type": "streamingfile",
+                    "name": "streaming",
+                    "contents": "stream",
+                    "size": null
+                }
+            ]
+        }
     },
     "response": {
         "status": 200,

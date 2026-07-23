@@ -1,14 +1,16 @@
 package dav
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOptions(t *testing.T) {
-	s := NewServer("/")
+	s := NewServer("/", testRoot())
 	req := httptest.NewRequest("OPTIONS", "/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -34,7 +36,7 @@ func TestOptions(t *testing.T) {
 }
 
 func TestUnimplementedMethod(t *testing.T) {
-	s := NewServer("/")
+	s := NewServer("/", testRoot())
 	req := httptest.NewRequest("REPORT", "/calendars/admin/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -45,7 +47,7 @@ func TestUnimplementedMethod(t *testing.T) {
 }
 
 func TestFeaturesAggregation(t *testing.T) {
-	s := NewServer("/")
+	s := NewServer("/", testRoot())
 	s.AddPlugin(fakePlugin{features: []string{"calendar-access", "1"}})
 
 	got := strings.Join(s.Features(), ", ")
@@ -53,6 +55,24 @@ func TestFeaturesAggregation(t *testing.T) {
 		t.Errorf("Features() = %q, want %q (deduplicated, registration order)", got, want)
 	}
 }
+
+// testRoot is a minimal in-package root collection (the mock package can't
+// be imported here without a cycle).
+func testRoot() Collection { return emptyColl{} }
+
+type emptyColl struct{}
+
+func (emptyColl) Name() string                 { return "root" }
+func (emptyColl) SetName(string) error         { return nil }
+func (emptyColl) Delete() error                { return nil }
+func (emptyColl) LastModified() time.Time      { return time.Time{} }
+func (emptyColl) Children() ([]Node, error)    { return nil, nil }
+func (emptyColl) ChildExists(string) bool      { return false }
+func (emptyColl) CreateDirectory(string) error { return nil }
+func (emptyColl) Child(name string) (Node, error) {
+	return nil, ErrNotFound("File not found: %s", name)
+}
+func (emptyColl) CreateFile(string, io.Reader) (string, error) { return "", nil }
 
 type fakePlugin struct{ features []string }
 
@@ -72,7 +92,7 @@ func TestPath(t *testing.T) {
 		{"/dav/", "/other/calendars", "", true}, // outside base uri
 		{"/", "/a%20b/c%2Fd", "a b/c/d", false}, // sabre decodes %2F to a literal slash post-split
 	} {
-		s := NewServer(tc.base)
+		s := NewServer(tc.base, testRoot())
 		req := httptest.NewRequest("GET", tc.uri, nil)
 		got, err := s.Path(req)
 		if tc.wantErr != (err != nil) {

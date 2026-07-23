@@ -24,7 +24,11 @@
                 "return-minimal"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<d:propfind xmlns:d=\"DAV:\">\n    <d:prop>\n        <d:something />\n        <d:resourcetype />\n    </d:prop>\n</d:propfind>"
+        "body": "<?xml version=\"1.0\"?>\n<d:propfind xmlns:d=\"DAV:\">\n    <d:prop>\n        <d:something />\n        <d:resourcetype />\n    </d:prop>\n</d:propfind>",
+        "tree": {
+            "type": "roots",
+            "roots": []
+        }
     },
     "response": {
         "status": 207,

@@ -57,7 +57,22 @@
                 "1"
             ]
         },
-        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<C:calendar-query xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n  <D:prop>\n    <C:calendar-data>\n  <C:expand start=\"20120730T095609Z\"\n            end=\"20120813T095609Z\"/>\n</C:calendar-data>\n    <D:getetag/>\n  </D:prop>\n  <C:filter>\n    <C:comp-filter name=\"VCALENDAR\">\n      <C:comp-filter name=\"VEVENT\">\n        <C:time-range start=\"20120730T095609Z\" end=\"20120813T095609Z\"/>\n      </C:comp-filter>\n    </C:comp-filter>\n  </C:filter>\n</C:calendar-query>"
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<C:calendar-query xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n  <D:prop>\n    <C:calendar-data>\n  <C:expand start=\"20120730T095609Z\"\n            end=\"20120813T095609Z\"/>\n</C:calendar-data>\n    <D:getetag/>\n  </D:prop>\n  <C:filter>\n    <C:comp-filter name=\"VCALENDAR\">\n      <C:comp-filter name=\"VEVENT\">\n        <C:time-range start=\"20120730T095609Z\" end=\"20120813T095609Z\"/>\n      </C:comp-filter>\n    </C:comp-filter>\n  </C:filter>\n</C:calendar-query>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 207,

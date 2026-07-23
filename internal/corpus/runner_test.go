@@ -1,7 +1,11 @@
 package corpus
 
 import (
+	"encoding/xml"
+	"fmt"
 	"net/http/httptest"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -9,16 +13,75 @@ import (
 	davxml "calserver/internal/dav/xml"
 )
 
-// passing lists the corpus records the Go server must replay correctly.
-// Porting a feature moves its records from pending into this set; CI fails if
-// a listed record regresses. This is the port's progress metric.
-var passing = map[string]bool{
-	// Phase 0: no tree, no backends — nothing replays yet.
+// unreplayable lists tests whose behavior depends on event listeners the PHP
+// test registers programmatically — state the recorder cannot capture. They
+// are excluded from the corpus permanently.
+var unreplayable = map[string]string{
+	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimal`:                 "registers custom propPatch listener",
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistinBlockedCreateDestination`: "registers beforeBind interceptor",
+	`Sabre\DAV\HttpMoveTest::testMoveToExistingBlockedDeleteSource`:         "registers beforeUnbind interceptor",
+	`Sabre\DAV\HttpPutTest::testPutIntercept`:                               "registers beforeMethod interceptor",
 }
 
-// TestCorpus replays every extracted sabre record against the Go server.
-// Records in the passing set must match the reference response; the rest are
-// reported as pending (the red→green driver of the port).
+// passing lists corpus tests (by originating PHP test) the Go server must
+// replay correctly; CI fails if one regresses. Porting a feature adds its
+// tests here — the port's progress metric. Tests not listed are reported as
+// pending; newly green candidates show up in the test log.
+var passing = map[string]bool{
+	`Sabre\DAV\HttpCopyTest::testCopyColl`:                            true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollIntoSubtree`:                 true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExisting`:                  true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteF`:        true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteT`:        true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToSelf`:                      true,
+	`Sabre\DAV\HttpCopyTest::testCopyFile`:                            true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileNonExistantParent`:           true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExisting`:                  true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteBadValue`: true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteF`:        true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteT`:        true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToSelf`:                      true,
+	`Sabre\DAV\HttpCopyTest::testShallowCopyColl`:                     true,
+	`Sabre\DAV\HttpDeleteTest::testDelete`:                            true,
+	`Sabre\DAV\HttpDeleteTest::testDeleteDirectory`:                   true,
+	`Sabre\DAV\HttpDeleteTest::testDeleteNotFound`:                    true,
+	`Sabre\DAV\HttpDeleteTest::testDeletePreconditions`:               true,
+	`Sabre\DAV\HttpDeleteTest::testDeletePreconditionsFailed`:         true,
+	`Sabre\DAV\HttpGetTest::testGet`:                                  true,
+	`Sabre\DAV\HttpGetTest::testGet404`:                               true,
+	`Sabre\DAV\HttpGetTest::testGet404AsWell`:                         true,
+	`Sabre\DAV\HttpGetTest::testGetCollection`:                        true,
+	`Sabre\DAV\HttpGetTest::testGetDoubleSlash`:                       true,
+	`Sabre\DAV\HttpGetTest::testGetHttp10`:                            true,
+	`Sabre\DAV\HttpGetTest::testGetStreaming`:                         true,
+	`Sabre\DAV\HttpHeadTest::testDoubleAuth`:                          true,
+	`Sabre\DAV\HttpHeadTest::testHEAD`:                                true,
+	`Sabre\DAV\HttpHeadTest::testHEADCollection`:                      true,
+	`Sabre\DAV\HttpMoveTest::testMove`:                                true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExisting`:                      true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteF`:            true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteT`:            true,
+	`Sabre\DAV\HttpMoveTest::testMoveToSelf`:                          true,
+	`Sabre\DAV\HTTPPreferParsingTest::testpropfindMinimal`:            true,
+	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimalError`:      true,
+	`Sabre\DAV\HttpPutTest::testFinderPutFail`:                        true,
+	`Sabre\DAV\HttpPutTest::testFinderPutSuccess`:                     true,
+	`Sabre\DAV\HttpPutTest::testPut`:                                  true,
+	`Sabre\DAV\HttpPutTest::testPutContentRange`:                      true,
+	`Sabre\DAV\HttpPutTest::testPutExisting`:                          true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchCorrect`:            true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchStar`:               true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfNoneMatchStar`:           true,
+	`Sabre\DAV\HttpPutTest::testPutIfMatchStar`:                       true,
+	`Sabre\DAV\HttpPutTest::testPutIfNoneMatchStar`:                   true,
+	`Sabre\DAV\HttpPutTest::testPutParentCollectionDoesNotExist`:      true,
+	`Sabre\DAV\HttpPutTest::testPutParentIsNotCollection`:             true,
+	`Sabre\DAV\PropertyStorage\PluginTest::testMove`:                  true,
+}
+
+// TestCorpus replays the extracted sabre corpus. Records are grouped by
+// originating test and replayed in sequence against one seeded server, since
+// later requests depend on earlier mutations.
 func TestCorpus(t *testing.T) {
 	records, err := Load("../../testdata/corpus")
 	if err != nil {
@@ -28,31 +91,91 @@ func TestCorpus(t *testing.T) {
 		t.Skip("no corpus records extracted; run the CorpusRecorder (see package doc)")
 	}
 
-	var green, pending, outOfScope int
+	groups := map[string][]Record{}
+	var names []string
 	for _, rec := range records {
-		switch {
-		case rec.UsesUnsupportedFeatures():
+		if _, seen := groups[rec.Test]; !seen {
+			names = append(names, rec.Test)
+		}
+		groups[rec.Test] = append(groups[rec.Test], rec)
+	}
+	sort.Strings(names)
+
+	var green, newlyGreen []string
+	var pending, outOfScope int
+	for _, name := range names {
+		recs := groups[name]
+		sort.Slice(recs, func(i, j int) bool { return recs[i].Seq < recs[j].Seq })
+
+		if recs[0].UsesUnsupportedFeatures() {
 			outOfScope++
-		case passing[rec.File]:
-			green++
-			rec := rec
-			t.Run(rec.File, func(t *testing.T) { replay(t, &rec) })
-		default:
+			continue
+		}
+		if _, skip := unreplayable[name]; skip {
+			outOfScope++
+			continue
+		}
+		if needsLaterPhase(&recs[0]) {
 			pending++
+			continue
+		}
+
+		mismatches := replayGroup(recs)
+		if len(mismatches) == 0 {
+			green = append(green, name)
+			if !passing[name] {
+				newlyGreen = append(newlyGreen, name)
+			}
+			continue
+		}
+		pending++
+		if passing[name] {
+			t.Run(subtestName(name), func(t *testing.T) {
+				for _, m := range mismatches {
+					t.Error(m)
+				}
+			})
+		} else if os.Getenv("CORPUS_DEBUG") != "" {
+			t.Logf("pending %q:\n%s", name, strings.Join(mismatches, "\n"))
 		}
 	}
-	t.Logf("corpus coverage: %d green, %d pending, %d out of MVP scope (of %d records)",
-		green, pending, outOfScope, len(records))
+
+	t.Logf("corpus coverage: %d green (%d in passing set), %d pending, %d out of MVP scope (of %d tests)",
+		len(green), len(passing), pending+len(green)-len(passing), outOfScope, len(names))
+	for _, name := range newlyGreen {
+		t.Logf("newly green (add to passing): %q,", name)
+	}
+	for name := range passing {
+		if !contains(green, name) {
+			t.Errorf("regression: %q is in the passing set but no longer green", name)
+		}
+	}
 }
 
-// replay seeds a server from the record's setup, replays the request, and
-// compares the response semantically.
-func replay(t *testing.T, rec *Record) {
-	t.Helper()
-	// Backends land in later phases; the server grows as records move to
-	// the passing set.
-	srv := dav.NewServer("/")
+// needsLaterPhase filters tests whose fixtures require ports that land in
+// later phases (auth/ACL in phase 2, CalDAV backends in phase 3).
+func needsLaterPhase(r *Record) bool {
+	s := r.Setup
+	return s.SetupCalDAV || s.SetupACL || s.AutoLogin != "" || s.SetupPropertyStorage
+}
 
+// replayGroup replays a test's records in order against one seeded server
+// and returns human-readable mismatches (empty = fully green).
+func replayGroup(recs []Record) []string {
+	root, err := SeedTree(recs[0].Request.Tree)
+	if err != nil {
+		return []string{fmt.Sprintf("unseedable: %v", err)}
+	}
+	srv := dav.NewServer("/", root)
+
+	var mismatches []string
+	for _, rec := range recs {
+		mismatches = append(mismatches, replayOne(srv, &rec)...)
+	}
+	return mismatches
+}
+
+func replayOne(srv *dav.Server, rec *Record) []string {
 	req := httptest.NewRequest(rec.Request.Method, orSlash(rec.Request.URL), strings.NewReader(rec.Request.Body))
 	for name, vals := range rec.Request.Headers {
 		for _, v := range vals {
@@ -62,10 +185,21 @@ func replay(t *testing.T, rec *Record) {
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
+	label := fmt.Sprintf("seq %d %s %s", rec.Seq, rec.Request.Method, rec.Request.URL)
+	var out []string
 	if w.Code != rec.Response.Status {
-		t.Errorf("status = %d, sabre = %d; body:\n%s", w.Code, rec.Response.Status, w.Body.String())
+		out = append(out, fmt.Sprintf("%s: status = %d, sabre = %d\nours: %s",
+			label, w.Code, rec.Response.Status, w.Body.String()))
 	}
-	compareBodies(t, w.Body.String(), rec.Response.Body)
+	if diff := diffBodies(w.Body.String(), rec.Response.Body); diff != "" {
+		out = append(out, label+": "+diff)
+	}
+	if want := rec.Response.Headers["ETag"]; len(want) > 0 {
+		if got := w.Header().Get("ETag"); got != want[0] {
+			out = append(out, fmt.Sprintf("%s: ETag = %q, sabre = %q", label, got, want[0]))
+		}
+	}
+	return out
 }
 
 func orSlash(u string) string {
@@ -75,27 +209,61 @@ func orSlash(u string) string {
 	return u
 }
 
-// compareBodies compares semantically: XML bodies via the canonicalizer,
-// anything else byte-exact.
-func compareBodies(t *testing.T, got, want string) {
-	t.Helper()
+// diffBodies compares semantically: {DAV:}error bodies by exception class
+// (sabre's debug fields are masked), other XML via the canonicalizer,
+// anything else byte-exact. Empty result means equal.
+func diffBodies(got, want string) string {
 	if got == want {
-		return
+		return ""
+	}
+	gotExc, gotIsErr := errorException(got)
+	wantExc, wantIsErr := errorException(want)
+	if gotIsErr || wantIsErr {
+		if gotExc != wantExc {
+			return fmt.Sprintf("exception = %q, sabre = %q", gotExc, wantExc)
+		}
+		return ""
 	}
 	if looksLikeXML(got) && looksLikeXML(want) {
 		cGot, errG := davxml.Canonicalize(strings.NewReader(got))
 		cWant, errW := davxml.Canonicalize(strings.NewReader(want))
 		if errG == nil && errW == nil {
 			if cGot != cWant {
-				t.Errorf("XML bodies differ semantically:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)
+				return fmt.Sprintf("XML bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)
 			}
-			return
+			return ""
 		}
 	}
-	t.Errorf("bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", got, want)
+	return fmt.Sprintf("bodies differ:\n--- ours ---\n%q\n--- sabre ---\n%q", got, want)
+}
+
+// errorException extracts the sabre exception class from a {DAV:}error body.
+func errorException(body string) (string, bool) {
+	type davError struct {
+		XMLName   xml.Name `xml:"DAV: error"`
+		Exception string   `xml:"http://sabredav.org/ns exception"`
+	}
+	var e davError
+	if err := xml.Unmarshal([]byte(body), &e); err != nil {
+		return "", false
+	}
+	return e.Exception, true
 }
 
 func looksLikeXML(s string) bool {
 	s = strings.TrimSpace(s)
 	return strings.HasPrefix(s, "<?xml") || strings.HasPrefix(s, "<")
+}
+
+func subtestName(test string) string {
+	return strings.NewReplacer("\\", "_", "::", "/").Replace(test)
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

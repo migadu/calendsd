@@ -52,7 +52,22 @@
         "method": "REPORT",
         "url": "/calendars/user1/foo",
         "headers": [],
-        "body": "<?xml version=\"1.0\"?>\n<c:calendar-multiget xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:d=\"DAV:\">\n    <d:prop>\n        <c:calendar-data content-type=\"application/calendar+json\" />\n    </d:prop>\n    <d:href>/calendars/user1/foo/bar.ics</d:href>\n</c:calendar-multiget>"
+        "body": "<?xml version=\"1.0\"?>\n<c:calendar-multiget xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:d=\"DAV:\">\n    <d:prop>\n        <c:calendar-data content-type=\"application/calendar+json\" />\n    </d:prop>\n    <d:href>/calendars/user1/foo/bar.ics</d:href>\n</c:calendar-multiget>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 207,

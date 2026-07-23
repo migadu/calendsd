@@ -56,7 +56,22 @@
                 "1"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<c:calendar-query xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:d=\"DAV:\">\n    <d:prop>\n        <c:calendar-data content-type=\"application/calendar+json\" />\n    </d:prop>\n    <c:filter>\n        <c:comp-filter name=\"VCALENDAR\" />\n    </c:filter>\n</c:calendar-query>"
+        "body": "<?xml version=\"1.0\"?>\n<c:calendar-query xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:d=\"DAV:\">\n    <d:prop>\n        <c:calendar-data content-type=\"application/calendar+json\" />\n    </d:prop>\n    <c:filter>\n        <c:comp-filter name=\"VCALENDAR\" />\n    </c:filter>\n</c:calendar-query>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\CalendarRoot",
+                    "name": "calendars"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\CalDAV\\Principal\\Collection",
+                    "name": "principals"
+                }
+            ]
+        }
     },
     "response": {
         "status": 207,

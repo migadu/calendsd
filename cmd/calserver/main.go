@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"calserver/internal/dav"
+	"calserver/internal/dav/mock"
 )
 
 func main() {
@@ -15,7 +16,9 @@ func main() {
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
 	flag.Parse()
 
-	srv := dav.NewServer(*baseURI)
+	// The storage-backed tree lands in phase 3; until then the server
+	// exposes an empty in-memory root.
+	srv := dav.NewServer(*baseURI, mock.NewCollection("root"))
 
 	slog.Info("listening", "addr", *addr, "base_uri", *baseURI)
 	if err := http.ListenAndServe(*addr, srv); err != nil {

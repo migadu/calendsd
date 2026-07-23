@@ -20,7 +20,19 @@
         "method": "PUT",
         "url": "/file1/file2",
         "headers": [],
-        "body": "hello"
+        "body": "hello",
+        "tree": {
+            "type": "collection",
+            "name": "root",
+            "children": [
+                {
+                    "type": "file",
+                    "name": "file1",
+                    "contents": "foo",
+                    "lastModified": 1784811750
+                }
+            ]
+        }
     },
     "response": {
         "status": 409,

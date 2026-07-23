@@ -21,10 +21,15 @@
         "url": "/file.txt",
         "headers": {
             "If": [
-                "(<opaquelocktoken:9c74e371-f6c4-4b82-a68e-314461eb1c67>)"
+                "(<opaquelocktoken:1915836a-1cae-434c-9b7f-ba47506cb1d3>)"
             ]
         },
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "node",
+            "class": "Sabre\\DAV\\FS\\Directory",
+            "name": "temp"
+        }
     },
     "response": {
         "status": 204,

@@ -24,7 +24,25 @@
                 "/file1"
             ]
         },
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "collection",
+            "name": "root",
+            "children": [
+                {
+                    "type": "file",
+                    "name": "file1",
+                    "contents": "content1",
+                    "lastModified": 1784811750
+                },
+                {
+                    "type": "file",
+                    "name": "file2",
+                    "contents": "content2",
+                    "lastModified": 1784811750
+                }
+            ]
+        }
     },
     "response": {
         "status": 403,

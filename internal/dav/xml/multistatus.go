@@ -9,16 +9,29 @@ import (
 	"strings"
 )
 
+// Value is the serialized content of a property element.
+type Value interface{ isValue() }
+
+// Text is character-data content.
+type Text string
+
+// Raw is a pre-serialized XML fragment (element content only), used to
+// round-trip unknown/dead properties verbatim.
+type Raw []byte
+
+// NameSet renders as a sequence of empty child elements, e.g. resourcetype's
+// {DAV:}collection.
+type NameSet []xml.Name
+
+func (Text) isValue()    {}
+func (Raw) isValue()     {}
+func (NameSet) isValue() {}
+
 // Property is a single property inside a propstat: a qualified name plus its
-// serialized content. Raw keeps unknown/dead properties round-trippable.
+// content. A nil Value renders as an empty element.
 type Property struct {
-	Name xml.Name
-	// Text is the character-data content, used when Raw is nil.
-	Text string
-	// Raw is a pre-serialized XML fragment (element content only). Nested
-	// elements inside it must use clark-unambiguous serialization via
-	// WriteFragment; plain text may be given in Text instead.
-	Raw []byte
+	Name  xml.Name
+	Value Value
 }
 
 // Propstat groups properties sharing one status code.
@@ -70,6 +83,11 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 		for _, ps := range r.Propstats {
 			for _, p := range ps.Props {
 				collect(p.Name)
+				if names, ok := p.Value.(NameSet); ok {
+					for _, n := range names {
+						collect(n)
+					}
+				}
 			}
 		}
 	}
@@ -120,11 +138,29 @@ func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
 
 func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 	tag := qualify(p.Name, prefix)
-	switch {
-	case len(p.Raw) > 0:
-		fmt.Fprintf(b, "    <%s>%s</%s>\n", tag, p.Raw, tag)
-	case p.Text != "":
-		fmt.Fprintf(b, "    <%s>%s</%s>\n", tag, escapeText(p.Text), tag)
+	switch v := p.Value.(type) {
+	case Raw:
+		if len(v) == 0 {
+			fmt.Fprintf(b, "    <%s/>\n", tag)
+			return
+		}
+		fmt.Fprintf(b, "    <%s>%s</%s>\n", tag, v, tag)
+	case Text:
+		if v == "" {
+			fmt.Fprintf(b, "    <%s/>\n", tag)
+			return
+		}
+		fmt.Fprintf(b, "    <%s>%s</%s>\n", tag, escapeText(string(v)), tag)
+	case NameSet:
+		if len(v) == 0 {
+			fmt.Fprintf(b, "    <%s/>\n", tag)
+			return
+		}
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, n := range v {
+			fmt.Fprintf(b, "<%s/>", qualify(n, prefix))
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
 	default:
 		fmt.Fprintf(b, "    <%s/>\n", tag)
 	}

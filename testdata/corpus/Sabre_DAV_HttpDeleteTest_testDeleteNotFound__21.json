@@ -20,7 +20,37 @@
         "method": "DELETE",
         "url": "/file2",
         "headers": [],
-        "body": ""
+        "body": "",
+        "tree": {
+            "type": "collection",
+            "name": "root",
+            "children": [
+                {
+                    "type": "file",
+                    "name": "file1",
+                    "contents": "foo",
+                    "lastModified": 1784811750
+                },
+                {
+                    "type": "collection",
+                    "name": "dir",
+                    "children": [
+                        {
+                            "type": "file",
+                            "name": "subfile",
+                            "contents": "bar",
+                            "lastModified": 1784811750
+                        },
+                        {
+                            "type": "file",
+                            "name": "subfile2",
+                            "contents": "baz",
+                            "lastModified": 1784811750
+                        }
+                    ]
+                }
+            ]
+        }
     },
     "response": {
         "status": 404,
