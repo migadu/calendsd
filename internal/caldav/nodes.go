@@ -263,18 +263,33 @@ func (c *Calendar) SupportedPrivileges() *acl.Privilege {
 	}}
 }
 
-// ACL mirrors sabre Calendar::getACL (owner + proxies read/write,
-// authenticated free-busy).
+// readOnly reports sabre's {http://sabredav.org/ns}read-only marker, set on
+// calendars shared with ACCESS_READ.
+func (c *Calendar) readOnly() bool {
+	v, ok := c.Info.Props[xml.Name{Space: "http://sabredav.org/ns", Local: "read-only"}]
+	if !ok {
+		return false
+	}
+	s, isString := v.(string)
+	return !isString || (s != "" && s != "0")
+}
+
+// ACL mirrors sabre Calendar::getACL: owner + proxies read, authenticated
+// free-busy, and write only when the view is not read-only.
 func (c *Calendar) ACL() []acl.ACE {
 	owner := c.Owner()
-	return []acl.ACE{
+	aces := []acl.ACE{
 		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-write", Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-read", Protected: true},
 		{Privilege: "{urn:ietf:params:xml:ns:caldav}read-free-busy", Principal: "{DAV:}authenticated", Protected: true},
-		{Privilege: "{DAV:}write", Principal: owner, Protected: true},
-		{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true},
 	}
+	if !c.readOnly() {
+		aces = append(aces,
+			acl.ACE{Privilege: "{DAV:}write", Principal: owner, Protected: true},
+			acl.ACE{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true})
+	}
+	return aces
 }
 
 // CalendarObject is a single stored event/todo. Port of sabre's
@@ -334,14 +349,18 @@ func (o *CalendarObject) Data() []byte { return o.obj.CalendarData }
 func (o *CalendarObject) Owner() string { return o.calendar.PrincipalURI }
 
 // ACL mirrors sabre Calendar::getChildACL: the calendar's owner (and its
-// proxies) read and write the objects.
+// proxies) read the objects; write only on non-read-only views.
 func (o *CalendarObject) ACL() []acl.ACE {
 	owner := o.Owner()
-	return []acl.ACE{
+	aces := []acl.ACE{
 		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-write", Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-read", Protected: true},
-		{Privilege: "{DAV:}write", Principal: owner, Protected: true},
-		{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true},
 	}
+	if !(&Calendar{Info: o.calendar}).readOnly() {
+		aces = append(aces,
+			acl.ACE{Privilege: "{DAV:}write", Principal: owner, Protected: true},
+			acl.ACE{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true})
+	}
+	return aces
 }

@@ -30,12 +30,17 @@ func (c *CorePlugin) Features() []string {
 	return []string{"1", "3", "extended-mkcol"}
 }
 
-// Methods implements MethodProvider. Matches sabre CorePlugin's method set.
+// Methods implements MethodProvider. Matches sabre's getAllowedMethods:
+// MKCOL is only advertised on unmapped URIs.
 func (c *CorePlugin) Methods(path string) []string {
-	return []string{
-		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND", "MKCOL",
+	methods := []string{
+		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND",
 		"PUT", "PROPPATCH", "COPY", "MOVE", "REPORT",
 	}
+	if c.server.Tree == nil || !c.server.Tree.NodeExists(path) {
+		methods = append(methods, "MKCOL")
+	}
+	return methods
 }
 
 func (c *CorePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
@@ -482,18 +487,20 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	var extraProps map[xml.Name]any
 	if len(body) > 0 {
 		contentType := r.Header.Get("Content-Type")
 		if !strings.HasPrefix(contentType, "application/xml") && !strings.HasPrefix(contentType, "text/xml") {
 			return ErrUnsupportedMediaType("The request body for the MKCOL request must have an xml Content-Type")
 		}
-		resourceType, err := davxml.ParseMkcolResourceType(body)
+		resourceType, props, err := davxml.ParseMkcol(body)
 		if err != nil {
 			return ErrBadRequest("%s", err)
 		}
 		if !slices.Contains(resourceType, xml.Name{Space: davxml.NSDav, Local: "collection"}) {
 			return ErrForbidden("Unable to create a collection of this type")
 		}
+		extraProps = props
 	}
 
 	if c.server.Tree.NodeExists(path) {
@@ -514,9 +521,66 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	if err := coll.CreateDirectory(name); err != nil {
 		return err
 	}
+
+	// Extended MKCOL properties apply to the fresh collection; on failure
+	// the collection is rolled back and the failed statuses reported,
+	// mirroring sabre's createCollection.
+	if len(extraProps) > 0 {
+		result, err := c.server.UpdateProperties(path, &davxml.PropertyUpdate{
+			Names:  keysOf(extraProps),
+			Values: extraProps,
+		})
+		if err != nil {
+			return err
+		}
+		failed := false
+		for _, status := range result {
+			if status > 299 {
+				failed = true
+			}
+		}
+		if failed {
+			_ = c.server.Tree.Delete(path)
+			return c.writePropStatusResponse(w, path, extraProps, result)
+		}
+	}
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusCreated)
 	return nil
+}
+
+func keysOf(m map[xml.Name]any) []xml.Name {
+	out := make([]xml.Name, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// writePropStatusResponse renders a per-property status multistatus (used by
+// failed extended MKCOL).
+func (c *CorePlugin) writePropStatusResponse(w http.ResponseWriter, path string, props map[xml.Name]any, result map[xml.Name]int) error {
+	byStatus := map[int][]davxml.Property{}
+	var statuses []int
+	for name := range props {
+		status := result[name]
+		if _, seen := byStatus[status]; !seen {
+			statuses = append(statuses, status)
+		}
+		byStatus[status] = append(byStatus[status], davxml.Property{Name: name})
+	}
+	resp := davxml.Response{Href: c.server.BaseURI + encodePath(path)}
+	for _, s := range statuses {
+		resp.Propstats = append(resp.Propstats, davxml.Propstat{Status: s, Props: byStatus[s]})
+	}
+	out, err := (&davxml.MultiStatus{Responses: []davxml.Response{resp}}).Marshal()
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusMultiStatus)
+	_, err = w.Write(out)
+	return err
 }
 
 func (c *CorePlugin) copy(w http.ResponseWriter, r *http.Request) error {

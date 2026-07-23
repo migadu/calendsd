@@ -126,7 +126,11 @@ func ParseCalendarQuery(body []byte) (*CalendarQuery, error) {
 	if len(q.Filter.CompFilters) != 1 {
 		return nil, fmt.Errorf("the {urn:ietf:params:xml:ns:caldav}filter element must have exactly one comp-filter")
 	}
-	out := &CalendarQuery{Filter: convertCompFilter(q.Filter.CompFilters[0])}
+	filter, err := convertCompFilter(q.Filter.CompFilters[0])
+	if err != nil {
+		return nil, err
+	}
+	out := &CalendarQuery{Filter: filter}
 	if q.Prop != nil {
 		for _, p := range q.Prop.Names {
 			out.Props = append(out.Props, p.XMLName)
@@ -202,26 +206,42 @@ func parseICalTime(s string) (time.Time, error) {
 	return time.Parse("20060102T150405Z", s)
 }
 
-func convertCompFilter(in compFilterXML) CompFilter {
+func convertCompFilter(in compFilterXML) (CompFilter, error) {
 	out := CompFilter{Name: in.Name, IsNotDefined: in.IsNotDefined != nil}
-	out.TimeRange = convertTimeRange(in.TimeRange)
+	tr, err := convertTimeRange(in.TimeRange)
+	if err != nil {
+		return out, err
+	}
+	out.TimeRange = tr
 	for _, cf := range in.CompFilters {
-		out.CompFilters = append(out.CompFilters, convertCompFilter(cf))
+		converted, err := convertCompFilter(cf)
+		if err != nil {
+			return out, err
+		}
+		out.CompFilters = append(out.CompFilters, converted)
 	}
 	for _, pf := range in.PropFilters {
-		out.PropFilters = append(out.PropFilters, convertPropFilter(pf))
+		converted, err := convertPropFilter(pf)
+		if err != nil {
+			return out, err
+		}
+		out.PropFilters = append(out.PropFilters, converted)
 	}
-	return out
+	return out, nil
 }
 
-func convertPropFilter(in propFilterXML) PropFilter {
+func convertPropFilter(in propFilterXML) (PropFilter, error) {
 	out := PropFilter{Name: in.Name, IsNotDefined: in.IsNotDefined != nil}
-	out.TimeRange = convertTimeRange(in.TimeRange)
+	tr, err := convertTimeRange(in.TimeRange)
+	if err != nil {
+		return out, err
+	}
+	out.TimeRange = tr
 	for _, pf := range in.ParamFilters {
 		out.ParamFilters = append(out.ParamFilters, convertParamFilter(pf))
 	}
 	out.TextMatch = convertTextMatch(in.TextMatch)
-	return out
+	return out, nil
 }
 
 func convertParamFilter(in paramFilterXML) ParamFilter {
@@ -247,13 +267,28 @@ func convertTextMatch(in *textMatchXML) *TextMatch {
 	}
 }
 
-func convertTimeRange(in *timeRangeXML) *TimeRange {
+// timeRangeableProps are the date properties sabre allows time-range
+// filters on (its validateTimeRange property cases).
+var timeRangeableProps = map[string]bool{
+	"COMPLETED": true, "CREATED": true, "DTEND": true, "DTSTAMP": true,
+	"DTSTART": true, "DUE": true, "LAST-MODIFIED": true,
+}
+
+// convertTimeRange rejects malformed time attributes (a bad value must be a
+// 400, not a silently unbounded filter).
+func convertTimeRange(in *timeRangeXML) (*TimeRange, error) {
 	if in == nil {
-		return nil
+		return nil, nil
 	}
-	start, _ := parseICalTime(in.Start)
-	end, _ := parseICalTime(in.End)
-	return &TimeRange{Start: start, End: end}
+	start, err := parseICalTime(in.Start)
+	if err != nil {
+		return nil, dav.ErrBadRequest("The 'start' attribute of the time-range element is invalid: %s", in.Start)
+	}
+	end, err := parseICalTime(in.End)
+	if err != nil {
+		return nil, dav.ErrBadRequest("The 'end' attribute of the time-range element is invalid: %s", in.End)
+	}
+	return &TimeRange{Start: start, End: end}, nil
 }
 
 // bounds applies sabre's defaults for open-ended ranges.
@@ -272,6 +307,9 @@ func (tr *TimeRange) bounds() (time.Time, time.Time) {
 // CalendarQueryValidator. loc resolves floating times.
 type Validator struct {
 	Loc *time.Location
+	// cal is the object being validated (recurring-VALARM checks need
+	// access to overridden sibling instances).
+	cal *goical.Calendar
 }
 
 // Validate reports whether the calendar object matches the root filter.
@@ -279,6 +317,7 @@ func (v *Validator) Validate(cal *goical.Calendar, filter CompFilter) (bool, err
 	if cal.Name != filter.Name {
 		return false, nil
 	}
+	v.cal = cal
 	return v.validateComponent(cal.Component, filter.CompFilters, filter.PropFilters)
 }
 
@@ -367,13 +406,18 @@ nextFilter:
 		}
 
 		if filter.TimeRange != nil {
+			// Sabre restricts property time-ranges to the date properties
+			// and matches with an inclusive end ($start <= dt && $end >= dt).
+			if !timeRangeableProps[filter.Name] {
+				return false, dav.ErrBadRequest("You cannot create a time-range filter on a %s component", filter.Name)
+			}
 			start, end := filter.TimeRange.bounds()
 			for _, prop := range props {
 				t, err := prop.DateTime(v.loc())
 				if err != nil {
 					continue
 				}
-				if !start.After(t) && end.After(t) {
+				if !start.After(t) && !end.Before(t) {
 					continue nextFilter
 				}
 			}
@@ -444,12 +488,9 @@ func (v *Validator) componentInTimeRange(comp, parent *goical.Component, start, 
 	case goical.CompEvent:
 		return ical.EventInTimeRange(comp, start, end, v.loc())
 	case "VALARM":
-		if parent.Name == goical.CompEvent {
+		if parent.Name == goical.CompEvent && v.cal != nil {
 			if roption, _ := parent.Props.RecurrenceRule(); roption != nil {
-				// Sabre iterates every occurrence's alarms; the first
-				// occurrence approximates that until the todo/recur port
-				// deepens. TODO(parity): per-occurrence alarm triggers.
-				return ical.AlarmInTimeRange(comp, parent, start, end, v.loc())
+				return ical.AlarmsInTimeRangeRecurring(v.cal, parent, start, end, v.loc())
 			}
 		}
 		return ical.AlarmInTimeRange(comp, parent, start, end, v.loc())

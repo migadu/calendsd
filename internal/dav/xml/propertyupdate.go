@@ -16,58 +16,130 @@ type PropertyUpdate struct {
 	Values map[xml.Name]any
 }
 
-type rawProp struct {
-	XMLName xml.Name
-	Inner   string `xml:",innerxml"`
-}
-
-type propertyUpdateXML struct {
-	XMLName xml.Name `xml:"DAV: propertyupdate"`
-	Ops     []struct {
-		XMLName xml.Name
-		Prop    struct {
-			Props []rawProp `xml:",any"`
-		} `xml:"prop"`
-	} `xml:",any"`
-}
-
-// ParsePropertyUpdate parses a PROPPATCH body.
+// ParsePropertyUpdate parses a PROPPATCH body with a token walk, so complex
+// property values are re-serialized *self-contained* (every element carries
+// its namespace as a default xmlns) — a stored fragment must not depend on
+// prefixes declared by the request document.
 func ParsePropertyUpdate(r io.Reader) (*PropertyUpdate, error) {
-	var body propertyUpdateXML
-	if err := xml.NewDecoder(r).Decode(&body); err != nil {
-		return nil, err
-	}
+	dec := xml.NewDecoder(r)
 	out := &PropertyUpdate{Values: map[xml.Name]any{}}
-	for _, op := range body.Ops {
-		isRemove := op.XMLName == xml.Name{Space: NSDav, Local: "remove"}
-		isSet := op.XMLName == xml.Name{Space: NSDav, Local: "set"}
-		if !isRemove && !isSet {
+
+	// Walk: propertyupdate > (set|remove) > prop > *property elements*.
+	var stack []xml.Name
+	inRemove := false
+	rootSeen := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			if !rootSeen {
+				return nil, io.ErrUnexpectedEOF
+			}
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			depth := len(stack)
+			name := t.Name
+			isDav := name.Space == NSDav
+			switch {
+			case depth == 0 && (!isDav || name.Local != "propertyupdate"):
+				return nil, xml.UnmarshalError("expected {DAV:}propertyupdate root")
+			case depth == 0:
+				rootSeen = true
+			case depth == 1 && isDav && (name.Local == "set" || name.Local == "remove"):
+				inRemove = name.Local == "remove"
+			case depth == 3:
+				// A property element inside set/remove > prop.
+				value, err := parsePropValue(dec, t)
+				if err != nil {
+					return nil, err
+				}
+				if _, seen := out.Values[name]; !seen {
+					out.Names = append(out.Names, name)
+				}
+				if inRemove {
+					out.Values[name] = nil
+				} else {
+					out.Values[name] = value
+				}
+				continue // subtree fully consumed; no stack push
+			}
+			stack = append(stack, name)
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+}
+
+// parsePropValue consumes a property element's subtree. Text-only content
+// returns a string; element content returns a self-contained XML fragment.
+func parsePropValue(dec *xml.Decoder, start xml.StartElement) (any, error) {
+	var text strings.Builder
+	var fragment strings.Builder
+	hasElements := false
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			hasElements = true
+			depth++
+			writeSelfContainedStart(&fragment, t)
+		case xml.EndElement:
+			if depth == 0 {
+				// End of the property element itself.
+				if hasElements {
+					return []byte(fragment.String()), nil
+				}
+				return text.String(), nil
+			}
+			depth--
+			fragment.WriteString("</" + t.Name.Local + ">")
+		case xml.CharData:
+			text.Write(t)
+			fragment.WriteString(escapeXMLText(string(t)))
+		}
+	}
+}
+
+// writeSelfContainedStart writes an element with its namespace declared as
+// the default xmlns, making the fragment independent of outer prefixes.
+func writeSelfContainedStart(b *strings.Builder, t xml.StartElement) {
+	b.WriteString("<" + t.Name.Local)
+	if t.Name.Space != "" {
+		b.WriteString(` xmlns="` + escapeXMLAttr(t.Name.Space) + `"`)
+	}
+	for _, attr := range t.Attr {
+		if attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns") {
+			continue // prefix declarations are re-derived
+		}
+		if attr.Name.Space != "" {
+			// Namespaced attributes are rare in DAV bodies; qualify with
+			// the full URI-in-clark form is not valid XML, so skip the
+			// namespace (matching how sabre's fragment storage behaves
+			// for undeclared attribute prefixes).
+			b.WriteString(" " + attr.Name.Local + `="` + escapeXMLAttr(attr.Value) + `"`)
 			continue
 		}
-		for _, p := range op.Prop.Props {
-			if _, seen := out.Values[p.XMLName]; !seen {
-				out.Names = append(out.Names, p.XMLName)
-			}
-			if isRemove {
-				out.Values[p.XMLName] = nil
-				continue
-			}
-			out.Values[p.XMLName] = propValue(p.Inner)
-		}
+		b.WriteString(" " + attr.Name.Local + `="` + escapeXMLAttr(attr.Value) + `"`)
 	}
-	return out, nil
+	b.WriteString(">")
 }
 
-// propValue distinguishes plain text content from nested XML: fragments with
-// child elements stay raw, everything else is unescaped text.
-func propValue(inner string) any {
-	if strings.Contains(inner, "<") {
-		return []byte(inner)
-	}
-	var text string
-	// Round-trip through the decoder to resolve entities (&amp; etc.).
-	if err := xml.Unmarshal([]byte("<v>"+inner+"</v>"), &text); err != nil {
-		return inner
-	}
-	return text
+func escapeXMLText(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
+}
+
+func escapeXMLAttr(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", `"`, "&quot;")
+	return r.Replace(s)
 }

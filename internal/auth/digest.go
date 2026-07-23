@@ -45,17 +45,14 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 
 	uri := params["uri"]
 	a2 := md5hex(r.Method + ":" + uri)
-	var expected string
-	switch params["qop"] {
-	case "auth":
-		expected = md5hex(strings.Join([]string{
-			a1, params["nonce"], params["nc"], params["cnonce"], params["qop"], a2,
-		}, ":"))
-	case "":
-		expected = md5hex(a1 + ":" + params["nonce"] + ":" + a2)
-	default:
+	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
+	// downgrade path sabre's Digest also rejects.
+	if params["qop"] != "auth" {
 		return "", false, "Unsupported digest qop value"
 	}
+	expected := md5hex(strings.Join([]string{
+		a1, params["nonce"], params["nc"], params["cnonce"], params["qop"], a2,
+	}, ":"))
 	if expected != params["response"] {
 		return "", false, "Username or password was incorrect"
 	}

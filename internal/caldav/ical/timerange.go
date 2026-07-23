@@ -200,6 +200,152 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 	return dtstart.Add(triggerDur), nil
 }
 
+// AlarmsInTimeRangeRecurring evaluates the VALARMs of a recurring VEVENT,
+// porting sabre's recurring branch of validateTimeRange (the Issue 220
+// behavior) exactly: instances are walked in order with overridden instances
+// (RECURRENCE-ID) substituted; an instance *without* alarms aborts the whole
+// search as a no-match; the walk also stops once the earliest relative
+// trigger of an instance passes the range end.
+func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
+	uid := ""
+	if p := master.Props.Get(goical.PropUID); p != nil {
+		uid = p.Value
+	}
+	overrides := map[int64]*goical.Component{}
+	for _, child := range cal.Children {
+		if child.Name != goical.CompEvent || child == master {
+			continue
+		}
+		if p := child.Props.Get(goical.PropUID); p == nil || p.Value != uid {
+			continue
+		}
+		if rid := child.Props.Get(goical.PropRecurrenceID); rid != nil {
+			if t, err := rid.DateTime(loc); err == nil {
+				overrides[t.Unix()] = child
+			}
+		}
+	}
+
+	dtstartProp := master.Props.Get(goical.PropDateTimeStart)
+	if dtstartProp == nil {
+		return false, nil
+	}
+	dtstart, err := dtstartProp.DateTime(loc)
+	if err != nil {
+		return false, err
+	}
+	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	if err != nil {
+		return false, err
+	}
+	set, err := master.RecurrenceSet(loc)
+	if err != nil || set == nil {
+		return false, err
+	}
+
+	next := set.Iterator()
+	// Sabre relies on firstAlarm growing past $end for termination; the
+	// cap guards against pathological rules it would spin on.
+	for i := 0; i < 100000; i++ {
+		occStart, more := next()
+		if !more {
+			return false, nil
+		}
+		instance := master
+		instStart, instEnd := occStart, occStart.Add(dur)
+		if override, exists := overrides[occStart.Unix()]; exists {
+			instance = override
+			if sp := override.Props.Get(goical.PropDateTimeStart); sp != nil {
+				if t, err := sp.DateTime(loc); err == nil {
+					instStart = t
+					if e, err := eventEnd(override, sp, t, loc); err == nil {
+						instEnd = e
+					}
+				}
+			}
+		}
+
+		var alarms []*goical.Component
+		for _, child := range instance.Children {
+			if child.Name == "VALARM" {
+				alarms = append(alarms, child)
+			}
+		}
+		if len(alarms) == 0 {
+			// "No alarm that will change for every instance was found" —
+			// sabre assumes no match and stops here.
+			return false, nil
+		}
+
+		var firstAlarm *time.Time
+		for _, alarm := range alarms {
+			trigger := alarm.Props.Get("TRIGGER")
+			if trigger == nil {
+				continue
+			}
+			var effective time.Time
+			absolute := trigger.ValueType() == goical.ValueDateTime
+			if absolute {
+				if effective, err = trigger.DateTime(loc); err != nil {
+					continue
+				}
+			} else {
+				triggerDur, err := trigger.Duration()
+				if err != nil {
+					continue
+				}
+				if strings.EqualFold(trigger.Params.Get("RELATED"), "END") {
+					effective = instEnd.Add(triggerDur)
+				} else {
+					effective = instStart.Add(triggerDur)
+				}
+			}
+			if alarmRepeatsInRange(alarm, effective, start, end) {
+				return true, nil
+			}
+			if !absolute {
+				if firstAlarm == nil || effective.Before(*firstAlarm) {
+					t := effective
+					firstAlarm = &t
+				}
+			}
+		}
+		if firstAlarm == nil {
+			return false, nil
+		}
+		if firstAlarm.After(end) {
+			return false, nil
+		}
+	}
+	return false, nil
+}
+
+// alarmRepeatsInRange checks a trigger (plus its REPEAT/DURATION
+// repetitions) against [start, end).
+func alarmRepeatsInRange(alarm *goical.Component, trigger, start, end time.Time) bool {
+	repeat := 0
+	var dur time.Duration
+	if durProp := alarm.Props.Get(goical.PropDuration); durProp != nil {
+		if d, err := durProp.Duration(); err == nil {
+			dur = d
+			repeat = 1
+			if repProp := alarm.Props.Get("REPEAT"); repProp != nil {
+				if n, err := repProp.Int(); err == nil {
+					repeat = n
+				}
+			}
+		}
+	}
+	occ := trigger
+	for i := 0; i <= repeat; i++ {
+		if !start.After(occ) && end.After(occ) {
+			return true
+		}
+		occ = occ.Add(dur)
+	}
+	return false
+}
+
 // AlarmInTimeRange reports whether a VALARM's (possibly repeating) trigger
 // falls within [start, end). Port of vobject VAlarm::isInTimeRange.
 func AlarmInTimeRange(alarm, parent *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {

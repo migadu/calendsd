@@ -106,6 +106,11 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	}
 
 	dtstartProp := master.Props.Get(goical.PropDateTimeStart)
+	if dtstartProp == nil {
+		// A recurring event without DTSTART has no expandable
+		// occurrences; drop it rather than panic.
+		return nil, nil
+	}
 	dtstart, err := dtstartProp.DateTime(loc)
 	if err != nil {
 		return nil, err

@@ -9,32 +9,42 @@ type mkcolXML struct {
 	XMLName xml.Name `xml:"DAV: mkcol"`
 	Set     struct {
 		Prop struct {
-			ResourceType *struct {
-				Types []struct {
+			Props []struct {
+				XMLName xml.Name
+				Types   []struct {
 					XMLName xml.Name
 				} `xml:",any"`
-			} `xml:"resourcetype"`
+				Value string `xml:",chardata"`
+			} `xml:",any"`
 		} `xml:"prop"`
 	} `xml:"set"`
 }
 
-// ParseMkcolResourceType extracts the {DAV:}resourcetype values from an
-// extended-mkcol body (RFC 5689). A body without resourcetype is an error,
-// like sabre.
-func ParseMkcolResourceType(body []byte) ([]xml.Name, error) {
+// ParseMkcol extracts the {DAV:}resourcetype values plus any additional
+// properties from an extended-mkcol body (RFC 5689). A body without
+// resourcetype is an error, like sabre.
+func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
 	var parsed mkcolXML
 	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&parsed); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rt := parsed.Set.Prop.ResourceType
-	if rt == nil {
-		return nil, errMissingResourceType
+	var resourceType []xml.Name
+	haveResourceType := false
+	props := map[xml.Name]any{}
+	for _, p := range parsed.Set.Prop.Props {
+		if (p.XMLName == xml.Name{Space: NSDav, Local: "resourcetype"}) {
+			haveResourceType = true
+			for _, t := range p.Types {
+				resourceType = append(resourceType, t.XMLName)
+			}
+			continue
+		}
+		props[p.XMLName] = p.Value
 	}
-	out := make([]xml.Name, len(rt.Types))
-	for i, t := range rt.Types {
-		out[i] = t.XMLName
+	if !haveResourceType {
+		return nil, nil, errMissingResourceType
 	}
-	return out, nil
+	return resourceType, props, nil
 }
 
 type resourceTypeError struct{}

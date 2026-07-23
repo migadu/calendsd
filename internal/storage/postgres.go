@@ -67,9 +67,10 @@ SELECT calendarinstances.id as id, displayname, description, timezone,
 	var out []caldav.CalendarInfo
 	for rows.Next() {
 		var (
-			instanceID, calendarID, synctoken, calendarorder, transparent, access int64
-			uri, principal                                                        string
-			displayname, description, timezone, calendarcolor, components         sql.NullString
+			instanceID, calendarID, calendarorder, transparent, access    int64
+			synctoken                                                     sql.NullInt64
+			uri, principal                                                string
+			displayname, description, timezone, calendarcolor, components sql.NullString
 		)
 		if err := rows.Scan(&instanceID, &displayname, &description, &timezone,
 			&calendarorder, &calendarcolor, &calendarID, &uri, &synctoken,
@@ -85,9 +86,19 @@ SELECT calendarinstances.id as id, displayname, description, timezone,
 			PrincipalURI: principal,
 			Props:        map[xml.Name]any{},
 		}
-		token := strconv.FormatInt(synctoken, 10)
+		// An orphaned instance (no calendars row) degrades to token "0",
+		// like sabre's ?: '0' fallback.
+		token := "0"
+		if synctoken.Valid {
+			token = strconv.FormatInt(synctoken.Int64, 10)
+		}
 		info.Props[xml.Name{Space: davxml.NSCalendarServer, Local: "getctag"}] = syncTokenPrefix + token
 		info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "sync-token"}] = token
+		// Sharee views carry sabre's read-only marker; the calendar ACLs
+		// drop write privileges from it.
+		if access == 2 { // Sharing\Plugin::ACCESS_READ
+			info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "read-only"}] = "1"
+		}
 		info.Props[xml.Name{Space: davxml.NSCalDAV, Local: "supported-calendar-component-set"}] = componentSetValue(components.String)
 		transp := "opaque"
 		if transparent != 0 {
@@ -250,19 +261,35 @@ func toNullString(v any) any {
 	}
 }
 
+// DeleteCalendar transcribes sabre's access-aware deleteCalendar: only the
+// shared owner (access=1) removes the calendar with all its data; a sharee
+// merely drops their own instance row, leaving the owner's calendar intact.
 func (b *CalDAV) DeleteCalendar(id caldav.CalendarID) error {
 	tx, err := b.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, q := range []string{
-		`DELETE FROM calendarobjects WHERE calendarid = $1`,
-		`DELETE FROM calendarchanges WHERE calendarid = $1`,
-		`DELETE FROM calendarinstances WHERE calendarid = $1`,
-		`DELETE FROM calendars WHERE id = $1`,
-	} {
-		if _, err := tx.Exec(q, id.Calendar); err != nil {
+
+	var access int
+	if err := tx.QueryRow(
+		`SELECT access FROM calendarinstances WHERE id = $1`, id.Instance).Scan(&access); err != nil {
+		return err
+	}
+	if access == 1 { // Sharing\Plugin::ACCESS_SHAREDOWNER
+		for _, q := range []string{
+			`DELETE FROM calendarobjects WHERE calendarid = $1`,
+			`DELETE FROM calendarchanges WHERE calendarid = $1`,
+			`DELETE FROM calendarinstances WHERE calendarid = $1`,
+			`DELETE FROM calendars WHERE id = $1`,
+		} {
+			if _, err := tx.Exec(q, id.Calendar); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err := tx.Exec(
+			`DELETE FROM calendarinstances WHERE id = $1`, id.Instance); err != nil {
 			return err
 		}
 	}
@@ -491,16 +518,25 @@ func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, sync
 	return out, nil
 }
 
-// addChange transcribes sabre's addChange: record the change at the current
-// synctoken, then increment it.
+// addChange transcribes sabre's addChange (record at the current synctoken,
+// then increment) but locks the calendars row first: two concurrent writers
+// must not stamp two changes with the same token, or sync clients past that
+// token skip one forever. Sabre's unwrapped statements race here; the lock
+// serializes all Go-side writers and any sabre writer that reaches its
+// UPDATE while we hold the row.
 func addChange(tx *sql.Tx, calendarID, objectURI string, operation int) error {
-	if _, err := tx.Exec(`
-INSERT INTO calendarchanges (uri, synctoken, calendarid, operation)
-SELECT $1, synctoken, $2, $3 FROM calendars WHERE id = $2`,
-		objectURI, calendarID, operation); err != nil {
+	var token int64
+	if err := tx.QueryRow(
+		`SELECT synctoken FROM calendars WHERE id = $1 FOR UPDATE`, calendarID).Scan(&token); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`UPDATE calendars SET synctoken = synctoken + 1 WHERE id = $1`, calendarID)
+	if _, err := tx.Exec(`
+INSERT INTO calendarchanges (uri, synctoken, calendarid, operation)
+VALUES ($1, $2, $3, $4)`,
+		objectURI, token, calendarID, operation); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE calendars SET synctoken = $1 WHERE id = $2`, token+1, calendarID)
 	return err
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	gopath "path"
 	"slices"
 	"strings"
 
@@ -169,6 +170,15 @@ func (s *Server) stripBase(p string) (string, error) {
 			return "", ErrBadRequest("invalid uri: %s", p)
 		}
 		p = u.EscapedPath()
+	}
+	// Normalize ./.. segments and duplicate slashes like sabre's
+	// Uri\normalize before comparing against the base URI.
+	if p != "" {
+		trailing := strings.HasSuffix(p, "/")
+		p = gopath.Clean("/" + strings.TrimPrefix(p, "/"))
+		if trailing && p != "/" {
+			p += "/"
+		}
 	}
 	if p+"/" == s.BaseURI {
 		// Request for the base itself without the trailing slash.

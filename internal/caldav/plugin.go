@@ -193,7 +193,10 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 	if req.TimeRange == nil {
 		return dav.ErrBadRequest("The free-busy-query REPORT requires a time-range element")
 	}
-	tr := convertTimeRange(req.TimeRange)
+	tr, err := convertTimeRange(req.TimeRange)
+	if err != nil {
+		return err
+	}
 	start, end := tr.bounds()
 
 	// Free-busy is gated by its own privilege ({DAV:}authenticated holds

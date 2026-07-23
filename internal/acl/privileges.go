@@ -240,6 +240,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		if !exists {
 			return true, nil
 		}
+		// Sabre passes R_RECURSIVE here, but its checkPrivileges ignores
+		// the recursion argument entirely — the effective behavior (and
+		// ours) checks the top node only.
 		if ok, err := check(path, "{DAV:}read"); !ok {
 			return ok, err
 		}

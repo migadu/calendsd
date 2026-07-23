@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"net/http"
+	"slices"
 	"strings"
 
 	"calserver/internal/dav"
@@ -81,20 +82,15 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	davName := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
 
 	// Without {DAV:}read every requested property reports 403, mirroring
-	// sabre's propFind gating (hideNodesFromListings stays off).
-	if held, err := p.CurrentUserPrivileges(pf.Context(), node); err == nil {
-		readable := false
-		for _, priv := range held {
-			if priv == "{DAV:}read" {
-				readable = true
-			}
+	// sabre's propFind gating (hideNodesFromListings stays off). The gate
+	// fails closed: an error computing privileges denies, never grants.
+	held, err := p.CurrentUserPrivileges(pf.Context(), node)
+	readable := err == nil && slices.Contains(held, "{DAV:}read")
+	if !readable {
+		for _, name := range pf.Requested() {
+			pf.Set(name, nil, http.StatusForbidden)
 		}
-		if !readable {
-			for _, name := range pf.Requested() {
-				pf.Set(name, nil, http.StatusForbidden)
-			}
-			return nil
-		}
+		return nil
 	}
 
 	if ph, isPrincipal := node.(PrincipalHolder); isPrincipal {

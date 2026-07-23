@@ -7,6 +7,22 @@
         "lastOccurence": 1767312000,
         "uid": "allday-1"
     },
+    "dst-fall.ics": {
+        "etag": "0780ff2491e745a254ef3e6a523924d3",
+        "size": 297,
+        "componentType": "VEVENT",
+        "firstOccurence": 1793338200,
+        "lastOccurence": 1793691000,
+        "uid": "dst-2"
+    },
+    "dst-recurring.ics": {
+        "etag": "7b8c4ad4b17970d34d6eb72417da1a33",
+        "size": 293,
+        "componentType": "VEVENT",
+        "firstOccurence": 1774512000,
+        "lastOccurence": 1775030400,
+        "uid": "dst-1"
+    },
     "duration.ics": {
         "etag": "c3d7d928f60ebc58bf987de07c67c9b5",
         "size": 204,
@@ -23,6 +39,46 @@
         "lastOccurence": 1768482000,
         "uid": "exdate-1"
     },
+    "fb-overlap.ics": {
+        "etag": "b80178f72c43176e0a026fd15dce2814",
+        "size": 209,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780392600,
+        "lastOccurence": 1780398000,
+        "uid": "fb5"
+    },
+    "fb-recurring.ics": {
+        "etag": "b1915f534610fced05bbf6e61b198a67",
+        "size": 228,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780149600,
+        "lastOccurence": 1780498800,
+        "uid": "fb4"
+    },
+    "fb-simple.ics": {
+        "etag": "d4b98f29da5776f1a8956fa770f2c264",
+        "size": 202,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780390800,
+        "lastOccurence": 1780394400,
+        "uid": "fb1"
+    },
+    "fb-tentative.ics": {
+        "etag": "f5a960a5582c4896e785e0a114364dae",
+        "size": 220,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780477200,
+        "lastOccurence": 1780480800,
+        "uid": "fb2"
+    },
+    "fb-transparent.ics": {
+        "etag": "eeb6750c3a70cccbbc2c503e532ba4d9",
+        "size": 226,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780563600,
+        "lastOccurence": 1780567200,
+        "uid": "fb3"
+    },
     "finite-rrule.ics": {
         "etag": "81664f000007fcb5e6379461fffda98d",
         "size": 235,
@@ -30,6 +86,14 @@
         "firstOccurence": 1767268800,
         "lastOccurence": 1768482000,
         "uid": "finite-1"
+    },
+    "floating.ics": {
+        "etag": "3a9f438fc7f6f5b22b3874209be41732",
+        "size": 212,
+        "componentType": "VEVENT",
+        "firstOccurence": 1780315200,
+        "lastOccurence": 1780318800,
+        "uid": "float-1"
     },
     "infinite-rrule.ics": {
         "etag": "e61c019bcf5c842b8fdabb3a943da017",

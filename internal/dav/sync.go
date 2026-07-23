@@ -183,8 +183,16 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, collectionPath string, changes *ChangeSet, props []xml.Name) error {
 	ms := &davxml.MultiStatus{SyncToken: SyncTokenPrefix + changes.SyncToken}
 
+	// joinPath avoids "//" hrefs when syncing a root collection.
+	joinPath := func(item string) string {
+		if collectionPath == "" {
+			return item
+		}
+		return collectionPath + "/" + item
+	}
+
 	for _, item := range append(append([]string{}, changes.Added...), changes.Modified...) {
-		itemPath := collectionPath + "/" + item
+		itemPath := joinPath(item)
 		responses, err := p.server.PropertiesForPath(ctx, itemPath, props, 0)
 		if err != nil {
 			if AsError(err).Status == http.StatusNotFound {
@@ -196,13 +204,17 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 	}
 	for _, item := range changes.Deleted {
 		ms.Responses = append(ms.Responses, davxml.Response{
-			Href:   p.server.BaseURI + encodePath(collectionPath+"/"+item),
+			Href:   p.server.BaseURI + encodePath(joinPath(item)),
 			Status: http.StatusNotFound,
 		})
 	}
 	if changes.Truncated {
+		href := p.server.BaseURI
+		if collectionPath != "" {
+			href += encodePath(collectionPath) + "/"
+		}
 		ms.Responses = append(ms.Responses, davxml.Response{
-			Href:   p.server.BaseURI + encodePath(collectionPath) + "/",
+			Href:   href,
 			Status: http.StatusInsufficientStorage,
 		})
 	}

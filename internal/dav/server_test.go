@@ -22,10 +22,15 @@ func TestOptions(t *testing.T) {
 		t.Errorf("DAV header = %q, want %q", got, want)
 	}
 	allow := rec.Header().Get("Allow")
-	for _, m := range []string{"OPTIONS", "PROPFIND", "PUT", "MKCOL", "PROPPATCH", "COPY", "MOVE"} {
+	// MKCOL is absent: sabre only advertises it on unmapped URIs, and "/"
+	// exists.
+	for _, m := range []string{"OPTIONS", "PROPFIND", "PUT", "PROPPATCH", "COPY", "MOVE", "REPORT"} {
 		if !strings.Contains(allow, m) {
 			t.Errorf("Allow header %q missing %s", allow, m)
 		}
+	}
+	if strings.Contains(allow, "MKCOL") {
+		t.Errorf("Allow header %q must not advertise MKCOL on an existing path", allow)
 	}
 	if got := rec.Header().Get("MS-Author-Via"); got != "DAV" {
 		t.Errorf("MS-Author-Via = %q, want DAV", got)
