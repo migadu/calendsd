@@ -40,6 +40,9 @@ $server->addPlugin(new Sabre\DAV\Auth\Plugin($authBackend));
 $server->addPlugin(new Sabre\DAVACL\Plugin());
 $server->addPlugin(new Sabre\CalDAV\Plugin());
 $server->addPlugin(new Sabre\DAV\Sync\Plugin());
+$server->addPlugin(new Sabre\DAV\PropertyStorage\Plugin(
+    new Sabre\DAV\PropertyStorage\Backend\PDO($pdo)
+));
 $server->addPlugin(new Sabre\DAV\Browser\Plugin());
 
 $server->start();

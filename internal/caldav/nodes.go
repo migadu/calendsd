@@ -223,16 +223,7 @@ func (c *Calendar) Props(names []xml.Name) (map[xml.Name]any, error) {
 }
 
 func (c *Calendar) PropPatch(pp *dav.PropPatch) {
-	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
-		for n, v := range values {
-			if v == nil {
-				delete(c.Info.Props, n)
-			} else {
-				c.Info.Props[n] = v
-			}
-		}
-		return nil, true
-	})
+	c.backend.UpdateCalendar(c.Info.ID, pp)
 }
 
 // Owner returns the owning principal.

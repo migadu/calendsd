@@ -191,6 +191,46 @@ func TestParity(t *testing.T) {
 		}
 	})
 
+	t.Run("PropertyParity", func(t *testing.T) {
+		// Column-backed property: Go PROPPATCH → calendarinstances →
+		// sabre PROPFIND.
+		patch := `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/"><d:set><d:prop><a:calendar-color>#FF0000FF</a:calendar-color></d:prop></d:set></d:propertyupdate>`
+		status, body, _ := goClient.do(t, "PROPPATCH", "/calendars/admin/default/", patch, "Content-Type", "application/xml")
+		if status != 207 || strings.Contains(body, "403") {
+			t.Fatalf("Go PROPPATCH color = %d: %s", status, body)
+		}
+		find := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/"><d:prop><a:calendar-color/></d:prop></d:propfind>`
+		_, body, _ = sabreClient.do(t, "PROPFIND", "/calendars/admin/default/", find, "Depth", "0", "Content-Type", "application/xml")
+		if !strings.Contains(body, "#FF0000FF") {
+			t.Errorf("sabre does not see the Go-written calendar-color:\n%s", body)
+		}
+
+		// Dead property: Go PROPPATCH → propertystorage (valuetype 1) →
+		// sabre PROPFIND.
+		patch = `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:" xmlns:x="http://example.org/ns"><d:set><d:prop><x:go-written>from-go</x:go-written></d:prop></d:set></d:propertyupdate>`
+		status, body, _ = goClient.do(t, "PROPPATCH", "/calendars/admin/default/", patch, "Content-Type", "application/xml")
+		if status != 207 || strings.Contains(body, "403") {
+			t.Fatalf("Go PROPPATCH dead prop = %d: %s", status, body)
+		}
+		find = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:x="http://example.org/ns"><d:prop><x:go-written/></d:prop></d:propfind>`
+		_, body, _ = sabreClient.do(t, "PROPFIND", "/calendars/admin/default/", find, "Depth", "0", "Content-Type", "application/xml")
+		if !strings.Contains(body, "from-go") {
+			t.Errorf("sabre does not see the Go-written dead property:\n%s", body)
+		}
+
+		// Reverse: sabre PROPPATCH dead prop → Go PROPFIND.
+		patch = `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:" xmlns:x="http://example.org/ns"><d:set><d:prop><x:sabre-written>from-sabre</x:sabre-written></d:prop></d:set></d:propertyupdate>`
+		status, body, _ = sabreClient.do(t, "PROPPATCH", "/calendars/admin/default/", patch, "Content-Type", "application/xml")
+		if status != 207 && status != 204 {
+			t.Fatalf("sabre PROPPATCH = %d: %s", status, body)
+		}
+		find = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:x="http://example.org/ns"><d:prop><x:sabre-written/></d:prop></d:propfind>`
+		_, body, _ = goClient.do(t, "PROPFIND", "/calendars/admin/default/", find, "Depth", "0", "Content-Type", "application/xml")
+		if !strings.Contains(body, "from-sabre") {
+			t.Errorf("Go does not see the sabre-written dead property:\n%s", body)
+		}
+	})
+
 	t.Run("GoDeleteVisibleInSabreSync", func(t *testing.T) {
 		tokenBefore := sabreSyncToken(t, sabreClient)
 		status, body, _ := goClient.do(t, "DELETE", "/calendars/admin/default/parity2.ics", "")

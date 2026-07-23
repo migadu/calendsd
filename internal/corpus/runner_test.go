@@ -163,10 +163,6 @@ func TestCorpus(t *testing.T) {
 			outOfScope++
 			continue
 		}
-		if needsLaterPhase(&recs[0]) {
-			pending++
-			continue
-		}
 
 		mismatches := replayGroup(recs)
 		if len(mismatches) == 0 {
@@ -198,12 +194,6 @@ func TestCorpus(t *testing.T) {
 			t.Errorf("regression: %q is in the passing set but no longer green", name)
 		}
 	}
-}
-
-// needsLaterPhase filters tests whose fixtures require ports that haven't
-// landed yet (property storage).
-func needsLaterPhase(r *Record) bool {
-	return r.Setup.SetupPropertyStorage
 }
 
 // replayGroup replays a test's records in order against one seeded server

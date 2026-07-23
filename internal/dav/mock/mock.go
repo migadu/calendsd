@@ -155,6 +155,58 @@ func (f *File) Delete() error {
 	return nil
 }
 
+// MemoryPropStorage is an in-memory dead-property store, port of sabre's
+// PropertyStorage\Backend\Mock.
+type MemoryPropStorage struct {
+	// Props maps path → property name → value.
+	Props map[string]map[xml.Name]any
+}
+
+func (m *MemoryPropStorage) ensure() {
+	if m.Props == nil {
+		m.Props = map[string]map[xml.Name]any{}
+	}
+}
+
+func (m *MemoryPropStorage) PropFind(path string, pf *dav.PropFind) error {
+	for name, value := range m.Props[path] {
+		pf.Set(name, value, 200)
+	}
+	return nil
+}
+
+func (m *MemoryPropStorage) PropPatch(path string, pp *dav.PropPatch) error {
+	m.ensure()
+	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+		if m.Props[path] == nil {
+			m.Props[path] = map[xml.Name]any{}
+		}
+		for n, v := range values {
+			if v == nil {
+				delete(m.Props[path], n)
+			} else {
+				m.Props[path][n] = v
+			}
+		}
+		return nil, true
+	})
+	return nil
+}
+
+func (m *MemoryPropStorage) Delete(path string) error {
+	delete(m.Props, path)
+	return nil
+}
+
+func (m *MemoryPropStorage) Move(source, destination string) error {
+	m.ensure()
+	if props, exists := m.Props[source]; exists {
+		m.Props[destination] = props
+		delete(m.Props, source)
+	}
+	return nil
+}
+
 // StreamingFile is a file whose size may be unknown (-1), like sabre's
 // Mock\StreamingFile with a null size: no Content-Length, no ranges.
 type StreamingFile struct {

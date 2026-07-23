@@ -66,6 +66,9 @@ type Backend interface {
 	CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error)
 	// DeleteCalendar removes a calendar with its objects.
 	DeleteCalendar(calendarID CalendarID) error
+	// UpdateCalendar registers PropPatch handlers for the calendar
+	// properties the backend persists (sabre's updateCalendar).
+	UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch)
 
 	// CalendarObjects lists all objects of a calendar.
 	CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error)
@@ -161,6 +164,26 @@ func (m *MockBackend) UpdateCalendarObject(calendarID CalendarID, objectURI stri
 func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI string) error {
 	delete(m.Objects[calendarID], objectURI)
 	return nil
+}
+
+// UpdateCalendar accepts all mutations into the in-memory props, like
+// sabre's mock.
+func (m *MockBackend) UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch) {
+	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+		for i := range m.Calendars {
+			if m.Calendars[i].ID != calendarID {
+				continue
+			}
+			for n, v := range values {
+				if v == nil {
+					delete(m.Calendars[i].Props, n)
+				} else {
+					m.Calendars[i].Props[n] = v
+				}
+			}
+		}
+		return nil, true
+	})
 }
 
 // ChangesForCalendar reports no sync support, like sabre's plain mock.

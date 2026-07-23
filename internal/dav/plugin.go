@@ -50,6 +50,30 @@ type BeforeMethodHook interface {
 	BeforeMethod(w http.ResponseWriter, r *http.Request) (proceed bool, err error)
 }
 
+// PropPatchHook lets a plugin claim PROPPATCH mutations after the node's own
+// handlers ran (sabre's propPatch event at priority 300, where property
+// storage lives).
+type PropPatchHook interface {
+	PropPatch(path string, pp *PropPatch) error
+}
+
+// LatePropFindHook runs after node-supplied dead properties (sabre's
+// priority-130 propFind listeners, i.e. property storage).
+type LatePropFindHook interface {
+	PropFindLate(pf *PropFind, node Node) error
+}
+
+// AfterUnbindHook fires after a node was removed (sabre's afterUnbind).
+type AfterUnbindHook interface {
+	AfterUnbind(path string) error
+}
+
+// AfterMoveHook fires after a MOVE completed (sabre's afterMove; runs before
+// AfterUnbind so listeners can transfer state).
+type AfterMoveHook interface {
+	AfterMove(source, destination string) error
+}
+
 // ReportSetProvider advertises the REPORTs a plugin supports on a node, for
 // {DAV:}supported-report-set. Replaces sabre's getSupportedReportSet.
 type ReportSetProvider interface {

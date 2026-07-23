@@ -307,6 +307,7 @@ func (c *CorePlugin) delete(w http.ResponseWriter, r *http.Request) error {
 	if err := c.server.Tree.Delete(path); err != nil {
 		return err
 	}
+	c.server.fireAfterUnbind(path)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusNoContent)
 	return nil
@@ -556,10 +557,15 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 		if err := c.server.Tree.Delete(info.destination); err != nil {
 			return err
 		}
+		c.server.fireAfterUnbind(info.destination)
 	}
 	if err := c.server.Tree.Move(path, info.destination); err != nil {
 		return err
 	}
+	// afterMove before afterUnbind, so listeners can transfer state
+	// (sabre's ordering note for property storage).
+	c.server.fireAfterMove(path, info.destination)
+	c.server.fireAfterUnbind(path)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(statusForOverwrite(info.destinationExists))
 	return nil

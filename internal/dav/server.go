@@ -315,21 +315,28 @@ func (s *Server) runPropFind(pf *PropFind, node Node) error {
 			}
 		}
 	}
-	// Late phase: node dead properties (sabre's propFindNode).
+	// Late phase: node dead properties (sabre's propFindNode at 120).
 	if props, ok := node.(PropNode); ok {
 		var want []xml.Name
 		if !pf.IsAllProps() {
 			want = pf.Props404()
-			if len(want) == 0 {
-				return nil
+		}
+		if pf.IsAllProps() || len(want) > 0 {
+			values, err := props.Props(want)
+			if err != nil {
+				return err
+			}
+			for n, v := range values {
+				pf.Set(n, v, http.StatusOK)
 			}
 		}
-		values, err := props.Props(want)
-		if err != nil {
-			return err
-		}
-		for n, v := range values {
-			pf.Set(n, v, http.StatusOK)
+	}
+	// Very late phase: property storage (sabre's priority 130).
+	for _, p := range s.plugins {
+		if hook, ok := p.(LatePropFindHook); ok {
+			if err := hook.PropFindLate(pf, node); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -357,8 +364,34 @@ func (s *Server) UpdateProperties(path string, update *davxml.PropertyUpdate) (m
 	if props, ok := node.(PropNode); ok {
 		props.PropPatch(pp)
 	}
+	// Property-storage plugins claim the remainder (sabre priority 300).
+	for _, p := range s.plugins {
+		if hook, ok := p.(PropPatchHook); ok {
+			if err := hook.PropPatch(path, pp); err != nil {
+				return nil, err
+			}
+		}
+	}
 	result, _ := pp.Commit()
 	return result, nil
+}
+
+// fireAfterUnbind notifies plugins that a node was removed.
+func (s *Server) fireAfterUnbind(path string) {
+	for _, p := range s.plugins {
+		if hook, ok := p.(AfterUnbindHook); ok {
+			_ = hook.AfterUnbind(path)
+		}
+	}
+}
+
+// fireAfterMove notifies plugins that a node moved.
+func (s *Server) fireAfterMove(source, destination string) {
+	for _, p := range s.plugins {
+		if hook, ok := p.(AfterMoveHook); ok {
+			_ = hook.AfterMove(source, destination)
+		}
+	}
 }
 
 func isCollectionNode(n Node) bool {

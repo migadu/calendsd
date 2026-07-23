@@ -41,6 +41,9 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	// The sync plugin is part of the standard server (sabre's test harness
 	// adds it in the sync suite; it is inert elsewhere).
 	srv.AddPlugin(&dav.SyncPlugin{})
+	if rec.Setup.SetupPropertyStorage {
+		srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &mock.MemoryPropStorage{}})
+	}
 
 	if rec.Setup.SetupCalDAV {
 		srv.AddPlugin(&caldav.Plugin{})

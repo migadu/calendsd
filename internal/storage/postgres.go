@@ -181,6 +181,75 @@ func (b *CalDAV) CreateCalendar(principalURI, calendarURI string, props map[xml.
 	}, nil
 }
 
+// UpdateCalendar transcribes sabre's updateCalendar: the propertyMap columns
+// plus schedule-calendar-transp update calendarinstances (by instance ID)
+// and bump the synctoken with an empty-uri change record.
+func (b *CalDAV) UpdateCalendar(id caldav.CalendarID, pp *dav.PropPatch) {
+	transp := xml.Name{Space: davxml.NSCalDAV, Local: "schedule-calendar-transp"}
+	supported := []xml.Name{transp}
+	for _, pm := range propertyMap {
+		supported = append(supported, pm.name)
+	}
+
+	pp.Handle(supported, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+		var assignments []string
+		var args []any
+		for name, value := range values {
+			if name == transp {
+				v := 0
+				if raw, ok := value.([]byte); ok && strings.Contains(string(raw), "transparent") {
+					v = 1
+				}
+				args = append(args, v)
+				assignments = append(assignments, fmt.Sprintf("transparent = $%d", len(args)))
+				continue
+			}
+			for _, pm := range propertyMap {
+				if pm.name == name {
+					args = append(args, toNullString(value))
+					assignments = append(assignments, fmt.Sprintf("%s = $%d", pm.column, len(args)))
+				}
+			}
+		}
+		if len(assignments) == 0 {
+			return nil, true
+		}
+
+		tx, err := b.DB.Begin()
+		if err != nil {
+			return nil, false
+		}
+		defer tx.Rollback()
+		args = append(args, id.Instance)
+		if _, err := tx.Exec(fmt.Sprintf(
+			`UPDATE calendarinstances SET %s WHERE id = $%d`,
+			strings.Join(assignments, ", "), len(args)), args...); err != nil {
+			return nil, false
+		}
+		if err := addChange(tx, id.Calendar, "", 2); err != nil {
+			return nil, false
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false
+		}
+		return nil, true
+	})
+}
+
+// toNullString maps removal (nil) to NULL and values to their text form.
+func toNullString(v any) any {
+	switch value := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return value
+	case []byte:
+		return string(value)
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
 func (b *CalDAV) DeleteCalendar(id caldav.CalendarID) error {
 	tx, err := b.DB.Begin()
 	if err != nil {
