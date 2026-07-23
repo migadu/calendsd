@@ -19,8 +19,10 @@ type Backend interface {
 	Challenge(h http.Header)
 }
 
-// Plugin authenticates every request before dispatch. Port of sabre's
-// Auth\Plugin.
+// Plugin authenticates every request before dispatch, recording the
+// principal in the request context (sabre keeps it on the per-request plugin
+// instance; a long-lived Go server must scope it per request). Port of
+// sabre's Auth\Plugin.
 type Plugin struct {
 	backends []Backend
 
@@ -28,7 +30,9 @@ type Plugin struct {
 	// sabre's autoRequireLogin.
 	AutoRequireLogin bool
 
-	currentPrincipal string
+	// fixedPrincipal, when set, authenticates every request as that
+	// principal (the autoLogin mechanism of sabre's test harness).
+	fixedPrincipal string
 }
 
 // NewPlugin creates the auth plugin with the given backends.
@@ -39,26 +43,24 @@ func NewPlugin(backends ...Backend) *Plugin {
 // NewLoggedInPlugin creates a pre-authenticated plugin, mirroring the
 // autoLogin mechanism of sabre's test harness.
 func NewLoggedInPlugin(principal string) *Plugin {
-	return &Plugin{currentPrincipal: principal}
+	return &Plugin{fixedPrincipal: principal}
 }
 
 func (p *Plugin) PluginName() string { return "auth" }
 
 func (p *Plugin) Init(s *dav.Server) {}
 
-// CurrentPrincipal returns the authenticated principal path, or "".
-func (p *Plugin) CurrentPrincipal() string { return p.currentPrincipal }
-
 // BeforeMethod implements dav.BeforeMethodHook.
 func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
-	if p.currentPrincipal != "" {
+	if p.fixedPrincipal != "" {
+		dav.SetPrincipal(r.Context(), p.fixedPrincipal)
 		return true, nil
 	}
 	var reasons []string
 	for _, b := range p.backends {
 		principal, ok, reason := b.Check(r)
 		if ok {
-			p.currentPrincipal = principal
+			dav.SetPrincipal(r.Context(), principal)
 			return true, nil
 		}
 		reasons = append(reasons, reason)

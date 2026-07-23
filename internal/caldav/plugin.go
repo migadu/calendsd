@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -152,7 +153,7 @@ func (p *Plugin) Report(name xml.Name, body []byte, path string, w http.Response
 	case nameCalendarQuery:
 		return true, p.calendarQueryReport(body, path, w, r)
 	case nameMultiget:
-		return true, p.calendarMultigetReport(body, w)
+		return true, p.calendarMultigetReport(body, w, r)
 	}
 	return false, nil
 }
@@ -256,7 +257,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		}
 	}
 
-	return p.writeObjectResponses(w, matches, query.Props, query.Expand, loc)
+	return p.writeObjectResponses(r.Context(), w, matches, query.Props, query.Expand, loc)
 }
 
 func (p *Plugin) objectMatches(obj *CalendarObject, query *CalendarQuery, v *Validator) (bool, error) {
@@ -267,7 +268,7 @@ func (p *Plugin) objectMatches(obj *CalendarObject, query *CalendarQuery, v *Val
 	return v.Validate(cal, query.Filter)
 }
 
-func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter) error {
+func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *http.Request) error {
 	query, err := ParseCalendarMultiget(body)
 	if err != nil {
 		return dav.ErrBadRequest("%s", err)
@@ -281,15 +282,15 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter) erro
 		calendarPath, _ := splitPath(paths[0])
 		loc = p.calendarTimeZone(calendarPath)
 	}
-	return p.writeObjectResponses(w, paths, query.Props, query.Expand, loc)
+	return p.writeObjectResponses(r.Context(), w, paths, query.Props, query.Expand, loc)
 }
 
 // writeObjectResponses builds the multistatus for matched object paths,
 // applying calendar-data expansion when requested.
-func (p *Plugin) writeObjectResponses(w http.ResponseWriter, paths []string, props []xml.Name, expand *TimeRange, loc *time.Location) error {
+func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, expand *TimeRange, loc *time.Location) error {
 	ms := &davxml.MultiStatus{}
 	for _, objPath := range paths {
-		responses, err := p.server.PropertiesForPath(objPath, props, 0)
+		responses, err := p.server.PropertiesForPath(ctx, objPath, props, 0)
 		if err != nil {
 			if dav.AsError(err).Status == http.StatusNotFound {
 				ms.Responses = append(ms.Responses, davxml.Response{

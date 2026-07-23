@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 // unclaimed ones report 404 in the multistatus (except for allprop requests,
 // which omit them).
 type PropFind struct {
+	ctx      context.Context
 	path     string
 	depth    int
 	allProps bool
@@ -43,8 +45,9 @@ var allPropDefaults = []xml.Name{
 
 // NewPropFind creates a PropFind for one node. Empty names means allprop
 // (sabre treats propname the same way).
-func NewPropFind(path string, names []xml.Name, depth int) *PropFind {
+func NewPropFind(ctx context.Context, path string, names []xml.Name, depth int) *PropFind {
 	pf := &PropFind{
+		ctx:      ctx,
 		path:     strings.Trim(path, "/"),
 		depth:    depth,
 		allProps: len(names) == 0,
@@ -65,6 +68,21 @@ func NewPropFind(path string, names []xml.Name, depth int) *PropFind {
 // Path returns the node path this PropFind is for.
 func (pf *PropFind) Path() string { return pf.path }
 
+// Context returns the request context (carries the authenticated principal).
+func (pf *PropFind) Context() context.Context {
+	if pf.ctx == nil {
+		return context.Background()
+	}
+	return pf.ctx
+}
+
+// Requested lists all requested property names in order.
+func (pf *PropFind) Requested() []xml.Name {
+	out := make([]xml.Name, len(pf.order))
+	copy(out, pf.order)
+	return out
+}
+
 // Depth returns the request depth.
 func (pf *PropFind) Depth() int { return pf.depth }
 
@@ -75,7 +93,7 @@ func (pf *PropFind) IsAllProps() bool { return pf.allProps }
 func (pf *PropFind) clone(path string) *PropFind {
 	names := make([]xml.Name, len(pf.order))
 	copy(names, pf.order)
-	c := NewPropFind(path, names, pf.depth)
+	c := NewPropFind(pf.ctx, path, names, pf.depth)
 	c.allProps = pf.allProps
 	return c
 }

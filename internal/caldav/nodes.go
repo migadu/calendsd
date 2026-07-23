@@ -143,6 +143,12 @@ func (h *CalendarHome) CreateCalendar(name string, props map[xml.Name]any) error
 // Owner returns the owning principal.
 func (h *CalendarHome) Owner() string { return h.principalURI }
 
+// ACL grants the owning principal full access, like sabre's ACLTrait
+// default on CalendarHome.
+func (h *CalendarHome) ACL() []acl.ACE {
+	return []acl.ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
+}
+
 // Calendar is one calendar collection. Port of sabre's CalDAV\Calendar.
 type Calendar struct {
 	backend Backend
@@ -246,6 +252,26 @@ func (c *Calendar) Changes(syncToken string, syncLevel, limit int) (*dav.ChangeS
 	return c.backend.ChangesForCalendar(c.Info.ID, syncToken, syncLevel, limit)
 }
 
+// SupportedPrivileges extends the default tree with read-free-busy, like
+// sabre Calendar::getSupportedPrivilegeSet.
+func (c *Calendar) SupportedPrivileges() *acl.Privilege {
+	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
+		{Name: "{DAV:}read", Aggregates: []acl.Privilege{
+			{Name: "{DAV:}read-acl"},
+			{Name: "{DAV:}read-current-user-privilege-set"},
+			{Name: "{urn:ietf:params:xml:ns:caldav}read-free-busy"},
+		}},
+		{Name: "{DAV:}write", Aggregates: []acl.Privilege{
+			{Name: "{DAV:}write-properties"},
+			{Name: "{DAV:}write-content"},
+			{Name: "{DAV:}unlock"},
+			{Name: "{DAV:}bind"},
+			{Name: "{DAV:}unbind"},
+			{Name: "{DAV:}write-acl"},
+		}},
+	}}
+}
+
 // ACL mirrors sabre Calendar::getACL (owner + proxies read/write,
 // authenticated free-busy).
 func (c *Calendar) ACL() []acl.ACE {
@@ -308,3 +334,16 @@ func (o *CalendarObject) Data() []byte { return o.obj.CalendarData }
 
 // Owner returns the owning principal.
 func (o *CalendarObject) Owner() string { return o.calendar.PrincipalURI }
+
+// ACL mirrors sabre Calendar::getChildACL: the calendar's owner (and its
+// proxies) read and write the objects.
+func (o *CalendarObject) ACL() []acl.ACE {
+	owner := o.Owner()
+	return []acl.ACE{
+		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
+		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-write", Protected: true},
+		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-read", Protected: true},
+		{Privilege: "{DAV:}write", Principal: owner, Protected: true},
+		{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true},
+	}
+}

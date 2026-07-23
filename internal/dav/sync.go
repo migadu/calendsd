@@ -2,6 +2,7 @@ package dav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"net/http"
 	"strconv"
@@ -167,15 +168,15 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 	for _, n := range req.Prop.Names {
 		props = append(props, n.XMLName)
 	}
-	return true, p.writeResponse(w, path, changes, props)
+	return true, p.writeResponse(r.Context(), w, path, changes, props)
 }
 
-func (p *SyncPlugin) writeResponse(w http.ResponseWriter, collectionPath string, changes *ChangeSet, props []xml.Name) error {
+func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, collectionPath string, changes *ChangeSet, props []xml.Name) error {
 	ms := &davxml.MultiStatus{SyncToken: SyncTokenPrefix + changes.SyncToken}
 
 	for _, item := range append(append([]string{}, changes.Added...), changes.Modified...) {
 		itemPath := collectionPath + "/" + item
-		responses, err := p.server.PropertiesForPath(itemPath, props, 0)
+		responses, err := p.server.PropertiesForPath(ctx, itemPath, props, 0)
 		if err != nil {
 			if AsError(err).Status == http.StatusNotFound {
 				continue // changed then deleted; skip like sabre's multi-path fetch

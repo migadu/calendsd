@@ -2,6 +2,7 @@ package acl
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"net/http"
 	"strings"
@@ -10,14 +11,8 @@ import (
 	davxml "calserver/internal/dav/xml"
 )
 
-// CurrentPrincipalSource decouples the ACL plugin from the auth plugin: any
-// plugin exposing the authenticated principal works.
-type CurrentPrincipalSource interface {
-	CurrentPrincipal() string
-}
-
 // Plugin implements access control: principal properties, principal reports,
-// and (as the port grows) privilege checks. Port of sabre's DAVACL\Plugin.
+// and privilege enforcement. Port of sabre's DAVACL\Plugin.
 type Plugin struct {
 	server *dav.Server
 
@@ -25,7 +20,7 @@ type Plugin struct {
 	// mirroring sabre's adminPrincipals.
 	AdminPrincipals []string
 	// AllowUnauthenticatedAccess mirrors sabre's flag; when false,
-	// requests without a principal fail once privilege checks land.
+	// requests without a principal fail privilege checks with 401.
 	AllowUnauthenticatedAccess bool
 }
 
@@ -45,22 +40,10 @@ func (p *Plugin) Features() []string {
 	return []string{"access-control", "calendarserver-principal-property-search"}
 }
 
-// currentPrincipal finds the authenticated principal via the auth plugin.
-func (p *Plugin) currentPrincipal() string {
-	for _, plugin := range p.server.Plugins() {
-		if src, ok := plugin.(CurrentPrincipalSource); ok {
-			if principal := src.CurrentPrincipal(); principal != "" {
-				return principal
-			}
-		}
-	}
-	return ""
-}
-
 // CurrentUserPrincipals returns the current principal plus its group
 // membership, mirroring sabre's getCurrentUserPrincipals.
-func (p *Plugin) CurrentUserPrincipals() ([]string, error) {
-	current := p.currentPrincipal()
+func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
+	current := dav.Principal(ctx)
 	if current == "" {
 		return nil, nil
 	}
@@ -92,10 +75,27 @@ func (p *Plugin) ACLForNode(node dav.Node) []ACE {
 	return acl
 }
 
-// PropFind implements dav.PropFindHook: principal properties plus
+// PropFind implements dav.PropFindHook: read-gating, principal properties,
 // current-user-principal.
 func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	davName := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
+
+	// Without {DAV:}read every requested property reports 403, mirroring
+	// sabre's propFind gating (hideNodesFromListings stays off).
+	if held, err := p.CurrentUserPrivileges(pf.Context(), node); err == nil {
+		readable := false
+		for _, priv := range held {
+			if priv == "{DAV:}read" {
+				readable = true
+			}
+		}
+		if !readable {
+			for _, name := range pf.Requested() {
+				pf.Set(name, nil, http.StatusForbidden)
+			}
+			return nil
+		}
+	}
 
 	if ph, isPrincipal := node.(PrincipalHolder); isPrincipal {
 		pf.Handle(davName("alternate-URI-set"), func() any {
@@ -113,7 +113,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	}
 
 	pf.Handle(davName("current-user-principal"), func() any {
-		if current := p.currentPrincipal(); current != "" {
+		if current := dav.Principal(pf.Context()); current != "" {
 			return davxml.Href{p.server.BaseURI + current + "/"}
 		}
 		return davxml.Raw(`<d:unauthenticated/>`)
@@ -174,7 +174,7 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 		return dav.ErrBadRequest("%s", err)
 	}
 
-	currentPrincipals, err := p.CurrentUserPrincipals()
+	currentPrincipals, err := p.CurrentUserPrincipals(r.Context())
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 		}
 	} else if req.PrincipalProperty != nil && len(req.PrincipalProperty.Names) > 0 {
 		propName := req.PrincipalProperty.Names[0].XMLName
-		candidates, err := p.server.PropertiesForPath(path, []xml.Name{propName}, 1)
+		candidates, err := p.server.PropertiesForPath(r.Context(), path, []xml.Name{propName}, 1)
 		if err != nil {
 			return err
 		}
@@ -213,7 +213,7 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 			for _, n := range req.Prop.Names {
 				names = append(names, n.XMLName)
 			}
-			responses, err := p.server.PropertiesForPath(match, names, 0)
+			responses, err := p.server.PropertiesForPath(r.Context(), match, names, 0)
 			if err != nil {
 				return err
 			}
@@ -290,7 +290,7 @@ func (p *Plugin) aclPrincipalPropSetReport(body []byte, path string, w http.Resp
 	}
 	ms := &davxml.MultiStatus{}
 	for _, principal := range principals {
-		responses, err := p.server.PropertiesForPath(principal, names, 0)
+		responses, err := p.server.PropertiesForPath(r.Context(), principal, names, 0)
 		if err != nil {
 			return err
 		}

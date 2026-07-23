@@ -327,7 +327,7 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 	if pf.Type == davxml.PropfindProp {
 		names = pf.Props
 	}
-	responses, err := c.server.PropertiesForPath(path, names, depth)
+	responses, err := c.server.PropertiesForPath(r.Context(), path, names, depth)
 	if err != nil {
 		return err
 	}

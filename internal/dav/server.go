@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -153,6 +154,12 @@ func (s *Server) Path(r *http.Request) (string, error) {
 	return s.stripBase(r.URL.EscapedPath())
 }
 
+// ResolveHref resolves an absolute-or-URL href (e.g. the Destination
+// header) into a server-relative path.
+func (s *Server) ResolveHref(href string) (string, error) {
+	return s.stripBase(href)
+}
+
 // stripBase resolves an absolute-or-URL destination (e.g. the Destination
 // header) into a server-relative path.
 func (s *Server) stripBase(p string) (string, error) {
@@ -176,6 +183,7 @@ func (s *Server) stripBase(p string) (string, error) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(withPrincipalState(r.Context()))
 	// beforeMethod hooks (auth, ACL) run before precondition checks,
 	// matching sabre's event order.
 	for _, p := range s.plugins {
@@ -244,7 +252,7 @@ func xmlEscape(s string) string {
 // PropertiesForPath runs the PROPFIND machinery for a path: depth 0 or 1,
 // one multistatus response element per visited node. Port of sabre's
 // getPropertiesIteratorForPath.
-func (s *Server) PropertiesForPath(path string, names []xml.Name, depth int) ([]davxml.Response, error) {
+func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml.Name, depth int) ([]davxml.Response, error) {
 	if depth != 0 {
 		depth = 1 // propfind depth infinity stays disabled, like sabre's default
 	}
@@ -259,7 +267,7 @@ func (s *Server) PropertiesForPath(path string, names []xml.Name, depth int) ([]
 		pf   *PropFind
 		node Node
 	}
-	pf := NewPropFind(path, names, depth)
+	pf := NewPropFind(ctx, path, names, depth)
 	items := []reqItem{{pf, node}}
 	if depth == 1 {
 		if coll, isColl := node.(Collection); isColl {
