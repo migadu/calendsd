@@ -63,6 +63,15 @@ func (p *SyncPlugin) PropFind(pf *PropFind, node Node) error {
 	return nil
 }
 
+// SupportedReports advertises sync-collection on sync-capable collections
+// with sync info, like sabre's getSupportedReportSet.
+func (p *SyncPlugin) SupportedReports(node Node, path string) []xml.Name {
+	if sc, ok := node.(SyncCollection); ok && sc.SyncToken() != "" {
+		return []xml.Name{{Space: davxml.NSDav, Local: "sync-collection"}}
+	}
+	return nil
+}
+
 // ValidateTokens implements the If-header token validation for sync tokens,
 // mirroring sabre's validateTokens listener.
 func (p *SyncPlugin) ValidateTokens(conditions []IfCondition) {

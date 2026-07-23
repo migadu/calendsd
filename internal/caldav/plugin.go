@@ -147,6 +147,15 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	return nil
 }
 
+// SupportedReports advertises the calendar reports on object containers.
+func (p *Plugin) SupportedReports(node dav.Node, path string) []xml.Name {
+	switch node.(type) {
+	case *Calendar, *CalendarObject:
+		return []xml.Name{nameMultiget, nameCalendarQuery}
+	}
+	return nil
+}
+
 // Report implements dav.ReportHandler.
 func (p *Plugin) Report(name xml.Name, body []byte, path string, w http.ResponseWriter, r *http.Request) (bool, error) {
 	switch name {

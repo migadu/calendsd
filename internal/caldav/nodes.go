@@ -325,9 +325,16 @@ func (o *CalendarObject) Put(data io.Reader) (string, error) {
 	return etag, nil
 }
 
-func (o *CalendarObject) ContentType() string { return "text/calendar; charset=utf-8" }
-func (o *CalendarObject) Size() int64         { return int64(len(o.obj.CalendarData)) }
-func (o *CalendarObject) ETag() string        { return o.obj.QuotedETag() }
+// ContentType includes the component hint, like sabre's CalendarObject.
+func (o *CalendarObject) ContentType() string {
+	ct := "text/calendar; charset=utf-8"
+	if o.obj.Component != "" {
+		ct += "; component=" + strings.ToLower(o.obj.Component)
+	}
+	return ct
+}
+func (o *CalendarObject) Size() int64  { return int64(len(o.obj.CalendarData)) }
+func (o *CalendarObject) ETag() string { return o.obj.QuotedETag() }
 
 // Data exposes the raw iCalendar payload.
 func (o *CalendarObject) Data() []byte { return o.obj.CalendarData }

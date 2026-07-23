@@ -21,7 +21,7 @@ func main() {
 	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
 	flag.Parse()
 
-	var srv *dav.Server
+	var srv http.Handler
 	if *dsn != "" {
 		db, err := storage.Open(*dsn)
 		if err != nil {

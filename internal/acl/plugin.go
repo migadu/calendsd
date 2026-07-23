@@ -124,7 +124,28 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		}
 		return nil
 	})
+	pf.Handle(davName("current-user-privilege-set"), func() any {
+		held, err := p.CurrentUserPrivileges(pf.Context(), node)
+		if err != nil {
+			return nil
+		}
+		set := davxml.PrivilegeSet{}
+		for _, priv := range held {
+			if name, err := davxml.ParseClark(priv); err == nil {
+				set = append(set, name)
+			}
+		}
+		return set
+	})
 	return nil
+}
+
+// SupportedReports advertises the implemented principal reports.
+func (p *Plugin) SupportedReports(node dav.Node, path string) []xml.Name {
+	return []xml.Name{
+		{Space: davxml.NSDav, Local: "principal-match"},
+		{Space: davxml.NSDav, Local: "acl-principal-prop-set"},
+	}
 }
 
 func (p *Plugin) principalHrefs(fn func() ([]string, error)) any {

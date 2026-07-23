@@ -50,6 +50,12 @@ type BeforeMethodHook interface {
 	BeforeMethod(w http.ResponseWriter, r *http.Request) (proceed bool, err error)
 }
 
+// ReportSetProvider advertises the REPORTs a plugin supports on a node, for
+// {DAV:}supported-report-set. Replaces sabre's getSupportedReportSet.
+type ReportSetProvider interface {
+	SupportedReports(node Node, path string) []xml.Name
+}
+
 // ReportHandler lets a plugin implement REPORT methods. Replaces sabre's
 // report event.
 type ReportHandler interface {

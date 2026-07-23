@@ -27,10 +27,20 @@ type NameSet []xml.Name
 // principal-URL or current-user-principal values.
 type Href []string
 
-func (Text) isValue()    {}
-func (Raw) isValue()     {}
-func (NameSet) isValue() {}
-func (Href) isValue()    {}
+// ReportSet renders as {DAV:}supported-report-set content: one
+// supported-report/report wrapper per report name (RFC 3253 §3.1.5).
+type ReportSet []xml.Name
+
+// PrivilegeSet renders as {DAV:}current-user-privilege-set content: one
+// {DAV:}privilege wrapper per privilege name (RFC 3744 §5.4).
+type PrivilegeSet []xml.Name
+
+func (Text) isValue()         {}
+func (Raw) isValue()          {}
+func (NameSet) isValue()      {}
+func (Href) isValue()         {}
+func (ReportSet) isValue()    {}
+func (PrivilegeSet) isValue() {}
 
 // Property is a single property inside a propstat: a qualified name plus its
 // content. A nil Value renders as an empty element.
@@ -92,8 +102,17 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 		for _, ps := range r.Propstats {
 			for _, p := range ps.Props {
 				collect(p.Name)
-				if names, ok := p.Value.(NameSet); ok {
-					for _, n := range names {
+				switch v := p.Value.(type) {
+				case NameSet:
+					for _, n := range v {
+						collect(n)
+					}
+				case ReportSet:
+					for _, n := range v {
+						collect(n)
+					}
+				case PrivilegeSet:
+					for _, n := range v {
 						collect(n)
 					}
 				}
@@ -184,6 +203,18 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 		fmt.Fprintf(b, "    <%s>", tag)
 		for _, href := range v {
 			fmt.Fprintf(b, "<d:href>%s</d:href>", escapeText(href))
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
+	case ReportSet:
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, n := range v {
+			fmt.Fprintf(b, "<d:supported-report><d:report><%s/></d:report></d:supported-report>", qualify(n, prefix))
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
+	case PrivilegeSet:
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, n := range v {
+			fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(n, prefix))
 		}
 		fmt.Fprintf(b, "</%s>\n", tag)
 	default:

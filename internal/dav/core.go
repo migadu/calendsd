@@ -706,6 +706,15 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 	pf.Handle(dav("resourcetype"), func() any {
 		return davxml.NameSet(s.ResourceTypesForNode(node))
 	})
+	pf.Handle(dav("supported-report-set"), func() any {
+		reports := davxml.ReportSet{}
+		for _, plugin := range s.Plugins() {
+			if provider, ok := plugin.(ReportSetProvider); ok {
+				reports = append(reports, provider.SupportedReports(node, pf.Path())...)
+			}
+		}
+		return reports
+	})
 	pf.Handle(dav("supported-method-set"), func() any {
 		// Rendered as sabre emits it: <d:supported-method name="..."/>
 		// children (the d: prefix is always declared on the multistatus

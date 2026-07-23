@@ -43,6 +43,9 @@ type ObjectInfo struct {
 	// ETag, if empty, is derived from CalendarData (md5, quoted).
 	ETag string
 	Size int64
+	// Component is the object's component type (VEVENT/VTODO), used for
+	// the content-type hint clients like DAVx5 read.
+	Component string
 }
 
 // QuotedETag returns the object's ETag surrounded by quotes.

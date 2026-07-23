@@ -250,6 +250,7 @@ func scanObject(rows *sql.Rows, id caldav.CalendarID) (*caldav.ObjectInfo, error
 		CalendarData: data,
 		ETag:         `"` + etag.String + `"`,
 		Size:         size.Int64,
+		Component:    componenttype.String,
 	}, nil
 }
 

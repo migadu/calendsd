@@ -6,6 +6,7 @@ package server
 
 import (
 	"database/sql"
+	"net/http"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -22,8 +23,22 @@ type Config struct {
 	Realm string
 }
 
-// New builds the storage-backed server.
-func New(db *sql.DB, cfg Config) *dav.Server {
+// New builds the storage-backed server, wrapped with the /.well-known/caldav
+// redirect real clients use for discovery (RFC 6764).
+func New(db *sql.DB, cfg Config) http.Handler {
+	srv := newDAVServer(db, cfg)
+	return WrapWellKnown(srv, srv.BaseURI)
+}
+
+// WrapWellKnown adds the /.well-known/caldav → base-URI redirect.
+func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/.well-known/caldav", http.RedirectHandler(baseURI, http.StatusMovedPermanently))
+	mux.Handle("/", h)
+	return mux
+}
+
+func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	if cfg.Realm == "" {
 		cfg.Realm = "SabreDAV"
 	}
