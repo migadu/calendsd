@@ -62,6 +62,7 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	))
 	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 	srv.AddPlugin(&caldav.Plugin{})
+	srv.AddPlugin(&caldav.SchedulePlugin{})
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})
 	return srv

@@ -48,6 +48,9 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	if rec.Setup.SetupCalDAV {
 		srv.AddPlugin(&caldav.Plugin{})
 	}
+	if rec.Setup.SetupCalDAVScheduling {
+		srv.AddPlugin(&caldav.SchedulePlugin{})
+	}
 	if rec.Setup.AutoLogin != "" {
 		srv.AddPlugin(auth.NewLoggedInPlugin("principals/" + rec.Setup.AutoLogin))
 	}
@@ -68,7 +71,18 @@ type seedBackends struct {
 // seedCalDAV parses the caldavCalendars/caldavCalendarObjects fixtures into
 // a mock calendar backend.
 func seedCalDAV(rec *Record) (caldav.Backend, error) {
-	backend := &caldav.MockBackend{Objects: map[caldav.CalendarID]map[string]*caldav.ObjectInfo{}}
+	var backend *caldav.MockBackend
+	var result caldav.Backend
+	if rec.Setup.SetupCalDAVScheduling {
+		sched := &caldav.MockSchedulingBackend{}
+		backend = &sched.MockBackend
+		result = sched
+	} else {
+		plain := &caldav.MockBackend{}
+		backend = plain
+		result = plain
+	}
+	backend.Objects = map[caldav.CalendarID]map[string]*caldav.ObjectInfo{}
 
 	if len(rec.Setup.Calendars) > 0 {
 		var entries []map[string]any
@@ -103,7 +117,7 @@ func seedCalDAV(rec *Record) (caldav.Backend, error) {
 		}
 	}
 
-	if len(rec.Setup.CalendarObjects) > 0 {
+	if len(rec.Setup.CalendarObjects) > 0 && string(rec.Setup.CalendarObjects) != "[]" {
 		var perCalendar map[string]map[string]struct {
 			CalendarData string `json:"calendardata"`
 		}
@@ -122,7 +136,7 @@ func seedCalDAV(rec *Record) (caldav.Backend, error) {
 			}
 		}
 	}
-	return backend, nil
+	return result, nil
 }
 
 // jsonID renders numeric or string fixture IDs uniformly.

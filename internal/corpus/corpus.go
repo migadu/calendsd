@@ -155,6 +155,6 @@ func Load(dir string) ([]Record, error) {
 // indefinitely rather than counting against coverage.
 func (r *Record) UsesUnsupportedFeatures() bool {
 	s := r.Setup
-	return s.SetupCardDAV || s.SetupCalDAVSharing || s.SetupCalDAVScheduling ||
+	return s.SetupCardDAV || s.SetupCalDAVSharing ||
 		s.SetupCalDAVSubscriptions || s.SetupLocks
 }

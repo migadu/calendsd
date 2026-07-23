@@ -50,6 +50,19 @@ type BeforeMethodHook interface {
 	BeforeMethod(w http.ResponseWriter, r *http.Request) (proceed bool, err error)
 }
 
+// WriteInterceptor inspects (and may rewrite) a file body before PUT writes
+// it. Replaces sabre's beforeWriteContent/beforeCreateFile events — the
+// scheduling broker lives here.
+type WriteInterceptor interface {
+	InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error)
+}
+
+// BeforeUnbindHook fires before a DELETE removes a node (sabre's
+// beforeUnbind; scheduling sends CANCELs from it).
+type BeforeUnbindHook interface {
+	BeforeUnbind(r *http.Request, path string) error
+}
+
 // GetHandlerHook lets a plugin take over serving a resolved GET target
 // (e.g. content-type transforms). Replaces sabre's afterMethod:GET usage.
 type GetHandlerHook interface {

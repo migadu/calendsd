@@ -61,7 +61,12 @@ func TestParity(t *testing.T) {
 	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-c",
 		`INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
 		 INSERT INTO calendarinstances (calendarid, principaluri, access, displayname, uri)
-		 VALUES (currval('calendars_id_seq'), 'principals/admin', 1, 'parity calendar', 'default')`)
+		 VALUES (currval('calendars_id_seq'), 'principals/admin', 1, 'parity calendar', 'default');
+		 INSERT INTO principals (uri, email, displayname) VALUES ('principals/user2', 'user2@example.org', 'User Two');
+		 INSERT INTO users (username, digesta1) VALUES ('user2', 'unused');
+		 INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
+		 INSERT INTO calendarinstances (calendarid, principaluri, access, displayname, uri)
+		 VALUES (currval('calendars_id_seq'), 'principals/user2', 1, 'user2 calendar', 'default')`)
 
 	// The reference sabre instance.
 	sabre := exec.Command("php", "-S", sabreAddr, "scripts/sabre-server.php")
@@ -234,6 +239,55 @@ func TestParity(t *testing.T) {
 		_, body, _ = goClient.do(t, "PROPFIND", "/calendars/admin/default/", find, "Depth", "0", "Content-Type", "application/xml")
 		if !strings.Contains(body, "from-sabre") {
 			t.Errorf("Go does not see the sabre-written dead property:\n%s", body)
+		}
+	})
+
+	t.Run("SchedulingParity", func(t *testing.T) {
+		// An invite written through the Go server must be delivered so
+		// sabre sees both the attendee's calendar copy and the inbox item.
+		invite := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//parity//test//EN\r\nBEGIN:VEVENT\r\nUID:parity-invite-1\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20260801T100000Z\r\nDTEND:20260801T110000Z\r\nSUMMARY:Planning\r\nORGANIZER;CN=Admin:mailto:admin@example.org\r\nATTENDEE;CN=User Two;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:user2@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+		status, body, _ := goClient.do(t, "PUT", "/calendars/admin/default/invite1.ics", invite, "Content-Type", "text/calendar")
+		if status != 201 {
+			t.Fatalf("Go PUT invite = %d: %s", status, body)
+		}
+
+		// The organizer's stored copy carries the delivery status.
+		status, body, _ = sabreClient.do(t, "GET", "/calendars/admin/default/invite1.ics", "")
+		if status != 200 || !strings.Contains(body, "SCHEDULE-STATUS=1.2") {
+			t.Errorf("sabre-read organizer copy lacks SCHEDULE-STATUS=1.2 (%d):\n%s", status, body)
+		}
+
+		// The attendee copy is visible to sabre.
+		var attendeeCopies int
+		if err := db.QueryRow(`
+			SELECT count(*) FROM calendarobjects o
+			  JOIN calendarinstances i ON i.calendarid = o.calendarid
+			 WHERE i.principaluri = 'principals/user2' AND o.uid = 'parity-invite-1'`).Scan(&attendeeCopies); err != nil {
+			t.Fatal(err)
+		}
+		if attendeeCopies != 1 {
+			t.Errorf("attendee calendar copies = %d, want 1", attendeeCopies)
+		}
+		var inboxItems int
+		if err := db.QueryRow(
+			`SELECT count(*) FROM schedulingobjects WHERE principaluri = 'principals/user2'`).Scan(&inboxItems); err != nil {
+			t.Fatal(err)
+		}
+		if inboxItems != 1 {
+			t.Errorf("inbox items = %d, want 1", inboxItems)
+		}
+
+		// Reverse: a sabre-written invite is delivered where the Go server
+		// reads it.
+		invite2 := strings.ReplaceAll(strings.ReplaceAll(invite, "parity-invite-1", "parity-invite-2"), "20260801", "20260802")
+		status, body, _ = sabreClient.do(t, "PUT", "/calendars/admin/default/invite2.ics", invite2, "Content-Type", "text/calendar")
+		if status != 201 {
+			t.Fatalf("sabre PUT invite = %d: %s", status, body)
+		}
+		query := `<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="20260802T000000Z" end="20260803T000000Z"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`
+		status, body, _ = goClient.do(t, "REPORT", "/calendars/user2/default/", query, "Depth", "1", "Content-Type", "application/xml")
+		if status != 207 || !strings.Contains(body, "parity-invite-2") {
+			t.Errorf("Go calendar-query on the attendee calendar missed the sabre-delivered invite (%d):\n%s", status, body)
 		}
 	})
 

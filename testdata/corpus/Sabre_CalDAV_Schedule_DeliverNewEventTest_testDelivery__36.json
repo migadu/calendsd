@@ -15,7 +15,7 @@
         "autoLogin": "user1",
         "caldavCalendars": [
             {
-                "id": "df7d7067-ad05-4d24-a5dd-37b8d2e39534",
+                "id": "4f3dee9e-3e43-4e04-a5b4-859bef78218d",
                 "principaluri": "principals/user1",
                 "uri": "default",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -27,7 +27,7 @@
                 }
             },
             {
-                "id": "b3dad4f9-e832-44da-9b03-cd031eb9a2c8",
+                "id": "9a4cac3d-d4ae-4ea0-9ede-7b7f4a470497",
                 "principaluri": "principals/user2",
                 "uri": "default",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -39,22 +39,7 @@
                 }
             }
         ],
-        "caldavCalendarObjects": {
-            "b3dad4f9-e832-44da-9b03-cd031eb9a2c8": {
-                "sabredav-2c86872c-41c5-4a12-8d52-6d6831dafd61.ics": {
-                    "calendardata": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Sabre//Sabre VObject 4.6.1//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\nCREATED:20140109T204404Z\r\nUID:AADC6438-18CF-4B52-8DD2-EF9AD75ADE83\r\nDTEND;TZID=America/Toronto:20140107T110000\r\nTRANSP:OPAQUE\r\nATTENDEE;CN=Administrator;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:user1.\r\n sabredav@sabredav.org\r\nATTENDEE;CN=Roxy Kesh;CUTYPE=INDIVIDUAL;EMAIL=user2.sabredav@sabrdav.org;PA\r\n RTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:user2.sabredav@s\r\n abredav.org\r\nSUMMARY:Just testing!\r\nDTSTART;TZID=America/Toronto:20140107T100000\r\nORGANIZER;CN=Administrator:mailto:user1.sabredav@sabredav.org\r\nSEQUENCE:4\r\nDTSTAMP:20260723T202842Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-                    "calendarid": "b3dad4f9-e832-44da-9b03-cd031eb9a2c8",
-                    "uri": "sabredav-2c86872c-41c5-4a12-8d52-6d6831dafd61.ics"
-                }
-            },
-            "df7d7067-ad05-4d24-a5dd-37b8d2e39534": {
-                "foo.ics": {
-                    "calendardata": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Apple Inc.//Mac OS X 10.9.1//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\nCREATED:20140109T204404Z\r\nUID:AADC6438-18CF-4B52-8DD2-EF9AD75ADE83\r\nDTEND;TZID=America/Toronto:20140107T110000\r\nTRANSP:OPAQUE\r\nATTENDEE;CN=Administrator;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED:mailto:user1.\r\n sabredav@sabredav.org\r\nATTENDEE;CN=Roxy Kesh;CUTYPE=INDIVIDUAL;EMAIL=user2.sabredav@sabrdav.org;PA\r\n RTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE;SCHEDULE-STATUS=1.2:mai\r\n lto:user2.sabredav@sabredav.org\r\nSUMMARY:Just testing!\r\nDTSTART;TZID=America/Toronto:20140107T100000\r\nDTSTAMP:20140109T204422Z\r\nORGANIZER;CN=Administrator:mailto:user1.sabredav@sabredav.org\r\nSEQUENCE:4\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-                    "calendarid": "df7d7067-ad05-4d24-a5dd-37b8d2e39534",
-                    "uri": "foo.ics"
-                }
-            }
-        },
+        "caldavCalendarObjects": [],
         "principals": [
             {
                 "uri": "principals/user1",

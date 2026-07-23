@@ -37,9 +37,9 @@
                 "application/xml; charset=utf-8"
             ],
             "Lock-Token": [
-                "<opaquelocktoken:27cfdfc5-9a7e-4306-9288-750a1e9e919a>"
+                "<opaquelocktoken:a75e4206-75f7-4c93-9368-c523ac12dfa6>"
             ]
         },
-        "body": "<?xml version=\"1.0\"?>\n<d:prop xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n <d:lockdiscovery>\n  <d:activelock>\n   <d:lockscope>\n    <d:exclusive/>\n   </d:lockscope>\n   <d:locktype>\n    <d:write/>\n   </d:locktype>\n   <d:lockroot>\n    <d:href>/file.txt</d:href>\n   </d:lockroot>\n   <d:depth>infinity</d:depth>\n   <d:timeout>Second-1800</d:timeout>\n   <d:locktoken>\n    <d:href>opaquelocktoken:27cfdfc5-9a7e-4306-9288-750a1e9e919a</d:href>\n   </d:locktoken>\n  </d:activelock>\n </d:lockdiscovery>\n</d:prop>\n"
+        "body": "<?xml version=\"1.0\"?>\n<d:prop xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n <d:lockdiscovery>\n  <d:activelock>\n   <d:lockscope>\n    <d:exclusive/>\n   </d:lockscope>\n   <d:locktype>\n    <d:write/>\n   </d:locktype>\n   <d:lockroot>\n    <d:href>/file.txt</d:href>\n   </d:lockroot>\n   <d:depth>infinity</d:depth>\n   <d:timeout>Second-1800</d:timeout>\n   <d:locktoken>\n    <d:href>opaquelocktoken:a75e4206-75f7-4c93-9368-c523ac12dfa6</d:href>\n   </d:locktoken>\n  </d:activelock>\n </d:lockdiscovery>\n</d:prop>\n"
     }
 }

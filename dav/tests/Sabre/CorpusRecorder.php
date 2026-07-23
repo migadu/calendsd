@@ -42,6 +42,34 @@ class CorpusRecorder
             'headers' => $request->getHeaders(),
             'body' => $body,
             'tree' => self::serializeTree($test),
+            // Backend state must be captured pre-exec: the request itself
+            // may mutate it (e.g. scheduling delivery on PUT).
+            'caldavState' => self::caldavBackendState($test),
+        ];
+    }
+
+    /**
+     * Serializes the caldav mock backend's live state (calendars created in
+     * test setup supersede the constructor fixtures).
+     */
+    private static function caldavBackendState(AbstractDAVServerTestCase $test): ?array
+    {
+        $ref = new \ReflectionClass(AbstractDAVServerTestCase::class);
+        $p = $ref->getProperty('caldavBackend');
+        $p->setAccessible(true);
+        $backend = $p->getValue($test);
+        if (!$backend instanceof CalDAV\Backend\Mock) {
+            return null;
+        }
+        $bref = new \ReflectionClass(CalDAV\Backend\Mock::class);
+        $cp = $bref->getProperty('calendars');
+        $cp->setAccessible(true);
+        $dp = $bref->getProperty('calendarData');
+        $dp->setAccessible(true);
+
+        return [
+            'calendars' => self::jsonable(array_values($cp->getValue($backend))),
+            'objects' => self::jsonable($dp->getValue($backend)),
         ];
     }
 
@@ -157,10 +185,19 @@ class CorpusRecorder
             mkdir($dir, 0777, true);
         }
 
+        $setup = self::setupState($test);
+        // The pre-exec backend snapshot from snapshotRequest wins over the
+        // post-exec state.
+        if (isset($requestData['caldavState'])) {
+            $setup['caldavCalendars'] = $requestData['caldavState']['calendars'];
+            $setup['caldavCalendarObjects'] = $requestData['caldavState']['objects'];
+        }
+        unset($requestData['caldavState']);
+
         $record = [
             'test' => get_class($test).'::'.$test->getName(false),
             'seq' => ++self::$seq,
-            'setup' => self::setupState($test),
+            'setup' => $setup,
             'request' => $requestData,
             'response' => [
                 'status' => $response->getStatus(),

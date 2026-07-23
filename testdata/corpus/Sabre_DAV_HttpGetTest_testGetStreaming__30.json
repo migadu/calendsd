@@ -29,7 +29,7 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "foo",
-                    "lastModified": 1784838523
+                    "lastModified": 1784841858
                 },
                 {
                     "type": "collection",
@@ -52,7 +52,7 @@
                 "4.7.1"
             ],
             "Last-Modified": [
-                "Thu, 23 Jul 2026 20:28:43 GMT"
+                "Thu, 23 Jul 2026 21:24:18 GMT"
             ],
             "Content-Type": [
                 "application/octet-stream"

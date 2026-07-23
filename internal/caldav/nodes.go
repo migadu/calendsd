@@ -102,10 +102,23 @@ func (h *CalendarHome) Children() ([]dav.Node, error) {
 	for _, info := range infos {
 		out = append(out, NewCalendar(h.backend, info))
 	}
+	// Scheduling-capable backends expose the inbox and outbox, like
+	// sabre's CalendarHome.
+	if sb, ok := h.backend.(SchedulingBackend); ok {
+		out = append(out, NewInbox(sb, h.principalURI), NewOutbox(h.principalURI))
+	}
 	return out, nil
 }
 
 func (h *CalendarHome) Child(name string) (dav.Node, error) {
+	if sb, ok := h.backend.(SchedulingBackend); ok {
+		switch name {
+		case "inbox":
+			return NewInbox(sb, h.principalURI), nil
+		case "outbox":
+			return NewOutbox(h.principalURI), nil
+		}
+	}
 	infos, err := h.backend.CalendarsForUser(h.principalURI)
 	if err != nil {
 		return nil, err

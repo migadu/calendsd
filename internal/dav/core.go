@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -322,6 +323,13 @@ func (c *CorePlugin) delete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	for _, p := range c.server.Plugins() {
+		if hook, ok := p.(BeforeUnbindHook); ok {
+			if err := hook.BeforeUnbind(r, path); err != nil {
+				return err
+			}
+		}
+	}
 	if err := c.server.Tree.Delete(path); err != nil {
 		return err
 	}
@@ -446,7 +454,24 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		body = io.MultiReader(strings.NewReader(string(first[:n])), r.Body)
 	}
 
-	if c.server.Tree.NodeExists(path) {
+	isNew := !c.server.Tree.NodeExists(path)
+
+	// Write interceptors (the scheduling broker) may rewrite the payload.
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	for _, p := range c.server.Plugins() {
+		if hook, ok := p.(WriteInterceptor); ok {
+			raw, err = hook.InterceptWrite(r, path, raw, isNew)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	body = bytes.NewReader(raw)
+
+	if !isNew {
 		node, err := c.server.Tree.NodeForPath(path)
 		if err != nil {
 			return err

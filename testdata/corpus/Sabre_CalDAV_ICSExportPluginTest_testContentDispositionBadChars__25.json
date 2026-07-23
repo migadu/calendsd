@@ -15,7 +15,7 @@
         "autoLogin": null,
         "caldavCalendars": [
             {
-                "id": "e804b7ff-cc3a-4b84-aab9-c4543aceb91a",
+                "id": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
                 "principaluri": "principals/admin",
                 "uri": "UUID-123467",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -29,7 +29,7 @@
                 "{http://apple.com/ns/ical/}calendar-color": "#AA0000FF"
             },
             {
-                "id": "234563c8-6699-434a-82ac-41bb14fd05c4",
+                "id": "cd40365e-732e-476a-975f-89643f565ee6",
                 "principaluri": "principals/admin",
                 "uri": "UUID-b_ad\"(ch)ars",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -44,15 +44,15 @@
             }
         ],
         "caldavCalendarObjects": {
-            "e804b7ff-cc3a-4b84-aab9-c4543aceb91a": {
+            "5de86ddd-2f2d-488a-89a3-3b008eb0590a": {
                 "event-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Europe/Amsterdam\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:event-1\nDTSTART;TZID=Europe/Amsterdam:20151020T000000\nEND:VEVENT\nEND:VCALENDAR",
-                    "calendarid": "e804b7ff-cc3a-4b84-aab9-c4543aceb91a",
+                    "calendarid": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
                     "uri": "event-1"
                 },
                 "todo-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTODO\nUID:todo-1\nEND:VTODO\nEND:VCALENDAR",
-                    "calendarid": "e804b7ff-cc3a-4b84-aab9-c4543aceb91a",
+                    "calendarid": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
                     "uri": "todo-1"
                 }
             }
