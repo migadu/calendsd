@@ -34,7 +34,9 @@ func main() {
 		}
 		srv = server.New(db, server.Config{BaseURI: *baseURI, Realm: *realm})
 	} else {
-		srv = dav.NewServer(*baseURI, mock.NewCollection("root"))
+		// Dead-property capable in-memory root, so WebDAV suites
+		// (litmus props class) can exercise PROPPATCH.
+		srv = dav.NewServer(*baseURI, mock.NewPropCollection("root", nil))
 	}
 
 	slog.Info("listening", "addr", *addr, "base_uri", *baseURI, "db", *dsn != "")

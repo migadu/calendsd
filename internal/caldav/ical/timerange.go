@@ -87,6 +87,84 @@ func masterDurationIn(comp *goical.Component, dtstartProp *goical.Prop, dtstart 
 	return end.Sub(dtstart), nil
 }
 
+// TodoInTimeRange ports vobject VTodo::isInTimeRange: DTSTART/DURATION/DUE
+// combinations, falling back to COMPLETED/CREATED, and matching everything
+// for a bare VTODO.
+func TodoInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
+	get := func(name string) (time.Time, bool, error) {
+		prop := comp.Props.Get(name)
+		if prop == nil {
+			return time.Time{}, false, nil
+		}
+		t, err := prop.DateTime(loc)
+		return t, err == nil, err
+	}
+	dtstart, hasStart, err := get(goical.PropDateTimeStart)
+	if err != nil {
+		return false, err
+	}
+	due, hasDue, err := get("DUE")
+	if err != nil {
+		return false, err
+	}
+	completed, hasCompleted, err := get("COMPLETED")
+	if err != nil {
+		return false, err
+	}
+	created, hasCreated, err := get("CREATED")
+	if err != nil {
+		return false, err
+	}
+
+	if hasStart {
+		if durProp := comp.Props.Get(goical.PropDuration); durProp != nil {
+			dur, err := durProp.Duration()
+			if err != nil {
+				return false, err
+			}
+			effectiveEnd := dtstart.Add(dur)
+			return !start.After(effectiveEnd) && end.After(dtstart), nil
+		}
+		if hasDue {
+			return (start.Before(due) || !start.After(dtstart)) &&
+				(end.After(dtstart) || !end.Before(due)), nil
+		}
+		return !start.After(dtstart) && end.After(dtstart), nil
+	}
+	if hasDue {
+		return start.Before(due) && !end.Before(due), nil
+	}
+	if hasCompleted && hasCreated {
+		return (!start.After(created) || !start.After(completed)) &&
+			(!end.Before(created) || !end.Before(completed)), nil
+	}
+	if hasCompleted {
+		return !start.After(completed) && !end.Before(completed), nil
+	}
+	if hasCreated {
+		return end.After(created), nil
+	}
+	return true, nil
+}
+
+// JournalInTimeRange ports vobject VJournal::isInTimeRange: DTSTART-based
+// (all-day entries span one day); journals without DTSTART never match.
+func JournalInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
+	prop := comp.Props.Get(goical.PropDateTimeStart)
+	if prop == nil {
+		return false, nil
+	}
+	dtstart, err := prop.DateTime(loc)
+	if err != nil {
+		return false, err
+	}
+	effectiveEnd := dtstart
+	if prop.ValueType() == goical.ValueDate {
+		effectiveEnd = dtstart.AddDate(0, 0, 1)
+	}
+	return !start.After(effectiveEnd) && end.After(dtstart), nil
+}
+
 // EffectiveTriggerTime resolves a VALARM's trigger, relative to its parent
 // event. Port of vobject VAlarm::getEffectiveTriggerTime (VEVENT parents;
 // VTODO alarms come with the todo port).

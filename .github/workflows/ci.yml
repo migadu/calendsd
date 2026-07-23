@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: Unit tests + corpus
+        run: nix develop -c sh -c 'go vet ./... && go test ./...'
+
+      - name: Live parity test (Go + sabre on one Postgres)
+        run: |
+          nix develop -c sh -c '
+            set -e
+            scripts/dev-db.sh start
+            (cd dav && composer install --no-interaction --no-progress)
+            PARITY=1 go test ./internal/storage/ -run TestParity -v
+          '
+
+      # litmus is packaged for Linux only; results are informational until
+      # the WebDAV class coverage is reviewed and pinned.
+      - name: litmus WebDAV suite (informational)
+        continue-on-error: true
+        run: |
+          nix develop -c sh -c '
+            set -e
+            go run ./cmd/calserver -addr :8085 &
+            SERVER=$!
+            sleep 1
+            litmus http://127.0.0.1:8085/ | tee litmus.log || true
+            kill $SERVER
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: litmus-results
+          path: litmus.log
+          if-no-files-found: ignore

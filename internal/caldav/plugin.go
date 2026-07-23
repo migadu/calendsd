@@ -20,6 +20,7 @@ var (
 	nameCalendar      = xml.Name{Space: davxml.NSCalDAV, Local: "calendar"}
 	nameCalendarQuery = xml.Name{Space: davxml.NSCalDAV, Local: "calendar-query"}
 	nameMultiget      = xml.Name{Space: davxml.NSCalDAV, Local: "calendar-multiget"}
+	nameFreeBusy      = xml.Name{Space: davxml.NSCalDAV, Local: "free-busy-query"}
 )
 
 // Plugin implements the CalDAV protocol layer. Port of sabre's
@@ -150,7 +151,9 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 // SupportedReports advertises the calendar reports on object containers.
 func (p *Plugin) SupportedReports(node dav.Node, path string) []xml.Name {
 	switch node.(type) {
-	case *Calendar, *CalendarObject:
+	case *Calendar:
+		return []xml.Name{nameMultiget, nameCalendarQuery, nameFreeBusy}
+	case *CalendarObject:
 		return []xml.Name{nameMultiget, nameCalendarQuery}
 	}
 	return nil
@@ -163,8 +166,73 @@ func (p *Plugin) Report(name xml.Name, body []byte, path string, w http.Response
 		return true, p.calendarQueryReport(body, path, w, r)
 	case nameMultiget:
 		return true, p.calendarMultigetReport(body, w, r)
+	case nameFreeBusy:
+		return true, p.freeBusyQueryReport(body, path, w, r)
 	}
 	return false, nil
+}
+
+type freeBusyQueryXML struct {
+	XMLName   xml.Name      `xml:"urn:ietf:params:xml:ns:caldav free-busy-query"`
+	TimeRange *timeRangeXML `xml:"time-range"`
+}
+
+// PrivilegeChecker is the ACL enforcement surface the free-busy report needs
+// (implemented by the acl plugin).
+type PrivilegeChecker interface {
+	CheckPrivileges(ctx context.Context, path string, privileges ...string) error
+}
+
+// freeBusyQueryReport implements the free-busy-query REPORT (RFC 4791
+// §7.10), answering 200 with a text/calendar VFREEBUSY body like sabre.
+func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
+	var req freeBusyQueryXML
+	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		return dav.ErrBadRequest("%s", err)
+	}
+	if req.TimeRange == nil {
+		return dav.ErrBadRequest("The free-busy-query REPORT requires a time-range element")
+	}
+	tr := convertTimeRange(req.TimeRange)
+	start, end := tr.bounds()
+
+	// Free-busy is gated by its own privilege ({DAV:}authenticated holds
+	// it via the calendar ACL).
+	for _, plugin := range p.server.Plugins() {
+		if checker, ok := plugin.(PrivilegeChecker); ok {
+			if err := checker.CheckPrivileges(r.Context(), path,
+				"{urn:ietf:params:xml:ns:caldav}read-free-busy"); err != nil {
+				return err
+			}
+		}
+	}
+
+	node, err := p.server.Tree.NodeForPath(path)
+	if err != nil {
+		return err
+	}
+	calNode, isCal := node.(*Calendar)
+	if !isCal {
+		return dav.ErrNotImplemented("The free-busy-query REPORT is only implemented on calendars")
+	}
+
+	objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+	if err != nil {
+		return err
+	}
+	var payloads [][]byte
+	for _, obj := range objects {
+		payloads = append(payloads, obj.CalendarData)
+	}
+	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(path), time.Now())
+	if err != nil {
+		return err
+	}
+
+	w.Header().Set("Content-Type", "text/calendar")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(result)
+	return err
 }
 
 // calendarTimeZone resolves a calendar's timezone from its

@@ -453,9 +453,10 @@ func (v *Validator) componentInTimeRange(comp, parent *goical.Component, start, 
 			}
 		}
 		return ical.AlarmInTimeRange(comp, parent, start, end, v.loc())
-	case goical.CompToDo, "VJOURNAL":
-		// VTODO/VJOURNAL time-range semantics come with their ports.
-		return false, dav.ErrNotImplemented("time-range filters on %s are not implemented yet", comp.Name)
+	case goical.CompToDo:
+		return ical.TodoInTimeRange(comp, start, end, v.loc())
+	case "VJOURNAL":
+		return ical.JournalInTimeRange(comp, start, end, v.loc())
 	default:
 		return false, dav.ErrBadRequest("time-range filters are not supported on %s components", comp.Name)
 	}
