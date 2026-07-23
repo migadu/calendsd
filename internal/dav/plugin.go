@@ -50,6 +50,12 @@ type BeforeMethodHook interface {
 	BeforeMethod(w http.ResponseWriter, r *http.Request) (proceed bool, err error)
 }
 
+// GetHandlerHook lets a plugin take over serving a resolved GET target
+// (e.g. content-type transforms). Replaces sabre's afterMethod:GET usage.
+type GetHandlerHook interface {
+	HandleGet(node Node, w http.ResponseWriter, r *http.Request) (handled bool, err error)
+}
+
 // PropPatchHook lets a plugin claim PROPPATCH mutations after the node's own
 // handlers ran (sabre's propPatch event at priority 300, where property
 // storage lives).

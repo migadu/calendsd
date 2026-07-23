@@ -15,6 +15,14 @@
         "lastOccurence": 1793691000,
         "uid": "dst-2"
     },
+    "dst-override.ics": {
+        "etag": "8413b26595feca0e94d90c28fac2bf48",
+        "size": 510,
+        "componentType": "VEVENT",
+        "firstOccurence": 1774425600,
+        "lastOccurence": 1775203200,
+        "uid": "dst-override-1"
+    },
     "dst-recurring.ics": {
         "etag": "7b8c4ad4b17970d34d6eb72417da1a33",
         "size": 293,

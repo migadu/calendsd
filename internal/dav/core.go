@@ -148,6 +148,19 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 		return false, nil
 	}
 
+	// Plugins may take over serving (content-type transforms, sabre's
+	// afterMethod:GET equivalents).
+	if !headOnly {
+		for _, p := range c.server.Plugins() {
+			if hook, ok := p.(GetHandlerHook); ok {
+				handled, err := hook.HandleGet(node, w, r)
+				if handled || err != nil {
+					return true, err
+				}
+			}
+		}
+	}
+
 	h := w.Header()
 	contentType := file.ContentType()
 	if contentType == "" {

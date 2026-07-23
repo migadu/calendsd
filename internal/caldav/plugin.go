@@ -340,7 +340,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		}
 	}
 
-	return p.writeObjectResponses(r.Context(), w, matches, query.Props, query.Expand, loc)
+	return p.writeObjectResponses(r.Context(), w, matches, query.Props, query.Expand, query.JSON, loc)
 }
 
 func (p *Plugin) objectMatches(obj *CalendarObject, query *CalendarQuery, v *Validator) (bool, error) {
@@ -365,12 +365,12 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 		calendarPath, _ := splitPath(paths[0])
 		loc = p.calendarTimeZone(calendarPath)
 	}
-	return p.writeObjectResponses(r.Context(), w, paths, query.Props, query.Expand, loc)
+	return p.writeObjectResponses(r.Context(), w, paths, query.Props, query.Expand, query.JSON, loc)
 }
 
 // writeObjectResponses builds the multistatus for matched object paths,
 // applying calendar-data expansion when requested.
-func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, expand *TimeRange, loc *time.Location) error {
+func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, expand *TimeRange, asJSON bool, loc *time.Location) error {
 	ms := &davxml.MultiStatus{}
 	for _, objPath := range paths {
 		responses, err := p.server.PropertiesForPath(ctx, objPath, props, 0)
@@ -390,6 +390,11 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 					return err
 				}
 			}
+			if asJSON {
+				if err := jsonResponseData(&resp); err != nil {
+					return err
+				}
+			}
 			ms.Responses = append(ms.Responses, resp)
 		}
 	}
@@ -404,6 +409,63 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 	w.WriteHeader(http.StatusMultiStatus)
 	_, err = w.Write(out)
 	return err
+}
+
+// jsonResponseData rewrites the calendar-data property of a response as
+// jCal, for content-type="application/calendar+json" requests.
+func jsonResponseData(resp *davxml.Response) error {
+	for pi := range resp.Propstats {
+		ps := &resp.Propstats[pi]
+		if ps.Status != http.StatusOK {
+			continue
+		}
+		for i, prop := range ps.Props {
+			if prop.Name != nameCalendarData {
+				continue
+			}
+			text, isText := prop.Value.(davxml.Text)
+			if !isText {
+				continue
+			}
+			normalized := strings.ReplaceAll(strings.ReplaceAll(string(text), "\r\n", "\n"), "\n", "\r\n")
+			cal, err := ical.Decode([]byte(normalized))
+			if err != nil {
+				return dav.ErrBadRequest("The calendar object could not be parsed: %s", err)
+			}
+			out, err := ical.JCal(cal)
+			if err != nil {
+				return err
+			}
+			ps.Props[i].Value = davxml.Text(out)
+		}
+	}
+	return nil
+}
+
+// HandleGet implements dav.GetHandlerHook: calendar objects negotiate to
+// jCal when the client asks for application/calendar+json (sabre's
+// httpAfterGet transform).
+func (p *Plugin) HandleGet(node dav.Node, w http.ResponseWriter, r *http.Request) (bool, error) {
+	obj, isObject := node.(*CalendarObject)
+	if !isObject || negotiateExportFormat(r.Header.Get("Accept")) != "application/calendar+json" {
+		return false, nil
+	}
+	cal, err := ical.Decode(obj.Data())
+	if err != nil {
+		return true, dav.ErrBadRequest("The calendar object could not be parsed: %s", err)
+	}
+	body, err := ical.JCal(cal)
+	if err != nil {
+		return true, err
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/calendar+json")
+	if etag := obj.ETag(); etag != "" {
+		h.Set("ETag", etag)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(body)
+	return true, err
 }
 
 // expandResponseData rewrites the calendar-data property of a response with

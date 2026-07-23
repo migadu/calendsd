@@ -31,6 +31,10 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
+	`Sabre\CalDAV\JCalTransformTest::testCalendarQueryDepth0`:                          true,
+	`Sabre\CalDAV\JCalTransformTest::testCalendarQueryDepth1`:                          true,
+	`Sabre\CalDAV\JCalTransformTest::testGet`:                                          true,
+	`Sabre\CalDAV\JCalTransformTest::testMultiGet`:                                     true,
 	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandExport`:                      true,
 	`Sabre\CalDAV\ICSExportPluginTest::testACLIntegrationNotBlocked`:                   true,
 	`Sabre\CalDAV\ICSExportPluginTest::testBadEndParam`:                                true,
@@ -139,7 +143,6 @@ var outOfScopePrefixes = []string{
 	`Sabre\CalDAV\Schedule\`,
 	`Sabre\CalDAV\SharingPluginTest`,
 	`Sabre\CalDAV\Subscriptions\`,
-	`Sabre\CalDAV\JCalTransformTest`,
 }
 
 // TestCorpus replays the extracted sabre corpus. Records are grouped by
@@ -311,8 +314,8 @@ func diffBodies(got, want string) string {
 		return ""
 	}
 	if looksLikeXML(got) && looksLikeXML(want) {
-		cGot, errG := davxml.CanonicalizeFunc(strings.NewReader(got), canonicalizeICS)
-		cWant, errW := davxml.CanonicalizeFunc(strings.NewReader(want), canonicalizeICS)
+		cGot, errG := davxml.CanonicalizeFunc(strings.NewReader(got), canonicalizeEmbedded)
+		cWant, errW := davxml.CanonicalizeFunc(strings.NewReader(want), canonicalizeEmbedded)
 		if errG == nil && errW == nil {
 			if cGot != cWant {
 				return fmt.Sprintf("XML bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)
@@ -321,6 +324,21 @@ func diffBodies(got, want string) string {
 		}
 	}
 	return fmt.Sprintf("bodies differ:\n--- ours ---\n%q\n--- sabre ---\n%q", got, want)
+}
+
+// canonicalizeEmbedded normalizes payloads embedded in XML text nodes:
+// iCalendar via the ICS canonicalizer, jCal JSON structurally (PHP escapes
+// slashes and orders properties differently).
+func canonicalizeEmbedded(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, `["vcalendar`) {
+		var v any
+		if json.Unmarshal([]byte(trimmed), &v) == nil {
+			b, _ := json.Marshal(canonJSON(v))
+			return string(b)
+		}
+	}
+	return canonicalizeICS(text)
 }
 
 // canonJSON normalizes parsed jCal for semantic comparison: prodid values

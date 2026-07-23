@@ -65,8 +65,9 @@ type queryXML struct {
 
 type reqProp struct {
 	XMLName xml.Name
-	// Expand is only meaningful inside calendar-data.
-	Expand *expandXML `xml:"expand"`
+	// Expand and ContentType are only meaningful inside calendar-data.
+	Expand      *expandXML `xml:"expand"`
+	ContentType string     `xml:"content-type,attr"`
 }
 
 type expandXML struct {
@@ -113,6 +114,8 @@ type CalendarQuery struct {
 	Props []xml.Name
 	// Expand, when set, expands recurrences in calendar-data.
 	Expand *TimeRange
+	// JSON requests calendar-data as jCal.
+	JSON bool
 	// Filter is the root filter (name VCALENDAR).
 	Filter CompFilter
 }
@@ -134,12 +137,15 @@ func ParseCalendarQuery(body []byte) (*CalendarQuery, error) {
 	if q.Prop != nil {
 		for _, p := range q.Prop.Names {
 			out.Props = append(out.Props, p.XMLName)
-			if p.XMLName.Local == "calendar-data" && p.Expand != nil {
-				tr, err := parseExpandRange(p.Expand)
-				if err != nil {
-					return nil, err
+			if p.XMLName.Local == "calendar-data" {
+				if p.Expand != nil {
+					tr, err := parseExpandRange(p.Expand)
+					if err != nil {
+						return nil, err
+					}
+					out.Expand = tr
 				}
-				out.Expand = tr
+				out.JSON = p.ContentType == "application/calendar+json"
 			}
 		}
 	}
@@ -159,6 +165,7 @@ type multigetXML struct {
 type CalendarMultiget struct {
 	Props  []xml.Name
 	Expand *TimeRange
+	JSON   bool
 	Hrefs  []string
 }
 
@@ -172,12 +179,15 @@ func ParseCalendarMultiget(body []byte) (*CalendarMultiget, error) {
 	if q.Prop != nil {
 		for _, p := range q.Prop.Names {
 			out.Props = append(out.Props, p.XMLName)
-			if p.XMLName.Local == "calendar-data" && p.Expand != nil {
-				tr, err := parseExpandRange(p.Expand)
-				if err != nil {
-					return nil, err
+			if p.XMLName.Local == "calendar-data" {
+				if p.Expand != nil {
+					tr, err := parseExpandRange(p.Expand)
+					if err != nil {
+						return nil, err
+					}
+					out.Expand = tr
 				}
-				out.Expand = tr
+				out.JSON = p.ContentType == "application/calendar+json"
 			}
 		}
 	}

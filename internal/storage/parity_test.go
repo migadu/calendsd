@@ -37,10 +37,16 @@ const (
 )
 
 func TestParity(t *testing.T) {
-	if os.Getenv("PARITY") == "" {
-		t.Skip("set PARITY=1 to run the live co-existence parity test")
-	}
 	root := repoRoot(t)
+	// The co-existence contract this test guards must run whenever the
+	// environment allows, not only on opt-in: it is the sole automatic
+	// check of Go↔sabre database compatibility. PARITY=1 forces it (and
+	// turns missing prerequisites into failures).
+	if os.Getenv("PARITY") == "" {
+		if reason := parityPrereqsMissing(root); reason != "" {
+			t.Skipf("skipping live parity test: %s (set PARITY=1 to force)", reason)
+		}
+	}
 
 	// Fresh database from sabre's schema files.
 	run(t, root, "dropdb", "--if-exists", parityDB)
@@ -265,6 +271,27 @@ func extractCTag(body string) string {
 		return ""
 	}
 	return m[1]
+}
+
+// parityPrereqsMissing reports why the live harness can't run here: it
+// needs php with the sabre vendor tree, the psql tooling, and the dev
+// Postgres from scripts/dev-db.sh.
+func parityPrereqsMissing(root string) string {
+	for _, bin := range []string{"php", "psql", "createdb", "dropdb"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			return bin + " not on PATH"
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "dav", "vendor", "autoload.php")); err != nil {
+		return "dav/vendor missing (run composer install in dav/)"
+	}
+	if os.Getenv("PGHOST") == "" {
+		return "PGHOST not set"
+	}
+	if err := exec.Command("pg_isready", "-h", os.Getenv("PGHOST")).Run(); err != nil {
+		return "postgres not reachable (run scripts/dev-db.sh start)"
+	}
+	return ""
 }
 
 func repoRoot(t *testing.T) string {
