@@ -37,7 +37,7 @@ func TestOptions(t *testing.T) {
 
 func TestUnimplementedMethod(t *testing.T) {
 	s := NewServer("/", testRoot())
-	req := httptest.NewRequest("REPORT", "/calendars/admin/", nil)
+	req := httptest.NewRequest("BREW", "/calendars/admin/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 

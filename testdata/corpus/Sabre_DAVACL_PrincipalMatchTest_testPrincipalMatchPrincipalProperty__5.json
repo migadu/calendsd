@@ -1,0 +1,68 @@
+{
+    "test": "Sabre\\DAVACL\\PrincipalMatchTest::testPrincipalMatchPrincipalProperty",
+    "seq": 5,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": false,
+        "setupACL": true,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "REPORT",
+        "url": "/principals",
+        "headers": {
+            "Content-Type": [
+                "application/xml"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<principal-match xmlns=\"DAV:\">\n    <principal-property>\n        <principal-URL />\n    </principal-property>\n    <prop>\n      <resourcetype />\n    </prop>\n</principal-match>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAVACL\\PrincipalCollection",
+                    "name": "principals"
+                }
+            ]
+        }
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\">\n <d:href>/principals/user1/</d:href>\n <d:propstat>\n  <d:prop>\n   <d:resourcetype>\n    <d:principal/>\n   </d:resourcetype>\n  </d:prop>\n  <d:status>HTTP/1.1 200 OK</d:status>\n </d:propstat>\n</d:multistatus>\n"
+    }
+}

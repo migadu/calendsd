@@ -1,6 +1,11 @@
 package dav
 
-import "net/http"
+import (
+	"encoding/xml"
+	"net/http"
+)
+
+type xmlname = xml.Name
 
 // Plugin extends the server, mirroring sabre's ServerPlugin. The core WebDAV
 // behavior is itself a plugin (CorePlugin), so CalDAV, ACL, Sync and Auth all
@@ -35,4 +40,20 @@ type MethodProvider interface {
 type PropFindHook interface {
 	// PropFind may resolve properties on the PropFind object.
 	PropFind(pf *PropFind, node Node) error
+}
+
+// BeforeMethodHook runs before method dispatch (and before precondition
+// checks), like sabre's beforeMethod event. Auth lives here.
+type BeforeMethodHook interface {
+	// BeforeMethod returns proceed=false to stop processing (having
+	// written the response itself), or an error to abort.
+	BeforeMethod(w http.ResponseWriter, r *http.Request) (proceed bool, err error)
+}
+
+// ReportHandler lets a plugin implement REPORT methods. Replaces sabre's
+// report event.
+type ReportHandler interface {
+	// Report handles the named report if it can; body is the full request
+	// body. handled=false passes the report to the next plugin.
+	Report(name xmlname, body []byte, path string, w http.ResponseWriter, r *http.Request) (handled bool, err error)
 }

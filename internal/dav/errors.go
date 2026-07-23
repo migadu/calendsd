@@ -64,6 +64,14 @@ func ErrNotImplemented(format string, args ...any) *Error {
 	return davError(http.StatusNotImplemented, "NotImplemented", format, args...)
 }
 
+func ErrNotAuthenticated(format string, args ...any) *Error {
+	return davError(http.StatusUnauthorized, "NotAuthenticated", format, args...)
+}
+
+func ErrReportNotSupported() *Error {
+	return davError(http.StatusUnsupportedMediaType, "ReportNotSupported", "The report you requested is not supported")
+}
+
 // AsError extracts a protocol *Error, wrapping unknown errors as 500s the way
 // sabre wraps uncaught exceptions.
 func AsError(err error) *Error {

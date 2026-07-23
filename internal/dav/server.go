@@ -26,6 +26,29 @@ type Server struct {
 	// ProtectedProperties cannot be changed via PROPPATCH; mirrors
 	// sabre's Server::$protectedProperties.
 	ProtectedProperties []xml.Name
+
+	// resourceTypeMappings mirror sabre's Server::$resourceTypeMapping:
+	// plugins register predicates that add resourcetype values (e.g.
+	// {DAV:}principal for principal nodes).
+	resourceTypeMappings []func(Node) []xml.Name
+}
+
+// AddResourceTypeMapping registers an additional resourcetype source.
+func (s *Server) AddResourceTypeMapping(fn func(Node) []xml.Name) {
+	s.resourceTypeMappings = append(s.resourceTypeMappings, fn)
+}
+
+// ResourceTypesForNode computes a node's {DAV:}resourcetype values,
+// mirroring sabre's getResourceTypeForNode.
+func (s *Server) ResourceTypesForNode(node Node) []xml.Name {
+	var out []xml.Name
+	if isCollectionNode(node) {
+		out = append(out, xml.Name{Space: davxml.NSDav, Local: "collection"})
+	}
+	for _, fn := range s.resourceTypeMappings {
+		out = append(out, fn(node)...)
+	}
+	return out
 }
 
 // NewServer creates a server for the given root collection with the core
@@ -78,6 +101,9 @@ func (s *Server) AddPlugin(p Plugin) {
 	s.plugins = append(s.plugins, p)
 	p.Init(s)
 }
+
+// Plugins returns all registered plugins in registration order.
+func (s *Server) Plugins() []Plugin { return s.plugins }
 
 // Plugin returns the registered plugin with the given name, or nil.
 func (s *Server) Plugin(name string) Plugin {
@@ -150,6 +176,22 @@ func (s *Server) stripBase(p string) (string, error) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// beforeMethod hooks (auth, ACL) run before precondition checks,
+	// matching sabre's event order.
+	for _, p := range s.plugins {
+		hook, ok := p.(BeforeMethodHook)
+		if !ok {
+			continue
+		}
+		proceed, err := hook.BeforeMethod(w, r)
+		if err != nil {
+			s.WriteError(w, err)
+			return
+		}
+		if !proceed {
+			return
+		}
+	}
 	if proceed, err := s.checkPreconditions(w, r); err != nil {
 		s.WriteError(w, err)
 		return
@@ -240,8 +282,13 @@ func (s *Server) PropertiesForPath(path string, names []xml.Name, depth int) ([]
 		if err := s.runPropFind(item.pf, item.node); err != nil {
 			return nil, err
 		}
+		// WebDAV recommends (and iCal demands, for principals) a
+		// trailing slash on collection and principal hrefs.
 		href := s.BaseURI + encodePath(item.pf.Path())
-		if isCollectionNode(item.node) && !strings.HasSuffix(href, "/") {
+		types := s.ResourceTypesForNode(item.node)
+		slash := slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "collection"}) ||
+			slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "principal"})
+		if slash && !strings.HasSuffix(href, "/") {
 			href += "/"
 		}
 		out = append(out, item.pf.response(href))

@@ -23,9 +23,14 @@ type Raw []byte
 // {DAV:}collection.
 type NameSet []xml.Name
 
+// Href renders as one {DAV:}href child element per entry, e.g.
+// principal-URL or current-user-principal values.
+type Href []string
+
 func (Text) isValue()    {}
 func (Raw) isValue()     {}
 func (NameSet) isValue() {}
+func (Href) isValue()    {}
 
 // Property is a single property inside a propstat: a qualified name plus its
 // content. A nil Value renders as an empty element.
@@ -46,6 +51,10 @@ type Response struct {
 	Propstats []Propstat
 	// Status is set for status-only responses (e.g. 404 in sync reports).
 	Status int
+	// Bare omits the {DAV:}response wrapper, replicating sabre's
+	// principal-match serialization quirk (href/propstat directly under
+	// multistatus).
+	Bare bool
 }
 
 // MultiStatus is a {DAV:}multistatus response document.
@@ -121,7 +130,9 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 }
 
 func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
-	b.WriteString(" <d:response>\n")
+	if !r.Bare {
+		b.WriteString(" <d:response>\n")
+	}
 	fmt.Fprintf(b, "  <d:href>%s</d:href>\n", escapeText(r.Href))
 	for _, ps := range r.Propstats {
 		b.WriteString("  <d:propstat>\n   <d:prop>\n")
@@ -130,10 +141,14 @@ func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
 		}
 		fmt.Fprintf(b, "   </d:prop>\n   <d:status>HTTP/1.1 %s</d:status>\n  </d:propstat>\n", statusLine(ps.Status))
 	}
-	if r.Status != 0 {
+	// A status-only response (no propstats), like sabre's Response
+	// serialization.
+	if r.Status != 0 && len(r.Propstats) == 0 {
 		fmt.Fprintf(b, "  <d:status>HTTP/1.1 %s</d:status>\n", statusLine(r.Status))
 	}
-	b.WriteString(" </d:response>\n")
+	if !r.Bare {
+		b.WriteString(" </d:response>\n")
+	}
 }
 
 func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
@@ -159,6 +174,16 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 		fmt.Fprintf(b, "    <%s>", tag)
 		for _, n := range v {
 			fmt.Fprintf(b, "<%s/>", qualify(n, prefix))
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
+	case Href:
+		if len(v) == 0 {
+			fmt.Fprintf(b, "    <%s/>\n", tag)
+			return
+		}
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, href := range v {
+			fmt.Fprintf(b, "<d:href>%s</d:href>", escapeText(href))
 		}
 		fmt.Fprintf(b, "</%s>\n", tag)
 	default:

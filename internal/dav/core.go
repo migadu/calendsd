@@ -34,7 +34,7 @@ func (c *CorePlugin) Features() []string {
 func (c *CorePlugin) Methods(path string) []string {
 	return []string{
 		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND", "MKCOL",
-		"PUT", "PROPPATCH", "COPY", "MOVE",
+		"PUT", "PROPPATCH", "COPY", "MOVE", "REPORT",
 	}
 }
 
@@ -61,10 +61,57 @@ func (c *CorePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool,
 		err = c.copy(w, r)
 	case "MOVE":
 		err = c.move(w, r)
+	case "REPORT":
+		err = c.report(w, r)
 	default:
 		return false, nil
 	}
 	return true, err
+}
+
+// report parses the report's root element name and dispatches to plugins,
+// like sabre's httpReport + the report event.
+func (c *CorePlugin) report(w http.ResponseWriter, r *http.Request) error {
+	path, err := c.server.Path(r)
+	if err != nil {
+		return err
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	name, err := rootElementName(body)
+	if err != nil {
+		return ErrBadRequest("%s", err)
+	}
+	for _, p := range c.server.Plugins() {
+		rh, ok := p.(ReportHandler)
+		if !ok {
+			continue
+		}
+		handled, err := rh.Report(name, body, path, w, r)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
+	return ErrReportNotSupported()
+}
+
+// rootElementName returns the qualified name of a document's root element.
+func rootElementName(body []byte) (xml.Name, error) {
+	dec := xml.NewDecoder(strings.NewReader(string(body)))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return xml.Name{}, err
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			return start.Name, nil
+		}
+	}
 }
 
 // options answers OPTIONS with the DAV and Allow headers.
@@ -657,10 +704,7 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 		})
 	}
 	pf.Handle(dav("resourcetype"), func() any {
-		if isCollectionNode(node) {
-			return davxml.NameSet{dav("collection")}
-		}
-		return davxml.NameSet{}
+		return davxml.NameSet(s.ResourceTypesForNode(node))
 	})
 	pf.Handle(dav("supported-method-set"), func() any {
 		// Rendered as sabre emits it: <d:supported-method name="..."/>
