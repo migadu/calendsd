@@ -18,14 +18,33 @@ import (
 // Two documents are semantically equal iff their canonical forms are equal;
 // diffs of canonical forms are line-oriented and readable in test output.
 func Canonicalize(r io.Reader) (string, error) {
+	return CanonicalizeFunc(r, nil)
+}
+
+// CanonicalizeFunc canonicalizes with an optional text-node transformer,
+// letting callers normalize embedded payloads (e.g. iCalendar inside
+// calendar-data) before comparison.
+func CanonicalizeFunc(r io.Reader, textTransform func(string) string) (string, error) {
 	root, err := parseTree(r)
 	if err != nil {
 		return "", err
 	}
 	root.normalize()
+	if textTransform != nil {
+		root.transformText(textTransform)
+	}
 	var b strings.Builder
 	root.write(&b, 0)
 	return b.String(), nil
+}
+
+func (n *xnode) transformText(fn func(string) string) {
+	if n.text != "" {
+		n.text = fn(n.text)
+	}
+	for _, c := range n.children {
+		c.transformText(fn)
+	}
 }
 
 type xnode struct {

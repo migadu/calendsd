@@ -17,6 +17,7 @@ import (
 // test registers programmatically — state the recorder cannot capture. They
 // are excluded from the corpus permanently.
 var unreplayable = map[string]string{
+	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandExport`:           "uses the ICSExportPlugin (?export), out of MVP scope",
 	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimal`:                 "registers custom propPatch listener",
 	`Sabre\DAV\HttpCopyTest::testCopyFileToExistinBlockedCreateDestination`: "registers beforeBind interceptor",
 	`Sabre\DAV\HttpMoveTest::testMoveToExistingBlockedDeleteSource`:         "registers beforeUnbind interceptor",
@@ -28,67 +29,85 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
-	`Sabre\DAV\HttpCopyTest::testCopyColl`:                                 true,
-	`Sabre\DAV\HttpCopyTest::testCopyCollIntoSubtree`:                      true,
-	`Sabre\DAV\HttpCopyTest::testCopyCollToExisting`:                       true,
-	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteF`:             true,
-	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteT`:             true,
-	`Sabre\DAV\HttpCopyTest::testCopyCollToSelf`:                           true,
-	`Sabre\DAV\HttpCopyTest::testCopyFile`:                                 true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileNonExistantParent`:                true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileToExisting`:                       true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteBadValue`:      true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteF`:             true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteT`:             true,
-	`Sabre\DAV\HttpCopyTest::testCopyFileToSelf`:                           true,
-	`Sabre\DAV\HttpCopyTest::testShallowCopyColl`:                          true,
-	`Sabre\DAV\HttpDeleteTest::testDelete`:                                 true,
-	`Sabre\DAV\HttpDeleteTest::testDeleteDirectory`:                        true,
-	`Sabre\DAV\HttpDeleteTest::testDeleteNotFound`:                         true,
-	`Sabre\DAV\HttpDeleteTest::testDeletePreconditions`:                    true,
-	`Sabre\DAV\HttpDeleteTest::testDeletePreconditionsFailed`:              true,
-	`Sabre\DAV\HttpGetTest::testGet`:                                       true,
-	`Sabre\DAV\HttpGetTest::testGet404`:                                    true,
-	`Sabre\DAV\HttpGetTest::testGet404AsWell`:                              true,
-	`Sabre\DAV\HttpGetTest::testGetCollection`:                             true,
-	`Sabre\DAV\HttpGetTest::testGetDoubleSlash`:                            true,
-	`Sabre\DAV\HttpGetTest::testGetHttp10`:                                 true,
-	`Sabre\DAV\HttpGetTest::testGetStreaming`:                              true,
-	`Sabre\DAV\HttpHeadTest::testDoubleAuth`:                               true,
-	`Sabre\DAV\HttpHeadTest::testHEAD`:                                     true,
-	`Sabre\DAV\HttpHeadTest::testHEADCollection`:                           true,
-	`Sabre\DAV\HttpMoveTest::testMove`:                                     true,
-	`Sabre\DAV\HttpMoveTest::testMoveToExisting`:                           true,
-	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteF`:                 true,
-	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteT`:                 true,
-	`Sabre\DAV\HttpMoveTest::testMoveToSelf`:                               true,
-	`Sabre\DAV\HTTPPreferParsingTest::testpropfindMinimal`:                 true,
-	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimalError`:           true,
-	`Sabre\DAV\HttpPutTest::testFinderPutFail`:                             true,
-	`Sabre\DAV\HttpPutTest::testFinderPutSuccess`:                          true,
-	`Sabre\DAV\HttpPutTest::testPut`:                                       true,
-	`Sabre\DAV\HttpPutTest::testPutContentRange`:                           true,
-	`Sabre\DAV\HttpPutTest::testPutExisting`:                               true,
-	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchCorrect`:                 true,
-	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchStar`:                    true,
-	`Sabre\DAV\HttpPutTest::testPutExistingIfNoneMatchStar`:                true,
-	`Sabre\DAV\HttpPutTest::testPutIfMatchStar`:                            true,
-	`Sabre\DAV\HttpPutTest::testPutIfNoneMatchStar`:                        true,
-	`Sabre\DAV\HttpPutTest::testPutParentCollectionDoesNotExist`:           true,
-	`Sabre\DAV\HttpPutTest::testPutParentIsNotCollection`:                  true,
-	`Sabre\DAV\PropertyStorage\PluginTest::testMove`:                       true,
-	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReport`:               true,
-	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReportDepth1`:         true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatch`:                  true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchPrincipalProperty`: true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchProp`:              true,
+	`Sabre\CalDAV\ExpandEventsDTSTARTandDTENDTest::testExpand`:                         true,
+	`Sabre\CalDAV\ExpandEventsDTSTARTandDTENDbyDayTest::testExpandRecurringByDayEvent`: true,
+	`Sabre\CalDAV\ExpandEventsDoubleEventsTest::testExpand`:                            true,
+	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandCalendarQuery`:               true,
+	`Sabre\CalDAV\ExpandEventsFloatingTimeTest::testExpandMultiGet`:                    true,
+	`Sabre\CalDAV\GetEventsByTimerangeTest::testQueryTimerange`:                        true,
+	`Sabre\CalDAV\Issue1000Test::testIssue1000`:                                        true,
+	`Sabre\CalDAV\Issue203Test::testIssue203`:                                          true,
+	`Sabre\CalDAV\Issue205Test::testIssue205`:                                          true,
+	`Sabre\CalDAV\Issue211Test::testIssue211`:                                          true,
+	`Sabre\CalDAV\Issue220Test::testIssue220`:                                          true,
+	`Sabre\CalDAV\Issue228Test::testIssue228`:                                          true,
+	`Sabre\DAV\HttpCopyTest::testCopyColl`:                                             true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollIntoSubtree`:                                  true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExisting`:                                   true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteF`:                         true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToExistingOverwriteT`:                         true,
+	`Sabre\DAV\HttpCopyTest::testCopyCollToSelf`:                                       true,
+	`Sabre\DAV\HttpCopyTest::testCopyFile`:                                             true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileNonExistantParent`:                            true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExisting`:                                   true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteBadValue`:                  true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteF`:                         true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToExistingOverwriteT`:                         true,
+	`Sabre\DAV\HttpCopyTest::testCopyFileToSelf`:                                       true,
+	`Sabre\DAV\HttpCopyTest::testShallowCopyColl`:                                      true,
+	`Sabre\DAV\HttpDeleteTest::testDelete`:                                             true,
+	`Sabre\DAV\HttpDeleteTest::testDeleteDirectory`:                                    true,
+	`Sabre\DAV\HttpDeleteTest::testDeleteNotFound`:                                     true,
+	`Sabre\DAV\HttpDeleteTest::testDeletePreconditions`:                                true,
+	`Sabre\DAV\HttpDeleteTest::testDeletePreconditionsFailed`:                          true,
+	`Sabre\DAV\HttpGetTest::testGet`:                                                   true,
+	`Sabre\DAV\HttpGetTest::testGet404`:                                                true,
+	`Sabre\DAV\HttpGetTest::testGet404AsWell`:                                          true,
+	`Sabre\DAV\HttpGetTest::testGetCollection`:                                         true,
+	`Sabre\DAV\HttpGetTest::testGetDoubleSlash`:                                        true,
+	`Sabre\DAV\HttpGetTest::testGetHttp10`:                                             true,
+	`Sabre\DAV\HttpGetTest::testGetStreaming`:                                          true,
+	`Sabre\DAV\HttpHeadTest::testDoubleAuth`:                                           true,
+	`Sabre\DAV\HttpHeadTest::testHEAD`:                                                 true,
+	`Sabre\DAV\HttpHeadTest::testHEADCollection`:                                       true,
+	`Sabre\DAV\HttpMoveTest::testMove`:                                                 true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExisting`:                                       true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteF`:                             true,
+	`Sabre\DAV\HttpMoveTest::testMoveToExistingOverwriteT`:                             true,
+	`Sabre\DAV\HttpMoveTest::testMoveToSelf`:                                           true,
+	`Sabre\DAV\HTTPPreferParsingTest::testpropfindMinimal`:                             true,
+	`Sabre\DAV\HTTPPreferParsingTest::testproppatchMinimalError`:                       true,
+	`Sabre\DAV\HttpPutTest::testFinderPutFail`:                                         true,
+	`Sabre\DAV\HttpPutTest::testFinderPutSuccess`:                                      true,
+	`Sabre\DAV\HttpPutTest::testPut`:                                                   true,
+	`Sabre\DAV\HttpPutTest::testPutContentRange`:                                       true,
+	`Sabre\DAV\HttpPutTest::testPutExisting`:                                           true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchCorrect`:                             true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfMatchStar`:                                true,
+	`Sabre\DAV\HttpPutTest::testPutExistingIfNoneMatchStar`:                            true,
+	`Sabre\DAV\HttpPutTest::testPutIfMatchStar`:                                        true,
+	`Sabre\DAV\HttpPutTest::testPutIfNoneMatchStar`:                                    true,
+	`Sabre\DAV\HttpPutTest::testPutParentCollectionDoesNotExist`:                       true,
+	`Sabre\DAV\HttpPutTest::testPutParentIsNotCollection`:                              true,
+	`Sabre\DAV\PropertyStorage\PluginTest::testMove`:                                   true,
+	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReport`:                           true,
+	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReportDepth1`:                     true,
+	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatch`:                              true,
+	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchPrincipalProperty`:             true,
+	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchProp`:                          true,
 }
 
 // outOfScopePrefixes are sabre plugins outside the MVP port scope
-// (PLAN.md §1): PATCH partial updates and DAV sharing.
+// (PLAN.md §1): PATCH partial updates, sharing, scheduling, subscriptions,
+// and the export/jCal conveniences.
 var outOfScopePrefixes = []string{
 	`Sabre\DAV\PartialUpdate\`,
 	`Sabre\DAV\Sharing\`,
+	`Sabre\CalDAV\Schedule\`,
+	`Sabre\CalDAV\SharingPluginTest`,
+	`Sabre\CalDAV\Subscriptions\`,
+	`Sabre\CalDAV\ICSExportPluginTest`,
+	`Sabre\CalDAV\JCalTransformTest`,
 }
 
 // TestCorpus replays the extracted sabre corpus. Records are grouped by
@@ -168,11 +187,10 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
-// needsLaterPhase filters tests whose fixtures require ports that land in
-// later phases (CalDAV backends in phase 3, property storage).
+// needsLaterPhase filters tests whose fixtures require ports that haven't
+// landed yet (property storage).
 func needsLaterPhase(r *Record) bool {
-	s := r.Setup
-	return s.SetupCalDAV || s.SetupPropertyStorage
+	return r.Setup.SetupPropertyStorage
 }
 
 // replayGroup replays a test's records in order against one seeded server
@@ -240,8 +258,8 @@ func diffBodies(got, want string) string {
 		return ""
 	}
 	if looksLikeXML(got) && looksLikeXML(want) {
-		cGot, errG := davxml.Canonicalize(strings.NewReader(got))
-		cWant, errW := davxml.Canonicalize(strings.NewReader(want))
+		cGot, errG := davxml.CanonicalizeFunc(strings.NewReader(got), canonicalizeICS)
+		cWant, errW := davxml.CanonicalizeFunc(strings.NewReader(want), canonicalizeICS)
 		if errG == nil && errW == nil {
 			if cGot != cWant {
 				return fmt.Sprintf("XML bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)

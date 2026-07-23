@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"strings"
 	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
+	"calserver/internal/caldav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
 	davxml "calserver/internal/dav/xml"
@@ -16,21 +18,30 @@ import (
 type xmlName = xml.Name
 
 // BuildServer constructs a Go server equivalent to the sabre test setup of a
-// record: seeded tree, principal backend, auth (autoLogin) and ACL plugins.
-// Mirrors AbstractDAVServerTestCase::initializeEverything.
+// record: seeded tree, principal/calendar backends, auth (autoLogin), ACL and
+// CalDAV plugins. Mirrors AbstractDAVServerTestCase::initializeEverything.
 func BuildServer(rec *Record) (*dav.Server, error) {
 	principals, err := seedPrincipals(rec.Setup.Principals)
 	if err != nil {
 		return nil, err
 	}
-	backend := &acl.MemoryBackend{Principals: principals}
+	backends := &seedBackends{principals: &acl.MemoryBackend{Principals: principals}}
+	if rec.Setup.SetupCalDAV {
+		backends.caldav, err = seedCalDAV(rec)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	root, err := seedTree(rec.Request.Tree, backend)
+	root, err := seedTree(rec.Request.Tree, backends)
 	if err != nil {
 		return nil, err
 	}
 	srv := dav.NewServer("/", root)
 
+	if rec.Setup.SetupCalDAV {
+		srv.AddPlugin(&caldav.Plugin{})
+	}
 	if rec.Setup.AutoLogin != "" {
 		srv.AddPlugin(auth.NewLoggedInPlugin("principals/" + rec.Setup.AutoLogin))
 	}
@@ -41,6 +52,103 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 		})
 	}
 	return srv, nil
+}
+
+type seedBackends struct {
+	principals acl.Backend
+	caldav     caldav.Backend
+}
+
+// seedCalDAV parses the caldavCalendars/caldavCalendarObjects fixtures into
+// a mock calendar backend.
+func seedCalDAV(rec *Record) (caldav.Backend, error) {
+	backend := &caldav.MockBackend{Objects: map[string]map[string]*caldav.ObjectInfo{}}
+
+	if len(rec.Setup.Calendars) > 0 {
+		var entries []map[string]any
+		if err := json.Unmarshal(rec.Setup.Calendars, &entries); err != nil {
+			return nil, fmt.Errorf("parsing caldavCalendars: %w", err)
+		}
+		for _, entry := range entries {
+			info := caldav.CalendarInfo{Props: map[xmlName]any{}}
+			for k, v := range entry {
+				switch k {
+				case "id":
+					info.ID = jsonID(v)
+				case "uri":
+					info.URI, _ = v.(string)
+				case "principaluri":
+					info.PrincipalURI, _ = v.(string)
+				case "name":
+					// sabre's mock keeps a non-property name key.
+				default:
+					name, err := davxml.ParseClark(k)
+					if err != nil {
+						continue
+					}
+					value, err := seedCalendarProp(v)
+					if err != nil {
+						return nil, fmt.Errorf("calendar prop %s: %w", k, err)
+					}
+					info.Props[name] = value
+				}
+			}
+			backend.Calendars = append(backend.Calendars, info)
+		}
+	}
+
+	if len(rec.Setup.CalendarObjects) > 0 {
+		var perCalendar map[string]map[string]struct {
+			CalendarData string `json:"calendardata"`
+		}
+		if err := json.Unmarshal(rec.Setup.CalendarObjects, &perCalendar); err != nil {
+			return nil, fmt.Errorf("parsing caldavCalendarObjects: %w", err)
+		}
+		for calID, objects := range perCalendar {
+			backend.Objects[calID] = map[string]*caldav.ObjectInfo{}
+			for uri, obj := range objects {
+				backend.Objects[calID][uri] = &caldav.ObjectInfo{
+					URI:          uri,
+					CalendarID:   calID,
+					CalendarData: []byte(obj.CalendarData),
+				}
+			}
+		}
+	}
+	return backend, nil
+}
+
+// jsonID renders numeric or string fixture IDs uniformly.
+func jsonID(v any) string {
+	switch id := v.(type) {
+	case string:
+		return id
+	case float64:
+		return fmt.Sprintf("%.0f", id)
+	default:
+		return fmt.Sprint(id)
+	}
+}
+
+// seedCalendarProp converts a recorded calendar property value.
+func seedCalendarProp(v any) (any, error) {
+	switch value := v.(type) {
+	case string:
+		return value, nil
+	case map[string]any:
+		if value["__type"] == "supported-calendar-component-set" {
+			var b strings.Builder
+			if comps, ok := value["components"].([]any); ok {
+				for _, c := range comps {
+					fmt.Fprintf(&b, `<cal:comp name="%s"/>`, c)
+				}
+			}
+			return davxml.Raw(b.String()), nil
+		}
+		return nil, fmt.Errorf("unsupported fixture value %v", value["__type"])
+	default:
+		return nil, fmt.Errorf("unsupported fixture value type %T", v)
+	}
 }
 
 // seedPrincipals parses the recorded principal fixtures.
@@ -74,7 +182,7 @@ func seedPrincipals(raw json.RawMessage) ([]acl.Principal, error) {
 // seedTree builds an in-memory node tree from a recorded fixture. It returns
 // an error for fixtures using node types the port cannot represent yet; the
 // runner reports those records as pending.
-func seedTree(t *Tree, backend acl.Backend) (dav.Collection, error) {
+func seedTree(t *Tree, backends *seedBackends) (dav.Collection, error) {
 	if t == nil {
 		return nil, fmt.Errorf("record has no tree fixture")
 	}
@@ -82,7 +190,7 @@ func seedTree(t *Tree, backend acl.Backend) (dav.Collection, error) {
 		// sabre wraps a node array in a root SimpleCollection named "root".
 		root := mock.NewCollection("root")
 		for _, r := range t.Roots {
-			node, err := seedNode(r, backend)
+			node, err := seedNode(r, backends)
 			if err != nil {
 				return nil, err
 			}
@@ -90,7 +198,7 @@ func seedTree(t *Tree, backend acl.Backend) (dav.Collection, error) {
 		}
 		return root, nil
 	}
-	node, err := seedNode(t, backend)
+	node, err := seedNode(t, backends)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +209,7 @@ func seedTree(t *Tree, backend acl.Backend) (dav.Collection, error) {
 	return coll, nil
 }
 
-func seedNode(t *Tree, backend acl.Backend) (dav.Node, error) {
+func seedNode(t *Tree, backends *seedBackends) (dav.Node, error) {
 	switch t.Type {
 	case "file":
 		f := mock.NewFile(t.Name, t.Contents)
@@ -118,7 +226,7 @@ func seedNode(t *Tree, backend acl.Backend) (dav.Node, error) {
 	case "collection":
 		c := mock.NewCollection(t.Name)
 		for _, child := range t.Children {
-			node, err := seedNode(child, backend)
+			node, err := seedNode(child, backends)
 			if err != nil {
 				return nil, err
 			}
@@ -135,7 +243,7 @@ func seedNode(t *Tree, backend acl.Backend) (dav.Node, error) {
 			pc.Mode = mock.FailMode(mode)
 		}
 		for _, child := range t.Children {
-			node, err := seedNode(child, backend)
+			node, err := seedNode(child, backends)
 			if err != nil {
 				return nil, err
 			}
@@ -145,7 +253,12 @@ func seedNode(t *Tree, backend acl.Backend) (dav.Node, error) {
 	case "node":
 		switch t.Class {
 		case `Sabre\DAVACL\PrincipalCollection`, `Sabre\CalDAV\Principal\Collection`:
-			return acl.NewPrincipalCollection(backend, t.Name), nil
+			return acl.NewPrincipalCollection(backends.principals, t.Name), nil
+		case `Sabre\CalDAV\CalendarRoot`:
+			if backends.caldav == nil {
+				return nil, fmt.Errorf("CalendarRoot fixture without caldav setup")
+			}
+			return caldav.NewCalendarRoot(backends.principals, backends.caldav, t.Name), nil
 		}
 		return nil, fmt.Errorf("unseedable node type %q (class %s)", t.Type, t.Class)
 	default:
