@@ -1,0 +1,21 @@
+# Curated CalDAVTester files that exercise standards-based CalDAV/CardDAV
+# behaviour calserver implements. Paths are relative to scripts/tests/ in the
+# CalDAVTester checkout. Lines starting with # are ignored.
+#
+# Excluded on purpose: Calendar-Server-only extensions (proxy, managed
+# attachments, timezone service, trash, dropbox, bulk POST, sharing-* which
+# assume CS provisioning) and scheduling/implicit files that need auto-created
+# inbox delivery semantics we cover in our own corpus instead.
+CalDAV/current-user-principal.xml
+CalDAV/propfind.xml
+CalDAV/get.xml
+CalDAV/put.xml
+CalDAV/delete.xml
+CalDAV/options.xml
+CalDAV/freebusy.xml
+CalDAV/sync-report.xml
+CardDAV/current-user-principal.xml
+CardDAV/propfind.xml
+CardDAV/get.xml
+CardDAV/put.xml
+CardDAV/reports.xml
