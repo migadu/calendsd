@@ -240,6 +240,27 @@ func (c *Calendar) Child(name string) (dav.Node, error) {
 	return NewCalendarObject(c.backend, c.Info, *obj), nil
 }
 
+// QueryObjects returns the objects passing the backend's coarse prefilter for a
+// calendar-query with the given top-level component type and time range. The
+// caller applies the full validator to each; this only narrows what is loaded.
+func (c *Calendar) QueryObjects(componentType string, start, end time.Time) ([]*CalendarObject, error) {
+	uris, err := c.backend.CalendarQuery(c.Info.ID, componentType, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*CalendarObject, 0, len(uris))
+	for _, uri := range uris {
+		obj, err := c.backend.CalendarObject(c.Info.ID, uri)
+		if err != nil {
+			return nil, err
+		}
+		if obj != nil {
+			out = append(out, NewCalendarObject(c.backend, c.Info, *obj))
+		}
+	}
+	return out, nil
+}
+
 func (c *Calendar) ChildExists(name string) bool {
 	obj, err := c.backend.CalendarObject(c.Info.ID, name)
 	return err == nil && obj != nil

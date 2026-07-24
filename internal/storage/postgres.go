@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	// Registers the pgx database/sql driver.
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -315,6 +316,41 @@ func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, err
 			return nil, err
 		}
 		out = append(out, *obj)
+	}
+	return out, rows.Err()
+}
+
+// CalendarQuery prefilters candidate objects in SQL by component type and the
+// denormalized firstoccurence/lastoccurence bounds, transcribing sabre's PDO
+// calendarQuery. The occurrence filters are NULL-safe so objects without
+// computed bounds are never wrongly excluded — the caller's validator refines.
+func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start, end time.Time) ([]string, error) {
+	q := `SELECT uri FROM calendarobjects WHERE calendarid = $1`
+	args := []any{id.Calendar}
+	if componentType != "" {
+		args = append(args, componentType)
+		q += fmt.Sprintf(" AND componenttype = $%d", len(args))
+	}
+	if !end.IsZero() {
+		args = append(args, int(end.Unix()))
+		q += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d)", len(args))
+	}
+	if !start.IsZero() {
+		args = append(args, int(start.Unix()))
+		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d)", len(args))
+	}
+	rows, err := b.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var uri string
+		if err := rows.Scan(&uri); err != nil {
+			return nil, err
+		}
+		out = append(out, uri)
 	}
 	return out, rows.Err()
 }

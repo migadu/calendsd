@@ -120,6 +120,25 @@ type CalendarQuery struct {
 	Filter CompFilter
 }
 
+// prefilterHints returns the top-level component type and time range the backend
+// can prefilter candidates on, or "" / zero times when there is no single
+// unambiguous constraint. A nested or is-not-defined filter yields no hint, so
+// the backend returns a superset and the validator decides.
+func (q *CalendarQuery) prefilterHints() (componentType string, start, end time.Time) {
+	if len(q.Filter.CompFilters) != 1 {
+		return "", time.Time{}, time.Time{}
+	}
+	inner := q.Filter.CompFilters[0]
+	if inner.IsNotDefined {
+		return "", time.Time{}, time.Time{}
+	}
+	componentType = inner.Name
+	if inner.TimeRange != nil {
+		start, end = inner.TimeRange.Start, inner.TimeRange.End
+	}
+	return componentType, start, end
+}
+
 // ParseCalendarQuery parses a calendar-query REPORT body.
 func ParseCalendarQuery(body []byte) (*CalendarQuery, error) {
 	var q queryXML

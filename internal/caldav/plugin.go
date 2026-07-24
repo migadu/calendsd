@@ -449,12 +449,15 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		}
 	case *Calendar:
 		if depth == 1 {
-			children, err := n.Children()
+			// Narrow the candidate set in the backend (component type +
+			// occurrence bounds) instead of loading every object; the
+			// validator below stays authoritative.
+			componentType, trStart, trEnd := query.prefilterHints()
+			objs, err := n.QueryObjects(componentType, trStart, trEnd)
 			if err != nil {
 				return err
 			}
-			for _, child := range children {
-				obj := child.(*CalendarObject)
+			for _, obj := range objs {
 				ok, err := p.objectMatches(obj, query, validator)
 				if err != nil {
 					return err

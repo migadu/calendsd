@@ -7,6 +7,8 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
+	"sort"
+	"time"
 
 	"calserver/internal/dav"
 )
@@ -75,6 +77,12 @@ type Backend interface {
 
 	// CalendarObjects lists all objects of a calendar.
 	CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error)
+	// CalendarQuery returns the URIs of objects that could match a query with
+	// the given top-level component type ("" = no constraint) and optional
+	// time range (zero Start/End = unconstrained). It is a coarse prefilter
+	// that must return a superset of the true matches; the caller validates
+	// each candidate. Port of sabre's BackendInterface::calendarQuery.
+	CalendarQuery(calendarID CalendarID, componentType string, start, end time.Time) ([]string, error)
 	// CalendarObject fetches one object, or nil if absent.
 	CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error)
 	// CreateCalendarObject stores a new object, returning its quoted etag.
@@ -136,6 +144,17 @@ func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, erro
 	for _, o := range m.Objects[calendarID] {
 		out = append(out, *o)
 	}
+	return out, nil
+}
+
+// CalendarQuery returns every object URI (a valid superset); the mock leaves
+// all filtering to the caller's validator.
+func (m *MockBackend) CalendarQuery(calendarID CalendarID, componentType string, start, end time.Time) ([]string, error) {
+	var out []string
+	for uri := range m.Objects[calendarID] {
+		out = append(out, uri)
+	}
+	sort.Strings(out)
 	return out, nil
 }
 
