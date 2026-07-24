@@ -15,6 +15,13 @@ import (
 // pair sabre with UTC, and the shared-DB parity test will catch a mismatch.
 var maxDate = time.Date(2038, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// maxRecurrences bounds every recurrence-set iteration, mirroring sabre
+// vobject's RRuleIterator::maxRecurrences. Without it a crafted rule
+// (FREQ=SECONDLY, open-ended query range) would iterate billions of times
+// and pin a core — a remotely triggerable DoS. On reaching the cap we stop
+// as if the rule ended, which is what sabre does.
+const maxRecurrences = 3500
+
 // ErrNoComponent is returned for calendar data without a VEVENT/VTODO/VJOURNAL.
 // Maps to 400 Bad Request, like sabre's getDenormalizedData.
 var ErrNoComponent = errors.New("calendar object must have a VJOURNAL, VEVENT or VTODO component")
@@ -135,7 +142,7 @@ func eventOccurrenceBounds(comp *goical.Component) (first, last time.Time, err e
 
 	last = dtstart.Add(dur)
 	next := set.Iterator()
-	for {
+	for i := 0; i < maxRecurrences; i++ {
 		start, ok := next()
 		if !ok {
 			break

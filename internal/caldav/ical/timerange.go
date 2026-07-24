@@ -36,7 +36,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 			return false, err
 		}
 		next := set.Iterator()
-		for {
+		for i := 0; i < maxRecurrences; i++ {
 			occStart, ok := next()
 			if !ok || !occStart.Before(end) {
 				return false, nil
@@ -45,6 +45,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 				return true, nil
 			}
 		}
+		return false, nil
 	}
 
 	effStart, err := dtstartProp.DateTime(loc)

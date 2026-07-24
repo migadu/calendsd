@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -435,11 +436,17 @@ func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, sync
 	if syncToken == "" {
 		var currentToken sql.NullInt64
 		err := b.DB.QueryRow(`SELECT synctoken FROM calendars WHERE id = $1`, id.Calendar).Scan(&currentToken)
-		if err == sql.ErrNoRows || !currentToken.Valid {
+		// A missing calendar (no row / null token) means "no sync info";
+		// any other error is a real failure that must surface, not be
+		// masked as an empty change set.
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
+		}
+		if !currentToken.Valid {
+			return nil, nil
 		}
 		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(currentToken.Int64, 10)}
 		rows, err := b.DB.Query(`SELECT uri FROM calendarobjects WHERE calendarid = $1`, id.Calendar)

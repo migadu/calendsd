@@ -332,6 +332,9 @@ func applyScheduleStatus(cal *goical.Calendar, messages []*ical.Message) {
 			props := comp.Props.Values(target)
 			for i := range props {
 				if strings.EqualFold(props[i].Value, msg.Recipient) {
+					if props[i].Params == nil {
+						props[i].Params = goical.Params{}
+					}
 					props[i].Params.Set("SCHEDULE-STATUS", code)
 				}
 			}

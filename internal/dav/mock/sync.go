@@ -104,13 +104,16 @@ func (sc *SyncCollection) Changes(syncToken string, syncLevel, limit int) (*dav.
 				break
 			}
 			out.Truncated = true
-			out.Modified = out.Modified[:len(out.Modified)+left]
+			// PHP's array_slice tolerates a negative length that exceeds
+			// the slice; Go's slice bound would panic, so clamp to 0 when
+			// deletions alone already exceed the limit.
+			out.Modified = out.Modified[:max(0, len(out.Modified)+left)]
 			left = limit - (len(out.Modified) + len(out.Deleted))
 			if left == 0 {
 				break
 			}
 			if left < 0 {
-				out.Deleted = out.Deleted[:len(out.Deleted)+left]
+				out.Deleted = out.Deleted[:max(0, len(out.Deleted)+left)]
 			}
 			break
 		}

@@ -5,6 +5,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
 	"calserver/internal/dav"
 )
@@ -73,13 +74,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	}
 	msg := "No authentication backends were configured on this server."
 	if len(reasons) > 0 {
-		msg = ""
-		for i, reason := range reasons {
-			if i > 0 {
-				msg += ", "
-			}
-			msg += reason
-		}
+		msg = strings.Join(reasons, ", ")
 	}
 	return false, dav.ErrNotAuthenticated("%s", msg)
 }

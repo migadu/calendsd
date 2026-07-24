@@ -138,7 +138,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 
 	var out []*goical.Component
 	next := set.Iterator()
-	for {
+	for i := 0; i < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
 			break

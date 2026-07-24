@@ -464,8 +464,7 @@ func jsonResponseData(resp *davxml.Response) error {
 			if !isText {
 				continue
 			}
-			normalized := strings.ReplaceAll(strings.ReplaceAll(string(text), "\r\n", "\n"), "\n", "\r\n")
-			cal, err := ical.Decode([]byte(normalized))
+			cal, err := ical.Decode([]byte(ical.NormalizeCRLF(string(text))))
 			if err != nil {
 				return dav.ErrBadRequest("The calendar object could not be parsed: %s", err)
 			}
@@ -522,8 +521,7 @@ func expandResponseData(resp *davxml.Response, expand *TimeRange, loc *time.Loca
 				continue
 			}
 			// The propfind handler strips \r; restore CRLF for parsing.
-			normalized := strings.ReplaceAll(strings.ReplaceAll(string(text), "\r\n", "\n"), "\n", "\r\n")
-			cal, err := ical.Decode([]byte(normalized))
+			cal, err := ical.Decode([]byte(ical.NormalizeCRLF(string(text))))
 			if err != nil {
 				return dav.ErrBadRequest("The calendar object could not be parsed: %s", err)
 			}

@@ -133,10 +133,10 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 	if err != nil {
 		return nil, err
 	}
-	filtered := start.IsZero() && end.IsZero() && componentType == ""
+	exportAll := start.IsZero() && end.IsZero() && componentType == ""
 	var out [][]byte
 	for _, obj := range objects {
-		if !filtered {
+		if !exportAll {
 			name := componentType
 			if name == "" {
 				name = "VEVENT"

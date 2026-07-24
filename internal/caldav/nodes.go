@@ -216,7 +216,6 @@ func (c *Calendar) Children() ([]dav.Node, error) {
 	}
 	var out []dav.Node
 	for _, obj := range objs {
-		obj := obj
 		out = append(out, NewCalendarObject(c.backend, c.Info, obj))
 	}
 	return out, nil

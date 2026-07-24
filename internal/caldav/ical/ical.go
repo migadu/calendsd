@@ -17,6 +17,13 @@ func Decode(data []byte) (*goical.Calendar, error) {
 	return goical.NewDecoder(bytes.NewReader(data)).Decode()
 }
 
+// NormalizeCRLF restores CRLF line endings, undoing the \r-stripping the
+// PROPFIND calendar-data handler applies before XML output. go-ical's parser
+// requires CRLF.
+func NormalizeCRLF(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+}
+
 // Encode serializes a calendar object to iCalendar bytes, enforcing go-ical's
 // component validation (DTSTAMP required on VEVENT, etc.).
 func Encode(cal *goical.Calendar) ([]byte, error) {

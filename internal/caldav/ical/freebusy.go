@@ -148,13 +148,14 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 	}
 	var out []busyPeriod
 	next := set.Iterator()
-	for {
+	for i := 0; i < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
-			return out, nil
+			break
 		}
 		if p := clamp(occStart, occStart.Add(dur)); p != nil {
 			out = append(out, *p)
 		}
 	}
+	return out, nil
 }

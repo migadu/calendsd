@@ -20,8 +20,10 @@ type Plugin struct {
 	// AdminPrincipals get an implicit {DAV:}all ACE on every node,
 	// mirroring sabre's adminPrincipals.
 	AdminPrincipals []string
-	// AllowUnauthenticatedAccess mirrors sabre's flag; when false,
-	// requests without a principal fail privilege checks with 401.
+	// AllowUnauthenticatedAccess mirrors sabre's flag. When true, a
+	// privilege check that fails for an unauthenticated request returns
+	// 401 (prompting login) rather than 403, so anonymous clients get a
+	// chance to authenticate. When false, the failure is a plain 403.
 	AllowUnauthenticatedAccess bool
 }
 

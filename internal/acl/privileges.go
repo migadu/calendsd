@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"calserver/internal/dav"
@@ -97,12 +98,7 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 		return nil, err
 	}
 	isPrincipal := func(candidate string) bool {
-		for _, principal := range principals {
-			if principal == candidate {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(principals, candidate)
 	}
 	authenticated := dav.Principal(ctx) != ""
 
