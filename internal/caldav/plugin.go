@@ -45,6 +45,29 @@ func (p *Plugin) Features() []string { return []string{"calendar-access"} }
 
 func (p *Plugin) Methods(path string) []string { return []string{"MKCALENDAR"} }
 
+// InterceptWrite implements dav.WriteInterceptor: a jCal (RFC 7265) body PUT to
+// a calendar is converted to iCalendar before storage, matching sabre's
+// jCal-on-PUT handling. Runs before the scheduling broker (registration order),
+// so downstream sees iCalendar. Malformed jCal is rejected rather than stored.
+func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
+	if !ical.IsJCal(data) {
+		return data, nil
+	}
+	parentPath, _ := splitPath(path)
+	parent, err := p.server.Tree.NodeForPath(parentPath)
+	if err != nil {
+		return data, nil // not a calendar object write; leave it to other handlers
+	}
+	if _, isCal := parent.(*Calendar); !isCal {
+		return data, nil
+	}
+	cal, err := ical.DecodeJCal(data)
+	if err != nil {
+		return nil, dav.ErrBadRequest("Invalid jCal request body: %s", err)
+	}
+	return ical.EncodeLenient(cal), nil
+}
+
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	switch r.Method {
 	case "MKCALENDAR":

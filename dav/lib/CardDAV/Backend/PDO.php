@@ -516,16 +516,42 @@ class PDO extends AbstractBackend implements SyncSupport
      */
     protected function addChange($addressBookId, $objectUri, $operation)
     {
-        $stmt = $this->pdo->prepare('INSERT INTO '.$this->addressBookChangesTableName.' (uri, synctoken, addressbookid, operation) SELECT ?, synctoken, ?, ? FROM '.$this->addressBooksTableName.' WHERE id = ?');
-        $stmt->execute([
-            $objectUri,
-            $addressBookId,
-            $operation,
-            $addressBookId,
-        ]);
-        $stmt = $this->pdo->prepare('UPDATE '.$this->addressBooksTableName.' SET synctoken = synctoken + 1 WHERE id = ?');
-        $stmt->execute([
-            $addressBookId,
-        ]);
+        // Lock the address book row for the read-stamp-increment of synctoken so
+        // concurrent writers — including a second server sharing this database —
+        // serialize instead of stamping two changes with the same synctoken and
+        // skipping a value. SQLite serializes writers at the database level, so
+        // the surrounding transaction suffices there. See CalDAV\Backend\PDO.
+        $lock = 'sqlite' === $this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) ? '' : ' FOR UPDATE';
+        $ownTransaction = !$this->pdo->inTransaction();
+        if ($ownTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $stmt = $this->pdo->prepare('SELECT synctoken FROM '.$this->addressBooksTableName.' WHERE id = ?'.$lock);
+            $stmt->execute([$addressBookId]);
+            $stmt->fetch();
+
+            $stmt = $this->pdo->prepare('INSERT INTO '.$this->addressBookChangesTableName.' (uri, synctoken, addressbookid, operation) SELECT ?, synctoken, ?, ? FROM '.$this->addressBooksTableName.' WHERE id = ?');
+            $stmt->execute([
+                $objectUri,
+                $addressBookId,
+                $operation,
+                $addressBookId,
+            ]);
+            $stmt = $this->pdo->prepare('UPDATE '.$this->addressBooksTableName.' SET synctoken = synctoken + 1 WHERE id = ?');
+            $stmt->execute([
+                $addressBookId,
+            ]);
+
+            if ($ownTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (\Exception $e) {
+            if ($ownTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 }

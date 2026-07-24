@@ -1032,17 +1032,46 @@ SQL;
      */
     protected function addChange($calendarId, $objectUri, $operation)
     {
-        $stmt = $this->pdo->prepare('INSERT INTO '.$this->calendarChangesTableName.' (uri, synctoken, calendarid, operation) SELECT ?, synctoken, ?, ? FROM '.$this->calendarTableName.' WHERE id = ?');
-        $stmt->execute([
-            $objectUri,
-            $calendarId,
-            $operation,
-            $calendarId,
-        ]);
-        $stmt = $this->pdo->prepare('UPDATE '.$this->calendarTableName.' SET synctoken = synctoken + 1 WHERE id = ?');
-        $stmt->execute([
-            $calendarId,
-        ]);
+        // Serialize the read-stamp-increment of synctoken against every other
+        // writer on this calendar — including a second server (e.g. a Go
+        // implementation) sharing this database — by locking the calendar row
+        // for the whole operation. Without the lock, two concurrent addChange()
+        // calls can read the same synctoken, stamp two changes with it, and
+        // skip a value, so a syncing client misses a change until the next
+        // ctag-triggered resync. SQLite has no row lock but serializes writers
+        // at the database level, so the surrounding transaction is enough there.
+        $lock = 'sqlite' === $this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) ? '' : ' FOR UPDATE';
+        $ownTransaction = !$this->pdo->inTransaction();
+        if ($ownTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $stmt = $this->pdo->prepare('SELECT synctoken FROM '.$this->calendarTableName.' WHERE id = ?'.$lock);
+            $stmt->execute([$calendarId]);
+            $stmt->fetch();
+
+            $stmt = $this->pdo->prepare('INSERT INTO '.$this->calendarChangesTableName.' (uri, synctoken, calendarid, operation) SELECT ?, synctoken, ?, ? FROM '.$this->calendarTableName.' WHERE id = ?');
+            $stmt->execute([
+                $objectUri,
+                $calendarId,
+                $operation,
+                $calendarId,
+            ]);
+            $stmt = $this->pdo->prepare('UPDATE '.$this->calendarTableName.' SET synctoken = synctoken + 1 WHERE id = ?');
+            $stmt->execute([
+                $calendarId,
+            ]);
+
+            if ($ownTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (\Exception $e) {
+            if ($ownTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**

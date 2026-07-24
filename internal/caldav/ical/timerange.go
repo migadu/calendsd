@@ -247,7 +247,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	next := set.Iterator()
 	// Sabre relies on firstAlarm growing past $end for termination; the
 	// cap guards against pathological rules it would spin on.
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more {
 			return false, nil
