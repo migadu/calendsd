@@ -111,6 +111,20 @@ type PrincipalCollection struct {
 	backend Backend
 	// prefix is the principal path prefix, conventionally "principals".
 	prefix string
+	// Proxies, when true, exposes calendar-proxy-read/-write sub-principals
+	// on each user principal (calendarserver delegation). Off by default so
+	// plain DAVACL principals stay leaf nodes.
+	Proxies bool
+}
+
+// wrap turns a principal into a node, as a proxy-hosting user principal when
+// delegation is enabled.
+func (c *PrincipalCollection) wrap(p Principal) dav.Node {
+	node := NewPrincipalNode(c.backend, p)
+	if c.Proxies {
+		return &UserPrincipalNode{PrincipalNode: node}
+	}
+	return node
 }
 
 // NewPrincipalCollection creates the collection for a prefix.
@@ -141,7 +155,7 @@ func (c *PrincipalCollection) Child(name string) (dav.Node, error) {
 	if p == nil {
 		return nil, dav.ErrNotFound("Principal with name %s not found", name)
 	}
-	return NewPrincipalNode(c.backend, *p), nil
+	return c.wrap(*p), nil
 }
 
 func (c *PrincipalCollection) Children() ([]dav.Node, error) {
@@ -151,7 +165,7 @@ func (c *PrincipalCollection) Children() ([]dav.Node, error) {
 	}
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
-		out[i] = NewPrincipalNode(c.backend, p)
+		out[i] = c.wrap(p)
 	}
 	return out, nil
 }

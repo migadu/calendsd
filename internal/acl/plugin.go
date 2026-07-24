@@ -37,6 +37,12 @@ func (p *Plugin) Init(s *dav.Server) {
 		}
 		return nil
 	})
+	s.AddResourceTypeMapping(func(n dav.Node) []xml.Name {
+		if proxy, ok := n.(*ProxyPrincipalNode); ok {
+			return []xml.Name{proxy.ProxyResourceType()}
+		}
+		return nil
+	})
 }
 
 func (p *Plugin) Features() []string {
@@ -108,6 +114,17 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		pf.Handle(davName("group-membership"), func() any {
 			return p.principalHrefs(ph.GroupMembership)
 		})
+		// User principals advertise which principals' calendars they may
+		// proxy (calendarserver delegation); proxy nodes themselves do not.
+		if _, isProxy := node.(*ProxyPrincipalNode); !isProxy {
+			cs := func(local string) xml.Name { return xml.Name{Space: davxml.NSCalendarServer, Local: local} }
+			pf.Handle(cs("calendar-proxy-read-for"), func() any {
+				return p.proxyFor(ph, proxyReadName)
+			})
+			pf.Handle(cs("calendar-proxy-write-for"), func() any {
+				return p.proxyFor(ph, proxyWriteName)
+			})
+		}
 	}
 
 	pf.Handle(davName("current-user-principal"), func() any {
@@ -363,6 +380,23 @@ func (e expandPropEntry) xmlName() xml.Name {
 // PrincipalSearcher is implemented by principal collections that can search.
 type PrincipalSearcher interface {
 	SearchPrincipals(search map[xml.Name]string, test string) ([]string, error)
+}
+
+// proxyFor lists the user principals whose calendars this principal may act as
+// a proxy for: the parents of the proxy groups it belongs to. Backs the
+// calendarserver calendar-proxy-read-for / calendar-proxy-write-for properties.
+func (p *Plugin) proxyFor(ph PrincipalHolder, proxySuffix string) any {
+	groups, err := ph.GroupMembership()
+	if err != nil {
+		return nil
+	}
+	hrefs := davxml.Href{}
+	for _, g := range groups {
+		if parent, base := splitPath(g); base == proxySuffix {
+			hrefs = append(hrefs, p.server.BaseURI+parent+"/")
+		}
+	}
+	return hrefs
 }
 
 func (p *Plugin) principalHrefs(fn func() ([]string, error)) any {

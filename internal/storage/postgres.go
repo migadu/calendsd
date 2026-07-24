@@ -712,6 +712,37 @@ SELECT groups.uri
  WHERE members.uri = $1`, principal)
 }
 
+// SetGroupMemberSet replaces a group's members, transcribing sabre's PDO
+// setGroupMemberSet: resolve principal ids, delete the old rows, insert the new
+// ones. The group and every member must already exist as principals.
+func (p *Principals) SetGroupMemberSet(principal string, members []string) error {
+	tx, err := p.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var groupID int64
+	if err := tx.QueryRow(`SELECT id FROM principals WHERE uri = $1`, principal).Scan(&groupID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM groupmembers WHERE principal_id = $1`, groupID); err != nil {
+		return err
+	}
+	for _, member := range members {
+		var memberID int64
+		if err := tx.QueryRow(`SELECT id FROM principals WHERE uri = $1`, member).Scan(&memberID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO groupmembers (principal_id, member_id) VALUES ($1, $2)`,
+			groupID, memberID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // searchColumns maps searchable principal properties to columns.
 var searchColumns = map[xml.Name]string{
 	{Space: davxml.NSDav, Local: "displayname"}:        "displayname",

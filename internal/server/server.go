@@ -56,7 +56,9 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	addressbooks := &storage.CardDAV{DB: db}
 
 	root := mock.NewCollection("root")
-	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	principalCollection := acl.NewPrincipalCollection(principals, "principals")
+	principalCollection.Proxies = true // expose calendar-proxy delegation principals
+	root.Attach(principalCollection)
 	root.Attach(caldav.NewCalendarRoot(principals, calendars, "calendars"))
 	root.Attach(carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks"))
 

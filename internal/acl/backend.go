@@ -31,6 +31,9 @@ type Backend interface {
 	GroupMemberSet(principal string) ([]string, error)
 	// GroupMembership lists groups a principal belongs to.
 	GroupMembership(principal string) ([]string, error)
+	// SetGroupMemberSet replaces the members of a group principal. Used to
+	// configure calendar-proxy delegation via PROPPATCH group-member-set.
+	SetGroupMemberSet(principal string, members []string) error
 	// SearchPrincipals returns principal paths under prefix whose
 	// properties match every (test=allof) or any (test=anyof) of the
 	// searched name→substring pairs. Port of searchPrincipals.
@@ -66,6 +69,14 @@ func (m *MemoryBackend) PrincipalByPath(path string) (*Principal, error) {
 
 func (m *MemoryBackend) GroupMemberSet(principal string) ([]string, error) {
 	return m.Groups[principal], nil
+}
+
+func (m *MemoryBackend) SetGroupMemberSet(principal string, members []string) error {
+	if m.Groups == nil {
+		m.Groups = map[string][]string{}
+	}
+	m.Groups[principal] = members
+	return nil
 }
 
 func (m *MemoryBackend) GroupMembership(principal string) ([]string, error) {
