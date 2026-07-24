@@ -361,7 +361,14 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if preferMinimal(r) {
+	switch {
+	case pf.Type == davxml.PropfindPropName:
+		// propname: return only the names of the properties that exist,
+		// with empty values and status 200 (RFC 4918 §9.1).
+		for i := range responses {
+			responses[i].Propstats = propNamesOnly(responses[i].Propstats)
+		}
+	case preferMinimal(r):
 		for i := range responses {
 			responses[i].Propstats = stripStatus(responses[i].Propstats, http.StatusNotFound)
 		}
@@ -775,6 +782,24 @@ func preferMinimal(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// propNamesOnly collapses discovered properties to a single 200 propstat of
+// bare names with empty values — the propname flavor of PROPFIND.
+func propNamesOnly(propstats []davxml.Propstat) []davxml.Propstat {
+	var names []davxml.Property
+	for _, ps := range propstats {
+		if ps.Status != http.StatusOK {
+			continue
+		}
+		for _, p := range ps.Props {
+			names = append(names, davxml.Property{Name: p.Name})
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return []davxml.Propstat{{Status: http.StatusOK, Props: names}}
 }
 
 // stripStatus removes propstat groups with the given status.
