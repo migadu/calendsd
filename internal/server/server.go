@@ -73,6 +73,7 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	srv.AddPlugin(&caldav.Plugin{})
 	srv.AddPlugin(&caldav.SchedulePlugin{})
 	srv.AddPlugin(&caldav.SharingPlugin{})
+	srv.AddPlugin(&caldav.NotificationsPlugin{})
 	srv.AddPlugin(&carddav.Plugin{})
 	if cfg.IMipSMTP != "" {
 		srv.AddPlugin(&caldav.IMipPlugin{

@@ -107,6 +107,9 @@ func (h *CalendarHome) Children() ([]dav.Node, error) {
 	if sb, ok := h.backend.(SchedulingBackend); ok {
 		out = append(out, NewInbox(sb, h.principalURI), NewOutbox(h.principalURI))
 	}
+	if nb, ok := h.backend.(NotificationsBackend); ok {
+		out = append(out, NewNotifications(nb, h.principalURI))
+	}
 	return out, nil
 }
 
@@ -118,6 +121,9 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 		case "outbox":
 			return NewOutbox(h.principalURI), nil
 		}
+	}
+	if nb, ok := h.backend.(NotificationsBackend); ok && name == "notifications" {
+		return NewNotifications(nb, h.principalURI), nil
 	}
 	infos, err := h.backend.CalendarsForUser(h.principalURI)
 	if err != nil {

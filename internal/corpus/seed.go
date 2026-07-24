@@ -60,6 +60,7 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	}
 	if rec.Setup.SetupCalDAVSharing {
 		srv.AddPlugin(&caldav.SharingPlugin{})
+		srv.AddPlugin(&caldav.NotificationsPlugin{})
 	}
 	if rec.Setup.SetupCardDAV {
 		srv.AddPlugin(&carddav.Plugin{})

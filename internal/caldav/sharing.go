@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"net/http"
 	"strings"
+	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/dav"
@@ -53,9 +54,11 @@ type ReplySupport interface {
 	ShareReply(href string, status int, calendarURI, inReplyTo, summary string) (string, error)
 }
 
-// MockSharingBackend ports sabre's Backend\MockSharing.
+// MockSharingBackend ports sabre's Backend\MockSharing (with notification
+// support so the sharee round-trip can be exercised).
 type MockSharingBackend struct {
 	MockBackend
+	MemoryNotificationsBackend
 	Shares map[CalendarID][]Sharee
 }
 
@@ -189,9 +192,38 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	if err := sharing.UpdateInvites(calNode.Info.ID, sharees); err != nil {
 		return err
 	}
+	// Drop an invite-notification into each added local sharee's inbox, so
+	// their client's notification feed surfaces the share (like sabre).
+	if notif, ok := calNode.backend.(NotificationsBackend); ok {
+		for _, sharee := range sharees {
+			if sharee.Access == AccessNoAccess || sharee.Principal == "" {
+				continue
+			}
+			_ = notif.AddNotification(sharee.Principal, InviteNotification{
+				ID:           notificationID(calPath, sharee.Href),
+				DTStamp:      requestTime(r),
+				HostURL:      calPath,
+				Organizer:    calNode.Owner(),
+				Access:       sharee.Access,
+				InviteStatus: InviteNoResponse,
+				Summary:      sharee.Comment,
+			})
+		}
+	}
 	w.Header().Set("X-Sabre-Status", "everything-went-well")
 	w.WriteHeader(http.StatusOK)
 	return nil
+}
+
+// requestTime returns a deterministic timestamp when available (parity/tests
+// pin it), else now.
+func requestTime(r *http.Request) time.Time {
+	if v := r.Header.Get("X-Test-Now"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t
+		}
+	}
+	return time.Now()
 }
 
 // inviteReply processes a sharee's accept/decline.

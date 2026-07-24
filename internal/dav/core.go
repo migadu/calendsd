@@ -144,13 +144,11 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	if err != nil {
 		return true, err
 	}
-	file, isFile := node.(File)
-	if !isFile {
-		return false, nil
-	}
 
-	// Plugins may take over serving (content-type transforms, sabre's
-	// afterMethod:GET equivalents).
+	// Plugins may take over serving (content-type transforms and
+	// non-file nodes like notifications; sabre's afterMethod:GET
+	// equivalents). Consulted before the File check so a plugin can
+	// serve a node that is not an IFile.
 	if !headOnly {
 		for _, p := range c.server.Plugins() {
 			if hook, ok := p.(GetHandlerHook); ok {
@@ -160,6 +158,11 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 				}
 			}
 		}
+	}
+
+	file, isFile := node.(File)
+	if !isFile {
+		return false, nil
 	}
 
 	h := w.Header()
