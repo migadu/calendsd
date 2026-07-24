@@ -54,3 +54,45 @@ func TestComponentTypeEnforcedOnPut(t *testing.T) {
 		t.Errorf("VTODO PUT into events-only calendar = %d, want 403", code)
 	}
 }
+
+// Malformed iCalendar must fail as a clean client error, never a 500 leaking an
+// internal parse error. A body that is not iCalendar at all is a 415; a body
+// that parses but is semantically invalid (bad DURATION) is a 400 carrying the
+// RFC 4791 {CALDAV:}valid-calendar-data precondition. Regression test for the
+// CalDAVTester finding where an invalid DURATION returned HTTP 500.
+func TestMalformedCalendarDataRejectedCleanly(t *testing.T) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/user1"}}}
+	backend := &caldav.MockBackend{Calendars: []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "calendar", PrincipalURI: "principals/user1",
+	}}}
+
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+
+	put := func(uri, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("PUT", "/calendars/user1/calendar/"+uri, strings.NewReader(body))
+		req.Header.Set("Content-Type", "text/calendar")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := put("garbage.ics", "this is not iCalendar"); w.Code != 415 {
+		t.Errorf("non-iCalendar PUT = %d, want 415\n%s", w.Code, w.Body.String())
+	}
+
+	badDur := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:bad\r\nDTSTART:20260101T120000Z\r\nDURATION:PTH\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	w := put("bad.ics", badDur)
+	if w.Code != 400 {
+		t.Fatalf("invalid-DURATION PUT = %d, want 400 (must never be 500)\n%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), davxml.NSCalDAV) ||
+		!strings.Contains(w.Body.String(), "valid-calendar-data") {
+		t.Errorf("400 body missing valid-calendar-data precondition:\n%s", w.Body.String())
+	}
+}

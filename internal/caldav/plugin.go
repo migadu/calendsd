@@ -72,11 +72,13 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 		data = ical.EncodeLenient(decoded)
 	}
 
-	// Enforce the calendar's supported component types. A parse failure here
-	// is left to the backend, which surfaces it as before.
+	// A body that will not parse as iCalendar is rejected up front, the way
+	// sabre's validateICalendar does, rather than handed to the backend, which
+	// would surface the failure as an opaque 500.
 	cal, err := ical.Decode(data)
 	if err != nil {
-		return data, nil
+		return nil, dav.ErrUnsupportedMediaType(
+			"This resource only supports valid iCalendar 2.0 data. Parse error: %s", err)
 	}
 	compType := ical.ComponentType(cal)
 	if compType == "" {
@@ -86,7 +88,25 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 		return nil, invalidComponentType(fmt.Sprintf(
 			"This calendar only supports %s; the object is a %s", strings.Join(allowed, ", "), compType))
 	}
+	// The backend denormalizes every stored object (first/last occurrence,
+	// recurrence bounds). Run that here so data which parses structurally but
+	// is semantically invalid — a malformed DURATION, date, or RRULE — fails
+	// as a 400 carrying the CalDAV valid-calendar-data precondition instead of
+	// an opaque backend 500 leaking an internal error string.
+	if _, err := ical.Denormalize(data); err != nil {
+		return nil, invalidCalendarData("Invalid iCalendar data: %s", err)
+	}
 	return data, nil
+}
+
+// invalidCalendarData reports iCalendar that parses but is not usable (bad
+// durations, dates, or recurrence rules) as a 400 carrying the RFC 4791
+// {CALDAV:}valid-calendar-data precondition, mirroring sabre's precondition
+// reporting rather than leaking an internal error as a 500.
+func invalidCalendarData(format string, args ...any) error {
+	e := dav.ErrBadRequest(format, args...)
+	e.Precondition = []xml.Name{{Space: davxml.NSCalDAV, Local: "valid-calendar-data"}}
+	return e
 }
 
 // invalidComponentType mirrors sabre's Sabre\CalDAV\Exception\InvalidComponentType

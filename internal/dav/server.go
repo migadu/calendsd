@@ -246,12 +246,20 @@ func (s *Server) WriteError(w http.ResponseWriter, err error) {
 		h.Set("Allow", strings.Join(s.AllowedMethods(""), ", "))
 	}
 	w.WriteHeader(de.Status)
+	var pre strings.Builder
+	for _, name := range de.Precondition {
+		// A self-closing precondition element carrying its own namespace,
+		// like sabre's exception::serialize output.
+		fmt.Fprintf(&pre, "  <x:%s xmlns:x=\"%s\"/>\n",
+			xmlEscape(name.Local), xmlEscape(name.Space))
+	}
 	fmt.Fprintf(w, xml.Header+
 		"<d:error xmlns:d=\"DAV:\" xmlns:s=\"%s\">\n"+
+		"%s"+
 		"  <s:exception>%s</s:exception>\n"+
 		"  <s:message>%s</s:message>\n"+
 		"</d:error>\n",
-		davxml.NSSabreDAV, xmlEscape(de.Exception), xmlEscape(de.Message))
+		davxml.NSSabreDAV, pre.String(), xmlEscape(de.Exception), xmlEscape(de.Message))
 }
 
 func xmlEscape(s string) string {

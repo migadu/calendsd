@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,10 @@ type Error struct {
 	// "Sabre\DAV\Exception\NotFound".
 	Exception string
 	Message   string
+	// Precondition names protocol precondition/postcondition elements
+	// (e.g. {urn:ietf:params:xml:ns:caldav}valid-calendar-data) that sabre
+	// serializes as children of {DAV:}error alongside the exception.
+	Precondition []xml.Name
 }
 
 func (e *Error) Error() string {
