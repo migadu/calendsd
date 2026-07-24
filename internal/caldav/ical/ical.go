@@ -17,6 +17,18 @@ func Decode(data []byte) (*goical.Calendar, error) {
 	return goical.NewDecoder(bytes.NewReader(data)).Decode()
 }
 
+// ComponentType returns the first non-VTIMEZONE component name (VEVENT, VTODO,
+// VJOURNAL, …), or "" if the calendar has none. This is the type CalDAV
+// filters and validates against supported-calendar-component-set.
+func ComponentType(cal *goical.Calendar) string {
+	for _, child := range cal.Children {
+		if child.Name != goical.CompTimezone {
+			return child.Name
+		}
+	}
+	return ""
+}
+
 // NormalizeCRLF restores CRLF line endings, undoing the \r-stripping the
 // PROPFIND calendar-data handler applies before XML output. go-ical's parser
 // requires CRLF.

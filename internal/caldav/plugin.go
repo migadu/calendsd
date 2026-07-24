@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,27 +47,56 @@ func (p *Plugin) Features() []string { return []string{"calendar-access"} }
 
 func (p *Plugin) Methods(path string) []string { return []string{"MKCALENDAR"} }
 
-// InterceptWrite implements dav.WriteInterceptor: a jCal (RFC 7265) body PUT to
-// a calendar is converted to iCalendar before storage, matching sabre's
-// jCal-on-PUT handling. Runs before the scheduling broker (registration order),
-// so downstream sees iCalendar. Malformed jCal is rejected rather than stored.
+// InterceptWrite implements dav.WriteInterceptor for calendar-object PUTs,
+// mirroring sabre's validateICalendar: a jCal (RFC 7265) body is converted to
+// iCalendar, and the object's component type is checked against the calendar's
+// supported-calendar-component-set. Runs before the scheduling broker
+// (registration order), so downstream sees validated iCalendar.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
-	if !ical.IsJCal(data) {
-		return data, nil
-	}
 	parentPath, _ := splitPath(path)
 	parent, err := p.server.Tree.NodeForPath(parentPath)
 	if err != nil {
 		return data, nil // not a calendar object write; leave it to other handlers
 	}
-	if _, isCal := parent.(*Calendar); !isCal {
+	calNode, isCal := parent.(*Calendar)
+	if !isCal {
 		return data, nil
 	}
-	cal, err := ical.DecodeJCal(data)
-	if err != nil {
-		return nil, dav.ErrBadRequest("Invalid jCal request body: %s", err)
+
+	// jCal → iCalendar. Malformed jCal is rejected rather than stored raw.
+	if ical.IsJCal(data) {
+		decoded, err := ical.DecodeJCal(data)
+		if err != nil {
+			return nil, dav.ErrBadRequest("Invalid jCal request body: %s", err)
+		}
+		data = ical.EncodeLenient(decoded)
 	}
-	return ical.EncodeLenient(cal), nil
+
+	// Enforce the calendar's supported component types. A parse failure here
+	// is left to the backend, which surfaces it as before.
+	cal, err := ical.Decode(data)
+	if err != nil {
+		return data, nil
+	}
+	compType := ical.ComponentType(cal)
+	if compType == "" {
+		return nil, invalidComponentType("iCalendar object must contain a VEVENT, VTODO or VJOURNAL component")
+	}
+	if allowed := calNode.SupportedComponents(); !slices.Contains(allowed, compType) {
+		return nil, invalidComponentType(fmt.Sprintf(
+			"This calendar only supports %s; the object is a %s", strings.Join(allowed, ", "), compType))
+	}
+	return data, nil
+}
+
+// invalidComponentType mirrors sabre's Sabre\CalDAV\Exception\InvalidComponentType
+// (a 403 Forbidden subclass) so the error identity matches on the wire.
+func invalidComponentType(msg string) error {
+	return &dav.Error{
+		Status:    http.StatusForbidden,
+		Exception: `Sabre\CalDAV\Exception\InvalidComponentType`,
+		Message:   msg,
+	}
 }
 
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {

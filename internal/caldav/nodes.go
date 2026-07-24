@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/dav"
+	davxml "calserver/internal/dav/xml"
 )
 
 // CalendarRoot is the /calendars collection: one CalendarHome per principal.
@@ -253,6 +255,25 @@ func (c *Calendar) CreateFile(name string, data io.Reader) (string, error) {
 
 func (c *Calendar) CreateDirectory(string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in calendar objects is not allowed")
+}
+
+var supportedComponentRe = regexp.MustCompile(`name="([A-Za-z]+)"`)
+
+// SupportedComponents lists the component types this calendar accepts, parsed
+// from supported-calendar-component-set. Absent the property it defaults to all
+// three, matching sabre's validateICalendar.
+func (c *Calendar) SupportedComponents() []string {
+	name := xml.Name{Space: davxml.NSCalDAV, Local: "supported-calendar-component-set"}
+	if raw, ok := c.Info.Props[name].(davxml.Raw); ok {
+		var out []string
+		for _, m := range supportedComponentRe.FindAllStringSubmatch(string(raw), -1) {
+			out = append(out, strings.ToUpper(m[1]))
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return []string{"VEVENT", "VTODO", "VJOURNAL"}
 }
 
 // Props implements dav.PropNode with the calendar's stored properties.
