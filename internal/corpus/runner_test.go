@@ -31,6 +31,21 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
+	`Sabre\CalDAV\SharingPluginTest::testInviteBadXML`:                                 true,
+	`Sabre\CalDAV\SharingPluginTest::testInviteReply`:                                  true,
+	`Sabre\CalDAV\SharingPluginTest::testInviteWrongUrl`:                               true,
+	`Sabre\CalDAV\SharingPluginTest::testPublish`:                                      true,
+	`Sabre\CalDAV\SharingPluginTest::testPublishWrongUrl`:                              true,
+	`Sabre\CalDAV\SharingPluginTest::testShareRequest`:                                 true,
+	`Sabre\CalDAV\SharingPluginTest::testShareRequestNoShareableCalendar`:              true,
+	`Sabre\CalDAV\SharingPluginTest::testUnknownMethodNoNode`:                          true,
+	`Sabre\CalDAV\SharingPluginTest::testUnknownMethodNoPOST`:                          true,
+	`Sabre\CalDAV\SharingPluginTest::testUnknownMethodNoXML`:                           true,
+	`Sabre\CalDAV\SharingPluginTest::testUnknownXmlDoc`:                                true,
+	`Sabre\CalDAV\SharingPluginTest::testUnpublish`:                                    true,
+	`Sabre\CalDAV\SharingPluginTest::testUnpublishWrongUrl`:                            true,
+	`Sabre\CalDAV\Subscriptions\CreateSubscriptionTest::testMKCALENDAR`:                true,
+	`Sabre\CalDAV\Subscriptions\CreateSubscriptionTest::testMKCOL`:                     true,
 	`Sabre\CalDAV\Schedule\DeliverNewEventTest::testDelivery`:                          true,
 	`Sabre\CalDAV\Schedule\OutboxPostTest::testInvalidIcalBody`:                        true,
 	`Sabre\CalDAV\Schedule\OutboxPostTest::testNoMETHOD`:                               true,
@@ -148,8 +163,6 @@ var passing = map[string]bool{
 var outOfScopePrefixes = []string{
 	`Sabre\DAV\PartialUpdate\`,
 	`Sabre\DAV\Sharing\`,
-	`Sabre\CalDAV\SharingPluginTest`,
-	`Sabre\CalDAV\Subscriptions\`,
 }
 
 // TestCorpus replays the extracted sabre corpus. Records are grouped by

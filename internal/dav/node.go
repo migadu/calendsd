@@ -55,6 +55,15 @@ type File interface {
 	ETag() string
 }
 
+// ExtendedCollection can create children with non-standard resource types
+// (extended MKCOL / MKCALENDAR bodies). Port of sabre's IExtendedCollection.
+type ExtendedCollection interface {
+	Collection
+	// CreateExtendedCollection creates a child with the given resource
+	// types and initial properties.
+	CreateExtendedCollection(name string, resourceTypes []xml.Name, props map[xml.Name]any) error
+}
+
 // PropNode is a node with custom (dead or protected) properties.
 // Port of sabre's IProperties.
 type PropNode interface {

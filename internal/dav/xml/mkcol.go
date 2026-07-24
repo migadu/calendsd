@@ -3,6 +3,7 @@ package davxml
 import (
 	"bytes"
 	"encoding/xml"
+	"strings"
 )
 
 type mkcolXML struct {
@@ -15,6 +16,7 @@ type mkcolXML struct {
 					XMLName xml.Name
 				} `xml:",any"`
 				Value string `xml:",chardata"`
+				Inner string `xml:",innerxml"`
 			} `xml:",any"`
 		} `xml:"prop"`
 	} `xml:"set"`
@@ -39,7 +41,11 @@ func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
 			}
 			continue
 		}
-		props[p.XMLName] = p.Value
+		if strings.Contains(p.Inner, "<") {
+			props[p.XMLName] = []byte(p.Inner)
+		} else {
+			props[p.XMLName] = p.Value
+		}
 	}
 	if !haveResourceType {
 		return nil, nil, errMissingResourceType

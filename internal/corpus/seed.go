@@ -51,6 +51,9 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	if rec.Setup.SetupCalDAVScheduling {
 		srv.AddPlugin(&caldav.SchedulePlugin{})
 	}
+	if rec.Setup.SetupCalDAVSharing {
+		srv.AddPlugin(&caldav.SharingPlugin{})
+	}
 	if rec.Setup.AutoLogin != "" {
 		srv.AddPlugin(auth.NewLoggedInPlugin("principals/" + rec.Setup.AutoLogin))
 	}
@@ -73,11 +76,20 @@ type seedBackends struct {
 func seedCalDAV(rec *Record) (caldav.Backend, error) {
 	var backend *caldav.MockBackend
 	var result caldav.Backend
-	if rec.Setup.SetupCalDAVScheduling {
+	switch {
+	case rec.Setup.SetupCalDAVSharing:
+		sharing := &caldav.MockSharingBackend{}
+		backend = &sharing.MockBackend
+		result = sharing
+	case rec.Setup.SetupCalDAVSubscriptions:
+		subs := &caldav.MockSubscriptionBackend{}
+		backend = &subs.MockBackend
+		result = subs
+	case rec.Setup.SetupCalDAVScheduling:
 		sched := &caldav.MockSchedulingBackend{}
 		backend = &sched.MockBackend
 		result = sched
-	} else {
+	default:
 		plain := &caldav.MockBackend{}
 		backend = plain
 		result = plain
@@ -101,6 +113,10 @@ func seedCalDAV(rec *Record) (caldav.Backend, error) {
 					info.PrincipalURI, _ = v.(string)
 				case "name":
 					// sabre's mock keeps a non-property name key.
+				case "share-access":
+					if f, isNum := v.(float64); isNum {
+						info.ShareAccess = int(f)
+					}
 				default:
 					name, err := davxml.ParseClark(k)
 					if err != nil {

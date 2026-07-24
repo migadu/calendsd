@@ -526,6 +526,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var extraProps map[xml.Name]any
+	var resourceTypes []xml.Name
 	if len(body) > 0 {
 		contentType := r.Header.Get("Content-Type")
 		if !strings.HasPrefix(contentType, "application/xml") && !strings.HasPrefix(contentType, "text/xml") {
@@ -539,6 +540,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 			return ErrForbidden("Unable to create a collection of this type")
 		}
 		extraProps = props
+		resourceTypes = resourceType
 	}
 
 	if c.server.Tree.NodeExists(path) {
@@ -555,6 +557,20 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	coll, isColl := parent.(Collection)
 	if !isColl {
 		return ErrConflict("Parent node is not a collection")
+	}
+	// Non-plain resource types go to extended-collection parents
+	// (calendars, subscriptions), like sabre's createCollection.
+	if len(resourceTypes) > 1 {
+		ext, isExt := parent.(ExtendedCollection)
+		if !isExt {
+			return ErrForbidden("Unable to create a collection of this type")
+		}
+		if err := ext.CreateExtendedCollection(name, resourceTypes, extraProps); err != nil {
+			return err
+		}
+		w.Header().Set("Content-Length", "0")
+		w.WriteHeader(http.StatusCreated)
+		return nil
 	}
 	if err := coll.CreateDirectory(name); err != nil {
 		return err

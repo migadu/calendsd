@@ -153,6 +153,35 @@ func (h *CalendarHome) CreateCalendar(name string, props map[xml.Name]any) error
 	return err
 }
 
+// CreateExtendedCollection implements dav.ExtendedCollection: calendars and
+// subscriptions, depending on the resource types. Port of sabre's
+// CalendarHome::createExtendedCollection.
+func (h *CalendarHome) CreateExtendedCollection(name string, resourceTypes []xml.Name, props map[xml.Name]any) error {
+	isSubscription := false
+	isCalendar := false
+	for _, rt := range resourceTypes {
+		if rt == nameSubscribed {
+			isSubscription = true
+		}
+		if rt == nameCalendar {
+			isCalendar = true
+		}
+	}
+	switch {
+	case isSubscription:
+		subs, supported := h.backend.(SubscriptionsBackend)
+		if !supported {
+			return dav.ErrForbidden("This backend does not support subscriptions")
+		}
+		_, err := subs.CreateSubscription(h.principalURI, name, props)
+		return err
+	case isCalendar:
+		return h.CreateCalendar(name, props)
+	default:
+		return dav.ErrForbidden("Unable to create a collection of this type in the calendar home")
+	}
+}
+
 // Owner returns the owning principal.
 func (h *CalendarHome) Owner() string { return h.principalURI }
 
@@ -273,6 +302,10 @@ func (c *Calendar) SupportedPrivileges() *acl.Privilege {
 			{Name: "{DAV:}unbind"},
 			{Name: "{DAV:}write-acl"},
 		}},
+		// {DAV:}share is a sibling of write (not aggregated by it), so
+		// write access alone does not grant re-sharing — like sabre's
+		// Sharing\Plugin::getSupportedPrivilegeSet.
+		{Name: "{DAV:}share"},
 	}}
 }
 
@@ -301,6 +334,11 @@ func (c *Calendar) ACL() []acl.ACE {
 		aces = append(aces,
 			acl.ACE{Privilege: "{DAV:}write", Principal: owner, Protected: true},
 			acl.ACE{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true})
+	}
+	// {DAV:}share is granted only on the owner's own view (not-shared or
+	// shared-owner), so a sharee cannot re-share, like sabre.
+	if c.Info.ShareAccess == 0 || c.Info.ShareAccess == 1 {
+		aces = append(aces, acl.ACE{Privilege: "{DAV:}share", Principal: owner, Protected: true})
 	}
 	return aces
 }

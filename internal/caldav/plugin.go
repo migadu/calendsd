@@ -86,7 +86,20 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 	if !isHome {
 		return dav.ErrMethodNotAllowed("You can only create calendars inside a calendar home")
 	}
-	if err := home.CreateCalendar(name, props); err != nil {
+	// iCal abuses MKCALENDAR to create subscriptions: a resourcetype in
+	// the body overrides the default, like sabre.
+	resourceTypes := []xml.Name{
+		{Space: davxml.NSDav, Local: "collection"}, nameCalendar,
+	}
+	if rt, hasRT := props[xml.Name{Space: davxml.NSDav, Local: "resourcetype"}]; hasRT {
+		if raw, isRaw := rt.([]byte); isRaw {
+			if names, err := parseResourceTypeFragment(raw); err == nil {
+				resourceTypes = names
+			}
+		}
+		delete(props, xml.Name{Space: davxml.NSDav, Local: "resourcetype"})
+	}
+	if err := home.CreateExtendedCollection(name, resourceTypes, props); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Length", "0")
@@ -117,6 +130,30 @@ func parseMkcalendarProps(body []byte) (map[xml.Name]any, error) {
 			out[prop.XMLName] = []byte(prop.Inner)
 		} else {
 			out[prop.XMLName] = prop.Inner
+		}
+	}
+	return out, nil
+}
+
+// parseResourceTypeFragment extracts element names from a raw resourcetype
+// fragment.
+func parseResourceTypeFragment(raw []byte) ([]xml.Name, error) {
+	dec := xml.NewDecoder(bytes.NewReader(append(append([]byte("<rt>"), raw...), []byte("</rt>")...)))
+	var out []xml.Name
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth > 0 {
+				out = append(out, t.Name)
+			}
+			depth++
+		case xml.EndElement:
+			depth--
 		}
 	}
 	return out, nil

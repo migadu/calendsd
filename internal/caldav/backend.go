@@ -32,6 +32,9 @@ type CalendarInfo struct {
 	PrincipalURI string
 	// Props holds calendar properties in clark-name keys.
 	Props map[xml.Name]any
+	// ShareAccess is the sharing access level of this calendar view
+	// (AccessNotShared/AccessSharedOwner for the owner's own view).
+	ShareAccess int
 }
 
 // ObjectInfo is one calendar object (event/todo). Port of the row arrays
