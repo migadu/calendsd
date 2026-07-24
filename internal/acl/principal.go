@@ -168,3 +168,8 @@ func (c *PrincipalCollection) CreateFile(string, io.Reader) (string, error) {
 func (c *PrincipalCollection) CreateDirectory(string) error {
 	return dav.ErrForbidden("Permission denied to create directory")
 }
+
+// SearchPrincipals implements PrincipalSearcher via the backend.
+func (c *PrincipalCollection) SearchPrincipals(search map[xml.Name]string, test string) ([]string, error) {
+	return c.backend.SearchPrincipals(c.prefix, search, test)
+}

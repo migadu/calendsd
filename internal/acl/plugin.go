@@ -143,7 +143,226 @@ func (p *Plugin) SupportedReports(node dav.Node, path string) []xml.Name {
 	return []xml.Name{
 		{Space: davxml.NSDav, Local: "principal-match"},
 		{Space: davxml.NSDav, Local: "acl-principal-prop-set"},
+		{Space: davxml.NSDav, Local: "principal-property-search"},
+		{Space: davxml.NSDav, Local: "principal-search-property-set"},
+		{Space: davxml.NSDav, Local: "expand-property"},
 	}
+}
+
+// principalSearchProps are the properties this server allows searching over,
+// with human descriptions (sabre's default $principalSearchPropertySet).
+var principalSearchProps = []struct {
+	name        xml.Name
+	description string
+}{
+	{xml.Name{Space: davxml.NSDav, Local: "displayname"}, "Display name"},
+	{xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}, "Email address"},
+}
+
+type principalPropertySearchXML struct {
+	XMLName                       xml.Name  `xml:"DAV: principal-property-search"`
+	ApplyToPrincipalCollectionSet *struct{} `xml:"apply-to-principal-collection-set"`
+	Test                          string    `xml:"test,attr"`
+	PropertySearch                []struct {
+		Prop struct {
+			Names []struct{ XMLName xml.Name } `xml:",any"`
+		} `xml:"prop"`
+		Match string `xml:"match"`
+	} `xml:"property-search"`
+	Prop *struct {
+		Names []struct{ XMLName xml.Name } `xml:",any"`
+	} `xml:"prop"`
+}
+
+// principalPropertySearchReport implements {DAV:}principal-property-search:
+// the attendee/contact directory search clients use (RFC 3744 §9.4).
+func (p *Plugin) principalPropertySearchReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
+	var req principalPropertySearchXML
+	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		return dav.ErrBadRequest("%s", err)
+	}
+	if d := r.Header.Get("Depth"); d != "" && d != "0" {
+		return dav.ErrBadRequest("Depth must be 0")
+	}
+	test := "allof"
+	if req.Test == "anyof" {
+		test = "anyof"
+	}
+	search := map[xml.Name]string{}
+	for _, ps := range req.PropertySearch {
+		for _, n := range ps.Prop.Names {
+			search[n.XMLName] = ps.Match
+		}
+	}
+	var props []xml.Name
+	if req.Prop != nil {
+		for _, n := range req.Prop.Names {
+			props = append(props, n.XMLName)
+		}
+	}
+
+	// Search each principal collection (the request path, or all of them
+	// when apply-to-principal-collection-set is set).
+	prefixes := []string{strings.Trim(path, "/")}
+	if req.ApplyToPrincipalCollectionSet != nil {
+		prefixes = p.principalCollectionPrefixes()
+	}
+	seen := map[string]bool{}
+	ms := &davxml.MultiStatus{}
+	for _, prefix := range prefixes {
+		matches, err := p.backendSearch(prefix, search, test)
+		if err != nil {
+			return err
+		}
+		for _, principal := range matches {
+			if seen[principal] {
+				continue
+			}
+			seen[principal] = true
+			responses, err := p.server.PropertiesForPath(r.Context(), principal, props, 0)
+			if err != nil {
+				return err
+			}
+			ms.Responses = append(ms.Responses, responses...)
+		}
+	}
+	return writeMultiStatus(w, ms)
+}
+
+// backendSearch runs a principal search against the collection at prefix.
+func (p *Plugin) backendSearch(prefix string, search map[xml.Name]string, test string) ([]string, error) {
+	node, err := p.server.Tree.NodeForPath(prefix)
+	if err != nil {
+		return nil, nil
+	}
+	searcher, ok := node.(PrincipalSearcher)
+	if !ok {
+		return nil, nil
+	}
+	return searcher.SearchPrincipals(search, test)
+}
+
+// principalCollectionPrefixes returns the known principal collection paths.
+func (p *Plugin) principalCollectionPrefixes() []string {
+	return []string{"principals"}
+}
+
+func (p *Plugin) principalSearchPropertySetReport(w http.ResponseWriter) error {
+	var b bytes.Buffer
+	b.WriteString(xml.Header)
+	b.WriteString(`<d:principal-search-property-set xmlns:d="DAV:" xmlns:s="` + davxml.NSSabreDAV + `">` + "\n")
+	for _, sp := range principalSearchProps {
+		b.WriteString(" <d:principal-search-property>\n  <d:prop>\n")
+		b.WriteString("   " + emptyElement(sp.name) + "\n")
+		b.WriteString("  </d:prop>\n")
+		b.WriteString(`  <d:description xml:lang="en">` + xmlEscape(sp.description) + "</d:description>\n")
+		b.WriteString(" </d:principal-search-property>\n")
+	}
+	b.WriteString("</d:principal-search-property-set>\n")
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(b.Bytes())
+	return err
+}
+
+// emptyElement renders a clark-name as an empty prefixed element.
+func emptyElement(n xml.Name) string {
+	prefix := "d"
+	if n.Space == davxml.NSSabreDAV {
+		prefix = "s"
+	}
+	return "<" + prefix + ":" + n.Local + "/>"
+}
+
+func xmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
+}
+
+type expandPropertyXML struct {
+	XMLName  xml.Name          `xml:"DAV: expand-property"`
+	Property []expandPropEntry `xml:"property"`
+}
+
+type expandPropEntry struct {
+	Name      string            `xml:"name,attr"`
+	Namespace string            `xml:"namespace,attr"`
+	Children  []expandPropEntry `xml:"property"`
+}
+
+// expandPropertyReport implements {DAV:}expand-property: href-valued
+// properties are replaced inline with the child's expanded properties,
+// saving round-trips (RFC 3253 §3.8).
+func (p *Plugin) expandPropertyReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
+	var req expandPropertyXML
+	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		return dav.ErrBadRequest("%s", err)
+	}
+	depth := 0
+	if d := r.Header.Get("Depth"); d == "1" {
+		depth = 1
+	}
+	responses, err := p.expandProperties(r.Context(), path, req.Property, depth)
+	if err != nil {
+		return err
+	}
+	return writeMultiStatus(w, &davxml.MultiStatus{Responses: responses})
+}
+
+func (p *Plugin) expandProperties(ctx context.Context, path string, requested []expandPropEntry, depth int) ([]davxml.Response, error) {
+	var names []xml.Name
+	childReq := map[xml.Name][]expandPropEntry{}
+	for _, entry := range requested {
+		n := entry.xmlName()
+		names = append(names, n)
+		if len(entry.Children) > 0 {
+			childReq[n] = entry.Children
+		}
+	}
+	responses, err := p.server.PropertiesForPath(ctx, path, names, depth)
+	if err != nil {
+		return nil, err
+	}
+	for ri := range responses {
+		for pi := range responses[ri].Propstats {
+			ps := &responses[ri].Propstats[pi]
+			if ps.Status != http.StatusOK {
+				continue
+			}
+			for i, prop := range ps.Props {
+				children, expand := childReq[prop.Name]
+				hrefs, isHref := prop.Value.(davxml.Href)
+				if !expand || !isHref {
+					continue
+				}
+				var nested []davxml.Response
+				for _, href := range hrefs {
+					childPath := strings.Trim(strings.TrimPrefix(href, p.server.BaseURI), "/")
+					sub, err := p.expandProperties(ctx, childPath, children, 0)
+					if err != nil {
+						return nil, err
+					}
+					nested = append(nested, sub...)
+				}
+				ps.Props[i].Value = davxml.ResponseList(nested)
+			}
+		}
+	}
+	return responses, nil
+}
+
+func (e expandPropEntry) xmlName() xml.Name {
+	// sabre's ExpandPropertyReport defaults an absent namespace to DAV:.
+	ns := e.Namespace
+	if ns == "" {
+		ns = davxml.NSDav
+	}
+	return xml.Name{Space: ns, Local: e.Name}
+}
+
+// PrincipalSearcher is implemented by principal collections that can search.
+type PrincipalSearcher interface {
+	SearchPrincipals(search map[xml.Name]string, test string) ([]string, error)
 }
 
 func (p *Plugin) principalHrefs(fn func() ([]string, error)) any {
@@ -160,11 +379,18 @@ func (p *Plugin) principalHrefs(fn func() ([]string, error)) any {
 
 // Report implements dav.ReportHandler for the principal reports.
 func (p *Plugin) Report(name xml.Name, body []byte, path string, w http.ResponseWriter, r *http.Request) (bool, error) {
+	dav := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
 	switch name {
-	case xml.Name{Space: davxml.NSDav, Local: "principal-match"}:
+	case dav("principal-match"):
 		return true, p.principalMatchReport(body, path, w, r)
-	case xml.Name{Space: davxml.NSDav, Local: "acl-principal-prop-set"}:
+	case dav("acl-principal-prop-set"):
 		return true, p.aclPrincipalPropSetReport(body, path, w, r)
+	case dav("principal-property-search"):
+		return true, p.principalPropertySearchReport(body, path, w, r)
+	case dav("principal-search-property-set"):
+		return true, p.principalSearchPropertySetReport(w)
+	case dav("expand-property"):
+		return true, p.expandPropertyReport(body, path, w, r)
 	}
 	return false, nil
 }

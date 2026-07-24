@@ -35,12 +35,17 @@ type ReportSet []xml.Name
 // {DAV:}privilege wrapper per privilege name (RFC 3744 §5.4).
 type PrivilegeSet []xml.Name
 
+// ResponseList renders nested {DAV:}response elements inside a property,
+// used by expand-property to inline a referenced resource's properties.
+type ResponseList []Response
+
 func (Text) isValue()         {}
 func (Raw) isValue()          {}
 func (NameSet) isValue()      {}
 func (Href) isValue()         {}
 func (ReportSet) isValue()    {}
 func (PrivilegeSet) isValue() {}
+func (ResponseList) isValue() {}
 
 // Property is a single property inside a propstat: a qualified name plus its
 // content. A nil Value renders as an empty element.
@@ -98,7 +103,8 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 			others = append(others, n.Space)
 		}
 	}
-	for _, r := range ms.Responses {
+	var collectResponse func(r Response)
+	collectResponse = func(r Response) {
 		for _, ps := range r.Propstats {
 			for _, p := range ps.Props {
 				collect(p.Name)
@@ -115,9 +121,16 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 					for _, n := range v {
 						collect(n)
 					}
+				case ResponseList:
+					for _, nested := range v {
+						collectResponse(nested)
+					}
 				}
 			}
 		}
+	}
+	for _, r := range ms.Responses {
+		collectResponse(r)
 	}
 	sort.Strings(others)
 
@@ -217,6 +230,16 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 			fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(n, prefix))
 		}
 		fmt.Fprintf(b, "</%s>\n", tag)
+	case ResponseList:
+		if len(v) == 0 {
+			fmt.Fprintf(b, "    <%s/>\n", tag)
+			return
+		}
+		fmt.Fprintf(b, "    <%s>\n", tag)
+		for i := range v {
+			writeResponse(b, &v[i], prefix)
+		}
+		fmt.Fprintf(b, "    </%s>\n", tag)
 	default:
 		fmt.Fprintf(b, "    <%s/>\n", tag)
 	}

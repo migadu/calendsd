@@ -5,6 +5,7 @@ package acl
 
 import (
 	"encoding/xml"
+	"strings"
 
 	"calserver/internal/dav"
 )
@@ -30,6 +31,10 @@ type Backend interface {
 	GroupMemberSet(principal string) ([]string, error)
 	// GroupMembership lists groups a principal belongs to.
 	GroupMembership(principal string) ([]string, error)
+	// SearchPrincipals returns principal paths under prefix whose
+	// properties match every (test=allof) or any (test=anyof) of the
+	// searched name→substring pairs. Port of searchPrincipals.
+	SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error)
 }
 
 // MemoryBackend is an in-memory principal backend, used by tests and the
@@ -70,6 +75,31 @@ func (m *MemoryBackend) GroupMembership(principal string) ([]string, error) {
 			if member == principal {
 				out = append(out, group)
 			}
+		}
+	}
+	return out, nil
+}
+
+func (m *MemoryBackend) SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error) {
+	if len(search) == 0 {
+		return nil, nil
+	}
+	var out []string
+	for _, p := range m.Principals {
+		if parent, _ := splitPath(p.URI); parent != prefix {
+			continue
+		}
+		matches, misses := 0, 0
+		for name, needle := range search {
+			v, _ := p.Props[name].(string)
+			if strings.Contains(strings.ToLower(v), strings.ToLower(needle)) {
+				matches++
+			} else {
+				misses++
+			}
+		}
+		if (test == "anyof" && matches > 0) || (test != "anyof" && misses == 0) {
+			out = append(out, p.URI)
 		}
 	}
 	return out, nil

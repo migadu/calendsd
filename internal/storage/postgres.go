@@ -676,6 +676,57 @@ SELECT groups.uri
  WHERE members.uri = $1`, principal)
 }
 
+// searchColumns maps searchable principal properties to columns.
+var searchColumns = map[xml.Name]string{
+	{Space: davxml.NSDav, Local: "displayname"}:        "displayname",
+	{Space: davxml.NSSabreDAV, Local: "email-address"}: "email",
+}
+
+// SearchPrincipals implements a substring search over the searchable
+// principal columns. Port of PrincipalBackend\PDO::searchPrincipals.
+func (p *Principals) SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error) {
+	if len(search) == 0 {
+		return nil, nil
+	}
+	var clauses []string
+	args := []any{prefix + "/%"}
+	for name, needle := range search {
+		col, ok := searchColumns[name]
+		if !ok {
+			// Unknown property never matches: allof → no rows, anyof →
+			// this term contributes nothing.
+			if test != "anyof" {
+				return nil, nil
+			}
+			continue
+		}
+		args = append(args, "%"+strings.ToLower(needle)+"%")
+		clauses = append(clauses, "lower("+col+") LIKE $"+strconv.Itoa(len(args)))
+	}
+	if len(clauses) == 0 {
+		return nil, nil
+	}
+	joiner := " AND "
+	if test == "anyof" {
+		joiner = " OR "
+	}
+	rows, err := p.DB.Query(
+		"SELECT uri FROM principals WHERE uri LIKE $1 AND ("+strings.Join(clauses, joiner)+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var uri string
+		if err := rows.Scan(&uri); err != nil {
+			return nil, err
+		}
+		out = append(out, uri)
+	}
+	return out, rows.Err()
+}
+
 func (p *Principals) groupQuery(query, principal string) ([]string, error) {
 	rows, err := p.DB.Query(query, principal)
 	if err != nil {
