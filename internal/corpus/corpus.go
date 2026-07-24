@@ -46,6 +46,8 @@ type Setup struct {
 	// empty maps as []) — seeding interprets them feature by feature.
 	Calendars       json.RawMessage `json:"caldavCalendars"`
 	CalendarObjects json.RawMessage `json:"caldavCalendarObjects"`
+	AddressBooks    json.RawMessage `json:"carddavAddressBooks"`
+	Cards           json.RawMessage `json:"carddavCards"`
 	Principals      json.RawMessage `json:"principals"`
 }
 
@@ -155,5 +157,5 @@ func Load(dir string) ([]Record, error) {
 // indefinitely rather than counting against coverage.
 func (r *Record) UsesUnsupportedFeatures() bool {
 	s := r.Setup
-	return s.SetupCardDAV || s.SetupLocks
+	return s.SetupLocks
 }

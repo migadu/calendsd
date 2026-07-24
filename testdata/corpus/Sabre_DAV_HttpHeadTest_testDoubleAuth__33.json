@@ -14,7 +14,9 @@
         "setupPropertyStorage": false,
         "autoLogin": null,
         "caldavCalendars": [],
-        "caldavCalendarObjects": []
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": []
     },
     "request": {
         "method": "HEAD",
@@ -33,7 +35,7 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "foo",
-                    "lastModified": 1784841858
+                    "lastModified": 1784872683
                 },
                 {
                     "type": "collection",
@@ -56,7 +58,7 @@
                 "4.7.1"
             ],
             "Last-Modified": [
-                "Thu, 23 Jul 2026 21:24:18 GMT"
+                "Fri, 24 Jul 2026 05:58:03 GMT"
             ],
             "ETag": [
                 "\"acbd18db4cc2f85cedef654fccc4a4d8\""

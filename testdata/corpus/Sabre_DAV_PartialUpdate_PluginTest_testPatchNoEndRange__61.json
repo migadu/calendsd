@@ -14,7 +14,9 @@
         "setupPropertyStorage": false,
         "autoLogin": null,
         "caldavCalendars": [],
-        "caldavCalendarObjects": []
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": []
     },
     "request": {
         "method": "PATCH",

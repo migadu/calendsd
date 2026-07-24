@@ -29,6 +29,8 @@
                 }
             }
         },
+        "carddavAddressBooks": [],
+        "carddavCards": [],
         "principals": [
             {
                 "uri": "principals/user1",
@@ -82,7 +84,7 @@
                 "4.7.1"
             ],
             "Content-Disposition": [
-                "attachment; filename=\"calendar1-2026-07-23.ics\""
+                "attachment; filename=\"calendar1-2026-07-24.ics\""
             ],
             "Content-Type": [
                 "text/calendar"

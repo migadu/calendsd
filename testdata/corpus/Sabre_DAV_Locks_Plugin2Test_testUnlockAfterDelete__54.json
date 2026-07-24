@@ -14,14 +14,16 @@
         "setupPropertyStorage": false,
         "autoLogin": null,
         "caldavCalendars": [],
-        "caldavCalendarObjects": []
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": []
     },
     "request": {
         "method": "DELETE",
         "url": "/file.txt",
         "headers": {
             "If": [
-                "(<opaquelocktoken:a75e4206-75f7-4c93-9368-c523ac12dfa6>)"
+                "(<opaquelocktoken:6c0796ba-2f01-48aa-b4b5-dc0cf840f38d>)"
             ]
         },
         "body": "",

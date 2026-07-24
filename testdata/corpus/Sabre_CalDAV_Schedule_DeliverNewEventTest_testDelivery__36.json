@@ -15,7 +15,7 @@
         "autoLogin": "user1",
         "caldavCalendars": [
             {
-                "id": "4f3dee9e-3e43-4e04-a5b4-859bef78218d",
+                "id": "d90d3bc9-a66c-409a-b0dc-e213219b6dd2",
                 "principaluri": "principals/user1",
                 "uri": "default",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -27,7 +27,7 @@
                 }
             },
             {
-                "id": "9a4cac3d-d4ae-4ea0-9ede-7b7f4a470497",
+                "id": "8a7de7d6-a624-4b1e-9238-366e1e1aa147",
                 "principaluri": "principals/user2",
                 "uri": "default",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -40,6 +40,8 @@
             }
         ],
         "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": [],
         "principals": [
             {
                 "uri": "principals/user1",

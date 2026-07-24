@@ -1,0 +1,95 @@
+{
+    "test": "Sabre\\CardDAV\\VCFExportTest::testContentDispositionBadChars",
+    "seq": 3,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": true,
+        "setupACL": true,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [
+            {
+                "id": "book1",
+                "uri": "book1",
+                "principaluri": "principals/user1"
+            },
+            {
+                "id": "book-b_ad\"(ch)ars",
+                "uri": "book-b_ad\"(ch)ars",
+                "principaluri": "principals/user1"
+            }
+        ],
+        "carddavCards": {
+            "book1": {
+                "card1": "BEGIN:VCARD\r\nFN:Person1\r\nEND:VCARD\r\n",
+                "card2": "BEGIN:VCARD\r\nFN:Person2\r\nEND:VCARD",
+                "card3": "BEGIN:VCARD\r\nFN:Person3\r\nEND:VCARD\r\n",
+                "card4": "BEGIN:VCARD\nFN:Person4\nEND:VCARD\n"
+            },
+            "book-b_ad\"(ch)ars": {
+                "card1": "BEGIN:VCARD\r\nFN:Person1\r\nEND:VCARD\r\n"
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "GET",
+        "url": "/addressbooks/user1/book-b_ad\"(ch)ars?export",
+        "headers": [],
+        "body": "",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CardDAV\\AddressBookRoot",
+                    "name": "addressbooks"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAVACL\\PrincipalCollection",
+                    "name": "principals"
+                }
+            ]
+        }
+    },
+    "response": {
+        "status": 200,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Disposition": [
+                "attachment; filename=\"book-b_adchars-2026-07-24.vcf\""
+            ],
+            "Content-Type": [
+                "text/directory"
+            ]
+        },
+        "body": "BEGIN:VCARD\r\nFN:Person1\r\nEND:VCARD\r\n"
+    }
+}

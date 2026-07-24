@@ -291,6 +291,38 @@ func TestParity(t *testing.T) {
 		}
 	})
 
+	t.Run("CardDAVParity", func(t *testing.T) {
+		// A vCard written through the Go server must be readable, with an
+		// identical ETag, by sabre — over the shared cards table.
+		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-c",
+			`INSERT INTO addressbooks (principaluri, uri, displayname, synctoken)
+			 VALUES ('principals/admin', 'contacts', 'Contacts', 1)`)
+		card := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:parity-card-1\r\nFN:Parity Person\r\nEMAIL:p@example.org\r\nEND:VCARD\r\n"
+		status, body, goHeaders := goClient.do(t, "PUT", "/addressbooks/admin/contacts/p1.vcf", card, "Content-Type", "text/vcard")
+		if status != 201 {
+			t.Fatalf("Go PUT vcard = %d: %s", status, body)
+		}
+		status, body, sabreHeaders := sabreClient.do(t, "GET", "/addressbooks/admin/contacts/p1.vcf", "")
+		if status != 200 || body != card {
+			t.Errorf("sabre read a different vcard (%d):\n%q", status, body)
+		}
+		if sabreHeaders.Get("ETag") != goHeaders.Get("ETag") {
+			t.Errorf("vcard ETag mismatch: go %s, sabre %s", goHeaders.Get("ETag"), sabreHeaders.Get("ETag"))
+		}
+		// Reverse: sabre-written card found by Go's addressbook-query.
+		card2 := strings.ReplaceAll(card, "parity-card-1", "parity-card-2")
+		card2 = strings.ReplaceAll(card2, "Parity Person", "Query Target")
+		status, _, _ = sabreClient.do(t, "PUT", "/addressbooks/admin/contacts/p2.vcf", card2, "Content-Type", "text/vcard")
+		if status != 201 {
+			t.Fatalf("sabre PUT vcard = %d", status)
+		}
+		q := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/></d:prop><c:filter><c:prop-filter name="FN"><c:text-match match-type="contains">Query Target</c:text-match></c:prop-filter></c:filter></c:addressbook-query>`
+		status, body, _ = goClient.do(t, "REPORT", "/addressbooks/admin/contacts/", q, "Depth", "1", "Content-Type", "application/xml")
+		if status != 207 || !strings.Contains(body, "p2.vcf") {
+			t.Errorf("Go addressbook-query missed the sabre-written card (%d):\n%s", status, body)
+		}
+	})
+
 	t.Run("GoDeleteVisibleInSabreSync", func(t *testing.T) {
 		tokenBefore := sabreSyncToken(t, sabreClient)
 		status, body, _ := goClient.do(t, "DELETE", "/calendars/admin/default/parity2.ics", "")

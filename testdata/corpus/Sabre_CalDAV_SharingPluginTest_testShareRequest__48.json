@@ -32,6 +32,8 @@
             }
         ],
         "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": [],
         "principals": [
             {
                 "uri": "principals/user1",

@@ -14,7 +14,9 @@
         "setupPropertyStorage": false,
         "autoLogin": null,
         "caldavCalendars": [],
-        "caldavCalendarObjects": []
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": []
     },
     "request": {
         "method": "MOVE",
@@ -36,13 +38,13 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "content1",
-                    "lastModified": 1784841858
+                    "lastModified": 1784872683
                 },
                 {
                     "type": "file",
                     "name": "file2",
                     "contents": "content2",
-                    "lastModified": 1784841858
+                    "lastModified": 1784872683
                 }
             ]
         }

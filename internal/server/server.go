@@ -11,6 +11,7 @@ import (
 	"calserver/internal/acl"
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
+	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
 	"calserver/internal/storage"
@@ -34,6 +35,7 @@ func New(db *sql.DB, cfg Config) http.Handler {
 func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/.well-known/caldav", http.RedirectHandler(baseURI, http.StatusMovedPermanently))
+	mux.Handle("/.well-known/carddav", http.RedirectHandler(baseURI, http.StatusMovedPermanently))
 	mux.Handle("/", h)
 	return mux
 }
@@ -47,9 +49,12 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	calendars := &storage.CalDAV{DB: db}
 	users := &storage.Users{DB: db}
 
+	addressbooks := &storage.CardDAV{DB: db}
+
 	root := mock.NewCollection("root")
 	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
 	root.Attach(caldav.NewCalendarRoot(principals, calendars, "calendars"))
+	root.Attach(carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks"))
 
 	srv := dav.NewServer(cfg.BaseURI, root)
 	srv.AddPlugin(auth.NewPlugin(
@@ -64,6 +69,7 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	srv.AddPlugin(&caldav.Plugin{})
 	srv.AddPlugin(&caldav.SchedulePlugin{})
 	srv.AddPlugin(&caldav.SharingPlugin{})
+	srv.AddPlugin(&carddav.Plugin{})
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})
 	return srv

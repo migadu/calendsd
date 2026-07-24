@@ -26,11 +26,13 @@ $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $authBackend = new Sabre\DAV\Auth\Backend\PDO($pdo);
 $authBackend->setRealm('SabreDAV'); // baked into users.digesta1 — see PLAN.md §5
 $calendarBackend = new Sabre\CalDAV\Backend\PDO($pdo);
+$carddavBackend = new Sabre\CardDAV\Backend\PDO($pdo);
 $principalBackend = new Sabre\DAVACL\PrincipalBackend\PDO($pdo);
 
 $tree = [
     new Sabre\CalDAV\Principal\Collection($principalBackend),
     new Sabre\CalDAV\CalendarRoot($principalBackend, $calendarBackend),
+    new Sabre\CardDAV\AddressBookRoot($principalBackend, $carddavBackend),
 ];
 
 $server = new Sabre\DAV\Server($tree);
@@ -40,6 +42,7 @@ $server->addPlugin(new Sabre\DAV\Auth\Plugin($authBackend));
 $server->addPlugin(new Sabre\DAVACL\Plugin());
 $server->addPlugin(new Sabre\CalDAV\Plugin());
 $server->addPlugin(new Sabre\CalDAV\Schedule\Plugin());
+$server->addPlugin(new Sabre\CardDAV\Plugin());
 $server->addPlugin(new Sabre\DAV\Sync\Plugin());
 $server->addPlugin(new Sabre\DAV\PropertyStorage\Plugin(
     new Sabre\DAV\PropertyStorage\Backend\PDO($pdo)

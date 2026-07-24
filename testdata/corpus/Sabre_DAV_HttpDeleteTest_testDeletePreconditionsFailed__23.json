@@ -14,7 +14,9 @@
         "setupPropertyStorage": false,
         "autoLogin": null,
         "caldavCalendars": [],
-        "caldavCalendarObjects": []
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [],
+        "carddavCards": []
     },
     "request": {
         "method": "DELETE",
@@ -33,7 +35,7 @@
                     "type": "file",
                     "name": "file1",
                     "contents": "foo",
-                    "lastModified": 1784841858
+                    "lastModified": 1784872683
                 },
                 {
                     "type": "collection",
@@ -43,13 +45,13 @@
                             "type": "file",
                             "name": "subfile",
                             "contents": "bar",
-                            "lastModified": 1784841858
+                            "lastModified": 1784872683
                         },
                         {
                             "type": "file",
                             "name": "subfile2",
                             "contents": "baz",
-                            "lastModified": 1784841858
+                            "lastModified": 1784872683
                         }
                     ]
                 }

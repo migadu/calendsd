@@ -45,6 +45,7 @@ class CorpusRecorder
             // Backend state must be captured pre-exec: the request itself
             // may mutate it (e.g. scheduling delivery on PUT).
             'caldavState' => self::caldavBackendState($test),
+            'carddavState' => self::carddavBackendState($test),
         ];
     }
 
@@ -70,6 +71,30 @@ class CorpusRecorder
         return [
             'calendars' => self::jsonable(array_values($cp->getValue($backend))),
             'objects' => self::jsonable($dp->getValue($backend)),
+        ];
+    }
+
+    /**
+     * Serializes the carddav mock backend's live state.
+     */
+    private static function carddavBackendState(AbstractDAVServerTestCase $test): ?array
+    {
+        $ref = new \ReflectionClass(AbstractDAVServerTestCase::class);
+        $p = $ref->getProperty('carddavBackend');
+        $p->setAccessible(true);
+        $backend = $p->getValue($test);
+        if (!$backend instanceof CardDAV\Backend\Mock) {
+            return null;
+        }
+        $bref = new \ReflectionClass(CardDAV\Backend\Mock::class);
+        $abp = $bref->getProperty('addressBooks');
+        $abp->setAccessible(true);
+        $cp = $bref->getProperty('cards');
+        $cp->setAccessible(true);
+
+        return [
+            'addressBooks' => self::jsonable(array_values($abp->getValue($backend))),
+            'cards' => self::jsonable($cp->getValue($backend)),
         ];
     }
 
@@ -193,6 +218,11 @@ class CorpusRecorder
             $setup['caldavCalendarObjects'] = $requestData['caldavState']['objects'];
         }
         unset($requestData['caldavState']);
+        if (isset($requestData['carddavState'])) {
+            $setup['carddavAddressBooks'] = $requestData['carddavState']['addressBooks'];
+            $setup['carddavCards'] = $requestData['carddavState']['cards'];
+        }
+        unset($requestData['carddavState']);
 
         $record = [
             'test' => get_class($test).'::'.$test->getName(false),
@@ -226,6 +256,7 @@ class CorpusRecorder
             'setupCalDAVICSExport', 'setupLocks', 'setupFiles',
             'setupPropertyStorage', 'autoLogin',
             'caldavCalendars', 'caldavCalendarObjects',
+            'carddavAddressBooks', 'carddavCards',
         ];
         $state = [];
         $ref = new \ReflectionClass(AbstractDAVServerTestCase::class);

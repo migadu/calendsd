@@ -31,6 +31,9 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
+	`Sabre\CardDAV\VCFExportTest::testContentDisposition`:                              true,
+	`Sabre\CardDAV\VCFExportTest::testContentDispositionBadChars`:                      true,
+	`Sabre\CardDAV\VCFExportTest::testExport`:                                          true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteBadXML`:                                 true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteReply`:                                  true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteWrongUrl`:                               true,

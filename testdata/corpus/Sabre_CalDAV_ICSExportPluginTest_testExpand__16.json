@@ -15,7 +15,7 @@
         "autoLogin": null,
         "caldavCalendars": [
             {
-                "id": "24671866-7320-4f75-b60e-d1633afa5513",
+                "id": "01587c4e-e3ea-4db5-88b3-1233563e2785",
                 "principaluri": "principals/admin",
                 "uri": "UUID-123467",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -30,19 +30,21 @@
             }
         ],
         "caldavCalendarObjects": {
-            "24671866-7320-4f75-b60e-d1633afa5513": {
+            "01587c4e-e3ea-4db5-88b3-1233563e2785": {
                 "event-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Europe/Amsterdam\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:event-1\nDTSTART;TZID=Europe/Amsterdam:20151020T000000\nEND:VEVENT\nEND:VCALENDAR",
-                    "calendarid": "24671866-7320-4f75-b60e-d1633afa5513",
+                    "calendarid": "01587c4e-e3ea-4db5-88b3-1233563e2785",
                     "uri": "event-1"
                 },
                 "todo-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTODO\nUID:todo-1\nEND:VTODO\nEND:VCALENDAR",
-                    "calendarid": "24671866-7320-4f75-b60e-d1633afa5513",
+                    "calendarid": "01587c4e-e3ea-4db5-88b3-1233563e2785",
                     "uri": "todo-1"
                 }
             }
         },
+        "carddavAddressBooks": [],
+        "carddavCards": [],
         "principals": [
             {
                 "uri": "principals/user1",
@@ -89,7 +91,7 @@
                 "4.7.1"
             ],
             "Content-Disposition": [
-                "attachment; filename=\"UUID-123467-2026-07-23.ics\""
+                "attachment; filename=\"UUID-123467-2026-07-24.ics\""
             ],
             "Content-Type": [
                 "text/calendar"

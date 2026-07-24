@@ -10,6 +10,7 @@ import (
 	"calserver/internal/acl"
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
+	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
 	davxml "calserver/internal/dav/xml"
@@ -28,6 +29,12 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	backends := &seedBackends{principals: &acl.MemoryBackend{Principals: principals}}
 	if rec.Setup.SetupCalDAV {
 		backends.caldav, err = seedCalDAV(rec)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if rec.Setup.SetupCardDAV {
+		backends.carddav, err = seedCardDAV(rec)
 		if err != nil {
 			return nil, err
 		}
@@ -54,6 +61,9 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 	if rec.Setup.SetupCalDAVSharing {
 		srv.AddPlugin(&caldav.SharingPlugin{})
 	}
+	if rec.Setup.SetupCardDAV {
+		srv.AddPlugin(&carddav.Plugin{})
+	}
 	if rec.Setup.AutoLogin != "" {
 		srv.AddPlugin(auth.NewLoggedInPlugin("principals/" + rec.Setup.AutoLogin))
 	}
@@ -69,6 +79,65 @@ func BuildServer(rec *Record) (*dav.Server, error) {
 type seedBackends struct {
 	principals acl.Backend
 	caldav     caldav.Backend
+	carddav    carddav.Backend
+}
+
+// seedCardDAV parses the carddavAddressBooks/carddavCards fixtures into a
+// mock CardDAV backend.
+func seedCardDAV(rec *Record) (carddav.Backend, error) {
+	backend := &carddav.MockBackend{CardsByBook: map[string]map[string]*carddav.CardInfo{}}
+
+	if len(rec.Setup.AddressBooks) > 0 && string(rec.Setup.AddressBooks) != "[]" {
+		var entries []map[string]any
+		if err := json.Unmarshal(rec.Setup.AddressBooks, &entries); err != nil {
+			return nil, fmt.Errorf("parsing carddavAddressBooks: %w", err)
+		}
+		for _, entry := range entries {
+			info := carddav.AddressBookInfo{Props: map[xmlName]any{}}
+			for k, v := range entry {
+				switch k {
+				case "id":
+					info.ID = jsonID(v)
+				case "uri":
+					info.URI, _ = v.(string)
+				case "principaluri":
+					info.PrincipalURI, _ = v.(string)
+				default:
+					if name, err := davxml.ParseClark(k); err == nil {
+						if s, ok := v.(string); ok {
+							info.Props[name] = s
+						}
+					}
+				}
+			}
+			backend.AddressBooks = append(backend.AddressBooks, info)
+		}
+	}
+
+	if len(rec.Setup.Cards) > 0 && string(rec.Setup.Cards) != "[]" {
+		var perBook map[string]map[string]any
+		if err := json.Unmarshal(rec.Setup.Cards, &perBook); err != nil {
+			return nil, fmt.Errorf("parsing carddavCards: %w", err)
+		}
+		for bookID, cards := range perBook {
+			backend.CardsByBook[bookID] = map[string]*carddav.CardInfo{}
+			for uri, v := range cards {
+				// A card value is either the raw vCard string or a row
+				// map with a "carddata" key.
+				var data string
+				switch cv := v.(type) {
+				case string:
+					data = cv
+				case map[string]any:
+					data, _ = cv["carddata"].(string)
+				}
+				backend.CardsByBook[bookID][uri] = &carddav.CardInfo{
+					URI: uri, AddressBookID: bookID, CardData: []byte(data),
+				}
+			}
+		}
+	}
+	return backend, nil
 }
 
 // seedCalDAV parses the caldavCalendars/caldavCalendarObjects fixtures into
@@ -315,6 +384,11 @@ func seedNode(t *Tree, backends *seedBackends) (dav.Node, error) {
 				return nil, fmt.Errorf("CalendarRoot fixture without caldav setup")
 			}
 			return caldav.NewCalendarRoot(backends.principals, backends.caldav, t.Name), nil
+		case `Sabre\CardDAV\AddressBookRoot`:
+			if backends.carddav == nil {
+				return nil, fmt.Errorf("AddressBookRoot fixture without carddav setup")
+			}
+			return carddav.NewAddressBookRoot(backends.principals, backends.carddav, t.Name), nil
 		}
 		return nil, fmt.Errorf("unseedable node type %q (class %s)", t.Type, t.Class)
 	default:

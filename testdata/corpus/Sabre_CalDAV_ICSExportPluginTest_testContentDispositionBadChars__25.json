@@ -15,7 +15,7 @@
         "autoLogin": null,
         "caldavCalendars": [
             {
-                "id": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
+                "id": "0b8e3b70-f0fe-44c2-bcb4-b0d7ab3bfd14",
                 "principaluri": "principals/admin",
                 "uri": "UUID-123467",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -29,7 +29,7 @@
                 "{http://apple.com/ns/ical/}calendar-color": "#AA0000FF"
             },
             {
-                "id": "cd40365e-732e-476a-975f-89643f565ee6",
+                "id": "56c71f0d-ea5f-4651-8f1a-2d34d1260155",
                 "principaluri": "principals/admin",
                 "uri": "UUID-b_ad\"(ch)ars",
                 "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set": {
@@ -44,19 +44,21 @@
             }
         ],
         "caldavCalendarObjects": {
-            "5de86ddd-2f2d-488a-89a3-3b008eb0590a": {
+            "0b8e3b70-f0fe-44c2-bcb4-b0d7ab3bfd14": {
                 "event-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Europe/Amsterdam\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:event-1\nDTSTART;TZID=Europe/Amsterdam:20151020T000000\nEND:VEVENT\nEND:VCALENDAR",
-                    "calendarid": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
+                    "calendarid": "0b8e3b70-f0fe-44c2-bcb4-b0d7ab3bfd14",
                     "uri": "event-1"
                 },
                 "todo-1": {
                     "calendardata": "BEGIN:VCALENDAR\nBEGIN:VTODO\nUID:todo-1\nEND:VTODO\nEND:VCALENDAR",
-                    "calendarid": "5de86ddd-2f2d-488a-89a3-3b008eb0590a",
+                    "calendarid": "0b8e3b70-f0fe-44c2-bcb4-b0d7ab3bfd14",
                     "uri": "todo-1"
                 }
             }
         },
+        "carddavAddressBooks": [],
+        "carddavCards": [],
         "principals": [
             {
                 "uri": "principals/user1",
@@ -107,7 +109,7 @@
                 "4.7.1"
             ],
             "Content-Disposition": [
-                "attachment; filename=\"UUID-b_adchars-2026-07-23.json\""
+                "attachment; filename=\"UUID-b_adchars-2026-07-24.json\""
             ],
             "Content-Type": [
                 "application/calendar+json"
