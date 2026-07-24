@@ -202,10 +202,26 @@ func (p *SchedulePlugin) BeforeUnbind(r *http.Request, path string) error {
 	return nil
 }
 
-// deliver routes one iTIP message; only local delivery is implemented
-// (sabre's schedule event with the local-delivery listener).
+// ExternalDeliverer delivers to non-local recipients (iMip email). Returns
+// true if it handled the message (set a schedule status).
+type ExternalDeliverer interface {
+	DeliverExternal(msg *ical.Message) bool
+}
+
+// deliver routes one iTIP message: local delivery first, then any external
+// deliverers (iMip). Port of sabre's deliver() + the schedule listeners.
 func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message) {
-	p.scheduleLocalDelivery(r, msg)
+	if p.principalForAddress(msg.Recipient) != "" {
+		p.scheduleLocalDelivery(r, msg)
+	} else {
+		for _, plugin := range p.server.Plugins() {
+			if ext, ok := plugin.(ExternalDeliverer); ok {
+				if ext.DeliverExternal(msg) {
+					break
+				}
+			}
+		}
+	}
 	if msg.ScheduleStatus == "" {
 		msg.ScheduleStatus = "5.2;There was no system capable of delivering the scheduling message"
 	}

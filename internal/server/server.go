@@ -22,6 +22,10 @@ type Config struct {
 	BaseURI string
 	// Realm must match the realm baked into users.digesta1 (PLAN.md §5).
 	Realm string
+	// IMipSender and IMipSMTP enable emailing invites to external
+	// attendees; when IMipSMTP is empty, iMip is disabled.
+	IMipSender string
+	IMipSMTP   string
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
@@ -70,6 +74,12 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	srv.AddPlugin(&caldav.SchedulePlugin{})
 	srv.AddPlugin(&caldav.SharingPlugin{})
 	srv.AddPlugin(&carddav.Plugin{})
+	if cfg.IMipSMTP != "" {
+		srv.AddPlugin(&caldav.IMipPlugin{
+			SenderEmail: cfg.IMipSender,
+			Mailer:      &caldav.SMTPMailer{Addr: cfg.IMipSMTP},
+		})
+	}
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})
 	return srv

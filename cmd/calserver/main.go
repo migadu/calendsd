@@ -19,6 +19,8 @@ func main() {
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
 	dsn := flag.String("db", "", "Postgres DSN of the shared sabre database (e.g. postgres://localhost/calserver); empty runs an in-memory server")
 	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
+	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
+	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	flag.Parse()
 
 	var srv http.Handler
@@ -32,7 +34,10 @@ func main() {
 			slog.Error("connecting to database", "err", err)
 			os.Exit(1)
 		}
-		srv = server.New(db, server.Config{BaseURI: *baseURI, Realm: *realm})
+		srv = server.New(db, server.Config{
+			BaseURI: *baseURI, Realm: *realm,
+			IMipSMTP: *imipSMTP, IMipSender: *imipSender,
+		})
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
 		// (litmus props class) can exercise PROPPATCH.
