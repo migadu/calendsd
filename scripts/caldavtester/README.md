@@ -6,8 +6,13 @@ against. This directory runs a curated subset of it against a local
 `calserver`.
 
 ```sh
-direnv exec . scripts/caldavtester/run.sh              # curated list (tests.txt)
+make caldavtester                                      # curated list (tests.txt)
+make caldavtester-full                                 # the entire suite, categorized
+
+# or call the scripts directly:
+direnv exec . scripts/caldavtester/run.sh              # curated list
 direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml   # a single file
+direnv exec . scripts/caldavtester/run-full.sh         # full sweep (fresh server per file)
 ```
 
 The first run takes a while: it compiles a Python 2.7 interpreter (CalDAVTester

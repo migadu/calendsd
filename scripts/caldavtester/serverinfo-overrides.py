@@ -2,17 +2,22 @@
 # Rewrite an upstream CalDAVTester serverinfo.xml in place so it targets a
 # calserver instance (sabre URL layout) instead of Apple Calendar Server.
 #
-#   python2.7 serverinfo-overrides.py <path-to-serverinfo.xml> [host] [port]
+#   python2.7 serverinfo-overrides.py [--full] <path-to-serverinfo.xml> [host] [port]
 #
-# Changes: host/port, a trimmed <features> list (only what calserver
-# implements), and the substitution building blocks that map CalDAVTester's
-# __uids__/GUID paths onto sabre's /calendars/<user>/ layout.
+# Changes: host/port and the substitution building blocks that map
+# CalDAVTester's __uids__/GUID paths onto sabre's /calendars/<user>/ layout.
+# By default the <features> list is trimmed to what calserver implements, so
+# only applicable files run (the curated harness). With --full the upstream
+# feature list is kept and the wait loop is shortened, so the ENTIRE suite runs
+# and you see the raw pass/skip/fail spread (the full sweep).
 import re
 import sys
 
-path = sys.argv[1]
-host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
-port = sys.argv[3] if len(sys.argv) > 3 else "8008"
+argv = [a for a in sys.argv[1:] if a != "--full"]
+full = "--full" in sys.argv
+path = argv[0]
+host = argv[1] if len(argv) > 1 else "127.0.0.1"
+port = argv[2] if len(argv) > 2 else "8008"
 
 s = open(path).read()
 
@@ -20,6 +25,12 @@ s = open(path).read()
 s = re.sub(r"<host>.*?</host>", "<host>%s</host>" % host, s, count=1)
 s = re.sub(r"<nonsslport>.*?</nonsslport>",
            "<nonsslport>%s</nonsslport>" % port, s, count=1)
+
+if full:
+    # Keep every feature so all files execute; shorten the wait loop so
+    # missing-resource polls fail fast instead of stalling the sweep.
+    s = re.sub(r"<waitcount>.*?</waitcount>", "<waitcount>5</waitcount>", s, count=1)
+    s = re.sub(r"<waitdelay>.*?</waitdelay>", "<waitdelay>0.1</waitdelay>", s, count=1)
 
 # Only the features calserver actually implements. This gates which test
 # files (and sub-tests) run, so listing an unsupported feature just yields
@@ -42,7 +53,8 @@ features = """	<features>
 		<feature>caldav</feature>
 		<feature>carddav</feature>
 	</features>"""
-s = re.sub(r"\t<features>.*?</features>", features, s, count=1, flags=re.S)
+if not full:
+    s = re.sub(r"\t<features>.*?</features>", features, s, count=1, flags=re.S)
 
 # Substitution remaps: sabre exposes /principals/<user>/, /calendars/<user>/,
 # /addressbooks/<user>/ (no __uids__/GUID indirection), and names the
@@ -65,5 +77,5 @@ for pat, repl in remaps:
         sys.stderr.write("warning: remap did not apply once: %s\n" % pat)
 
 open(path, "w").write(s)
-print("patched %s -> host=%s port=%s, %d features" %
-      (path, host, port, s.count("<feature>")))
+print("patched %s -> host=%s port=%s, %d features (%s)" %
+      (path, host, port, s.count("<feature>"), "full" if full else "curated"))
