@@ -20,7 +20,12 @@ type busyPeriod struct {
 // cancelled events are skipped, TENTATIVE maps to BUSY-TENTATIVE, recurring
 // events expand within the range, and overlapping same-type periods coalesce
 // (pinned against sabre's output in testdata/freebusy-golden.ics).
-func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location, now time.Time) ([]byte, error) {
+//
+// extraProps are additional pre-formatted iCalendar property lines (unfolded,
+// no CRLF) injected into the VFREEBUSY component. The outbox POST free-busy
+// handler passes UID/ORGANIZER/ATTENDEE so the response echoes the queried
+// recipient, matching sabre; the free-busy-query REPORT passes none.
+func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
 	var periods []busyPeriod
 	for _, data := range objects {
 		cal, err := Decode(data)
@@ -51,6 +56,9 @@ func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location
 	writeLine("DTSTART:" + start.UTC().Format(stamp))
 	writeLine("DTEND:" + end.UTC().Format(stamp))
 	writeLine("DTSTAMP:" + now.UTC().Format(stamp))
+	for _, line := range extraProps {
+		writeLine(line)
+	}
 	for _, p := range periods {
 		fbType := ""
 		if p.fbType != "BUSY" {

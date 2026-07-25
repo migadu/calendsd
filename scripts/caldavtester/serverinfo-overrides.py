@@ -47,7 +47,6 @@ features = """	<features>
 		<feature>current-user-principal</feature>
 		<feature>expand-property</feature>
 		<feature>sync-report</feature>
-		<feature>sync-report-home</feature>
 		<feature>well-known</feature>
 		<feature>json-data</feature>
 		<feature>caldav</feature>
@@ -62,6 +61,11 @@ if not full:
 remaps = [
     (r"(<key>\$principals_users:</key>\s*<value>)[^<]*(</value>)",
      r"\g<1>$principalcollection:\g<2>"),
+    # calserver exposes principals as /principals/<user>/, not the Calendar
+    # Server __uids__/GUID form, so current-user-principal and expand-property
+    # compare against the users path.
+    (r"(<key>\$principaluri%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principals_users:$userid%d:/\g<2>"),
     (r"(<key>\$calendarhome%d:</key>\s*<value>)[^<]*(</value>)",
      r"\g<1>$calendars:$userid%d:\g<2>"),
     (r"(<key>\$addressbookhome%d:</key>\s*<value>)[^<]*(</value>)",

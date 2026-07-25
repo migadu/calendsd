@@ -78,9 +78,26 @@ func (t *Tree) Delete(path string) error {
 	return node.Delete()
 }
 
+// pathContainsOrEquals reports whether descendant is ancestor itself or lives
+// beneath it. The root ("") contains everything.
+func pathContainsOrEquals(ancestor, descendant string) bool {
+	ancestor = strings.Trim(ancestor, "/")
+	descendant = strings.Trim(descendant, "/")
+	if ancestor == "" {
+		return true
+	}
+	return descendant == ancestor || strings.HasPrefix(descendant, ancestor+"/")
+}
+
 // Copy copies the node at sourcePath to destinationPath. With depth 0 a
 // collection is copied without children (RFC 4918 §9.8.3).
 func (t *Tree) Copy(sourcePath, destinationPath string, depth int) error {
+	// Copying a collection into itself or a descendant is forbidden (RFC 4918
+	// §9.8.5); without this guard copyNode recurses into the collection it is
+	// still writing to and allocates until the process is OOM-killed.
+	if pathContainsOrEquals(sourcePath, destinationPath) {
+		return ErrForbidden("Cannot copy a resource into itself or a descendant")
+	}
 	source, err := t.NodeForPath(sourcePath)
 	if err != nil {
 		return err
@@ -100,6 +117,9 @@ func (t *Tree) Copy(sourcePath, destinationPath string, depth int) error {
 // Move moves the node at sourcePath to destinationPath. A move within one
 // parent is a rename; otherwise it's copy + delete, like sabre.
 func (t *Tree) Move(sourcePath, destinationPath string) error {
+	if pathContainsOrEquals(sourcePath, destinationPath) {
+		return ErrForbidden("Cannot move a resource into itself or a descendant")
+	}
 	sourceDir, _ := splitPath(sourcePath)
 	destDir, destName := splitPath(destinationPath)
 

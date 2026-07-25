@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -437,6 +438,17 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		return dav.ErrBadRequest("Invalid DTEND")
 	}
 
+	// Identity properties echoed into each recipient's VFREEBUSY, matching
+	// sabre's generateFreeBusyResponse (UID + ORGANIZER from the request,
+	// ATTENDEE set to the recipient).
+	var idProps []string
+	if uid := vfb.Props.Get("UID"); uid != nil && uid.Value != "" {
+		idProps = append(idProps, "UID:"+uid.Value)
+	}
+	if org := vfb.Props.Get("ORGANIZER"); org != nil {
+		idProps = append(idProps, formatICalProp(org))
+	}
+
 	var b strings.Builder
 	b.WriteString(xml.Header)
 	b.WriteString(`<cal:schedule-response xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">` + "\n")
@@ -447,7 +459,8 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {
-			fb, err := p.freeBusyForPrincipal(principal, start.UTC(), end.UTC())
+			extra := append(append([]string{}, idProps...), "ATTENDEE:"+att.Value)
+			fb, err := p.freeBusyForPrincipal(principal, start.UTC(), end.UTC(), extra...)
 			if err != nil {
 				status = "5.0;Internal error"
 			} else {
@@ -472,7 +485,7 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 
 // freeBusyForPrincipal aggregates free-busy across all of a principal's
 // calendars.
-func (p *SchedulePlugin) freeBusyForPrincipal(principalURI string, start, end time.Time) ([]byte, error) {
+func (p *SchedulePlugin) freeBusyForPrincipal(principalURI string, start, end time.Time, extraProps ...string) ([]byte, error) {
 	_, name := splitPath(principalURI)
 	home, err := p.server.Tree.NodeForPath("calendars/" + name)
 	if err != nil {
@@ -500,7 +513,28 @@ func (p *SchedulePlugin) freeBusyForPrincipal(principalURI string, start, end ti
 			payloads = append(payloads, obj.CalendarData)
 		}
 	}
-	return ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now())
+	return ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now(), extraProps...)
+}
+
+// formatICalProp serializes an iCalendar property to a single unfolded content
+// line ("NAME;PARAM=value:value"), preserving parameters so a cloned ORGANIZER
+// keeps its CN.
+func formatICalProp(prop *goical.Prop) string {
+	var b strings.Builder
+	b.WriteString(prop.Name)
+	// Emit parameters in a stable order for deterministic output.
+	names := make([]string, 0, len(prop.Params))
+	for name := range prop.Params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, v := range prop.Params[name] {
+			b.WriteString(";" + name + "=" + v)
+		}
+	}
+	b.WriteString(":" + prop.Value)
+	return b.String()
 }
 
 func randomToken() string {

@@ -60,6 +60,30 @@ func fbLines(s string) []string {
 	return out
 }
 
+// TestGenerateFreeBusyExtraProps checks that outbox-supplied identity
+// properties (UID/ORGANIZER/ATTENDEE) are injected into the VFREEBUSY, which
+// CalDAVTester's postFreeBusy verifier requires to match the queried recipient.
+func TestGenerateFreeBusyExtraProps(t *testing.T) {
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC)
+	got, err := GenerateFreeBusy(nil, start, end, time.UTC, start,
+		"UID:abc",
+		"ORGANIZER;CN=User 01:mailto:user01@example.org",
+		"ATTENDEE:mailto:user01@example.org")
+	if err != nil {
+		t.Fatalf("GenerateFreeBusy: %v", err)
+	}
+	for _, want := range []string{
+		"UID:abc",
+		"ORGANIZER;CN=User 01:mailto:user01@example.org",
+		"ATTENDEE:mailto:user01@example.org",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("VFREEBUSY missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestTodoInTimeRange(t *testing.T) {
 	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC)
