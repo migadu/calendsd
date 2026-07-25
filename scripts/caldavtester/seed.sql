@@ -62,6 +62,16 @@ BEGIN
       ON CONFLICT (uri) DO NOTHING;
   END LOOP;
 
+  -- Group memberships from Calendar Server's stock test directory that the
+  -- group-attendee tests rely on: group02 = {user06, user07},
+  -- group20 = {user02, user03} (the "changing membership" group's start
+  -- state).
+  INSERT INTO groupmembers (principal_id, member_id)
+    SELECT grp.id, mem.id FROM principals grp, principals mem
+    WHERE (grp.uri = 'principals/group02' AND mem.uri IN ('principals/user06','principals/user07'))
+       OR (grp.uri = 'principals/group20' AND mem.uri IN ('principals/user02','principals/user03'))
+    ON CONFLICT (principal_id, member_id) DO NOTHING;
+
   -- Calendar Server's stock test directory delegates every resource and
   -- location to user01 (write proxy); calendaruserproxy.xml's "Default
   -- setup" test depends on it.

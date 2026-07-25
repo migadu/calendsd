@@ -84,6 +84,11 @@ func summarize(cal *goical.Calendar) *eventSummary {
 		}
 		// Attendees union across instances (sabre does per-instance).
 		for _, att := range comp.Props.Values("ATTENDEE") {
+			// Expanded Calendar-Server group placeholders are display-only:
+			// no iTIP messages, and their SCHEDULE-STATUS=2.7 stays put.
+			if att.Params.Get("CUTYPE") == "X-SERVER-GROUP" {
+				continue
+			}
 			href := strings.ToLower(att.Value)
 			if seen[href] {
 				continue

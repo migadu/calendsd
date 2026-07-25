@@ -27,6 +27,11 @@ import (
 type SchedulePlugin struct {
 	server *dav.Server
 
+	// ExpandGroups turns a group ATTENDEE into a display-only
+	// CUTYPE=X-SERVER-GROUP placeholder plus one real ATTENDEE per member
+	// (Calendar Server's group-attendee expansion); off by default.
+	ExpandGroups bool
+
 	// AutoSchedule marks principals that auto-process scheduling messages
 	// (Calendar-Server resource/location semantics): REQUESTs are accepted
 	// into their default calendar — or declined on a free-busy conflict —
@@ -45,7 +50,13 @@ func (p *SchedulePlugin) PluginName() string { return "caldav-schedule" }
 
 func (p *SchedulePlugin) Init(s *dav.Server) { p.server = s }
 
-func (p *SchedulePlugin) Features() []string { return []string{"calendar-auto-schedule"} }
+func (p *SchedulePlugin) Features() []string {
+	f := []string{"calendar-auto-schedule"}
+	if p.ExpandGroups {
+		f = append(f, "calendarserver-group-attendee")
+	}
+	return f
+}
 
 func (p *SchedulePlugin) Methods(path string) []string { return []string{"POST"} }
 
@@ -117,6 +128,38 @@ func (p *SchedulePlugin) addressesForPrincipal(principalURI string) []string {
 	return append(ph.AlternateURISet(), p.server.BaseURI+ph.PrincipalURL()+"/")
 }
 
+// principalEmail returns a principal node's email address, if any.
+func principalEmail(node dav.Node) string {
+	pn, ok := node.(dav.PropNode)
+	if !ok {
+		return ""
+	}
+	props, err := pn.Props([]xml.Name{{Space: davxml.NSSabreDAV, Local: "email-address"}})
+	if err != nil {
+		return ""
+	}
+	if v, ok := props[xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// principalName returns a principal node's display name, if any.
+func principalName(node dav.Node) string {
+	pn, ok := node.(dav.PropNode)
+	if !ok {
+		return ""
+	}
+	props, err := pn.Props([]xml.Name{{Space: davxml.NSDav, Local: "displayname"}})
+	if err != nil {
+		return ""
+	}
+	if v, ok := props[xml.Name{Space: davxml.NSDav, Local: "displayname"}].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // principalForAddress finds the principal owning a calendar user address
 // (sabre's getPrincipalByUri via calendar-user-address-set).
 func (p *SchedulePlugin) principalForAddress(address string) string {
@@ -176,9 +219,19 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		}
 	}
 
+	expanded := false
+	if p.ExpandGroups {
+		expanded = p.expandGroupAttendees(newCal)
+	}
+
 	addresses := p.addressesForPrincipal(calNode.Owner())
 	messages, err := ical.ParseEvent(newCal, addresses, oldCal)
 	if err != nil || len(messages) == 0 {
+		// Re-encode only when group expansion rewrote the object; a plain
+		// non-scheduling PUT must be stored byte-for-byte (parity).
+		if expanded {
+			return ical.EncodeLenient(newCal), nil
+		}
 		return data, nil
 	}
 	for _, msg := range messages {
@@ -187,6 +240,123 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 	// Write SCHEDULE-STATUS back onto the stored object's attendees.
 	applyScheduleStatus(newCal, messages)
 	return ical.EncodeLenient(newCal), nil
+}
+
+// groupMemberInfo is one expanded member of a group attendee.
+type groupMemberInfo struct{ address, name, email string }
+
+// groupMembers reports whether the calendar-user address is a group
+// principal, and if so its members' scheduling info. A principal counts as a
+// group when it carries a non-empty {DAV:}group-member-set (only groups and
+// proxy sub-principals do, and proxy sub-principals are never attendees).
+func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo, groupEmail string, isGroup bool) {
+	uri := p.principalForAddress(address)
+	if uri == "" {
+		return nil, "", false
+	}
+	node, err := p.server.Tree.NodeForPath(uri)
+	if err != nil {
+		return nil, "", false
+	}
+	holder, ok := node.(acl.PrincipalHolder)
+	if !ok {
+		return nil, "", false
+	}
+	set, err := holder.GroupMemberSet()
+	if err != nil || len(set) == 0 {
+		return nil, "", false
+	}
+	groupEmail = principalEmail(node)
+	for _, memberURI := range set {
+		mnode, err := p.server.Tree.NodeForPath(memberURI)
+		if err != nil {
+			continue
+		}
+		mh, ok := mnode.(acl.PrincipalHolder)
+		if !ok {
+			continue
+		}
+		addr := ""
+		for _, a := range mh.AlternateURISet() {
+			if strings.HasPrefix(strings.ToLower(a), "mailto:") {
+				addr = a
+				break
+			}
+		}
+		if addr == "" {
+			addr = p.server.BaseURI + memberURI + "/"
+		}
+		members = append(members, groupMemberInfo{
+			address: addr, name: principalName(mnode), email: principalEmail(mnode),
+		})
+	}
+	return members, groupEmail, true
+}
+
+// expandGroupAttendees rewrites each group ATTENDEE into a display-only
+// X-SERVER-GROUP placeholder and appends one real ATTENDEE per member,
+// mirroring Calendar Server's GroupAttendeeReconciliation. Returns whether it
+// changed the calendar.
+func (p *SchedulePlugin) expandGroupAttendees(cal *goical.Calendar) bool {
+	changed := false
+	for _, comp := range cal.Children {
+		if comp.Name != goical.CompEvent {
+			continue
+		}
+		atts := comp.Props["ATTENDEE"]
+		// Existing attendee addresses, so a member already invited directly
+		// is not added twice.
+		present := map[string]bool{}
+		for i := range atts {
+			present[strings.ToLower(atts[i].Value)] = true
+		}
+		var added []goical.Prop
+		for i := range atts {
+			if atts[i].Params.Get("CUTYPE") == "X-SERVER-GROUP" {
+				continue // already expanded
+			}
+			members, groupEmail, isGroup := p.groupMembers(atts[i].Value)
+			if !isGroup {
+				continue
+			}
+			changed = true
+			// The group attendee becomes a non-schedulable placeholder.
+			if atts[i].Params == nil {
+				atts[i].Params = make(goical.Params)
+			}
+			atts[i].Params.Set("CUTYPE", "X-SERVER-GROUP")
+			atts[i].Params.Set("SCHEDULE-STATUS", "2.7")
+			if groupEmail != "" {
+				atts[i].Params.Set("EMAIL", groupEmail)
+			}
+			atts[i].Params.Del("PARTSTAT")
+			atts[i].Params.Del("RSVP")
+
+			for _, m := range members {
+				if present[strings.ToLower(m.address)] {
+					continue
+				}
+				present[strings.ToLower(m.address)] = true
+				member := goical.NewProp("ATTENDEE")
+				member.Value = m.address
+				member.Params.Set("CUTYPE", "INDIVIDUAL")
+				member.Params.Set("PARTSTAT", "NEEDS-ACTION")
+				member.Params.Set("RSVP", "TRUE")
+				member.Params.Set("MEMBER", atts[i].Value)
+				if m.name != "" {
+					member.Params.Set("CN", m.name)
+				}
+				if m.email != "" {
+					member.Params.Set("EMAIL", m.email)
+				}
+				added = append(added, *member)
+			}
+		}
+		if len(added) > 0 {
+			comp.Props["ATTENDEE"] = append(atts, added...)
+		}
+	}
+	return changed
 }
 
 // BeforeUnbind implements dav.BeforeUnbindHook: deleting a scheduled object
