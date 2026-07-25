@@ -128,8 +128,73 @@ func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		return true, p.mkcalendar(w, r)
 	case "GET":
 		return p.handleExport(w, r)
+	case "POST":
+		return p.handleAddMember(w, r)
 	}
 	return false, nil
+}
+
+// addMemberSegment is the trailing path segment RFC 5995 Add-Member POSTs
+// target (Calendar Server's convention).
+const addMemberSegment = ";add-member"
+
+// handleAddMember implements RFC 5995: a POST to "<calendar>/;add-member"
+// stores the body as a new calendar object under a server-assigned name and
+// returns 201 with its Location. Non-add-member POSTs (the scheduling outbox)
+// fall through to the next plugin.
+func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, error) {
+	path, err := p.server.Path(r)
+	if err != nil {
+		return false, nil
+	}
+	if !strings.HasSuffix(path, "/"+addMemberSegment) {
+		return false, nil
+	}
+	calPath := strings.TrimSuffix(path, "/"+addMemberSegment)
+	node, err := p.server.Tree.NodeForPath(calPath)
+	if err != nil {
+		return true, err
+	}
+	cal, isCal := node.(*Calendar)
+	if !isCal {
+		return true, dav.ErrForbidden("Add-Member is only supported on calendar collections")
+	}
+
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return true, err
+	}
+	name := randomToken() + ".ics"
+	targetPath := calPath + "/" + name
+
+	// Run the same write-interceptor chain a PUT would (validation +
+	// scheduling), so an Add-Member POST is not a validation bypass.
+	for _, plugin := range p.server.Plugins() {
+		if wi, ok := plugin.(dav.WriteInterceptor); ok {
+			raw, err = wi.InterceptWrite(r, targetPath, raw, true)
+			if err != nil {
+				return true, err
+			}
+		}
+	}
+	etag, err := cal.CreateFile(name, bytes.NewReader(raw))
+	if err != nil {
+		return true, err
+	}
+	for _, plugin := range p.server.Plugins() {
+		if hook, ok := plugin.(dav.AfterWriteHook); ok {
+			hook.AfterWrite(r, targetPath)
+		}
+	}
+
+	h := w.Header()
+	h.Set("Location", p.server.BaseURI+targetPath)
+	if etag != "" {
+		h.Set("ETag", etag)
+	}
+	h.Set("Content-Length", "0")
+	w.WriteHeader(http.StatusCreated)
+	return true, nil
 }
 
 // mkcalendar creates a calendar collection (RFC 4791 §5.3.1).
@@ -256,6 +321,11 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	}
 
 	if _, isCal := node.(*Calendar); isCal {
+		// RFC 5995 Add-Member: POSTing a resource here lets the server
+		// assign its name. The URL is the collection plus ";add-member".
+		pf.Handle(xml.Name{Space: davxml.NSDav, Local: "add-member"}, func() any {
+			return davxml.Href{p.server.BaseURI + pf.Path() + "/" + addMemberSegment}
+		})
 		// Constant per-calendar properties sabre emits on every calendar
 		// (max-resource-size is advertised, not enforced, matching sabre).
 		pf.Handle(cal("max-resource-size"), func() any { return "10000000" })

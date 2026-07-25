@@ -45,6 +45,7 @@ features = """	<features>
 		<feature>principal-search-property-set REPORT</feature>
 		<feature>brief</feature>
 		<feature>current-user-principal</feature>
+		<feature>add-member</feature>
 		<feature>expand-property</feature>
 		<feature>sync-report</feature>
 		<feature>well-known</feature>
