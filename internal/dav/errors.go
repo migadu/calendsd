@@ -84,6 +84,13 @@ func AsError(err error) *Error {
 	if errors.As(err, &de) {
 		return de
 	}
+	// A body exceeding Server.MaxRequestBodySize surfaces here as a
+	// *http.MaxBytesError; report it as 413 rather than a generic 500.
+	var mbe *http.MaxBytesError
+	if errors.As(err, &mbe) {
+		return davError(http.StatusRequestEntityTooLarge, "RequestEntityTooLarge",
+			"The request body exceeds the maximum allowed size")
+	}
 	return &Error{
 		Status:    http.StatusInternalServerError,
 		Exception: `Exception`,

@@ -59,7 +59,7 @@ while IFS= read -r f; do
     [ -z "$f" ] && continue
     psql -q -d "$PGDATABASE" -f "$HERE/seed.sql" >/dev/null 2>&1
     "$WORK/calserver" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
-        -browser -auto-schedule-prefixes resource,location -principals-readable -auto-provision -per-user-props >"$WORK/srv.log" 2>&1 &
+        -browser -auto-schedule-prefixes resource,location -principals-readable -auto-provision -per-user-props -expand-groups >"$WORK/srv.log" 2>&1 &
     SRV=$!
     sleep 0.8
     out="$(timeout 90 "$PY2" testcaldav.py "$f" 2>/dev/null)"

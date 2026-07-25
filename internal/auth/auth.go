@@ -42,9 +42,14 @@ func NewPlugin(backends ...Backend) *Plugin {
 }
 
 // NewLoggedInPlugin creates a pre-authenticated plugin, mirroring the
-// autoLogin mechanism of sabre's test harness.
+// autoLogin mechanism of sabre's test harness. An empty principal would
+// otherwise fall through to an unauthenticated, require-login-disabled state
+// (an accidental open server), so it panics instead.
 func NewLoggedInPlugin(principal string) *Plugin {
-	return &Plugin{fixedPrincipal: principal}
+	if principal == "" {
+		panic("auth.NewLoggedInPlugin: principal must not be empty")
+	}
+	return &Plugin{fixedPrincipal: principal, AutoRequireLogin: true}
 }
 
 func (p *Plugin) PluginName() string { return "auth" }

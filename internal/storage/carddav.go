@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -240,7 +241,10 @@ func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLev
 	if syncToken == "" {
 		var current sql.NullInt64
 		if err := b.DB.QueryRow(`SELECT synctoken FROM addressbooks WHERE id = $1`, addressBookID).Scan(&current); err != nil {
-			return nil, nil
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil // unknown address book: no change info
+			}
+			return nil, err // surface real DB errors instead of masking them
 		}
 		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(current.Int64, 10)}
 		rows, err := b.DB.Query(`SELECT uri FROM cards WHERE addressbookid = $1`, addressBookID)

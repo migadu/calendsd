@@ -14,10 +14,14 @@ that risks sabre co-existence.
 ## 1. Hard constraints
 
 - **Shared schema**: the Postgres schema is shared live with sabre/dav.
-  The admin panel introduces **no new tables** and never writes raw SQL for
-  mutations — all writes go through the existing backend interfaces
+  The admin panel introduces **no new tables**. Writes to anything with a
+  sync token, change log, or ETag go through the existing backend interfaces
   (`caldav.Backend`, `carddav.Backend`, `acl.Backend`, `dav.PropStorageBackend`)
-  so sync tokens, change logs, and ETags stay correct for both servers.
+  so both servers stay correct. **One carve-out**: `users` and `principals`
+  have no backend write path anywhere in calserver (auth.Backend is
+  read-only) and carry no sync state, so user/principal creation and
+  password reset go through a new, narrowly scoped `storage.AdminWrites`
+  type (§4) — plain SQL in sabre-parity style, nothing else touches it.
 - **Stdlib style**: plain `net/http`, `html/template`, `embed.FS`. No web
   framework, no JS toolchain. Single binary.
 
@@ -40,9 +44,13 @@ Accepted costs (documented, mitigated):
 
 1. **Config drift** — the privilege simulator is only truthful if the admin
    app runs with the same flags as the server (realm, `-per-user-props`,
-   `-principals-readable`, admin principals, …). Mitigation: both processes
-   read the same flags; the admin app prints the effective config at startup
-   and on the dashboard.
+   `-principals-readable`, …; admin principals are hardcoded in
+   `server.New`, so they can't drift as long as the admin app composes via
+   `server.New` rather than building its own plugin set). "Run both with
+   the same flags" is a convention, not a mechanism, so make drift
+   checkable: both binaries log the same canonical one-line effective-config
+   string at startup, and the dashboard (§3.1) shows the admin app's copy —
+   comparing the two is a string diff.
 2. **No in-process visibility** — in-flight iMip sends and any future caches
    live in the server process; the admin app sees only DB and logs.
    Negligible today.
@@ -76,9 +84,13 @@ curl/jq. Phase A may ship JSON-only if useful earlier.
 - Counts: principals, users, calendars/instances, objects, address books,
   cards.
 - Recent activity: last N rows from `calendarchanges`/`addressbookchanges`
-  (principal, collection, operation, time).
-- Effective config echo: realm, iMip status, enabled Calendar-Server flags —
-  doubles as the config-drift check.
+  (principal, collection, operation), ordered by synctoken — the change
+  tables have **no timestamp column**; a time can be joined in from
+  `calendarobjects.lastmodified` only for objects that still exist
+  (deletes show without one).
+- Effective config echo: the canonical config string from §2 (realm, iMip
+  status, enabled Calendar-Server flags) — doubles as the config-drift
+  check against the server's startup log line.
 
 ### 3.2 Principal & user inspector ("everything about user X")
 - Identity: `principals` row (uri, email, displayname) + matching `users` row.
@@ -96,18 +108,23 @@ curl/jq. Phase A may ship JSON-only if useful earlier.
   `share_href`.
 - **Properties in three layers**: live column-backed props (displayname,
   color, timezone, order, transparent), dead props from `propertystorage`,
-  and per-user overlays (the `path + "\n" + principal` synthetic rows),
-  shown per principal — "delegate sees a different color than owner" made
-  visible. Flag `valuetype=3` (PHP-serialized) rows as sabre-only.
+  and per-user overlays (the `path + "/\n" + principal` synthetic rows built
+  in `internal/dav/peruserprops.go`), shown per principal — "delegate sees a
+  different color than owner" made visible. Flag `valuetype=3`
+  (PHP-serialized) rows as sabre-only.
 - Supported components, sync token, object count, total size.
 
 ### 3.4 Object browser
 - List/search `calendarobjects` and `cards` by UID, URI, summary, date range.
+  UID and URI hit indexed columns; summary/date-range search must parse
+  `calendardata` row by row, so it is **scoped to one collection and
+  hard-limited/paginated** — the browser must not be the query that OOMs.
 - Raw iCal/vCard next to a parsed summary (component type, UID,
   organizer/attendees, RRULE).
-- **Stored-vs-derived checks**: recompute `firstoccurrence`/`lastoccurrence`/
-  `size`/`etag` from `calendardata` and diff against stored columns —
-  explains "event missing from time-range REPORT".
+- **Stored-vs-derived checks**: recompute `firstoccurence`/`lastoccurence`
+  (sabre's single-"r" spelling, kept in the schema)/`size`/`etag` from
+  `calendardata` and diff against stored columns — explains "event missing
+  from time-range REPORT".
 
 ### 3.5 ACL & privilege simulator (the big debugging win)
 - Effective ACL viewer: walk the real node tree for any path, render
@@ -136,14 +153,16 @@ Read-only invariant checks, each finding linked to its inspector:
 ### 3.8 Setup actions (writes — gated)
 Behind `-readonly` defaulting to **true**:
 - Create user + principal (compute `digesta1` from the configured realm);
-  reset password.
+  reset password. These are the one class of write with **no existing
+  backend path** — they go through `storage.AdminWrites` (§1 carve-out, §4).
 - Edit delegation via `SetGroupMemberSet`.
 - Fix collection properties via the backend `PropPatch` path.
 - Provision default calendar/address book (reuse auto-provision code).
 - Delete orphans found by the doctor.
 
-Every write goes through existing backends — never raw SQL — and emits a
-structured audit log line (no audit table, per §1).
+Every write with sync state goes through existing backends — raw SQL only
+inside `AdminWrites` for the sync-state-free `users`/`principals` tables —
+and emits a structured audit log line (no audit table, per §1).
 
 ## 4. Data access
 
@@ -151,8 +170,11 @@ Backend interfaces are per-principal shaped (`CalendarsForUser`, …) — right
 for inspectors, wrong for cross-user aggregates. Add a small **read-only**
 `storage.AdminQueries{DB}` beside the existing storage types for the
 dashboard/doctor joins and counts, in the same sabre-parity SQL style.
-Everything else reuses existing types (`acl.Principal`, `caldav.CalendarInfo`,
-`caldav.ObjectInfo`, …).
+For Phase C, a sibling `storage.AdminWrites{DB}` holds the §1 carve-out:
+`users`/`principals` inserts and password (`digesta1`) updates — the only
+raw mutation SQL in the admin app, kept in one file so the carve-out stays
+auditable. Everything else reuses existing types (`acl.Principal`,
+`caldav.CalendarInfo`, `caldav.ObjectInfo`, …).
 
 ## 5. Phases
 
@@ -160,7 +182,7 @@ Everything else reuses existing types (`acl.Principal`, `caldav.CalendarInfo`,
 |-------|-------|------|
 | **A** | Standalone binary, auth, dashboard, principal inspector, calendar/addressbook inspector, object browser | Pure reads; zero parity risk; most of the debugging value |
 | **B** | Privilege simulator, scheduling/sync debugger, doctor | Still read-only; simulated requests through the plugin chain |
-| **C** | Gated write actions (§3.8) + parity tests proving sabre sees admin-made changes correctly (extend the `PARITY=1` harness) | Writes; guarded by backends + parity tests |
+| **C** | Gated write actions (§3.8) + parity tests proving sabre sees admin-made changes correctly (extend the `PARITY=1` harness) | Writes; guarded by backends (plus the audited `AdminWrites` carve-out) + parity tests |
 
 ## 6. Testing
 

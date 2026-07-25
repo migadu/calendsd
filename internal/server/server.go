@@ -5,6 +5,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/xml"
 	"net/http"
@@ -37,6 +38,9 @@ type Config struct {
 	// PerUserProps stores non-owner property writes per (principal, path)
 	// and overlays them on reads (Calendar-Server behavior); off by default.
 	PerUserProps bool
+	// ExpandGroups expands group ATTENDEEs into per-member invitations
+	// (Calendar-Server behavior); off by default.
+	ExpandGroups bool
 	// PrincipalsReadable grants authenticated users read on principal
 	// resources (Calendar-Server behavior); off by default (sabre parity).
 	PrincipalsReadable bool
@@ -91,9 +95,11 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	srv.AddPlugin(auth.NewPlugin(
 		&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1},
 		&auth.BasicBackend{Realm: cfg.Realm, Validate: func(username, password string) bool {
-			// Basic verifies against the same digesta1 hash.
+			// Basic verifies against the same digesta1 hash, compared in
+			// constant time so verification does not leak the stored hash.
 			hash, ok := users.HashA1(cfg.Realm, username)
-			return ok && auth.DigestA1(username, cfg.Realm, password) == hash
+			return ok && subtle.ConstantTimeCompare(
+				[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
 		}},
 	))
 	srv.AddPlugin(&acl.Plugin{
@@ -101,7 +107,7 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
 	})
 	srv.AddPlugin(&caldav.Plugin{})
-	schedule := &caldav.SchedulePlugin{}
+	schedule := &caldav.SchedulePlugin{ExpandGroups: cfg.ExpandGroups}
 	if len(cfg.AutoSchedulePrefixes) > 0 {
 		prefixes := cfg.AutoSchedulePrefixes
 		schedule.AutoSchedule = func(principalURI string) bool {

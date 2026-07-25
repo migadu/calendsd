@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -53,7 +54,11 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 	expected := md5hex(strings.Join([]string{
 		a1, params["nonce"], params["nc"], params["cnonce"], params["qop"], a2,
 	}, ":"))
-	if expected != params["response"] {
+	// Constant-time compare so response-hash verification does not leak the
+	// expected value through timing. NOTE: this backend is stateless (it does
+	// not track or expire the nonce, matching sabre's Digest), so a captured
+	// Authorization header can be replayed — deploy behind TLS.
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(params["response"])) != 1 {
 		return "", false, "Username or password was incorrect"
 	}
 	return b.prefix() + username, true, ""

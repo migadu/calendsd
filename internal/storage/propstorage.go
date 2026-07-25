@@ -62,10 +62,18 @@ func (p *PropertyStorage) PropFind(path string, pf *dav.PropFind) error {
 
 func (p *PropertyStorage) PropPatch(path string, pp *dav.PropPatch) error {
 	pp.HandleRemaining(func(values map[xmlName]any) (map[xmlName]int, bool) {
+		// PROPPATCH is all-or-nothing (RFC 4918 §9.2): apply every property
+		// write in one transaction so a failure midway leaves nothing
+		// half-committed.
+		tx, err := p.DB.Begin()
+		if err != nil {
+			return nil, false
+		}
+		defer tx.Rollback()
 		for name, value := range values {
 			clark := davxml.Clark(name)
 			if value == nil {
-				if _, err := p.DB.Exec(
+				if _, err := tx.Exec(
 					`DELETE FROM propertystorage WHERE path = $1 AND name = $2`,
 					path, clark); err != nil {
 					return nil, false
@@ -83,12 +91,15 @@ func (p *PropertyStorage) PropPatch(path string, pp *dav.PropPatch) error {
 			default:
 				return nil, false
 			}
-			if _, err := p.DB.Exec(`
+			if _, err := tx.Exec(`
 INSERT INTO propertystorage (path, name, valuetype, value) VALUES ($1, $2, $3, $4)
 ON CONFLICT (path, name) DO UPDATE SET valuetype = $3, value = $4`,
 				path, clark, valuetype, stored); err != nil {
 				return nil, false
 			}
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false
 		}
 		return nil, true
 	})
@@ -103,14 +114,21 @@ func (p *PropertyStorage) Delete(path string) error {
 }
 
 func (p *PropertyStorage) Move(source, destination string) error {
-	// Sabre's PDO backend renames the exact path and all children.
-	rows, err := p.DB.Query(
+	// Sabre's PDO backend renames the exact path and all children. Do the
+	// select and every rename in one transaction so a failure mid-way cannot
+	// leave the property subtree half-renamed.
+	tx, err := p.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(
 		`SELECT id, path FROM propertystorage WHERE path = $1 OR path LIKE $2`,
 		source, escapeLike(source)+"/%")
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	type rename struct {
 		id      int64
 		newPath string
@@ -120,20 +138,22 @@ func (p *PropertyStorage) Move(source, destination string) error {
 		var id int64
 		var path string
 		if err := rows.Scan(&id, &path); err != nil {
+			rows.Close()
 			return err
 		}
 		renames = append(renames, rename{id, destination + strings.TrimPrefix(path, source)})
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
 	for _, r := range renames {
-		if _, err := p.DB.Exec(
+		if _, err := tx.Exec(
 			`UPDATE propertystorage SET path = $1 WHERE id = $2`, r.newPath, r.id); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func escapeLike(s string) string {

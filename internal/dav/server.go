@@ -33,7 +33,17 @@ type Server struct {
 	// plugins register predicates that add resourcetype values (e.g.
 	// {DAV:}principal for principal nodes).
 	resourceTypeMappings []func(Node) []xml.Name
+
+	// MaxRequestBodySize caps how many bytes any request body may deliver;
+	// larger bodies are rejected with 413. Guards against memory-exhaustion
+	// from unbounded PUT/REPORT/PROPFIND bodies. Zero means the default.
+	MaxRequestBodySize int64
 }
+
+// DefaultMaxRequestBodySize is the request-body cap applied when a Server does
+// not set MaxRequestBodySize. 100 MiB comfortably covers real calendar/contact
+// payloads while bounding per-request allocation.
+const DefaultMaxRequestBodySize = 100 << 20
 
 // AddResourceTypeMapping registers an additional resourcetype source.
 func (s *Server) AddResourceTypeMapping(fn func(Node) []xml.Name) {
@@ -193,6 +203,13 @@ func (s *Server) stripBase(p string) (string, error) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	limit := s.MaxRequestBodySize
+	if limit <= 0 {
+		limit = DefaultMaxRequestBodySize
+	}
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+	}
 	r = r.WithContext(withPrincipalState(r.Context()))
 	// beforeMethod hooks (auth, ACL) run before precondition checks,
 	// matching sabre's event order.

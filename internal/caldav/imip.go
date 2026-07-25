@@ -68,14 +68,18 @@ func (p *IMipPlugin) DeliverExternal(msg *ical.Message) bool {
 		}
 	}
 
+	// Every value below is derived from attacker-controlled calendar data
+	// (SUMMARY, ORGANIZER/ATTENDEE CN and address, METHOD). Strip CR/LF so a
+	// crafted event cannot inject additional headers (Bcc, a forged body) into
+	// the outgoing message.
 	body := ical.EncodeLenient(msg.Calendar)
 	headers := []string{
 		"Reply-To: " + formatAddress(msg.SenderName, sender),
 		"From: " + formatAddress(msg.SenderName, p.SenderEmail),
 		"To: " + formatAddress(msg.RecipientName, recipient),
-		"Subject: " + subject,
+		"Subject: " + stripHeaderChars(subject),
 		"MIME-Version: 1.0",
-		"Content-Type: text/calendar; charset=UTF-8; method=" + msg.Method,
+		"Content-Type: text/calendar; charset=UTF-8; method=" + stripHeaderChars(msg.Method),
 	}
 	email := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + string(body))
 
@@ -92,10 +96,17 @@ func (p *IMipPlugin) DeliverExternal(msg *ical.Message) bool {
 }
 
 func formatAddress(name, addr string) string {
+	name, addr = stripHeaderChars(name), stripHeaderChars(addr)
 	if name != "" && name != addr {
 		return fmt.Sprintf("%s <%s>", name, addr)
 	}
 	return addr
+}
+
+// stripHeaderChars removes CR and LF so untrusted values (event summaries,
+// attendee names, addresses) cannot inject extra email headers or a body.
+func stripHeaderChars(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
 
 // eventSummaryText returns the SUMMARY of the message's first VEVENT.

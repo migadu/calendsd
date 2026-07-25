@@ -28,7 +28,7 @@ func DecodeJCal(data []byte) (*goical.Calendar, error) {
 	if err := dec.Decode(&root); err != nil {
 		return nil, fmt.Errorf("invalid jCal: %w", err)
 	}
-	comp, err := decodeJCalComponent(root)
+	comp, err := decodeJCalComponent(root, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +38,14 @@ func DecodeJCal(data []byte) (*goical.Calendar, error) {
 	return &goical.Calendar{Component: comp}, nil
 }
 
-func decodeJCalComponent(node []any) (*goical.Component, error) {
+// maxJCalDepth caps jCal subcomponent nesting so a deeply-nested body cannot
+// exhaust the stack during the recursive decode.
+const maxJCalDepth = 100
+
+func decodeJCalComponent(node []any, depth int) (*goical.Component, error) {
+	if depth > maxJCalDepth {
+		return nil, fmt.Errorf("jCal component nesting exceeds %d levels", maxJCalDepth)
+	}
 	if len(node) != 3 {
 		return nil, fmt.Errorf("jCal component must be a 3-element array")
 	}
@@ -73,7 +80,7 @@ func decodeJCalComponent(node []any) (*goical.Component, error) {
 		if !ok {
 			return nil, fmt.Errorf("jCal subcomponent must be an array")
 		}
-		child, err := decodeJCalComponent(ca)
+		child, err := decodeJCalComponent(ca, depth+1)
 		if err != nil {
 			return nil, err
 		}

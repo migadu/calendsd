@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
@@ -27,6 +28,9 @@ func main() {
 	principalsReadable := flag.Bool("principals-readable", false, "grant authenticated users read access to principal resources (Calendar-Server behavior)")
 	autoProvision := flag.Bool("auto-provision", false, "recreate the default calendar/addressbook when a principal has none (Calendar-Server behavior)")
 	perUserProps := flag.Bool("per-user-props", false, "store non-owner property writes per user and overlay them on reads (Calendar-Server behavior)")
+	expandGroups := flag.Bool("expand-groups", false, "expand group ATTENDEEs into per-member invitations (Calendar-Server behavior)")
+	tlsCert := flag.String("tls-cert", "", "path to a TLS certificate; enables HTTPS (Basic/Digest send credentials, so terminate TLS here or in front)")
+	tlsKey := flag.String("tls-key", "", "path to the TLS private key (required with -tls-cert)")
 	flag.Parse()
 
 	var srv http.Handler
@@ -51,6 +55,7 @@ func main() {
 			PrincipalsReadable: *principalsReadable,
 			AutoProvision:      *autoProvision,
 			PerUserProps:       *perUserProps,
+			ExpandGroups:       *expandGroups,
 		})
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
@@ -58,8 +63,30 @@ func main() {
 		srv = dav.NewServer(*baseURI, mock.NewPropCollection("root", nil))
 	}
 
-	slog.Info("listening", "addr", *addr, "base_uri", *baseURI, "db", *dsn != "")
-	if err := http.ListenAndServe(*addr, srv); err != nil {
+	httpSrv := &http.Server{
+		Addr:              *addr,
+		Handler:           srv,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB of request headers
+	}
+
+	tls := *tlsCert != "" || *tlsKey != ""
+	if tls && (*tlsCert == "" || *tlsKey == "") {
+		slog.Error("TLS requires both -tls-cert and -tls-key")
+		os.Exit(1)
+	}
+
+	slog.Info("listening", "addr", *addr, "base_uri", *baseURI, "db", *dsn != "", "tls", tls)
+	var err error
+	if tls {
+		err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+	} else {
+		err = httpSrv.ListenAndServe()
+	}
+	if err != nil {
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
 	}

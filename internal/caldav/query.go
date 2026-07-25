@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -12,6 +13,38 @@ import (
 	"calserver/internal/caldav/ical"
 	"calserver/internal/dav"
 )
+
+// maxFilterDepth caps element nesting in a REPORT filter body. Real CalDAV
+// filters nest a handful of levels (VCALENDAR > VEVENT > VALARM); this bound is
+// generous while stopping a deeply-nested body from exhausting the stack when
+// xml.Unmarshal and the recursive filter walk recurse per level.
+const maxFilterDepth = 100
+
+// checkXMLNestingDepth rejects XML whose element nesting exceeds max. It scans
+// tokens iteratively so the check itself cannot stack-overflow, and runs before
+// the recursive struct unmarshal.
+func checkXMLNestingDepth(body []byte, max int) error {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return nil // let the real parser report malformed XML
+		}
+		switch tok.(type) {
+		case xml.StartElement:
+			depth++
+			if depth > max {
+				return dav.ErrBadRequest("request body XML nesting exceeds %d levels", max)
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
+}
 
 // Filter trees mirror RFC 4791 §9.7 and sabre's parsed filter arrays.
 
@@ -141,6 +174,9 @@ func (q *CalendarQuery) prefilterHints() (componentType string, start, end time.
 
 // ParseCalendarQuery parses a calendar-query REPORT body.
 func ParseCalendarQuery(body []byte) (*CalendarQuery, error) {
+	if err := checkXMLNestingDepth(body, maxFilterDepth); err != nil {
+		return nil, err
+	}
 	var q queryXML
 	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&q); err != nil {
 		return nil, err
@@ -190,6 +226,9 @@ type CalendarMultiget struct {
 
 // ParseCalendarMultiget parses a calendar-multiget REPORT body.
 func ParseCalendarMultiget(body []byte) (*CalendarMultiget, error) {
+	if err := checkXMLNestingDepth(body, maxFilterDepth); err != nil {
+		return nil, err
+	}
 	var q multigetXML
 	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&q); err != nil {
 		return nil, err

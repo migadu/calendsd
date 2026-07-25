@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -462,7 +463,13 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 			for _, obj := range objs {
 				ok, err := p.objectMatches(obj, query, validator)
 				if err != nil {
-					return err
+					// One unparseable/semantically-invalid stored object
+					// (e.g. a malformed DURATION written by another client)
+					// must not 500 the entire collection query: skip it and
+					// keep matching the rest, like a resilient report engine.
+					slog.Warn("skipping calendar object in query",
+						"path", path+"/"+obj.Name(), "err", err)
+					continue
 				}
 				if ok {
 					matches = append(matches, path+"/"+obj.Name())
@@ -479,7 +486,14 @@ func (p *Plugin) objectMatches(obj *CalendarObject, query *CalendarQuery, v *Val
 	if err != nil {
 		return false, dav.ErrBadRequest("The calendar object could not be parsed: %s", err)
 	}
-	return v.Validate(cal, query.Filter)
+	ok, err := v.Validate(cal, query.Filter)
+	if err != nil {
+		// Semantically-invalid stored data (bad DURATION/date/RRULE in a
+		// VALARM/VTODO the PUT-time check doesn't cover) is a client-visible
+		// data error, not a server fault: 400 rather than 500.
+		return false, invalidCalendarData("Invalid calendar object: %s", err)
+	}
+	return ok, nil
 }
 
 func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -489,7 +503,15 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 	}
 	var paths []string
 	for _, href := range query.Hrefs {
-		paths = append(paths, strings.Trim(strings.TrimPrefix(href, p.server.BaseURI), "/"))
+		// Normalize each href through the same base-stripping logic as the
+		// request path (gopath.Clean + base-prefix enforcement) rather than a
+		// bare TrimPrefix, so hrefs outside the mount are rejected instead of
+		// silently resolved.
+		path, err := p.server.ResolveHref(href)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, path)
 	}
 	loc := time.UTC
 	if query.Expand != nil && len(paths) > 0 {
@@ -621,7 +643,10 @@ func expandResponseData(resp *davxml.Response, expand *TimeRange, loc *time.Loca
 			}
 			expanded, err := ical.Expand(cal, expand.Start, expand.End, loc)
 			if err != nil {
-				return err
+				// Malformed recurrence/duration data in a stored object is a
+				// data problem, not a server fault: report 400
+				// valid-calendar-data instead of a generic 500.
+				return invalidCalendarData("Could not expand calendar object: %s", err)
 			}
 			ps.Props[i].Value = davxml.Text(ical.EncodeLenient(expanded))
 		}
