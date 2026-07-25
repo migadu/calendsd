@@ -191,3 +191,33 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestDenormalizeOverrideExtendsLast: an overridden instance moved past the
+// RRULE's range extends LastOccurrence (sabre's EventIterator behavior);
+// FirstOccurrence stays the master DTSTART.
+func TestDenormalizeOverrideExtendsLast(t *testing.T) {
+	data := ics(
+		"BEGIN:VEVENT", "UID:rec-1", "DTSTAMP:20251201T000000Z",
+		"DTSTART:20260101T120000Z", "DTEND:20260101T130000Z",
+		"RRULE:FREQ=WEEKLY;COUNT=3", "END:VEVENT",
+		// Move the Jan 15 occurrence to Jan 20, ending 15:00.
+		"BEGIN:VEVENT", "UID:rec-1", "DTSTAMP:20251201T000000Z",
+		"RECURRENCE-ID:20260115T120000Z",
+		"DTSTART:20260120T120000Z", "DTEND:20260120T150000Z", "END:VEVENT",
+	)
+	checkBounds(t, data, ts(t, 2026, 1, 1, 12, 0), ts(t, 2026, 1, 20, 15, 0))
+}
+
+// TestDenormalizeOverrideWithinRange: an override that does not extend past
+// the normal range leaves LastOccurrence at the master's final occurrence.
+func TestDenormalizeOverrideWithinRange(t *testing.T) {
+	data := ics(
+		"BEGIN:VEVENT", "UID:rec-2", "DTSTAMP:20251201T000000Z",
+		"DTSTART:20260101T120000Z", "DTEND:20260101T130000Z",
+		"RRULE:FREQ=WEEKLY;COUNT=3", "END:VEVENT",
+		"BEGIN:VEVENT", "UID:rec-2", "DTSTAMP:20251201T000000Z",
+		"RECURRENCE-ID:20260108T120000Z",
+		"DTSTART:20260108T090000Z", "DTEND:20260108T093000Z", "END:VEVENT",
+	)
+	checkBounds(t, data, ts(t, 2026, 1, 1, 12, 0), ts(t, 2026, 1, 15, 13, 0))
+}
