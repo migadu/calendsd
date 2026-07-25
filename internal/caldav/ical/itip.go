@@ -1,13 +1,16 @@
 // iTIP scheduling broker: generates scheduling messages from calendar-object
 // changes and applies incoming messages to recipient copies. Port of the
 // core flows of sabre/vobject's ITip\Broker (new invites, updates,
-// cancellations, attendee replies). Per-instance attendee handling
-// (RECURRENCE-ID-scoped invitations) is simplified to whole-object
-// granularity — TODO(parity): port the per-instance matrix.
+// cancellations, attendee replies), including the per-instance
+// (RECURRENCE-ID-scoped) attendee matrix: each attendee receives only the
+// occurrences they belong to, with EXDATE synthesized on the master for
+// excluded instances, and replies scoped to the instances whose PARTSTAT
+// changed.
 package ical
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -48,28 +51,60 @@ type attendeeInfo struct {
 	prop     goical.Prop
 }
 
-// eventSummary captures the scheduling-relevant view of an object.
+// eventSummary captures the scheduling-relevant view of an object, including
+// the per-instance (RECURRENCE-ID) attendee matrix sabre's broker needs.
 type eventSummary struct {
 	uid       string
 	organizer string
 	orgName   string
 	sequence  string
-	attendees []attendeeInfo
+	status    string
+	exdate    []string // sorted EXDATE values across all components
 	master    *goical.Component
+	// instances maps a recurrence id ("master" or the RECURRENCE-ID value)
+	// to its VEVENT; instOrder preserves calendar order.
+	instances map[string]*goical.Component
+	instOrder []string
+	// attendees is the flat, first-seen list (the reply applier reads it);
+	// perAtt/attOrder carry the per-instance participation matrix.
+	attendees []attendeeInfo
+	perAtt    map[string]*attendeeState
+	attOrder  []string
+	sigHash   string // significant-change fingerprint
 	cal       *goical.Calendar
 }
+
+// attendeeState is one attendee's participation across instances.
+type attendeeState struct {
+	href      string
+	name      string
+	instances map[string]string // recurrence id -> PARTSTAT
+	order     []string          // recurrence ids in first-seen order
+}
+
+// sigProps are the properties whose change makes an update significant (sabre
+// Broker::$significantChangeProperties).
+var sigProps = []string{"DTSTART", "DTEND", "DURATION", "DUE", "RRULE", "RDATE", "EXDATE", "STATUS"}
 
 func summarize(cal *goical.Calendar) *eventSummary {
 	if cal == nil {
 		return nil
 	}
-	out := &eventSummary{cal: cal, sequence: "0"}
-	seen := map[string]bool{}
+	out := &eventSummary{
+		cal: cal, sequence: "0",
+		instances: map[string]*goical.Component{},
+		perAtt:    map[string]*attendeeState{},
+	}
+	flatSeen := map[string]bool{}
+	var exset, eventHashes []string
 	for _, comp := range cal.Children {
 		if comp.Name != goical.CompEvent {
 			continue
 		}
-		if out.master == nil {
+		rid := recurID(comp)
+		out.instances[rid] = comp
+		out.instOrder = append(out.instOrder, rid)
+		if rid == "master" || out.master == nil {
 			out.master = comp
 		}
 		if p := comp.Props.Get(goical.PropUID); p != nil && out.uid == "" {
@@ -79,10 +114,16 @@ func summarize(cal *goical.Calendar) *eventSummary {
 			out.organizer = strings.ToLower(p.Value)
 			out.orgName = p.Params.Get("CN")
 		}
-		if p := comp.Props.Get("SEQUENCE"); p != nil {
+		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == "0" {
 			out.sequence = p.Value
 		}
-		// Attendees union across instances (sabre does per-instance).
+		if p := comp.Props.Get("STATUS"); p != nil {
+			out.status = strings.ToUpper(p.Value)
+		}
+		for _, ex := range comp.Props.Values("EXDATE") {
+			exset = append(exset, splitList(ex.Value)...)
+		}
+		// Per-instance attendee participation.
 		for _, att := range comp.Props.Values("ATTENDEE") {
 			// Expanded Calendar-Server group placeholders are display-only:
 			// no iTIP messages, and their SCHEDULE-STATUS=2.7 stays put.
@@ -90,21 +131,67 @@ func summarize(cal *goical.Calendar) *eventSummary {
 				continue
 			}
 			href := strings.ToLower(att.Value)
-			if seen[href] {
-				continue
-			}
-			seen[href] = true
 			partStat := att.Params.Get("PARTSTAT")
 			if partStat == "" {
 				partStat = "NEEDS-ACTION"
 			}
-			out.attendees = append(out.attendees, attendeeInfo{
-				href: href, name: att.Params.Get("CN"), partStat: partStat, prop: att,
-			})
+			st := out.perAtt[href]
+			if st == nil {
+				st = &attendeeState{href: href, name: att.Params.Get("CN"), instances: map[string]string{}}
+				out.perAtt[href] = st
+				out.attOrder = append(out.attOrder, href)
+			}
+			if _, dup := st.instances[rid]; !dup {
+				st.order = append(st.order, rid)
+			}
+			st.instances[rid] = partStat
+			if !flatSeen[href] {
+				flatSeen[href] = true
+				out.attendees = append(out.attendees, attendeeInfo{
+					href: href, name: att.Params.Get("CN"), partStat: partStat, prop: att,
+				})
+			}
 		}
+		// Per-event significant-change hash.
+		var h strings.Builder
+		for _, prop := range sigProps {
+			vals := comp.Props.Values(prop)
+			if len(vals) == 0 {
+				continue
+			}
+			h.WriteString(prop + ":")
+			for _, v := range vals {
+				h.WriteString(v.Value + ";")
+			}
+		}
+		eventHashes = append(eventHashes, h.String())
 	}
 	if out.master == nil {
 		return nil
+	}
+	sort.Strings(exset)
+	out.exdate = exset
+	sort.Strings(eventHashes)
+	out.sigHash = strings.Join(eventHashes, "")
+	return out
+}
+
+// recurID returns a component's recurrence id: the RECURRENCE-ID value, or
+// "master" for the base instance.
+func recurID(comp *goical.Component) string {
+	if p := comp.Props.Get("RECURRENCE-ID"); p != nil {
+		return p.Value
+	}
+	return "master"
+}
+
+// splitList splits a comma-separated property value (EXDATE can carry many).
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
 	}
 	return out
 }
@@ -133,132 +220,414 @@ func ParseEvent(newCal *goical.Calendar, addresses []string, oldCal *goical.Cale
 	return parseAsAttendee(newInfo, oldInfo, lowered)
 }
 
+// parseAsOrganizer generates the per-attendee REQUEST/CANCEL messages for an
+// organizer-side change. Port of Broker::parseEventForOrganizer: each attendee
+// receives only the instances they belong to, with EXDATE synthesized for the
+// master when they are excluded from some occurrences.
 func parseAsOrganizer(newInfo, oldInfo *eventSummary) ([]*Message, error) {
-	var out []*Message
-
-	significant := significantChange(newInfo, oldInfo)
-	current := map[string]attendeeInfo{}
-	if newInfo != nil {
-		for _, att := range newInfo.attendees {
-			current[att.href] = att
-			if att.href == newInfo.organizer {
-				continue
-			}
-			msg := &Message{
-				UID: newInfo.uid, Method: "REQUEST", Component: "VEVENT",
-				Sender: newInfo.organizer, SenderName: newInfo.orgName,
-				Recipient: att.href, RecipientName: att.name,
-				SignificantChange: significant,
-				Calendar:          itipPayload(newInfo.cal, "REQUEST"),
-			}
-			out = append(out, msg)
-		}
-	}
-	// Attendees removed (or the whole event deleted) get CANCEL.
-	if oldInfo != nil {
-		for _, att := range oldInfo.attendees {
-			if att.href == oldInfo.organizer {
-				continue
-			}
-			if _, still := current[att.href]; still {
-				continue
-			}
-			out = append(out, &Message{
-				UID: oldInfo.uid, Method: "CANCEL", Component: "VEVENT",
-				Sender: oldInfo.organizer, SenderName: oldInfo.orgName,
-				Recipient: att.href, RecipientName: att.name,
-				SignificantChange: true,
-				Calendar:          cancelPayload(oldInfo),
-			})
-		}
-	}
-	return out, nil
-}
-
-func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) ([]*Message, error) {
-	// Find the acting attendee and their old/new participation state.
-	find := func(info *eventSummary) *attendeeInfo {
-		if info == nil {
-			return nil
-		}
-		for i := range info.attendees {
-			if addresses[info.attendees[i].href] {
-				return &info.attendees[i]
-			}
-		}
-		return nil
-	}
-	newAtt, oldAtt := find(newInfo), find(oldInfo)
 	base := newInfo
 	if base == nil {
 		base = oldInfo
 	}
-	if newAtt == nil && oldAtt == nil {
-		return nil, nil
+	type merged struct {
+		href, name string
+		old, new   *attendeeState
+	}
+	m := map[string]*merged{}
+	var order []string
+	touch := func(href string) *merged {
+		if x := m[href]; x != nil {
+			return x
+		}
+		x := &merged{href: href}
+		m[href] = x
+		order = append(order, href)
+		return x
+	}
+	if oldInfo != nil {
+		for _, href := range oldInfo.attOrder {
+			st := oldInfo.perAtt[href]
+			x := touch(href)
+			x.old, x.name = st, st.name
+		}
+	}
+	if newInfo != nil {
+		for _, href := range newInfo.attOrder {
+			st := newInfo.perAtt[href]
+			x := touch(href)
+			x.new = st
+			if st.name != "" {
+				x.name = st.name
+			}
+		}
 	}
 
-	partStat := "DECLINED" // deletion by an attendee declines
-	var att *attendeeInfo
-	if newAtt != nil {
-		att = newAtt
-		partStat = newAtt.partStat
-		if oldAtt != nil && strings.EqualFold(oldAtt.partStat, partStat) {
-			return nil, nil // no participation change, no REPLY
+	sigChanged := oldInfo == nil || newInfo == nil || oldInfo.sigHash != newInfo.sigHash
+
+	var out []*Message
+	for _, href := range order {
+		x := m[href]
+		if href == base.organizer {
+			continue // an organizer who is also an attendee gets no message
 		}
-	} else {
-		att = oldAtt
+		msg := &Message{
+			UID: base.uid, Component: "VEVENT",
+			Sender: base.organizer, SenderName: base.orgName,
+			Recipient: href, RecipientName: x.name,
+		}
+		if x.new == nil || len(x.new.instances) == 0 || base.status == "CANCELLED" {
+			msg.Method = "CANCEL"
+			msg.SignificantChange = true
+			msg.Calendar = cancelMessage(base, href, x.name)
+		} else {
+			msg.Method = "REQUEST"
+			msg.SignificantChange = sigChanged || instancesDiffer(x.old, x.new)
+			msg.Calendar = requestMessage(newInfo, x.new)
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+// instancesDiffer reports whether the set of instances an attendee belongs to
+// changed (a significant change even when no property did).
+func instancesDiffer(oldSt, newSt *attendeeState) bool {
+	var o, n int
+	seen := map[string]bool{}
+	if oldSt != nil {
+		for id := range oldSt.instances {
+			seen[id] = true
+			o++
+		}
+	}
+	if newSt != nil {
+		for id := range newSt.instances {
+			if !seen[id] {
+				return true
+			}
+			n++
+		}
+	}
+	return o != n
+}
+
+// requestMessage builds the REQUEST body an attendee receives: only the
+// instances they belong to, VTIMEZONEs, and (on the master) EXDATE for the
+// occurrences they are excluded from, with server-only scheduling parameters
+// stripped. Port of the REQUEST branch of Broker::parseEventForOrganizer.
+func requestMessage(info *eventSummary, att *attendeeState) *goical.Calendar {
+	out := goical.NewCalendar()
+	out.Props.SetText(goical.PropVersion, "2.0")
+	setPlainProp(out.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlainProp(out.Props, "METHOD", "REQUEST")
+	for _, comp := range info.cal.Children {
+		if comp.Name == goical.CompTimezone {
+			out.Children = append(out.Children, cloneComponent(comp))
+		}
+	}
+	for _, rid := range info.instOrder {
+		if _, ok := att.instances[rid]; !ok {
+			continue
+		}
+		ev := cloneComponent(info.instances[rid])
+		if rid == "master" {
+			var exclude []string
+			for _, other := range info.instOrder {
+				if other == "master" {
+					continue
+				}
+				if _, ok := att.instances[other]; !ok {
+					exclude = append(exclude, other)
+				}
+			}
+			if len(exclude) > 0 {
+				addExdate(ev, info.instances["master"], exclude)
+			}
+			stripScheduleParams(ev)
+		}
+		setPlainProp(ev.Props, "DTSTAMP", nowStamp())
+		out.Children = append(out.Children, ev)
+	}
+	return out
+}
+
+// cancelMessage builds a minimal CANCEL for an attendee who was removed (or
+// whose event was deleted/cancelled).
+func cancelMessage(info *eventSummary, href, name string) *goical.Calendar {
+	out := goical.NewCalendar()
+	out.Props.SetText(goical.PropVersion, "2.0")
+	setPlainProp(out.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlainProp(out.Props, "METHOD", "CANCEL")
+	ev := goical.NewComponent(goical.CompEvent)
+	setPlainProp(ev.Props, goical.PropUID, info.uid)
+	setPlainProp(ev.Props, "SEQUENCE", info.sequence)
+	setPlainProp(ev.Props, "DTSTAMP", nowStamp())
+	m := info.master
+	if s := m.Props.Get("SUMMARY"); s != nil {
+		setPlainProp(ev.Props, "SUMMARY", s.Value)
+	}
+	if ds := m.Props.Get("DTSTART"); ds != nil {
+		ev.Props["DTSTART"] = []goical.Prop{cloneProp(*ds)}
+	}
+	if de := m.Props.Get("DTEND"); de != nil {
+		ev.Props["DTEND"] = []goical.Prop{cloneProp(*de)}
+	} else if du := m.Props.Get("DURATION"); du != nil {
+		ev.Props["DURATION"] = []goical.Prop{cloneProp(*du)}
+	}
+	org := goical.NewProp("ORGANIZER")
+	org.Value = info.organizer
+	if info.orgName != "" {
+		org.Params.Set("CN", info.orgName)
+	}
+	ev.Props.Set(org)
+	at := goical.NewProp("ATTENDEE")
+	at.Value = href
+	if name != "" {
+		at.Params.Set("CN", name)
+	}
+	ev.Props.Set(at)
+	out.Children = append(out.Children, ev)
+	return out
+}
+
+// parseAsAttendee generates the attendee's REPLY, per instance. Port of
+// Broker::parseEventForAttendee: a REPLY carries only the instances whose
+// PARTSTAT changed (plus DECLINEs for occurrences the attendee dropped via a
+// new EXDATE).
+func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) ([]*Message, error) {
+	base := newInfo
+	if base == nil {
+		base = oldInfo
+	}
+	if base == nil || base.status == "CANCELLED" {
+		return nil, nil
+	}
+	href := actingAttendee(newInfo, addresses)
+	if href == "" {
+		href = actingAttendee(oldInfo, addresses)
+	}
+	if href == "" {
+		return nil, nil
+	}
+	newSt, oldSt := attState(newInfo, href), attState(oldInfo, href)
+
+	type inst struct{ oldStatus, newStatus string }
+	byID := map[string]*inst{}
+	var order []string
+	get := func(id string) *inst {
+		if x := byID[id]; x != nil {
+			return x
+		}
+		x := &inst{}
+		byID[id] = x
+		order = append(order, id)
+		return x
+	}
+	if oldSt != nil {
+		for _, id := range oldSt.order {
+			get(id).oldStatus = oldSt.instances[id]
+		}
+	}
+	if newSt != nil {
+		for _, id := range newSt.order {
+			get(id).newStatus = newSt.instances[id]
+		}
+	}
+	// A newly-added EXDATE means the attendee dropped that occurrence: reply
+	// DECLINED for it, unless the master itself is declined.
+	if mi := byID["master"]; mi == nil || mi.newStatus != "DECLINED" {
+		var oldEx []string
+		if oldInfo != nil {
+			oldEx = oldInfo.exdate
+		}
+		if newInfo != nil {
+			for _, ex := range newInfo.exdate {
+				if !containsStr(oldEx, ex) {
+					get(ex).newStatus = "DECLINED"
+				}
+			}
+		}
+	}
+
+	senderName := ""
+	if newSt != nil {
+		senderName = newSt.name
+	} else if oldSt != nil {
+		senderName = oldSt.name
 	}
 
 	reply := goical.NewCalendar()
 	reply.Props.SetText(goical.PropVersion, "2.0")
 	setPlainProp(reply.Props, goical.PropProductID, "-//calserver//calserver//EN")
 	setPlainProp(reply.Props, "METHOD", "REPLY")
-	ev := goical.NewComponent(goical.CompEvent)
-	setPlainProp(ev.Props, goical.PropUID, base.uid)
-	setPlainProp(ev.Props, "SEQUENCE", base.sequence)
-	setPlainProp(ev.Props, "DTSTAMP", time.Now().UTC().Format("20060102T150405Z"))
-	org := goical.NewProp("ORGANIZER")
-	org.Value = base.organizer
-	if base.orgName != "" {
-		org.Params.Set("CN", base.orgName)
+	if newInfo != nil {
+		for _, comp := range newInfo.cal.Children {
+			if comp.Name == goical.CompTimezone {
+				reply.Children = append(reply.Children, cloneComponent(comp))
+			}
+		}
 	}
-	ev.Props.Set(org)
-	attendee := goical.NewProp("ATTENDEE")
-	attendee.Value = att.href
-	attendee.Params.Set("PARTSTAT", partStat)
-	if att.name != "" {
-		attendee.Params.Set("CN", att.name)
+	summary := ""
+	if s := base.master.Props.Get("SUMMARY"); s != nil {
+		summary = s.Value
 	}
-	ev.Props.Set(attendee)
-	reply.Children = append(reply.Children, ev)
 
+	hasReply := false
+	for _, id := range order {
+		in := byID[id]
+		if in.oldStatus == in.newStatus {
+			continue // no participation change for this instance
+		}
+		ev := goical.NewComponent(goical.CompEvent)
+		setPlainProp(ev.Props, goical.PropUID, base.uid)
+		setPlainProp(ev.Props, "SEQUENCE", base.sequence)
+		setPlainProp(ev.Props, "DTSTAMP", nowStamp())
+		if src := instanceOf(newInfo, id); src != nil {
+			if ds := src.Props.Get("DTSTART"); ds != nil {
+				ev.Props["DTSTART"] = []goical.Prop{cloneProp(*ds)}
+			}
+			if de := src.Props.Get("DTEND"); de != nil {
+				ev.Props["DTEND"] = []goical.Prop{cloneProp(*de)}
+			} else if du := src.Props.Get("DURATION"); du != nil {
+				ev.Props["DURATION"] = []goical.Prop{cloneProp(*du)}
+			}
+			if s := src.Props.Get("SUMMARY"); s != nil {
+				setPlainProp(ev.Props, "SUMMARY", s.Value)
+			} else if summary != "" {
+				setPlainProp(ev.Props, "SUMMARY", summary)
+			}
+		} else {
+			// Instance known only from EXDATE: synthesize DTSTART from the id.
+			dt := goical.NewProp("DTSTART")
+			dt.Value = id
+			if isDateOnly(id) {
+				dt.Params.Set("VALUE", "DATE")
+			}
+			ev.Props.Set(dt)
+			if summary != "" {
+				setPlainProp(ev.Props, "SUMMARY", summary)
+			}
+		}
+		if id != "master" {
+			rec := goical.NewProp("RECURRENCE-ID")
+			rec.Value = id
+			if isDateOnly(id) {
+				rec.Params.Set("VALUE", "DATE")
+			}
+			ev.Props.Set(rec)
+		}
+		org := goical.NewProp("ORGANIZER")
+		org.Value = base.organizer
+		if base.orgName != "" {
+			org.Params.Set("CN", base.orgName)
+		}
+		ev.Props.Set(org)
+		at := goical.NewProp("ATTENDEE")
+		at.Value = href
+		at.Params.Set("PARTSTAT", in.newStatus)
+		if senderName != "" {
+			at.Params.Set("CN", senderName)
+		}
+		ev.Props.Set(at)
+		reply.Children = append(reply.Children, ev)
+		hasReply = true
+	}
+	if !hasReply {
+		return nil, nil
+	}
 	return []*Message{{
 		UID: base.uid, Method: "REPLY", Component: "VEVENT",
-		Sender: att.href, SenderName: att.name,
+		Sender: href, SenderName: senderName,
 		Recipient: base.organizer, RecipientName: base.orgName,
-		SignificantChange: true,
-		Calendar:          reply,
+		SignificantChange: true, Calendar: reply,
 	}}, nil
 }
 
-// significantChange decides whether attendees must act again: sequence,
-// recurrence, or time changes. Subset of sabre's significant-change hash.
-func significantChange(newInfo, oldInfo *eventSummary) bool {
-	if newInfo == nil || oldInfo == nil {
-		return true
-	}
-	get := func(info *eventSummary, name string) string {
-		if p := info.master.Props.Get(name); p != nil {
-			return p.Value
-		}
+func actingAttendee(info *eventSummary, addresses map[string]bool) string {
+	if info == nil {
 		return ""
 	}
-	for _, name := range []string{"SEQUENCE", "RRULE", "DTSTART", "DTEND", "DURATION", "STATUS", "EXDATE", "RDATE"} {
-		if get(newInfo, name) != get(oldInfo, name) {
+	for _, href := range info.attOrder {
+		if addresses[href] {
+			return href
+		}
+	}
+	return ""
+}
+
+func attState(info *eventSummary, href string) *attendeeState {
+	if info == nil {
+		return nil
+	}
+	return info.perAtt[href]
+}
+
+func instanceOf(info *eventSummary, id string) *goical.Component {
+	if info == nil {
+		return nil
+	}
+	return info.instances[id]
+}
+
+func containsStr(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
 			return true
 		}
 	}
 	return false
+}
+
+// isDateOnly reports whether a recurrence id looks like a DATE (no time part).
+func isDateOnly(id string) bool { return len(id) <= 8 && !strings.Contains(id, "T") }
+
+func nowStamp() string { return time.Now().UTC().Format("20060102T150405Z") }
+
+// cloneProp deep-copies a property including its parameters.
+func cloneProp(p goical.Prop) goical.Prop {
+	cp := goical.Prop{Name: p.Name, Value: p.Value, Params: goical.Params{}}
+	for k, vs := range p.Params {
+		cp.Params[k] = append([]string(nil), vs...)
+	}
+	return cp
+}
+
+// addExdate adds EXDATE entries (the ids of excluded occurrences) to a master
+// event, matching its DTSTART TZID and merging with any existing EXDATE.
+func addExdate(ev, master *goical.Component, exclude []string) {
+	tzid := ""
+	if ds := master.Props.Get("DTSTART"); ds != nil {
+		tzid = ds.Params.Get("TZID")
+	}
+	joined := strings.Join(exclude, ",")
+	if existing := ev.Props.Get("EXDATE"); existing != nil {
+		merged := cloneProp(*existing)
+		merged.Value = merged.Value + "," + joined
+		ev.Props["EXDATE"] = []goical.Prop{merged}
+		return
+	}
+	ex := goical.NewProp("EXDATE")
+	ex.Value = joined
+	if tzid != "" {
+		ex.Params.Set("TZID", tzid)
+	}
+	ev.Props["EXDATE"] = []goical.Prop{*ex}
+}
+
+// stripScheduleParams removes server-only scheduling parameters from a message
+// event and defaults each attendee's PARTSTAT (so iOS shows an inbox item).
+func stripScheduleParams(ev *goical.Component) {
+	if org := ev.Props.Get("ORGANIZER"); org != nil {
+		org.Params.Del("SCHEDULE-FORCE-SEND")
+		org.Params.Del("SCHEDULE-STATUS")
+	}
+	for _, att := range ev.Props["ATTENDEE"] {
+		att.Params.Del("SCHEDULE-FORCE-SEND")
+		att.Params.Del("SCHEDULE-STATUS")
+		if att.Params.Get("PARTSTAT") == "" {
+			att.Params.Set("PARTSTAT", "NEEDS-ACTION")
+		}
+	}
 }
 
 // itipPayload clones a calendar as an iTIP message with the given METHOD.
