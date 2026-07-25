@@ -1,0 +1,71 @@
+# =============================================================================
+# calserver configuration
+# =============================================================================
+# Copy this file to config.toml and pass it with -config config.toml.
+#
+#   calserver -config config.toml
+#
+# Every value here is optional and shown with its built-in default. Any value
+# left out falls back to that default. Command-line flags OVERRIDE the file:
+# `calserver -config config.toml -addr :9000` uses :9000 regardless of what
+# [server].addr says. Unknown keys are rejected at startup rather than silently
+# ignored, so a typo fails fast.
+
+
+# SERVER
+# =============================================================================
+# HTTP listener and the WebDAV mount point.
+[server]
+addr = ":8080"          # Listen address (host:port; ":8080" = all interfaces).
+base_uri = "/"          # URI prefix the server is mounted at (e.g. "/dav/").
+realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
+                        # users.digesta1 in the shared database, forever, for
+                        # both Digest and Basic (see PLAN.md §5).
+
+# TLS / HTTPS. Leave both empty to serve plain HTTP (terminate TLS in front,
+# e.g. behind a reverse proxy). Basic/Digest send credentials, so if calserver
+# is edge-facing, set both to enable HTTPS here.
+[server.tls]
+cert = ""               # Path to the TLS certificate (PEM). Enables HTTPS.
+key = ""                # Path to the TLS private key (PEM). Required with cert.
+
+
+# DATABASE
+# =============================================================================
+# Postgres connection to the sabre-compatible schema. Empty runs an in-memory
+# server (no persistence) for WebDAV/litmus testing only.
+[database]
+dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
+
+
+# SCHEDULING
+# =============================================================================
+# iMIP emails invitations to attendees who are not local principals. Leave smtp
+# empty to disable outbound email (local iTIP delivery still works).
+[scheduling.imip]
+smtp = ""               # SMTP host:port, e.g. "mail.example.org:587".
+sender = ""             # From address for invitation emails.
+
+
+# CALENDAR SERVER COMPATIBILITY
+# =============================================================================
+# Optional Apple Calendar Server behaviors. Every one is OFF by default so the
+# server matches sabre/dav (the parity target). Turn these on only when you
+# specifically want Calendar-Server semantics.
+[calendarserver]
+browser = false             # Serve an HTML index on GET of a collection
+                            # (sabre answers 501 without its Browser plugin).
+auto_provision = false      # Recreate the default calendar/addressbook when a
+                            # principal has none left.
+per_user_props = false      # Store a delegate's calendar-color/-order per user
+                            # so it does not clobber the owner's values.
+expand_groups = false       # Expand a group ATTENDEE into a display-only
+                            # X-SERVER-GROUP placeholder plus one invitation
+                            # per member.
+principals_readable = false # Let any authenticated user read principal
+                            # resources (delegation UIs browse other users).
+
+# Principal-name prefixes whose scheduling messages are auto-accepted
+# (resources/rooms auto-book, declining on a free-busy conflict). Empty
+# disables auto-scheduling.
+auto_schedule_prefixes = []  # e.g. ["resource", "location"]
