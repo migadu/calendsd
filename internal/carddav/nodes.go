@@ -177,7 +177,7 @@ func NewAddressBook(backend Backend, info AddressBookInfo) *AddressBook {
 
 func (a *AddressBook) Name() string { return a.Info.URI }
 func (a *AddressBook) SetName(string) error {
-	return dav.ErrMethodNotAllowed("Renaming address books is not supported")
+	return dav.ErrMethodNotAllowed("Renaming addressbooks is not yet supported")
 }
 func (a *AddressBook) Delete() error           { return a.backend.DeleteAddressBook(a.Info.ID) }
 func (a *AddressBook) LastModified() time.Time { return time.Time{} }
@@ -273,7 +273,9 @@ func NewCard(backend Backend, addressBook AddressBookInfo, info CardInfo) *Card 
 
 func (c *Card) Name() string { return c.info.URI }
 func (c *Card) SetName(string) error {
-	return dav.ErrMethodNotAllowed("Renaming cards is not supported")
+	// Sabre's Card inherits DAV\Node::setName (via File), which forbids
+	// renaming; a MOVE-rename of a card therefore gets 403, matching sabre.
+	return dav.ErrForbidden("Permission denied to rename file")
 }
 func (c *Card) Delete() error           { return c.backend.DeleteCard(c.addressBook.ID, c.info.URI) }
 func (c *Card) LastModified() time.Time { return time.Time{} }

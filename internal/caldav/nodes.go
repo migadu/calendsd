@@ -456,7 +456,9 @@ func NewCalendarObject(backend Backend, calendar CalendarInfo, obj ObjectInfo) *
 
 func (o *CalendarObject) Name() string { return o.obj.URI }
 func (o *CalendarObject) SetName(string) error {
-	return dav.ErrMethodNotAllowed("Renaming calendar objects is not yet supported")
+	// Sabre's CalendarObject inherits DAV\Node::setName, which forbids
+	// renaming a file; match that exactly (a MOVE-rename gets 403, not 405).
+	return dav.ErrForbidden("Permission denied to rename file")
 }
 func (o *CalendarObject) Delete() error {
 	return o.backend.DeleteCalendarObject(o.calendar.ID, o.obj.URI)
