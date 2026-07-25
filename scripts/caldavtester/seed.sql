@@ -25,6 +25,12 @@ BEGIN
     INSERT INTO principals (uri, email, displayname)
       VALUES ('principals/'||u, u||'@example.org', initcap(regexp_replace(u, '([a-z])([0-9])', '\1 \2')))
       ON CONFLICT (uri) DO NOTHING;
+    -- calendar-proxy sub-principals, like sabre's examples/sql/pgsql.principals.sql;
+    -- SetGroupMemberSet needs these rows to store delegates.
+    INSERT INTO principals (uri) VALUES
+      ('principals/'||u||'/calendar-proxy-read'),
+      ('principals/'||u||'/calendar-proxy-write')
+      ON CONFLICT (uri) DO NOTHING;
     INSERT INTO users (username, digesta1)
       VALUES (u, md5(u||':SabreDAV:'||u)) ON CONFLICT (username) DO NOTHING;
 
@@ -55,4 +61,13 @@ BEGIN
       VALUES ('principals/'||u, u||'@example.org', 'Group '||lpad(i::text, 2, '0'))
       ON CONFLICT (uri) DO NOTHING;
   END LOOP;
+
+  -- Calendar Server's stock test directory delegates every resource and
+  -- location to user01 (write proxy); calendaruserproxy.xml's "Default
+  -- setup" test depends on it.
+  INSERT INTO groupmembers (principal_id, member_id)
+    SELECT grp.id, mem.id FROM principals grp, principals mem
+    WHERE mem.uri = 'principals/user01'
+      AND grp.uri ~ '^principals/(resource|location)[0-9]+/calendar-proxy-write$'
+    ON CONFLICT (principal_id, member_id) DO NOTHING;
 END $$;

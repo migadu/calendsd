@@ -60,7 +60,7 @@ echo "==> building calserver"
 go build -o "$WORK/calserver" ./cmd/calserver
 
 "$WORK/calserver" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
-    -browser -auto-schedule-prefixes resource,location \
+    -browser -auto-schedule-prefixes resource,location -principals-readable -auto-provision \
     >"$WORK/server.log" 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null || true' EXIT

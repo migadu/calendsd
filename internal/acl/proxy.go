@@ -109,7 +109,18 @@ func (p *ProxyPrincipalNode) ProxyResourceType() xml.Name {
 }
 
 func (p *ProxyPrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
-	return map[xml.Name]any{}, nil
+	out := map[xml.Name]any{}
+	for _, name := range names {
+		// Calendar Server tags proxy groups with a record-type.
+		if name == (xml.Name{Space: davxml.NSCalendarServer, Local: "record-type"}) {
+			if p.readOnly {
+				out[name] = "read-delegate-group"
+			} else {
+				out[name] = "write-delegate-group"
+			}
+		}
+	}
+	return out, nil
 }
 
 // PropPatch handles group-member-set writes: this is how a client (or the

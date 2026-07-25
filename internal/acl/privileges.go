@@ -84,6 +84,15 @@ func (p *Plugin) nodeACL(node dav.Node) []ACE {
 	} else {
 		acl = append(acl, defaultACL...)
 	}
+	// Calendar-Server compat: any authenticated user may read principal
+	// resources (delegation and invite UIs browse other users). Off by
+	// default — stock sabre principals are owner-only.
+	if p.PrincipalsReadableByAuthenticated {
+		switch node.(type) {
+		case *PrincipalNode, *UserPrincipalNode, *ProxyPrincipalNode:
+			acl = append(acl, ACE{Privilege: "{DAV:}read", Principal: "{DAV:}authenticated", Protected: true})
+		}
+	}
 	for _, admin := range p.AdminPrincipals {
 		acl = append(acl, ACE{Privilege: "{DAV:}all", Principal: admin, Protected: true})
 	}
@@ -211,7 +220,14 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	}
 
 	switch r.Method {
-	case "GET", "HEAD", "OPTIONS", "REPORT", "PROPFIND":
+	case "GET", "HEAD", "OPTIONS", "REPORT":
+		// Sabre's beforeMethod gates GET/HEAD/OPTIONS with {DAV:}read.
+		// PROPFIND is deliberately NOT gated here: the propFind hook marks
+		// every property 403 instead, so a foreign-principal PROPFIND yields
+		// a 207 with 403 propstats, not a request-level 403 (sabre parity —
+		// CalDAVTester's proxy suites read other principals this way).
+		// REPORT stays gated (stricter than sabre): our calendar-query
+		// prefilter would otherwise leak matching object hrefs.
 		if exists {
 			return check(path, "{DAV:}read")
 		}

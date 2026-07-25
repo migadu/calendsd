@@ -21,6 +21,9 @@ type CalendarRoot struct {
 	backend    Backend
 	// principalPrefix scopes which principals get homes.
 	principalPrefix string
+	// AutoProvision recreates the default "calendar" when a principal has
+	// none left (Calendar-Server behavior); off by default (sabre parity).
+	AutoProvision bool
 }
 
 // NewCalendarRoot builds the calendar root (conventionally named
@@ -43,7 +46,9 @@ func (r *CalendarRoot) Children() ([]dav.Node, error) {
 	}
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
-		out[i] = NewCalendarHome(r.backend, p.URI)
+		home := NewCalendarHome(r.backend, p.URI)
+		home.autoProvision = r.AutoProvision
+		out[i] = home
 	}
 	return out, nil
 }
@@ -56,7 +61,9 @@ func (r *CalendarRoot) Child(name string) (dav.Node, error) {
 	if p == nil {
 		return nil, dav.ErrNotFound("Principal with name %s not found", name)
 	}
-	return NewCalendarHome(r.backend, p.URI), nil
+	home := NewCalendarHome(r.backend, p.URI)
+	home.autoProvision = r.AutoProvision
+	return home, nil
 }
 
 func (r *CalendarRoot) ChildExists(name string) bool {
@@ -75,8 +82,9 @@ func (r *CalendarRoot) CreateDirectory(string) error {
 // CalendarHome holds one principal's calendars. Port of sabre's
 // CalDAV\CalendarHome.
 type CalendarHome struct {
-	backend      Backend
-	principalURI string
+	backend       Backend
+	principalURI  string
+	autoProvision bool
 }
 
 // NewCalendarHome builds a calendar home for a principal.
@@ -96,7 +104,7 @@ func (h *CalendarHome) Delete() error           { return dav.ErrForbidden("Permi
 func (h *CalendarHome) LastModified() time.Time { return time.Time{} }
 
 func (h *CalendarHome) Children() ([]dav.Node, error) {
-	infos, err := h.backend.CalendarsForUser(h.principalURI)
+	infos, err := h.provisioned()
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +135,7 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 	if nb, ok := h.backend.(NotificationsBackend); ok && name == "notifications" {
 		return NewNotifications(nb, h.principalURI), nil
 	}
-	infos, err := h.backend.CalendarsForUser(h.principalURI)
+	infos, err := h.provisioned()
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +145,22 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 		}
 	}
 	return nil, dav.ErrNotFound("Node with name '%s' could not be found", name)
+}
+
+// provisioned lists the principal's calendars, recreating the default
+// "calendar" first when auto-provisioning is on and none are left (Calendar
+// Server regenerates it after deletion; the CalDAVTester suite relies on it).
+func (h *CalendarHome) provisioned() ([]CalendarInfo, error) {
+	infos, err := h.backend.CalendarsForUser(h.principalURI)
+	if err != nil || !h.autoProvision || len(infos) > 0 {
+		return infos, err
+	}
+	if _, err := h.backend.CreateCalendar(h.principalURI, "calendar", map[xml.Name]any{
+		{Space: davxml.NSDav, Local: "displayname"}: "calendar",
+	}); err != nil {
+		return nil, err
+	}
+	return h.backend.CalendarsForUser(h.principalURI)
 }
 
 func (h *CalendarHome) ChildExists(name string) bool {

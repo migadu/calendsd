@@ -24,6 +24,8 @@ func main() {
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	browser := flag.Bool("browser", false, "serve HTML indexes for GET on collections (like sabre's Browser plugin; default matches sabre without it: 501)")
 	autoSchedule := flag.String("auto-schedule-prefixes", "", "comma-separated principal-name prefixes (e.g. resource,location) whose scheduling messages are auto-accepted Calendar-Server style; empty disables")
+	principalsReadable := flag.Bool("principals-readable", false, "grant authenticated users read access to principal resources (Calendar-Server behavior)")
+	autoProvision := flag.Bool("auto-provision", false, "recreate the default calendar/addressbook when a principal has none (Calendar-Server behavior)")
 	flag.Parse()
 
 	var srv http.Handler
@@ -45,6 +47,8 @@ func main() {
 			BaseURI: *baseURI, Realm: *realm,
 			IMipSMTP: *imipSMTP, IMipSender: *imipSender,
 			Browser: *browser, AutoSchedulePrefixes: autoPrefixes,
+			PrincipalsReadable: *principalsReadable,
+			AutoProvision:      *autoProvision,
 		})
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites

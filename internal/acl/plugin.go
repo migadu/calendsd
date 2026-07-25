@@ -20,6 +20,11 @@ type Plugin struct {
 	// AdminPrincipals get an implicit {DAV:}all ACE on every node,
 	// mirroring sabre's adminPrincipals.
 	AdminPrincipals []string
+	// PrincipalsReadableByAuthenticated grants every authenticated user
+	// {DAV:}read on principal resources (Calendar-Server behavior needed by
+	// delegation clients). Off by default: stock sabre keeps principals
+	// owner-only.
+	PrincipalsReadableByAuthenticated bool
 	// AllowUnauthenticatedAccess mirrors sabre's flag. When true, a
 	// privilege check that fails for an unauthenticated request returns
 	// 401 (prompting login) rather than 403, so anonymous clients get a

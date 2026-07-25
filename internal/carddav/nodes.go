@@ -9,6 +9,7 @@ import (
 
 	"calserver/internal/acl"
 	"calserver/internal/dav"
+	davxml "calserver/internal/dav/xml"
 )
 
 // AddressBookRoot is the /addressbooks collection: one home per principal.
@@ -18,6 +19,9 @@ type AddressBookRoot struct {
 	principals      acl.Backend
 	backend         Backend
 	principalPrefix string
+	// AutoProvision recreates the default "addressbook" when a principal
+	// has none left (Calendar-Server behavior); off by default.
+	AutoProvision bool
 }
 
 // NewAddressBookRoot builds the address book root (conventionally
@@ -40,7 +44,9 @@ func (r *AddressBookRoot) Children() ([]dav.Node, error) {
 	}
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
-		out[i] = NewAddressBookHome(r.backend, p.URI)
+		home := NewAddressBookHome(r.backend, p.URI)
+		home.autoProvision = r.AutoProvision
+		out[i] = home
 	}
 	return out, nil
 }
@@ -53,7 +59,9 @@ func (r *AddressBookRoot) Child(name string) (dav.Node, error) {
 	if p == nil {
 		return nil, dav.ErrNotFound("Principal with name %s not found", name)
 	}
-	return NewAddressBookHome(r.backend, p.URI), nil
+	home := NewAddressBookHome(r.backend, p.URI)
+	home.autoProvision = r.AutoProvision
+	return home, nil
 }
 
 func (r *AddressBookRoot) ChildExists(name string) bool {
@@ -71,8 +79,9 @@ func (r *AddressBookRoot) CreateDirectory(string) error {
 // AddressBookHome holds one principal's address books. Port of sabre's
 // CardDAV\AddressBookHome.
 type AddressBookHome struct {
-	backend      Backend
-	principalURI string
+	backend       Backend
+	principalURI  string
+	autoProvision bool
 }
 
 // NewAddressBookHome builds the home for a principal.
@@ -92,7 +101,7 @@ func (h *AddressBookHome) LastModified() time.Time { return time.Time{} }
 func (h *AddressBookHome) Owner() string           { return h.principalURI }
 
 func (h *AddressBookHome) Children() ([]dav.Node, error) {
-	infos, err := h.backend.AddressBooksForUser(h.principalURI)
+	infos, err := h.provisioned()
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +113,7 @@ func (h *AddressBookHome) Children() ([]dav.Node, error) {
 }
 
 func (h *AddressBookHome) Child(name string) (dav.Node, error) {
-	infos, err := h.backend.AddressBooksForUser(h.principalURI)
+	infos, err := h.provisioned()
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +128,22 @@ func (h *AddressBookHome) Child(name string) (dav.Node, error) {
 func (h *AddressBookHome) ChildExists(name string) bool {
 	_, err := h.Child(name)
 	return err == nil
+}
+
+// provisioned lists the principal's address books, recreating the default
+// "addressbook" first when auto-provisioning is on and none are left
+// (Calendar-Server behavior the CalDAVTester suite relies on).
+func (h *AddressBookHome) provisioned() ([]AddressBookInfo, error) {
+	infos, err := h.backend.AddressBooksForUser(h.principalURI)
+	if err != nil || !h.autoProvision || len(infos) > 0 {
+		return infos, err
+	}
+	if _, err := h.backend.CreateAddressBook(h.principalURI, "addressbook", map[xml.Name]any{
+		{Space: davxml.NSDav, Local: "displayname"}: "addressbook",
+	}); err != nil {
+		return nil, err
+	}
+	return h.backend.AddressBooksForUser(h.principalURI)
 }
 
 func (h *AddressBookHome) CreateFile(string, io.Reader) (string, error) {

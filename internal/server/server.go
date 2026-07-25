@@ -30,6 +30,12 @@ type Config struct {
 	// Browser serves HTML indexes for GET on collections (off by default:
 	// sabre without its Browser plugin answers 501, which the corpus pins).
 	Browser bool
+	// AutoProvision recreates the default calendar/addressbook when a
+	// principal has none left (Calendar-Server behavior); off by default.
+	AutoProvision bool
+	// PrincipalsReadable grants authenticated users read on principal
+	// resources (Calendar-Server behavior); off by default (sabre parity).
+	PrincipalsReadable bool
 	// AutoSchedulePrefixes lists principal-name prefixes (e.g.
 	// "resource,location" split on commas by the caller) whose scheduling
 	// messages are auto-processed Calendar-Server style: accept into the
@@ -69,8 +75,12 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	principalCollection := acl.NewPrincipalCollection(principals, "principals")
 	principalCollection.Proxies = true // expose calendar-proxy delegation principals
 	root.Attach(principalCollection)
-	root.Attach(caldav.NewCalendarRoot(principals, calendars, "calendars"))
-	root.Attach(carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks"))
+	calendarRoot := caldav.NewCalendarRoot(principals, calendars, "calendars")
+	calendarRoot.AutoProvision = cfg.AutoProvision
+	root.Attach(calendarRoot)
+	addressBookRoot := carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks")
+	addressBookRoot.AutoProvision = cfg.AutoProvision
+	root.Attach(addressBookRoot)
 
 	srv := dav.NewServer(cfg.BaseURI, root)
 	srv.AddPlugin(auth.NewPlugin(
@@ -81,7 +91,10 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 			return ok && auth.DigestA1(username, cfg.Realm, password) == hash
 		}},
 	))
-	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&acl.Plugin{
+		AdminPrincipals:                   []string{"principals/admin"},
+		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
+	})
 	srv.AddPlugin(&caldav.Plugin{})
 	schedule := &caldav.SchedulePlugin{}
 	if len(cfg.AutoSchedulePrefixes) > 0 {

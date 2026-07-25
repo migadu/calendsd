@@ -71,9 +71,15 @@ func TestStrangerCannotReadCalendar(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "NeedPrivileges") {
 		t.Errorf("expected NeedPrivileges error body, got: %s", w.Body.String())
 	}
+	// PROPFIND is not request-level gated (sabre parity): it answers 207
+	// with every property in a 403 propstat instead.
 	w = request(t, srv, "PROPFIND", "/calendars/user1/cal/", "")
-	if w.Code != 403 {
-		t.Errorf("stranger PROPFIND calendar = %d, want 403", w.Code)
+	if w.Code != 207 {
+		t.Errorf("stranger PROPFIND calendar = %d, want 207", w.Code)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "HTTP/1.1 403 Forbidden") ||
+		strings.Contains(body, "HTTP/1.1 200 OK") {
+		t.Errorf("stranger PROPFIND should return only 403 propstats:\n%s", body)
 	}
 }
 

@@ -43,7 +43,9 @@ func (p *Plugin) Init(s *dav.Server) {
 	})
 }
 
-func (p *Plugin) Features() []string { return []string{"calendar-access"} }
+// Features matches sabre's CalDAV\Plugin::getFeatures (calendar-proxy is the
+// calendarserver delegation extension, RFC-less but advertised by sabre).
+func (p *Plugin) Features() []string { return []string{"calendar-access", "calendar-proxy"} }
 
 func (p *Plugin) Methods(path string) []string { return []string{"MKCALENDAR"} }
 
