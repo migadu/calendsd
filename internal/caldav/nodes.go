@@ -24,6 +24,9 @@ type CalendarRoot struct {
 	// AutoProvision recreates the default "calendar" when a principal has
 	// none left (Calendar-Server behavior); off by default (sabre parity).
 	AutoProvision bool
+	// PerUserProps marks Calendar-Server per-user-properties mode (see
+	// Calendar.PerUserProps); off by default.
+	PerUserProps bool
 }
 
 // NewCalendarRoot builds the calendar root (conventionally named
@@ -48,6 +51,7 @@ func (r *CalendarRoot) Children() ([]dav.Node, error) {
 	for i, p := range principals {
 		home := NewCalendarHome(r.backend, p.URI)
 		home.autoProvision = r.AutoProvision
+		home.perUserProps = r.PerUserProps
 		out[i] = home
 	}
 	return out, nil
@@ -63,6 +67,7 @@ func (r *CalendarRoot) Child(name string) (dav.Node, error) {
 	}
 	home := NewCalendarHome(r.backend, p.URI)
 	home.autoProvision = r.AutoProvision
+	home.perUserProps = r.PerUserProps
 	return home, nil
 }
 
@@ -85,6 +90,7 @@ type CalendarHome struct {
 	backend       Backend
 	principalURI  string
 	autoProvision bool
+	perUserProps  bool
 }
 
 // NewCalendarHome builds a calendar home for a principal.
@@ -110,7 +116,9 @@ func (h *CalendarHome) Children() ([]dav.Node, error) {
 	}
 	var out []dav.Node
 	for _, info := range infos {
-		out = append(out, NewCalendar(h.backend, info))
+		cal := NewCalendar(h.backend, info)
+		cal.PerUserProps = h.perUserProps
+		out = append(out, cal)
 	}
 	// Scheduling-capable backends expose the inbox and outbox, like
 	// sabre's CalendarHome.
@@ -141,7 +149,9 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 	}
 	for _, info := range infos {
 		if info.URI == name {
-			return NewCalendar(h.backend, info), nil
+			cal := NewCalendar(h.backend, info)
+			cal.PerUserProps = h.perUserProps
+			return cal, nil
 		}
 	}
 	return nil, dav.ErrNotFound("Node with name '%s' could not be found", name)
@@ -219,14 +229,26 @@ func (h *CalendarHome) Owner() string { return h.principalURI }
 
 // ACL grants the owning principal full access, like sabre's ACLTrait
 // default on CalendarHome.
+// ACL mirrors sabre CalendarHome::getACL: the owner plus their calendar-proxy
+// groups (write proxies read+write, read proxies read).
 func (h *CalendarHome) ACL() []acl.ACE {
-	return []acl.ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
+	return []acl.ACE{
+		{Privilege: "{DAV:}read", Principal: h.principalURI, Protected: true},
+		{Privilege: "{DAV:}write", Principal: h.principalURI, Protected: true},
+		{Privilege: "{DAV:}read", Principal: h.principalURI + "/calendar-proxy-write", Protected: true},
+		{Privilege: "{DAV:}write", Principal: h.principalURI + "/calendar-proxy-write", Protected: true},
+		{Privilege: "{DAV:}read", Principal: h.principalURI + "/calendar-proxy-read", Protected: true},
+	}
 }
 
 // Calendar is one calendar collection. Port of sabre's CalDAV\Calendar.
 type Calendar struct {
 	backend Backend
 	Info    CalendarInfo
+	// PerUserProps marks Calendar-Server per-user-properties mode: read
+	// delegates additionally hold {DAV:}write-properties (their property
+	// writes are per-user, so they cannot damage shared state).
+	PerUserProps bool
 }
 
 // NewCalendar wraps calendar info into a node.
@@ -405,6 +427,11 @@ func (c *Calendar) ACL() []acl.ACE {
 		aces = append(aces,
 			acl.ACE{Privilege: "{DAV:}write", Principal: owner, Protected: true},
 			acl.ACE{Privilege: "{DAV:}write", Principal: owner + "/calendar-proxy-write", Protected: true})
+	}
+	if c.PerUserProps {
+		// CS read delegates may write (per-user) properties, never data.
+		aces = append(aces, acl.ACE{Privilege: "{DAV:}write-properties",
+			Principal: owner + "/calendar-proxy-read", Protected: true})
 	}
 	// {DAV:}share is granted only on the owner's own view (not-shared or
 	// shared-owner), so a sharee cannot re-share, like sabre.

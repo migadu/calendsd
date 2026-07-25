@@ -362,7 +362,7 @@ func (s *Server) runPropFind(pf *PropFind, node Node) error {
 
 // UpdateProperties runs the PROPPATCH machinery for a path. Port of sabre's
 // updateProperties: protected-property rejection, then node handlers.
-func (s *Server) UpdateProperties(path string, update *davxml.PropertyUpdate) (map[xml.Name]int, error) {
+func (s *Server) UpdateProperties(ctx context.Context, path string, update *davxml.PropertyUpdate) (map[xml.Name]int, error) {
 	pp := NewPropPatch(update.Values)
 
 	var protected []xml.Name
@@ -378,6 +378,14 @@ func (s *Server) UpdateProperties(path string, update *davxml.PropertyUpdate) (m
 	node, err := s.Tree.NodeForPath(path)
 	if err != nil {
 		return nil, err
+	}
+	// Pre-node hooks may claim mutations first (per-user property storage).
+	for _, p := range s.plugins {
+		if hook, ok := p.(PrePropPatchHook); ok {
+			if err := hook.PrePropPatch(ctx, path, node, pp); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if props, ok := node.(PropNode); ok {
 		props.PropPatch(pp)

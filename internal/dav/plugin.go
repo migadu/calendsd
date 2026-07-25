@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http"
 )
@@ -74,6 +75,13 @@ type AfterWriteHook interface {
 // (e.g. content-type transforms). Replaces sabre's afterMethod:GET usage.
 type GetHandlerHook interface {
 	HandleGet(node Node, w http.ResponseWriter, r *http.Request) (handled bool, err error)
+}
+
+// PrePropPatchHook runs before the node's own PROPPATCH handlers, so a
+// plugin can claim mutations first (per-user property storage keeps a
+// delegate's writes away from shared state).
+type PrePropPatchHook interface {
+	PrePropPatch(ctx context.Context, path string, node Node, pp *PropPatch) error
 }
 
 // PropPatchHook lets a plugin claim PROPPATCH mutations after the node's own

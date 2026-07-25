@@ -6,6 +6,7 @@ package server
 
 import (
 	"database/sql"
+	"encoding/xml"
 	"net/http"
 	"strings"
 
@@ -33,6 +34,9 @@ type Config struct {
 	// AutoProvision recreates the default calendar/addressbook when a
 	// principal has none left (Calendar-Server behavior); off by default.
 	AutoProvision bool
+	// PerUserProps stores non-owner property writes per (principal, path)
+	// and overlays them on reads (Calendar-Server behavior); off by default.
+	PerUserProps bool
 	// PrincipalsReadable grants authenticated users read on principal
 	// resources (Calendar-Server behavior); off by default (sabre parity).
 	PrincipalsReadable bool
@@ -77,6 +81,7 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	root.Attach(principalCollection)
 	calendarRoot := caldav.NewCalendarRoot(principals, calendars, "calendars")
 	calendarRoot.AutoProvision = cfg.AutoProvision
+	calendarRoot.PerUserProps = cfg.PerUserProps
 	root.Attach(calendarRoot)
 	addressBookRoot := carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks")
 	addressBookRoot.AutoProvision = cfg.AutoProvision
@@ -121,6 +126,18 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})
+	if cfg.PerUserProps {
+		// After property-storage: its late reads override global values.
+		srv.AddPlugin(&dav.PerUserPropsPlugin{
+			Backend: &storage.PropertyStorage{DB: db},
+			// Calendar Server's per-user set: personal presentation props.
+			Names: []xml.Name{
+				{Space: "http://apple.com/ns/ical/", Local: "calendar-color"},
+				{Space: "http://apple.com/ns/ical/", Local: "calendar-order"},
+			},
+			Exempt: []string{"principals/admin"},
+		})
+	}
 	if cfg.Browser {
 		// Last: only claims GETs no other plugin served.
 		srv.AddPlugin(&dav.BrowserPlugin{})

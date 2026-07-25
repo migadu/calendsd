@@ -397,7 +397,7 @@ func (c *CorePlugin) proppatch(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return ErrBadRequest("%s", err)
 	}
-	result, err := c.server.UpdateProperties(path, update)
+	result, err := c.server.UpdateProperties(r.Context(), path, update)
 	if err != nil {
 		return err
 	}
@@ -602,7 +602,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	// the collection is rolled back and the failed statuses reported,
 	// mirroring sabre's createCollection.
 	if len(extraProps) > 0 {
-		result, err := c.server.UpdateProperties(path, &davxml.PropertyUpdate{
+		result, err := c.server.UpdateProperties(r.Context(), path, &davxml.PropertyUpdate{
 			Names:  keysOf(extraProps),
 			Values: extraProps,
 		})

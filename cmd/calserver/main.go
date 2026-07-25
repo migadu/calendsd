@@ -26,6 +26,7 @@ func main() {
 	autoSchedule := flag.String("auto-schedule-prefixes", "", "comma-separated principal-name prefixes (e.g. resource,location) whose scheduling messages are auto-accepted Calendar-Server style; empty disables")
 	principalsReadable := flag.Bool("principals-readable", false, "grant authenticated users read access to principal resources (Calendar-Server behavior)")
 	autoProvision := flag.Bool("auto-provision", false, "recreate the default calendar/addressbook when a principal has none (Calendar-Server behavior)")
+	perUserProps := flag.Bool("per-user-props", false, "store non-owner property writes per user and overlay them on reads (Calendar-Server behavior)")
 	flag.Parse()
 
 	var srv http.Handler
@@ -49,6 +50,7 @@ func main() {
 			Browser: *browser, AutoSchedulePrefixes: autoPrefixes,
 			PrincipalsReadable: *principalsReadable,
 			AutoProvision:      *autoProvision,
+			PerUserProps:       *perUserProps,
 		})
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
