@@ -7,6 +7,7 @@ package server
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -26,6 +27,15 @@ type Config struct {
 	// attendees; when IMipSMTP is empty, iMip is disabled.
 	IMipSender string
 	IMipSMTP   string
+	// Browser serves HTML indexes for GET on collections (off by default:
+	// sabre without its Browser plugin answers 501, which the corpus pins).
+	Browser bool
+	// AutoSchedulePrefixes lists principal-name prefixes (e.g.
+	// "resource,location" split on commas by the caller) whose scheduling
+	// messages are auto-processed Calendar-Server style: accept into the
+	// default calendar (decline on conflict), REPLY to the organizer, no
+	// inbox drop. Empty disables auto-scheduling (sabre behavior).
+	AutoSchedulePrefixes []string
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
@@ -73,7 +83,20 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	))
 	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 	srv.AddPlugin(&caldav.Plugin{})
-	srv.AddPlugin(&caldav.SchedulePlugin{})
+	schedule := &caldav.SchedulePlugin{}
+	if len(cfg.AutoSchedulePrefixes) > 0 {
+		prefixes := cfg.AutoSchedulePrefixes
+		schedule.AutoSchedule = func(principalURI string) bool {
+			name := strings.TrimPrefix(principalURI, "principals/")
+			for _, p := range prefixes {
+				if p != "" && strings.HasPrefix(name, p) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	srv.AddPlugin(schedule)
 	srv.AddPlugin(&caldav.SharingPlugin{})
 	srv.AddPlugin(&caldav.NotificationsPlugin{})
 	srv.AddPlugin(&carddav.Plugin{})
@@ -85,5 +108,9 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})
+	if cfg.Browser {
+		// Last: only claims GETs no other plugin served.
+		srv.AddPlugin(&dav.BrowserPlugin{})
+	}
 	return srv
 }

@@ -74,6 +74,42 @@ remaps = [
      r"\g<1>notifications\g<2>"),
     (r"(<key>\$email%d:</key>\s*<value>)[^<]*(</value>)",
      r"\g<1>$userid%d:@example.org\g<2>"),
+    # Resource / location / group principals live flat under /principals/
+    # (seeded as resourceNN/locationNN/groupNN by seed.sql), with calendars
+    # under /calendars/<name>/ and mailto: calendar-user addresses instead of
+    # CS's urn:x-uid GUID form.
+    (r"(<key>\$principals_resources:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principalcollection:\g<2>"),
+    (r"(<key>\$principals_groups:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principalcollection:\g<2>"),
+    (r"(<key>\$rprincipaluri%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principalcollection:$resourceid%d:/\g<2>"),
+    (r"(<key>\$rcalendarhome%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$resourceid%d:\g<2>"),
+    (r"(<key>\$rcalendarpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$resourceid%d:/$calendar:\g<2>"),
+    (r"(<key>\$rinboxpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$resourceid%d:/$inbox:\g<2>"),
+    (r"(<key>\$routboxpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$resourceid%d:/$outbox:\g<2>"),
+    (r"(<key>\$rcuaddrurn%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>mailto:$resourceid%d:@example.org\g<2>"),
+    (r"(<key>\$lprincipaluri%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principalcollection:$locationid%d:/\g<2>"),
+    (r"(<key>\$lcalendarhome%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$locationid%d:\g<2>"),
+    (r"(<key>\$lcalendarpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$locationid%d:/$calendar:\g<2>"),
+    (r"(<key>\$linboxpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$locationid%d:/$inbox:\g<2>"),
+    (r"(<key>\$loutboxpath%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$calendars:$locationid%d:/$outbox:\g<2>"),
+    (r"(<key>\$lcuaddrurn%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>mailto:$locationid%d:@example.org\g<2>"),
+    (r"(<key>\$gprincipaluri%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>$principalcollection:$groupid%d:/\g<2>"),
+    (r"(<key>\$gcuaddrurn%d:</key>\s*<value>)[^<]*(</value>)",
+     r"\g<1>mailto:$groupid%d:@example.org\g<2>"),
 ]
 for pat, repl in remaps:
     s, n = re.subn(pat, repl, s, count=1)

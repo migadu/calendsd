@@ -494,6 +494,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
+		c.fireAfterWrite(r, path)
 		writeCreated(w, etag, http.StatusNoContent)
 		return nil
 	}
@@ -514,8 +515,19 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	c.fireAfterWrite(r, path)
 	writeCreated(w, etag, http.StatusCreated)
 	return nil
+}
+
+// fireAfterWrite notifies plugins that a PUT has been persisted (sabre's
+// afterWriteContent/afterCreateFile events).
+func (c *CorePlugin) fireAfterWrite(r *http.Request, path string) {
+	for _, p := range c.server.Plugins() {
+		if hook, ok := p.(AfterWriteHook); ok {
+			hook.AfterWrite(r, path)
+		}
+	}
 }
 
 func writeCreated(w http.ResponseWriter, etag string, status int) {

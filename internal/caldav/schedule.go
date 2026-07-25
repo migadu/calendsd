@@ -1,6 +1,7 @@
 package caldav
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/xml"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	goical "github.com/emersion/go-ical"
@@ -24,6 +26,19 @@ import (
 // Schedule\Plugin (iMip email delivery is out of scope).
 type SchedulePlugin struct {
 	server *dav.Server
+
+	// AutoSchedule marks principals that auto-process scheduling messages
+	// (Calendar-Server resource/location semantics): REQUESTs are accepted
+	// into their default calendar — or declined on a free-busy conflict —
+	// without an inbox drop, and a REPLY goes back to the organizer.
+	// Nil disables auto-processing (sabre behavior).
+	AutoSchedule func(principalURI string) bool
+
+	// pendingReplies queues auto-generated REPLYs per in-flight request:
+	// they are produced inside the organizer's PUT (InterceptWrite), but can
+	// only be applied to the organizer's copy after that PUT has been
+	// persisted, so AfterWrite flushes them. Keyed by *http.Request.
+	pendingReplies sync.Map
 }
 
 func (p *SchedulePlugin) PluginName() string { return "caldav-schedule" }
@@ -298,6 +313,11 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 		return
 	}
 
+	if p.AutoSchedule != nil && p.AutoSchedule(principalURI) {
+		p.autoProcess(r, msg, principalURI, defaultCalendar, newObject, existingObj)
+		return
+	}
+
 	// The raw iTIP message lands in the inbox.
 	fileName := "calserver-" + randomToken() + ".ics"
 	if _, err := inbox.CreateFile(fileName, strings.NewReader(string(ical.EncodeLenient(msg.Calendar)))); err != nil {
@@ -328,6 +348,167 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 		}
 	}
 	msg.ScheduleStatus = "1.2;Message delivered locally"
+}
+
+// autoProcess handles a scheduling message for an auto-schedule principal
+// (Calendar-Server resource/location semantics): no inbox drop; REQUESTs are
+// stored with PARTSTAT=ACCEPTED — or DECLINED when the booking window
+// conflicts with existing events — and a REPLY is sent to the organizer;
+// CANCELs remove the copy.
+func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, principalURI, defaultCalendar string, newObject *goical.Calendar, existingObj *CalendarObject) {
+	if msg.Method == "CANCEL" {
+		if existingObj != nil {
+			if err := existingObj.Delete(); err != nil {
+				msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
+				return
+			}
+		}
+		msg.ScheduleStatus = "1.2;Message delivered locally"
+		return
+	}
+
+	// Decide participation: decline on a free-busy conflict, else accept.
+	preState := ical.EncodeLenient(newObject) // pre-decision copy for the REPLY diff
+	partStat := "ACCEPTED"
+	if p.hasConflict(principalURI, preState) {
+		partStat = "DECLINED"
+	}
+	setAttendeePartStat(newObject, msg.Recipient, partStat)
+	serialized := ical.EncodeLenient(newObject)
+
+	if existingObj != nil {
+		if _, err := existingObj.Put(strings.NewReader(string(serialized))); err != nil {
+			msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
+			return
+		}
+	} else if partStat == "ACCEPTED" {
+		// Declined bookings never land on the resource calendar, like CS.
+		calendarNode, err := p.server.Tree.NodeForPath(defaultCalendar)
+		if err != nil {
+			msg.ScheduleStatus = "5.2;Could not find the default calendar"
+			return
+		}
+		coll, ok := calendarNode.(dav.Collection)
+		if !ok {
+			msg.ScheduleStatus = "5.2;Could not find the default calendar"
+			return
+		}
+		fileName := "calserver-" + randomToken() + ".ics"
+		if _, err := coll.CreateFile(fileName, strings.NewReader(string(serialized))); err != nil {
+			msg.ScheduleStatus = "5.2;Could not deliver to the default calendar"
+			return
+		}
+	}
+	msg.ScheduleStatus = "1.2;Message delivered locally"
+
+	// Generate the REPLY to the organizer, but queue it: we are inside the
+	// organizer's PUT (InterceptWrite), so their copy is not yet persisted
+	// and delivering now could not update it. AfterWrite flushes the queue.
+	oldCal, _ := ical.Decode(preState)
+	replies, err := ical.ParseEvent(newObject, p.addressesForPrincipal(principalURI), oldCal)
+	if err != nil {
+		return
+	}
+	for _, reply := range replies {
+		if reply.Method == "REPLY" {
+			p.queueReply(r, reply)
+		}
+	}
+}
+
+// queueReply records a REPLY to deliver once the triggering request's write
+// has been persisted.
+func (p *SchedulePlugin) queueReply(r *http.Request, reply *ical.Message) {
+	v, _ := p.pendingReplies.LoadOrStore(r, &[]*ical.Message{})
+	queue := v.(*[]*ical.Message)
+	*queue = append(*queue, reply)
+}
+
+// AfterWrite implements dav.AfterWriteHook: deliver REPLYs queued during
+// this request's InterceptWrite (auto-scheduled resources answering the
+// organizer whose object now exists).
+func (p *SchedulePlugin) AfterWrite(r *http.Request, path string) {
+	v, ok := p.pendingReplies.LoadAndDelete(r)
+	if !ok {
+		return
+	}
+	for _, reply := range *v.(*[]*ical.Message) {
+		p.deliver(r, reply)
+	}
+}
+
+// hasConflict reports whether the object's occurrence window overlaps any
+// busy period on the principal's calendars, ignoring copies of the same UID.
+func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
+	d, err := ical.Denormalize(data)
+	if err != nil || d.FirstOccurrence == nil || d.LastOccurrence == nil {
+		return false
+	}
+	start := time.Unix(*d.FirstOccurrence, 0).UTC()
+	end := time.Unix(*d.LastOccurrence, 0).UTC()
+	if !end.After(start) {
+		return false
+	}
+
+	_, name := splitPath(principalURI)
+	home, err := p.server.Tree.NodeForPath("calendars/" + name)
+	if err != nil {
+		return false
+	}
+	coll, ok := home.(dav.Collection)
+	if !ok {
+		return false
+	}
+	children, err := coll.Children()
+	if err != nil {
+		return false
+	}
+	var payloads [][]byte
+	for _, child := range children {
+		calNode, isCal := child.(*Calendar)
+		if !isCal {
+			continue
+		}
+		objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		if err != nil {
+			continue
+		}
+		for _, obj := range objs {
+			if od, err := ical.Denormalize(obj.CalendarData); err == nil && od.UID == d.UID {
+				continue // rescheduling the same booking is not a conflict
+			}
+			payloads = append(payloads, obj.CalendarData)
+		}
+	}
+	if len(payloads) == 0 {
+		return false
+	}
+	fb, err := ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now())
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(fb, []byte("\r\nFREEBUSY"))
+}
+
+// setAttendeePartStat sets PARTSTAT (and clears RSVP) on every ATTENDEE
+// matching the calendar-user address across the object's components.
+func setAttendeePartStat(cal *goical.Calendar, address, partStat string) {
+	for _, comp := range cal.Children {
+		if comp.Name == goical.CompTimezone {
+			continue
+		}
+		atts := comp.Props["ATTENDEE"]
+		for i := range atts {
+			if !strings.EqualFold(atts[i].Value, address) {
+				continue
+			}
+			if atts[i].Params == nil {
+				atts[i].Params = make(goical.Params)
+			}
+			atts[i].Params.Set("PARTSTAT", partStat)
+			atts[i].Params.Del("RSVP")
+		}
+	}
 }
 
 // applyScheduleStatus writes each message's delivery status onto the

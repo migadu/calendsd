@@ -63,6 +63,13 @@ type BeforeUnbindHook interface {
 	BeforeUnbind(r *http.Request, path string) error
 }
 
+// AfterWriteHook fires after a PUT body has been persisted (sabre's
+// afterWriteContent/afterCreateFile). Auto-scheduling delivers queued REPLYs
+// here, once the written object is visible to tree lookups.
+type AfterWriteHook interface {
+	AfterWrite(r *http.Request, path string)
+}
+
 // GetHandlerHook lets a plugin take over serving a resolved GET target
 // (e.g. content-type transforms). Replaces sabre's afterMethod:GET usage.
 type GetHandlerHook interface {

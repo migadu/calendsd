@@ -329,6 +329,12 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 			return nil, nil
 		}
 		replier := replyInfo.attendees[0]
+		// SCHEDULE-STATUS comes from the reply's REQUEST-STATUS, defaulting
+		// to 2.0, and a reply clears RSVP (Broker::processMessageReply).
+		requestStatus := "2.0"
+		if p := replyInfo.master.Props.Get("REQUEST-STATUS"); p != nil {
+			requestStatus, _, _ = strings.Cut(p.Value, ";")
+		}
 		for _, comp := range existing.Children {
 			if comp.Name != goical.CompEvent {
 				continue
@@ -337,7 +343,8 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 			for i := range atts {
 				if strings.EqualFold(atts[i].Value, replier.href) {
 					atts[i].Params.Set("PARTSTAT", replier.partStat)
-					atts[i].Params.Del("SCHEDULE-STATUS")
+					atts[i].Params.Set("SCHEDULE-STATUS", requestStatus)
+					atts[i].Params.Del("RSVP")
 				}
 			}
 			comp.Props["ATTENDEE"] = atts
