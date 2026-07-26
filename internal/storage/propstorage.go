@@ -108,7 +108,7 @@ ON CONFLICT (path, name) DO UPDATE SET valuetype = $3, value = $4`,
 
 func (p *PropertyStorage) Delete(path string) error {
 	_, err := p.DB.Exec(
-		`DELETE FROM propertystorage WHERE path = $1 OR path LIKE $2`,
+		`DELETE FROM propertystorage WHERE path = $1 OR path LIKE $2 ESCAPE '\'`,
 		path, escapeLike(path)+"/%")
 	return err
 }
@@ -124,7 +124,7 @@ func (p *PropertyStorage) Move(source, destination string) error {
 	defer tx.Rollback()
 
 	rows, err := tx.Query(
-		`SELECT id, path FROM propertystorage WHERE path = $1 OR path LIKE $2`,
+		`SELECT id, path FROM propertystorage WHERE path = $1 OR path LIKE $2 ESCAPE '\'`,
 		source, escapeLike(source)+"/%")
 	if err != nil {
 		return err
