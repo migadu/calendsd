@@ -29,6 +29,23 @@ realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
 cert = ""               # Path to the TLS certificate (PEM). Enables HTTPS.
 key = ""                # Path to the TLS private key (PEM). Required with cert.
 
+# AUTHENTICATION VIA rcptd (optional)
+# -----------------------------------------------------------------------------
+# By default, Basic/Digest logins are verified against the users.digesta1 column
+# in the database. Set url below to instead authenticate against an rcptd
+# daemon's /auth endpoint: rcptd serves the user's Dovecot password hashes and
+# calserver verifies the password locally (the same source of truth as the mail
+# stack). This mode is Basic-only (rcptd serves no digesta1, so Digest is
+# disabled) — front the server with TLS, and pair with
+# calendarserver.auto_provision below so first-time logins get a principal and
+# a default calendar/address book. Leave url empty to use the users table.
+[server.rcptd]
+url = ""                # rcptd base URL, e.g. "http://127.0.0.1:8090". Empty
+                        # disables rcptd auth (use the database instead).
+token = ""              # Bearer token rcptd requires (its auth_token). May also
+                        # be supplied via the $RCPTD_AUTH_TOKEN environment
+                        # variable, which keeps the secret out of the file.
+
 
 # DATABASE
 # =============================================================================

@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"os"
 	"strings"
 
 	"calserver/internal/server"
@@ -57,6 +58,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	autoProvision := flag.Bool("auto-provision", false, "recreate the default calendar/addressbook when a principal has none (Calendar-Server behavior)")
 	perUserProps := flag.Bool("per-user-props", false, "store non-owner property writes per user and overlay them on reads (Calendar-Server behavior)")
 	expandGroups := flag.Bool("expand-groups", false, "expand group ATTENDEEs into per-member invitations (Calendar-Server behavior)")
+	rcptdURL := flag.String("rcptd-url", "", "base URL of an rcptd daemon (e.g. http://127.0.0.1:8090); when set, authenticate Basic logins against its /auth endpoint (Dovecot passwd hashes) instead of the users table. Basic-only (no digesta1) — front with TLS; pair with -auto-provision")
+	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
 
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
@@ -77,6 +80,11 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			}
 		}
 
+		rcptdTok := m.Str("rcptd-token", *rcptdToken, m.File.Server.Rcptd.Token)
+		if rcptdTok == "" {
+			rcptdTok = os.Getenv("RCPTD_AUTH_TOKEN")
+		}
+
 		m.DSN = m.Str("db", *dsn, m.File.Database.DSN)
 		m.Server = server.Config{
 			BaseURI:              m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
@@ -89,6 +97,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			AutoProvision:        m.Bool("auto-provision", *autoProvision, m.File.CalendarServer.AutoProvision),
 			PerUserProps:         m.Bool("per-user-props", *perUserProps, m.File.CalendarServer.PerUserProps),
 			ExpandGroups:         m.Bool("expand-groups", *expandGroups, m.File.CalendarServer.ExpandGroups),
+			RcptdURL:             m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
+			RcptdToken:           rcptdTok,
 		}
 		return m, nil
 	}

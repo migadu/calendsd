@@ -22,6 +22,12 @@ type Config struct {
 			Cert string
 			Key  string
 		}
+		// Rcptd, when URL is set, authenticates via an rcptd daemon's /auth
+		// endpoint instead of the users table (see [server.rcptd]).
+		Rcptd struct {
+			URL   string
+			Token string
+		}
 	}
 	Database struct {
 		DSN string
@@ -65,6 +71,8 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Realm = str("server.realm")
 	cfg.Server.TLS.Cert = str("server.tls.cert")
 	cfg.Server.TLS.Key = str("server.tls.key")
+	cfg.Server.Rcptd.URL = str("server.rcptd.url")
+	cfg.Server.Rcptd.Token = str("server.rcptd.token")
 	cfg.Database.DSN = str("database.dsn")
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
@@ -88,6 +96,7 @@ func Load(path string) (*Config, error) {
 var known = map[string]bool{
 	"server.addr": true, "server.base_uri": true, "server.realm": true,
 	"server.tls.cert": true, "server.tls.key": true,
+	"server.rcptd.url": true, "server.rcptd.token": true,
 	"database.dsn":            true,
 	"scheduling.imip.smtp":    true, "scheduling.imip.sender": true,
 	"calendarserver.browser": true, "calendarserver.auto_provision": true,

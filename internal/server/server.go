@@ -9,8 +9,10 @@ import (
 	"database/sql"
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -51,6 +53,15 @@ type Config struct {
 	// default calendar (decline on conflict), REPLY to the organizer, no
 	// inbox drop. Empty disables auto-scheduling (sabre behavior).
 	AutoSchedulePrefixes []string
+	// RcptdURL, when non-empty, switches authentication to an rcptd daemon's
+	// /auth endpoint (Dovecot password hashes verified locally) instead of the
+	// users.digesta1 table. Digest auth is disabled in this mode — rcptd
+	// serves no digesta1 — so it's Basic-only; front it with TLS. Pair with
+	// AutoProvision so first-time logins get a principal and default
+	// collections. RcptdToken is the bearer token rcptd requires (a secret,
+	// kept out of Canonical()).
+	RcptdURL   string
+	RcptdToken string
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -75,10 +86,10 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t",
 		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser)
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "")
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
@@ -135,9 +146,24 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	root.Attach(addressBookRoot)
 
 	srv := dav.NewServer(cfg.BaseURI, root)
-	if authOverride != nil {
+	switch {
+	case authOverride != nil:
 		srv.AddPlugin(authOverride)
-	} else {
+	case cfg.RcptdURL != "":
+		// Authenticate against rcptd's /auth (Dovecot hashes verified locally
+		// via shared/passwd). Basic-only: rcptd serves no digesta1, so Digest
+		// can't work. First-time logins get a principal from the provisioner.
+		prov := &provisioner{
+			principals: principals,
+			writes:     &storage.AdminWrites{DB: db},
+			realm:      cfg.Realm,
+			seen:       map[string]bool{},
+		}
+		rb := auth.NewRcptdBackend(cfg.Realm, cfg.RcptdURL, cfg.RcptdToken, 5*time.Minute)
+		rb.Provision = prov.ensure
+		rb.Logger = slog.Default()
+		srv.AddPlugin(auth.NewPlugin(rb))
+	default:
 		srv.AddPlugin(auth.NewPlugin(
 			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1},
 			&auth.BasicBackend{Realm: cfg.Realm, Validate: func(username, password string) bool {
