@@ -9,14 +9,35 @@ REALM ?= SabreDAV
 # DSN for the shared dev Postgres started by scripts/dev-db.sh.
 DB    ?= postgres://$(USER)@/calserver?host=$(CURDIR)/.dev/pg
 
-# `make` with no target starts the server.
-.DEFAULT_GOAL := run
+# Admin panel (calserver-admin) dev settings.
+ADMIN_ADDR ?= 127.0.0.1:8081
+ADMIN_AUTH ?= .dev/admin-auth.htpasswd
+ADMIN_USER ?= root
+ADMIN_PASS ?= root
 
-.PHONY: help run all build test vet fmt corpus parity \
+# `make` with no target starts the DB and both servers.
+.DEFAULT_GOAL := dev
+
+.PHONY: help dev run all build test vet fmt corpus parity \
         db-start db-stop db-reset \
         caldavtester caldavtester-full clean
 
-run: build db-start ## Build and run the server against the dev DB (default)
+dev: build db-start $(ADMIN_AUTH) ## Start the dev DB and both servers: CalDAV/CardDAV + admin panel (default)
+	@echo "calserver (CalDAV/CardDAV) → http://$(ADDR)"
+	@echo "calserver-admin (panel)    → http://$(ADMIN_ADDR)  (login $(ADMIN_USER) / $(ADMIN_PASS))"
+	@echo "Ctrl-C stops both servers."
+	@trap 'kill 0' EXIT INT TERM; \
+	 ./bin/calserver -addr $(ADDR) -db "$(DB)" -realm $(REALM) & \
+	 ./bin/calserver-admin -addr $(ADMIN_ADDR) -db "$(DB)" -realm $(REALM) \
+	   -admin-auth $(ADMIN_AUTH) & \
+	 wait
+
+# Generate a bcrypt htpasswd for the admin panel on first run (dev creds only).
+$(ADMIN_AUTH):
+	@mkdir -p $(dir $@)
+	htpasswd -cbB $@ $(ADMIN_USER) $(ADMIN_PASS)
+
+run: build db-start ## Build and run only the CalDAV/CardDAV server against the dev DB
 	./bin/calserver -addr $(ADDR) -db "$(DB)" -realm $(REALM)
 
 help: ## Show available targets
