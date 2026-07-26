@@ -55,6 +55,17 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
 
 
+# LOGGING (debugging)
+# =============================================================================
+# When request_dir is set, every request/response is dumped to one file per
+# request under that directory (method, path, headers, and bounded request and
+# response bodies). The Authorization header is redacted, but the bodies hold
+# calendar/contact data — this is a DAV-client debugging aid, NOT for
+# production. Leave empty to disable.
+[logging]
+request_dir = ""        # e.g. "/var/tmp/calserver-requests". Empty = disabled.
+
+
 # SCHEDULING
 # =============================================================================
 # iMIP emails invitations to attendees who are not local principals. Leave smtp

@@ -60,6 +60,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	expandGroups := flag.Bool("expand-groups", false, "expand group ATTENDEEs into per-member invitations (Calendar-Server behavior)")
 	rcptdURL := flag.String("rcptd-url", "", "base URL of an rcptd daemon (e.g. http://127.0.0.1:8090); when set, authenticate Basic logins against its /auth endpoint (Dovecot passwd hashes) instead of the users table. Basic-only (no digesta1) — front with TLS; pair with -auto-provision")
 	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
+	requestLogDir := flag.String("request-log-dir", "", "debug: dump every request/response (headers + bounded bodies, Authorization redacted) to one file per request under this directory; empty disables. Do not use in production")
 
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
@@ -99,6 +100,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			ExpandGroups:         m.Bool("expand-groups", *expandGroups, m.File.CalendarServer.ExpandGroups),
 			RcptdURL:             m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
 			RcptdToken:           rcptdTok,
+			RequestLogDir:        m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
 		}
 		return m, nil
 	}

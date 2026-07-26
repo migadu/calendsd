@@ -62,6 +62,11 @@ type Config struct {
 	// kept out of Canonical()).
 	RcptdURL   string
 	RcptdToken string
+	// RequestLogDir, when non-empty, dumps every request/response (method,
+	// path, headers, bounded bodies; Authorization redacted) to one file per
+	// request under this directory. A debugging aid for DAV clients — off by
+	// default; do not enable in production (bodies hold calendar/contact data).
+	RequestLogDir string
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -86,17 +91,20 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t reqlog=%t",
 		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "")
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "", c.RequestLogDir != "")
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
 // redirect real clients use for discovery (RFC 6764).
 func New(db *sql.DB, cfg Config) http.Handler {
 	srv := newDAVServer(db, cfg)
-	return WrapWellKnown(srv, srv.BaseURI)
+	var h http.Handler = WrapWellKnown(srv, srv.BaseURI)
+	// Request logging wraps outermost so it captures the final status of every
+	// request, including the /.well-known redirects and auth challenges.
+	return WrapRequestLog(h, cfg.RequestLogDir)
 }
 
 // WrapWellKnown adds the /.well-known/caldav → base-URI redirect.

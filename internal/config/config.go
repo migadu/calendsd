@@ -32,6 +32,10 @@ type Config struct {
 	Database struct {
 		DSN string
 	}
+	// Logging holds request-debugging options. Off by default.
+	Logging struct {
+		RequestDir string
+	}
 	Scheduling struct {
 		IMip struct {
 			SMTP   string
@@ -74,6 +78,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Rcptd.URL = str("server.rcptd.url")
 	cfg.Server.Rcptd.Token = str("server.rcptd.token")
 	cfg.Database.DSN = str("database.dsn")
+	cfg.Logging.RequestDir = str("logging.request_dir")
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
 	cfg.CalendarServer.Browser = boolean("calendarserver.browser")
@@ -98,6 +103,7 @@ var known = map[string]bool{
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,
 	"database.dsn":            true,
+	"logging.request_dir":     true,
 	"scheduling.imip.smtp":    true, "scheduling.imip.sender": true,
 	"calendarserver.browser": true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
