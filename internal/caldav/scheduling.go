@@ -161,6 +161,30 @@ func (o *Outbox) Children() ([]dav.Node, error) { return nil, nil }
 func (o *Outbox) Child(name string) (dav.Node, error) {
 	return nil, dav.ErrNotFound("File not found: %s in 'outbox'", name)
 }
+
+// ACL restricts the outbox to its owner: only they may read it or send
+// scheduling messages from it. Without this the node has no ACLHolder and
+// falls back to the default {DAV:}all-for-authenticated grant, which would let
+// any authenticated user POST free-busy probes from anyone's outbox.
+func (o *Outbox) ACL() []acl.ACE {
+	return []acl.ACE{
+		{Privilege: "{DAV:}read", Principal: "{DAV:}owner", Protected: true},
+		{Privilege: "{urn:ietf:params:xml:ns:caldav}schedule-send", Principal: "{DAV:}owner", Protected: true},
+	}
+}
+
+// SupportedPrivileges extends the tree with the schedule-send aggregate so the
+// owner's schedule-send grant expands to its subtypes.
+func (o *Outbox) SupportedPrivileges() *acl.Privilege {
+	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
+		{Name: "{DAV:}read"},
+		{Name: "{urn:ietf:params:xml:ns:caldav}schedule-send", Aggregates: []acl.Privilege{
+			{Name: "{urn:ietf:params:xml:ns:caldav}schedule-send-invite"},
+			{Name: "{urn:ietf:params:xml:ns:caldav}schedule-send-reply"},
+			{Name: "{urn:ietf:params:xml:ns:caldav}schedule-send-freebusy"},
+		}},
+	}}
+}
 func (o *Outbox) ChildExists(string) bool { return false }
 func (o *Outbox) CreateFile(string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in the outbox is not allowed")

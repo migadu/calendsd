@@ -159,6 +159,18 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 	if !isCal {
 		return true, dav.ErrForbidden("Add-Member is only supported on calendar collections")
 	}
+	// Add-Member creates a new object in the calendar, so it requires the same
+	// {DAV:}bind privilege a PUT-create is gated by. POST is not covered by the
+	// ACL beforeMethod table, so enforce it here — otherwise Add-Member is a
+	// write-authorization bypass (any authenticated user writing into another
+	// principal's calendar).
+	for _, plugin := range p.server.Plugins() {
+		if checker, ok := plugin.(PrivilegeChecker); ok {
+			if err := checker.CheckPrivileges(r.Context(), calPath, "{DAV:}bind"); err != nil {
+				return true, err
+			}
+		}
+	}
 
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {

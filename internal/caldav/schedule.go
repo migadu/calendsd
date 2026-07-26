@@ -732,6 +732,17 @@ func (p *SchedulePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (b
 	if _, isOutbox := node.(*Outbox); !isOutbox {
 		return false, nil
 	}
+	// POST is not covered by the ACL beforeMethod table, so enforce
+	// schedule-send here — otherwise any authenticated user could probe
+	// free-busy from any principal's outbox.
+	for _, plugin := range p.server.Plugins() {
+		if checker, ok := plugin.(PrivilegeChecker); ok {
+			if err := checker.CheckPrivileges(r.Context(), path,
+				"{urn:ietf:params:xml:ns:caldav}schedule-send"); err != nil {
+				return true, err
+			}
+		}
+	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
