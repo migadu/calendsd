@@ -1,0 +1,24 @@
+{{define "objects"}}{{template "head"}}
+<h1>Objects in calendar {{.CalendarID}}</h1>
+<form class="inline" method="get" action="/objects">
+<input type="hidden" name="calendar" value="{{.CalendarID}}">
+<input name="match" value="{{.Query}}" placeholder="substring (uri, uid)">
+<label><input type="checkbox" name="indata" value="1"> search inside iCal data</label>
+<button>search</button>
+</form>
+{{if .Truncated}}<p class="warn">Results truncated (row limit or scan cap reached) — narrow the search.</p>{{end}}
+<table>
+<tr><th>uri</th><th>uid</th><th>type</th><th>size</th><th>modified</th><th>first occurrence</th><th>last occurrence</th></tr>
+{{range .Objects}}
+<tr>
+<td><a href="/object?calendar={{$.CalendarID}}&uri={{.URI}}">{{.URI}}</a></td>
+<td><code>{{.UID}}</code></td>
+<td>{{.ComponentType}}</td>
+<td>{{.Size}}</td>
+<td>{{epoch .LastModified}}</td>
+<td>{{epoch .FirstOccurrence}}</td>
+<td>{{epoch .LastOccurrence}}</td>
+</tr>
+{{else}}<tr><td colspan="7" class="muted">no matches</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}

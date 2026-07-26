@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -52,6 +53,34 @@ type Config struct {
 	AutoSchedulePrefixes []string
 }
 
+// Canonical renders the effective configuration as one deterministic line.
+// Both calserver and calserver-admin log it at startup, and the admin
+// dashboard echoes its own copy, so config drift between the two processes
+// (which would make the admin privilege simulator lie) reduces to comparing
+// two strings (ADMIN-PLAN.md §2). Values are normalized the way the server
+// applies them (base-URI slashes, realm default), so equivalent configs
+// always render the same line. No secrets: DSN and SMTP host stay out.
+func (c Config) Canonical() string {
+	base := c.BaseURI
+	if base == "" {
+		base = "/"
+	}
+	if !strings.HasPrefix(base, "/") {
+		base = "/" + base
+	}
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
+	}
+	realm := c.Realm
+	if realm == "" {
+		realm = "SabreDAV"
+	}
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t",
+		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
+		c.ExpandGroups, c.PrincipalsReadable,
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser)
+}
+
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
 // redirect real clients use for discovery (RFC 6764).
 func New(db *sql.DB, cfg Config) http.Handler {
@@ -68,7 +97,21 @@ func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 	return mux
 }
 
+// NewLoggedIn builds the production plugin stack with authentication
+// replaced by a fixed principal (the auth.NewLoggedInPlugin test pattern).
+// The admin privilege simulator uses it to answer "what would user X see on
+// path Y" through the identical composition (ADMIN-PLAN.md §3.5).
+func NewLoggedIn(db *sql.DB, cfg Config, principal string) *dav.Server {
+	return compose(db, cfg, auth.NewLoggedInPlugin(principal))
+}
+
 func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
+	return compose(db, cfg, nil)
+}
+
+// compose builds the full server; authOverride nil means real Digest/Basic
+// authentication against the users table.
+func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	if cfg.Realm == "" {
 		cfg.Realm = "SabreDAV"
 	}
@@ -92,16 +135,20 @@ func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
 	root.Attach(addressBookRoot)
 
 	srv := dav.NewServer(cfg.BaseURI, root)
-	srv.AddPlugin(auth.NewPlugin(
-		&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1},
-		&auth.BasicBackend{Realm: cfg.Realm, Validate: func(username, password string) bool {
-			// Basic verifies against the same digesta1 hash, compared in
-			// constant time so verification does not leak the stored hash.
-			hash, ok := users.HashA1(cfg.Realm, username)
-			return ok && subtle.ConstantTimeCompare(
-				[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
-		}},
-	))
+	if authOverride != nil {
+		srv.AddPlugin(authOverride)
+	} else {
+		srv.AddPlugin(auth.NewPlugin(
+			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1},
+			&auth.BasicBackend{Realm: cfg.Realm, Validate: func(username, password string) bool {
+				// Basic verifies against the same digesta1 hash, compared in
+				// constant time so verification does not leak the stored hash.
+				hash, ok := users.HashA1(cfg.Realm, username)
+				return ok && subtle.ConstantTimeCompare(
+					[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
+			}},
+		))
+	}
 	srv.AddPlugin(&acl.Plugin{
 		AdminPrincipals:                   []string{"principals/admin"},
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,

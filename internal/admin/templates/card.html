@@ -1,0 +1,16 @@
+{{define "card"}}{{template "head"}}
+<h1>{{.Stored.URI}} <span class="muted">(address book {{.BookID}})</span></h1>
+{{if .Diffs}}<p class="warn">Stored columns are stale: {{range .Diffs}}<code>{{.}}</code> {{end}}</p>
+{{else}}<p class="ok">Stored etag/size match the data.</p>{{end}}
+
+<h2>Stored vs derived</h2>
+<table>
+<tr><th></th><th>stored</th><th>derived</th></tr>
+<tr><th>etag</th><td><code>{{.Stored.ETag}}</code></td><td><code>{{.DerivedETag}}</code></td></tr>
+<tr><th>size</th><td>{{.Stored.Size}}</td><td>{{.DerivedSize}}</td></tr>
+<tr><th>lastmodified</th><td>{{epoch .Stored.LastModified}}</td><td class="muted">—</td></tr>
+</table>
+
+<h2>Raw vCard</h2>
+<pre>{{.Data}}</pre>
+{{template "foot"}}{{end}}

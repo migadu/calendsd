@@ -25,8 +25,9 @@ help: ## Show available targets
 
 all: vet test ## Vet then run the full Go test suite
 
-build: ## Build the server binary into bin/
+build: ## Build the server and admin binaries into bin/
 	$(GO) build -o bin/calserver ./cmd/calserver
+	$(GO) build -o bin/calserver-admin ./cmd/calserver-admin
 
 test: ## Run the full Go test suite
 	$(GO) test ./...

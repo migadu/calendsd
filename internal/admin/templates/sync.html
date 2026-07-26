@@ -1,0 +1,30 @@
+{{define "sync"}}{{template "head"}}
+<h1>Sync debugger — {{.Kind}} {{.ID}}</h1>
+<form class="inline" method="get" action="/sync">
+<input type="hidden" name="kind" value="{{.Kind}}">
+<input type="hidden" name="id" value="{{.ID}}">
+<input name="token" value="{{.Token}}" placeholder="sync token (empty = initial sync)" size="34">
+<button>preview</button>
+</form>
+
+<h2>sync-collection preview{{with .Token}} for token <code>{{.}}</code>{{else}} (initial sync){{end}}</h2>
+{{if .Preview}}
+<p>New token: <code>{{.Preview.SyncToken}}</code>{{if .Preview.Truncated}} <span class="warn">(truncated)</span>{{end}}</p>
+<table>
+<tr><th>added</th><th>modified</th><th>deleted</th></tr>
+<tr>
+<td>{{range .Preview.Added}}<code>{{.}}</code><br>{{else}}<span class="muted">—</span>{{end}}</td>
+<td>{{range .Preview.Modified}}<code>{{.}}</code><br>{{else}}<span class="muted">—</span>{{end}}</td>
+<td>{{range .Preview.Deleted}}<code>{{.}}</code><br>{{else}}<span class="muted">—</span>{{end}}</td>
+</tr>
+</table>
+{{else}}<p class="warn">{{.PreviewNote}}</p>{{end}}
+
+<h2>Change log</h2>
+<table>
+<tr><th>sync token</th><th>object</th><th>op</th><th>object modified</th></tr>
+{{range .Log}}
+<tr><td>{{.SyncToken}}</td><td><code>{{.ObjectURI}}</code></td><td>{{op .Operation}}</td><td>{{epoch .LastModified}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">no changes recorded</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}

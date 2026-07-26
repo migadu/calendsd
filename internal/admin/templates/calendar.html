@@ -1,0 +1,56 @@
+{{define "calendar"}}{{template "head"}}
+<h1>Calendar {{.ID}}</h1>
+<table>
+<tr><th>sync token</th><td>{{.Meta.SyncToken}}</td></tr>
+<tr><th>components</th><td>{{.Meta.Components}}</td></tr>
+<tr><th>objects</th><td>{{.Meta.ObjectCount}} ({{.Meta.TotalSize}} bytes) — <a href="/objects?calendar={{.ID}}">browse</a></td></tr>
+</table>
+<p><a href="/sync?kind=calendar&id={{.ID}}">sync debugger</a></p>
+
+<h2>Fix a property <span class="muted">(backend PropPatch path; need -readonly=false)</span></h2>
+{{with index .Instances 0}}
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/proppatch', this, 'ppresult')">
+<input name="path" value="{{.Path}}" size="30" required>
+<input name="name" placeholder="{DAV:}displayname" size="26" required>
+<input name="value" placeholder="value" size="24">
+<label><input type="checkbox" name="remove" value="1"> remove</label>
+<button>apply</button>
+<span id="ppresult"></span>
+</form>
+{{end}}
+
+<h2>Instances (sharing)</h2>
+<table>
+<tr><th>principal</th><th>uri</th><th>access</th><th>invite</th><th>display name</th><th>color</th><th>order</th><th>transparent</th><th>share href</th></tr>
+{{range .Instances}}
+<tr>
+<td><a href="/principal?path={{.Instance.PrincipalURI}}">{{.Instance.PrincipalURI}}</a></td>
+<td>{{.Instance.URI}}</td>
+<td>{{access .Instance.Access}}</td>
+<td>{{invite .Instance.InviteStatus}}</td>
+<td>{{.Instance.DisplayName}}</td>
+<td>{{.Instance.Color}}</td>
+<td>{{.Instance.Order}}</td>
+<td>{{.Instance.Transparent}}</td>
+<td>{{.Instance.ShareHref}}</td>
+</tr>
+{{end}}
+</table>
+
+{{range .Instances}}
+<h2>Properties at <code>{{.Path}}</code></h2>
+{{if .PropRows}}
+<table>
+<tr><th>name</th><th>value</th><th>overlay principal</th><th></th></tr>
+{{range .PropRows}}
+<tr>
+<td><code>{{.Name}}</code></td>
+<td><code>{{.Value}}</code></td>
+<td>{{if .OverlayPrincipal}}<a href="/principal?path={{.OverlayPrincipal}}">{{.OverlayPrincipal}}</a>{{else}}<span class="muted">global</span>{{end}}</td>
+<td>{{if .SabreOnly}}<span class="warn">sabre-only (PHP-serialized)</span>{{end}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">no propertystorage rows</p>{{end}}
+{{end}}
+{{template "foot"}}{{end}}

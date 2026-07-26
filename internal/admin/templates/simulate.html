@@ -1,0 +1,34 @@
+{{define "simulate"}}{{template "head"}}
+<h1>Privilege simulator</h1>
+<p class="muted">Runs a real PROPFIND through the production plugin chain with the principal forced — the exact code path a client request takes.</p>
+<form class="inline" method="get" action="/simulate">
+<input name="principal" value="{{.Principal}}" placeholder="principals/alice" size="28" required>
+<input name="path" value="{{.Path}}" placeholder="/calendars/alice/default" size="34" required>
+<button>simulate</button>
+</form>
+
+{{if .Unavailable}}<p class="warn">Simulator unavailable in this deployment.</p>{{end}}
+{{if .Requested}}
+<h2>As {{.Principal}} on <code>{{.Path}}</code></h2>
+{{if eq .Status 207}}
+<p>Privileges:</p>
+{{if .Privileges}}<ul>{{range .Privileges}}<li><code>{{.}}</code></li>{{end}}</ul>
+{{else}}<p class="warn">207 but no current-user-privilege-set granted — the property itself was denied.</p>{{end}}
+{{else}}
+<p class="warn">PROPFIND returned {{.Status}} — this is what the user's client sees.</p>
+<pre>{{.RawBody}}</pre>
+{{end}}
+
+<h2>Effective ACL</h2>
+{{if .ACLNote}}<p class="warn">{{.ACLNote}}</p>
+{{else}}
+<p>Owner: {{if .Owner}}<code>{{.Owner}}</code>{{else}}<span class="muted">—</span>{{end}}</p>
+<table>
+<tr><th>principal</th><th>privilege</th><th>protected</th></tr>
+{{range .ACL}}
+<tr><td><code>{{.Principal}}</code></td><td><code>{{.Privilege}}</code></td><td>{{if .Protected}}yes{{end}}</td></tr>
+{{else}}<tr><td colspan="3" class="muted">empty ACL</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}
+{{template "foot"}}{{end}}

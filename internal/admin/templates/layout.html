@@ -1,0 +1,46 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>calserver admin</title>
+<style>
+body { font: 14px/1.45 system-ui, sans-serif; margin: 1.5rem; color: #1a1a1a; }
+nav { margin-bottom: 1.2rem; padding-bottom: .6rem; border-bottom: 1px solid #ccc; }
+nav a { margin-right: 1rem; text-decoration: none; color: #0b57d0; }
+h1 { font-size: 1.25rem; } h2 { font-size: 1.05rem; margin-top: 1.4rem; }
+table { border-collapse: collapse; margin: .5rem 0 1rem; }
+th, td { border: 1px solid #ddd; padding: .25rem .6rem; text-align: left; vertical-align: top; }
+th { background: #f4f4f4; }
+code, pre { font: 12px/1.4 ui-monospace, monospace; }
+pre { background: #f8f8f8; border: 1px solid #ddd; padding: .6rem; overflow-x: auto; }
+.warn { color: #b3261e; font-weight: 600; }
+.ok { color: #146c2e; }
+.muted { color: #666; }
+form.inline input { margin-right: .4rem; }
+</style>
+<script>
+async function adminPost(url, form, outId) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'X-Admin-Request': '1', 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams(new FormData(form)),
+  });
+  const out = document.getElementById(outId);
+  const text = await res.text();
+  if (!res.ok) { out.textContent = 'error ' + res.status + ': ' + text; out.className = 'warn'; return; }
+  try { out.textContent = JSON.parse(text).detail; } catch { out.textContent = text; }
+  out.className = 'ok';
+}
+</script>
+</head>
+<body>
+<nav>
+<a href="/">dashboard</a>
+<a href="/principals">principals</a>
+<a href="/simulate">simulator</a>
+<a href="/doctor">doctor</a>
+<span class="muted">calserver admin</span>
+</nav>
+{{end}}
+
+{{define "foot"}}</body></html>{{end}}

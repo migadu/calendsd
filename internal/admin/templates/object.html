@@ -1,0 +1,21 @@
+{{define "object"}}{{template "head"}}
+<h1>{{.Stored.URI}} <span class="muted">(calendar {{.CalendarID}})</span></h1>
+{{if .ParseError}}<p class="warn">calendardata does not parse: {{.ParseError}}</p>{{end}}
+{{if .Diffs}}<p class="warn">Stored columns are stale: {{range .Diffs}}<code>{{.}}</code> {{end}} — recompute from calendardata disagrees. This explains missing time-range/sync results.</p>
+{{else if .Derived}}<p class="ok">Stored denormalized columns match the data.</p>{{end}}
+
+<h2>Stored vs derived</h2>
+<table>
+<tr><th></th><th>stored</th><th>derived</th></tr>
+<tr><th>etag</th><td><code>{{.Stored.ETag}}</code></td><td><code>{{with .Derived}}{{.ETag}}{{end}}</code></td></tr>
+<tr><th>size</th><td>{{.Stored.Size}}</td><td>{{with .Derived}}{{.Size}}{{end}}</td></tr>
+<tr><th>component</th><td>{{.Stored.ComponentType}}</td><td>{{with .Derived}}{{.ComponentType}}{{end}}</td></tr>
+<tr><th>uid</th><td><code>{{.Stored.UID}}</code></td><td><code>{{with .Derived}}{{.UID}}{{end}}</code></td></tr>
+<tr><th>firstoccurence</th><td>{{epoch .Stored.FirstOccurrence}}</td><td>{{with .Derived}}{{epoch .FirstOccurrence}}{{end}}</td></tr>
+<tr><th>lastoccurence</th><td>{{epoch .Stored.LastOccurrence}}</td><td>{{with .Derived}}{{epoch .LastOccurrence}}{{end}}</td></tr>
+<tr><th>lastmodified</th><td>{{epoch .Stored.LastModified}}</td><td class="muted">—</td></tr>
+</table>
+
+<h2>Raw iCalendar</h2>
+<pre>{{.Data}}</pre>
+{{template "foot"}}{{end}}

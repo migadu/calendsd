@@ -22,6 +22,8 @@ that risks sabre co-existence.
   read-only) and carry no sync state, so user/principal creation and
   password reset go through a new, narrowly scoped `storage.AdminWrites`
   type (§4) — plain SQL in sabre-parity style, nothing else touches it.
+  The same carve-out covers deleting doctor-found orphans: their parent
+  collection is gone, so no backend can reach them either.
 - **Stdlib style**: plain `net/http`, `html/template`, `embed.FS`. No web
   framework, no JS toolchain. Single binary.
 
@@ -95,8 +97,12 @@ curl/jq. Phase A may ship JSON-only if useful earlier.
 ### 3.2 Principal & user inspector ("everything about user X")
 - Identity: `principals` row (uri, email, displayname) + matching `users` row.
 - **Auth diagnostics**: principals without credentials, credentials without
-  principals, realm-mismatched `digesta1` hashes (classic silent login
-  failure).
+  principals, malformed `digesta1` hashes. A realm mismatch (classic silent
+  login failure) is **not detectable offline** — `digesta1` is an opaque
+  md5 — so the inspector carries an interactive credential check instead:
+  the admin enters a username/password, the app computes the digest under
+  the configured realm and compares; a known-good password that fails a
+  well-formed hash means the hash was minted under a different realm.
 - Group membership and **delegation**, both directions of `groupmembers`,
   rendered in proxy terms: who can act for this user
   (`calendar-proxy-read`/`-write` members) and whose calendars this user sees.
@@ -136,7 +142,10 @@ curl/jq. Phase A may ship JSON-only if useful earlier.
 
 ### 3.6 Scheduling & sync debugger
 - Scheduling: per-principal inbox (`schedulingobjects`) with parsed iTIP
-  method/status; pending `InviteNotification`s; iMip configuration status.
+  method/status; pending share invites — the shared schema stores **no
+  notification objects** (sabre's PDO backend lacks notification support),
+  so `calendarinstances.share_invitestatus = 1` is the source of truth;
+  iMip configuration status.
 - Sync: change-log timeline per collection; "what would `sync-collection`
   return for token T" preview via `ChangesForCalendar` — debugs "my phone
   stopped syncing".
@@ -180,9 +189,9 @@ auditable. Everything else reuses existing types (`acl.Principal`,
 
 | Phase | Scope | Risk |
 |-------|-------|------|
-| **A** | Standalone binary, auth, dashboard, principal inspector, calendar/addressbook inspector, object browser | Pure reads; zero parity risk; most of the debugging value |
-| **B** | Privilege simulator, scheduling/sync debugger, doctor | Still read-only; simulated requests through the plugin chain |
-| **C** | Gated write actions (§3.8) + parity tests proving sabre sees admin-made changes correctly (extend the `PARITY=1` harness) | Writes; guarded by backends (plus the audited `AdminWrites` carve-out) + parity tests |
+| **A** | Standalone binary, auth, dashboard, principal inspector, calendar/addressbook inspector, object browser | Pure reads; zero parity risk; most of the debugging value — **implemented** (`cmd/calserver-admin`, `internal/admin`, `storage.AdminQueries`) |
+| **B** | Privilege simulator, scheduling/sync debugger, doctor | Still read-only; simulated requests through the plugin chain — **implemented** (`server.NewLoggedIn`, `internal/admin/{simulate,debug}.go`, `storage` doctor) |
+| **C** | Gated write actions (§3.8) + parity tests proving sabre sees admin-made changes correctly (extend the `PARITY=1` harness) | Writes; guarded by backends (plus the audited `AdminWrites` carve-out) + parity tests — **implemented** (`storage.AdminWrites`, `internal/admin/writes.go`, `TestParity/AdminMadeUserWorksInSabre`) |
 
 ## 6. Testing
 

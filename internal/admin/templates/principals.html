@@ -1,0 +1,29 @@
+{{define "principals"}}{{template "head"}}
+<h1>Principals</h1>
+<table>
+<tr><th>uri</th><th>display name</th><th>email</th><th>credentials</th></tr>
+{{range .Principals}}
+<tr>
+<td><a href="/principal?path={{.URI}}">{{.URI}}</a></td>
+<td>{{.DisplayName}}</td>
+<td>{{.Email}}</td>
+<td>{{if .HasUser}}<span class="ok">yes</span>{{else}}<span class="warn">none</span>{{end}}</td>
+</tr>
+{{else}}<tr><td colspan="4" class="muted">no principals</td></tr>{{end}}
+</table>
+{{if .UsersWithoutPrincipal}}
+<h2>Users without a principal</h2>
+<ul>{{range .UsersWithoutPrincipal}}<li class="warn">{{.}}</li>{{end}}</ul>
+{{end}}
+
+<h2>Create user</h2>
+<p class="muted">Creates the users row (digesta1 under the configured realm) plus the principal and its proxy sub-principals. Requires -readonly=false.</p>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/create-user', this, 'createresult')">
+<input name="username" placeholder="username" required>
+<input name="password" type="password" placeholder="password" required>
+<input name="email" placeholder="email (optional)">
+<input name="displayname" placeholder="display name (optional)">
+<button>create</button>
+<span id="createresult"></span>
+</form>
+{{template "foot"}}{{end}}

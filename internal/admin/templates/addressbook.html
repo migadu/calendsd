@@ -1,0 +1,37 @@
+{{define "addressbook"}}{{template "head"}}
+<h1>Address book {{.Book.ID}}</h1>
+<table>
+<tr><th>principal</th><td><a href="/principal?path={{.Book.PrincipalURI}}">{{.Book.PrincipalURI}}</a></td></tr>
+<tr><th>uri</th><td>{{.Book.URI}}</td></tr>
+<tr><th>display name</th><td>{{.Book.DisplayName}}</td></tr>
+<tr><th>description</th><td>{{.Book.Description}}</td></tr>
+<tr><th>sync token</th><td>{{.Book.SyncToken}}</td></tr>
+<tr><th>cards</th><td>{{.Book.CardCount}} ({{.Book.TotalSize}} bytes) — <a href="/cards?book={{.Book.ID}}">browse</a></td></tr>
+</table>
+<p><a href="/sync?kind=addressbook&id={{.Book.ID}}">sync debugger</a></p>
+
+<h2>Fix a property <span class="muted">(backend PropPatch path; need -readonly=false)</span></h2>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/proppatch', this, 'ppresult')">
+<input name="path" value="{{.Path}}" size="30" required>
+<input name="name" placeholder="{DAV:}displayname" size="26" required>
+<input name="value" placeholder="value" size="24">
+<label><input type="checkbox" name="remove" value="1"> remove</label>
+<button>apply</button>
+<span id="ppresult"></span>
+</form>
+
+<h2>Properties at <code>{{.Path}}</code></h2>
+{{if .PropRows}}
+<table>
+<tr><th>name</th><th>value</th><th>overlay principal</th><th></th></tr>
+{{range .PropRows}}
+<tr>
+<td><code>{{.Name}}</code></td>
+<td><code>{{.Value}}</code></td>
+<td>{{if .OverlayPrincipal}}{{.OverlayPrincipal}}{{else}}<span class="muted">global</span>{{end}}</td>
+<td>{{if .SabreOnly}}<span class="warn">sabre-only (PHP-serialized)</span>{{end}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">no propertystorage rows</p>{{end}}
+{{template "foot"}}{{end}}

@@ -1,0 +1,37 @@
+{{define "dashboard"}}{{template "head"}}
+<h1>Dashboard</h1>
+<p><code>{{.ConfigLine}}</code><br>
+<span class="muted">Compare against the calserver startup log line "effective config" — any difference is config drift.</span>
+{{if .ReadOnly}}<br><span class="ok">read-only mode</span>{{else}}<br><span class="warn">write actions enabled</span>{{end}}</p>
+
+<h2>Counts</h2>
+<table>
+<tr><th>principals</th><th>users</th><th>calendars</th><th>instances</th><th>objects</th><th>address books</th><th>cards</th><th>scheduling</th><th>property rows</th></tr>
+<tr><td>{{.Counts.Principals}}</td><td>{{.Counts.Users}}</td><td>{{.Counts.Calendars}}</td><td>{{.Counts.CalendarInstances}}</td><td>{{.Counts.CalendarObjects}}</td><td>{{.Counts.AddressBooks}}</td><td>{{.Counts.Cards}}</td><td>{{.Counts.SchedulingObjects}}</td><td>{{.Counts.PropertyRows}}</td></tr>
+</table>
+
+<h2>Auth diagnostics</h2>
+{{with .Diagnostics}}
+{{if .PrincipalsWithoutUser}}<p class="warn">Principals without credentials:</p><ul>{{range .PrincipalsWithoutUser}}<li><a href="/principal?path={{.}}">{{.}}</a></li>{{end}}</ul>{{end}}
+{{if .UsersWithoutPrincipal}}<p class="warn">Users without principal:</p><ul>{{range .UsersWithoutPrincipal}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .MalformedDigestA1}}<p class="warn">Malformed digesta1:</p><ul>{{range .MalformedDigestA1}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if and (not .PrincipalsWithoutUser) (not .UsersWithoutPrincipal) (not .MalformedDigestA1)}}<p class="ok">No principal/user mismatches.</p>{{end}}
+{{end}}
+
+<h2>Recent changes</h2>
+<p class="muted">Ordered by sync token per table; the change log has no timestamps. Time shown is the live object's lastmodified (empty for deletes).</p>
+<table>
+<tr><th>kind</th><th>principal</th><th>collection</th><th>object</th><th>op</th><th>sync token</th><th>object modified</th></tr>
+{{range .Changes}}
+<tr>
+<td>{{.Kind}}</td>
+<td><a href="/principal?path={{.PrincipalURI}}">{{.PrincipalURI}}</a></td>
+<td>{{if eq .Kind "calendar"}}<a href="/calendar?id={{.CollectionID}}">{{.CollectionURI}}</a>{{else}}<a href="/addressbook?id={{.CollectionID}}">{{.CollectionURI}}</a>{{end}}</td>
+<td>{{.ObjectURI}}</td>
+<td>{{op .Operation}}</td>
+<td>{{.SyncToken}}</td>
+<td>{{epoch .LastModified}}</td>
+</tr>
+{{else}}<tr><td colspan="7" class="muted">no changes recorded</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}

@@ -1,0 +1,94 @@
+{{define "principal"}}{{template "head"}}
+<h1>{{.URI}}</h1>
+<table>
+<tr><th>display name</th><td>{{.DisplayName}}</td></tr>
+<tr><th>email</th><td>{{.Email}}</td></tr>
+<tr><th>users row</th><td>{{if .User}}<span class="ok">{{.User.Username}}</span>{{else}}<span class="warn">missing — cannot log in</span>{{end}}</td></tr>
+{{if .User}}<tr><th>digesta1</th><td>{{if .DigestWellFormed}}<span class="ok">well-formed</span>{{else}}<span class="warn">malformed ({{.User.DigestA1}})</span>{{end}}</td></tr>{{end}}
+</table>
+
+<p><a href="/scheduling?principal={{.URI}}">scheduling inbox</a> · <a href="/simulate?principal={{.URI}}">simulate privileges</a></p>
+
+<h2>Delegation</h2>
+<table>
+<tr><th>sees calendars of (read)</th><td>{{range .SeesCalendarsOfRead}}<a href="/principal?path={{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td></tr>
+<tr><th>sees calendars of (write)</th><td>{{range .SeesCalendarsOfWrite}}<a href="/principal?path={{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td></tr>
+<tr><th>read delegates (can see this user's calendars)</th><td>{{range .ReadDelegates}}<a href="/principal?path={{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td></tr>
+<tr><th>write delegates</th><td>{{range .WriteDelegates}}<a href="/principal?path={{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td></tr>
+{{if .Groups}}<tr><th>other groups</th><td>{{range .Groups}}{{.}} {{end}}</td></tr>{{end}}
+</table>
+
+<h2>Calendars</h2>
+<table>
+<tr><th>uri</th><th>display name</th><th>id</th><th></th></tr>
+{{range .Calendars}}
+<tr><td><a href="/calendar?id={{.ID}}">{{.URI}}</a></td><td>{{.DisplayName}}</td><td>{{.ID}}</td><td><a href="/objects?calendar={{.ID}}">objects</a></td></tr>
+{{else}}<tr><td colspan="4" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>Address books</h2>
+<table>
+<tr><th>uri</th><th>display name</th><th>id</th><th></th></tr>
+{{range .AddressBooks}}
+<tr><td><a href="/addressbook?id={{.ID}}">{{.URI}}</a></td><td>{{.DisplayName}}</td><td>{{.ID}}</td><td><a href="/cards?book={{.ID}}">cards</a></td></tr>
+{{else}}<tr><td colspan="4" class="muted">none</td></tr>{{end}}
+</table>
+
+<h2>Setup actions <span class="muted">(need -readonly=false)</span></h2>
+{{if .User}}
+<h3>Reset password</h3>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/set-password', this, 'pwresult')">
+<input type="hidden" name="username" value="{{.User.Username}}">
+<input name="password" type="password" placeholder="new password" required>
+<button>reset</button>
+<span id="pwresult"></span>
+</form>
+{{end}}
+<h3>Delegation</h3>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/set-delegation', this, 'delegreadresult')">
+<input type="hidden" name="principal" value="{{.URI}}">
+<input type="hidden" name="kind" value="read">
+<input name="members" size="50" value="{{range .ReadDelegates}}{{.}} {{end}}" placeholder="principals/x principals/y (read delegates)">
+<button>set read delegates</button>
+<span id="delegreadresult"></span>
+</form>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/set-delegation', this, 'delegwriteresult')">
+<input type="hidden" name="principal" value="{{.URI}}">
+<input type="hidden" name="kind" value="write">
+<input name="members" size="50" value="{{range .WriteDelegates}}{{.}} {{end}}" placeholder="principals/x principals/y (write delegates)">
+<button>set write delegates</button>
+<span id="delegwriteresult"></span>
+</form>
+<h3>Provision defaults</h3>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/provision', this, 'provresult')">
+<input type="hidden" name="principal" value="{{.URI}}">
+<button>provision default calendar/address book</button>
+<span id="provresult"></span>
+</form>
+
+<h2>Credential check</h2>
+<p class="muted">Verifies a password against the stored digesta1 under the configured realm. A known-good password that fails here means the hash was minted under a different realm.</p>
+<form class="inline" onsubmit="checkCreds(event)">
+<input name="username" placeholder="username" required>
+<input name="password" type="password" placeholder="password" required>
+<button>check</button>
+<span id="credresult"></span>
+</form>
+<script>
+async function checkCreds(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const body = new URLSearchParams(new FormData(f));
+  const res = await fetch('/api/check-credentials', {
+    method: 'POST',
+    headers: {'X-Admin-Request': '1', 'Content-Type': 'application/x-www-form-urlencoded'},
+    body,
+  });
+  const out = document.getElementById('credresult');
+  if (!res.ok) { out.textContent = 'error: ' + res.status; return; }
+  const j = await res.json();
+  out.textContent = j.note;
+  out.className = j.match ? 'ok' : 'warn';
+}
+</script>
+{{template "foot"}}{{end}}

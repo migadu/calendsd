@@ -1,0 +1,22 @@
+{{define "doctor"}}{{template "head"}}
+<h1>Doctor</h1>
+<p class="muted">Read-only invariant checks. Scanned {{.Report.ObjectsScanned}} calendar objects and {{.Report.CardsScanned}} cards{{if .Report.Truncated}} — <span class="warn">scan cap reached, coverage incomplete (raise ?scancap=)</span>{{end}}.</p>
+{{if .Report.Findings}}
+<table>
+<tr><th>check</th><th>subject</th><th>detail</th></tr>
+{{range .Report.Findings}}
+<tr><td><code>{{.Check}}</code></td><td>{{.Subject}}</td><td>{{.Detail}}</td></tr>
+{{end}}
+</table>
+
+<h2>Delete orphans <span class="muted">(need -readonly=false; rows no backend can reach)</span></h2>
+{{range .DeletableChecks}}
+<form class="inline" style="display:inline-block; margin-right:1rem"
+  onsubmit="event.preventDefault(); adminPost('/api/delete-orphans', this, 'del-{{.}}')">
+<input type="hidden" name="check" value="{{.}}">
+<button>delete {{.}}</button>
+<span id="del-{{.}}"></span>
+</form>
+{{end}}
+{{else}}<p class="ok">All invariants hold.</p>{{end}}
+{{template "foot"}}{{end}}

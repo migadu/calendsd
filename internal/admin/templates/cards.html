@@ -1,0 +1,20 @@
+{{define "cards"}}{{template "head"}}
+<h1>Cards in address book {{.BookID}}</h1>
+<form class="inline" method="get" action="/cards">
+<input type="hidden" name="book" value="{{.BookID}}">
+<input name="match" value="{{.Query}}" placeholder="substring (uri)">
+<label><input type="checkbox" name="indata" value="1"> search inside vCard data</label>
+<button>search</button>
+</form>
+{{if .Truncated}}<p class="warn">Results truncated — narrow the search.</p>{{end}}
+<table>
+<tr><th>uri</th><th>size</th><th>modified</th></tr>
+{{range .Cards}}
+<tr>
+<td><a href="/card?book={{$.BookID}}&uri={{.URI}}">{{.URI}}</a></td>
+<td>{{.Size}}</td>
+<td>{{epoch .LastModified}}</td>
+</tr>
+{{else}}<tr><td colspan="3" class="muted">no matches</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}

@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"calserver/internal/auth"
 	"calserver/internal/server"
 	"calserver/internal/storage"
 )
@@ -336,6 +337,64 @@ func TestParity(t *testing.T) {
 		}
 		if !strings.Contains(body, "parity2.ics") || !strings.Contains(body, "404") {
 			t.Errorf("sabre sync REPORT does not report the Go-side deletion:\n%s", body)
+		}
+	})
+
+	t.Run("AdminMadeUserWorksInSabre", func(t *testing.T) {
+		// Phase C acceptance (ADMIN-PLAN.md §5): a user created through
+		// the admin carve-out — digesta1 minted from the realm, principal
+		// triple inserted, default calendar auto-provisioned through the
+		// production code path — must be fully usable via real sabre.
+		writes := &storage.AdminWrites{DB: db}
+		if err := writes.CreateUser("adminmade",
+			auth.DigestA1("adminmade", "SabreDAV", "s3cret"),
+			"adminmade@example.org", "Admin Made"); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		// Provision the default calendar the way the panel does: a home
+		// PROPFIND through the auto-provisioning composition.
+		prov := server.NewLoggedIn(db,
+			server.Config{BaseURI: "/", AutoProvision: true}, "principals/adminmade")
+		propfindBody := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>`
+		req := httptest.NewRequest("PROPFIND", "/calendars/adminmade/", strings.NewReader(propfindBody))
+		req.Header.Set("Depth", "1")
+		req.Header.Set("Content-Type", "application/xml")
+		rec := httptest.NewRecorder()
+		prov.ServeHTTP(rec, req)
+		if rec.Code != 207 {
+			t.Fatalf("provisioning PROPFIND = %d: %s", rec.Code, rec.Body.String())
+		}
+
+		// The minted digesta1 must pass sabre's Digest auth, and sabre
+		// must list the provisioned calendar.
+		newClient := &digestClient{base: "http://" + sabreAddr, username: "adminmade", password: "s3cret"}
+		status, body, _ := newClient.do(t, "PROPFIND", "/calendars/adminmade/", propfindBody,
+			"Depth", "1", "Content-Type", "application/xml")
+		if status != 207 {
+			t.Fatalf("sabre PROPFIND as admin-made user = %d: %s", status, body)
+		}
+		// Auto-provision creates the Calendar-Server default URI "calendar".
+		if !strings.Contains(body, "/calendars/adminmade/calendar/") {
+			t.Errorf("sabre does not list the provisioned default calendar:\n%s", body)
+		}
+
+		// An admin PROPPATCH (panel path: production plugin chain as the
+		// admin principal) must be visible through sabre.
+		adm := server.NewLoggedIn(db, server.Config{BaseURI: "/"}, "principals/admin")
+		patch := `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>Renamed by admin</d:displayname></d:prop></d:set></d:propertyupdate>`
+		req = httptest.NewRequest("PROPPATCH", "/calendars/adminmade/calendar/", strings.NewReader(patch))
+		req.Header.Set("Content-Type", "application/xml")
+		rec = httptest.NewRecorder()
+		adm.ServeHTTP(rec, req)
+		if rec.Code != 207 || !strings.Contains(rec.Body.String(), "200 OK") {
+			t.Fatalf("admin PROPPATCH = %d: %s", rec.Code, rec.Body.String())
+		}
+		nameFind := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`
+		status, body, _ = newClient.do(t, "PROPFIND", "/calendars/adminmade/calendar/", nameFind,
+			"Depth", "0", "Content-Type", "application/xml")
+		if status != 207 || !strings.Contains(body, "Renamed by admin") {
+			t.Errorf("sabre does not see the admin-set displayname (%d):\n%s", status, body)
 		}
 	})
 }

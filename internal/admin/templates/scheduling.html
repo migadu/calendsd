@@ -1,0 +1,32 @@
+{{define "scheduling"}}{{template "head"}}
+<h1>Scheduling — {{.Principal}}</h1>
+<p>iMip: {{if .IMipEnabled}}<span class="ok">enabled</span> (sender {{.IMipSender}}){{else}}<span class="muted">disabled</span>{{end}}</p>
+
+<h2>Inbox (schedulingobjects)</h2>
+{{if .InboxUnavailable}}<p class="warn">No scheduling backend wired.</p>{{end}}
+{{range .Inbox}}
+<h3><code>{{.URI}}</code>{{if .Method}} — {{.Method}}{{end}}</h3>
+{{if .ParseError}}<p class="warn">does not parse: {{.ParseError}}</p>
+{{else}}
+<table>
+<tr><th>uid</th><td><code>{{.UID}}</code></td></tr>
+<tr><th>summary</th><td>{{.Summary}}</td></tr>
+<tr><th>organizer</th><td><code>{{.Organizer}}</code></td></tr>
+</table>
+{{if .Attendees}}
+<table>
+<tr><th>attendee</th><th>name</th><th>partstat</th><th>schedule-status</th></tr>
+{{range .Attendees}}<tr><td><code>{{.Address}}</code></td><td>{{.Name}}</td><td>{{.PartStat}}</td><td>{{.ScheduleStatus}}</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}
+{{else}}{{if not .InboxUnavailable}}<p class="muted">inbox is empty</p>{{end}}{{end}}
+
+<h2>Pending share invites</h2>
+<table>
+<tr><th>calendar</th><th>uri</th><th>access</th><th>share href</th></tr>
+{{range .PendingInvites}}
+<tr><td><a href="/calendar?id={{.CalendarID}}">calendar {{.CalendarID}}</a></td><td>{{.URI}}</td><td>{{access .Access}}</td><td>{{.ShareHref}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">none</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}
