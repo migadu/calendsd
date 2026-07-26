@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"fmt"
+	"net/mail"
 	"net/smtp"
 	"strings"
 
@@ -55,6 +56,12 @@ func (p *IMipPlugin) DeliverExternal(msg *ical.Message) bool {
 	}
 	sender := strings.TrimPrefix(msg.Sender, "mailto:")
 	recipient := strings.TrimPrefix(msg.Recipient, "mailto:")
+	// Reject a recipient that is not a syntactically valid address, so
+	// malformed attendee data can't reach the SMTP layer.
+	if _, err := mail.ParseAddress(recipient); err != nil {
+		msg.ScheduleStatus = "5.3;Recipient was not a valid email address"
+		return true
+	}
 
 	subject := "iTIP message"
 	if summary := eventSummaryText(msg); summary != "" {

@@ -297,6 +297,10 @@ func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo
 // X-SERVER-GROUP placeholder and appends one real ATTENDEE per member,
 // mirroring Calendar Server's GroupAttendeeReconciliation. Returns whether it
 // changed the calendar.
+// maxExpandedAttendees caps how many members a single event's group ATTENDEEs
+// expand into, bounding scheduling/iMIP fan-out (mail-amplification defense).
+const maxExpandedAttendees = 250
+
 func (p *SchedulePlugin) expandGroupAttendees(cal *goical.Calendar) bool {
 	changed := false
 	for _, comp := range cal.Children {
@@ -333,6 +337,15 @@ func (p *SchedulePlugin) expandGroupAttendees(cal *goical.Calendar) bool {
 			atts[i].Params.Del("RSVP")
 
 			for _, m := range members {
+				// Bound fan-out: a huge (or maliciously crafted) group must not
+				// expand into an unbounded number of attendees — each becomes an
+				// iTIP message and potentially an iMIP email. Past the cap the
+				// group stays a placeholder with the remaining members
+				// uninvited; narrow the group instead.
+				if len(added) >= maxExpandedAttendees {
+					atts[i].Params.Set("SCHEDULE-STATUS", "5.3")
+					break
+				}
 				if present[strings.ToLower(m.address)] {
 					continue
 				}

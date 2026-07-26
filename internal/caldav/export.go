@@ -126,6 +126,13 @@ func negotiateExportFormat(accept string) string {
 	return "text/calendar"
 }
 
+// maxExportObjects caps how many objects a single export merges. A whole-
+// calendar export loads, decodes, merges, (optionally) recurrence-expands and
+// re-encodes every object in memory; without a bound a very large calendar is a
+// memory/CPU DoS on an unauthenticated-size GET. Beyond this, the client must
+// narrow with start=/end=.
+const maxExportObjects = 50000
+
 // exportBlobs collects the calendar objects to merge, filtered when
 // start/end/componentType are given.
 func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Time, componentType string) ([][]byte, error) {
@@ -136,6 +143,11 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 	exportAll := start.IsZero() && end.IsZero() && componentType == ""
 	var out [][]byte
 	for _, obj := range objects {
+		if len(out) >= maxExportObjects {
+			return nil, dav.ErrForbidden(
+				"This calendar has too many objects to export at once (limit %d); narrow the export with start= and end= parameters.",
+				maxExportObjects)
+		}
 		if !exportAll {
 			name := componentType
 			if name == "" {
