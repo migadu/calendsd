@@ -92,6 +92,15 @@ func BasicAuth(creds map[string]string, next http.Handler) http.Handler {
 	})
 }
 
+// AuthenticatedHandler is the production entry point: the full admin mux
+// guarded by BasicAuth against creds. Wiring this (rather than composing
+// Handler() and BasicAuth by hand) keeps the auth wrapper from ever being
+// omitted, and lets a test assert the whole surface is protected. Handler()
+// alone is unauthenticated — for unit tests that exercise a single endpoint.
+func (a *App) AuthenticatedHandler(creds map[string]string) http.Handler {
+	return BasicAuth(creds, a.Handler())
+}
+
 // requireMutationHeader is the stateless CSRF guard: browsers attach Basic
 // credentials to cross-site requests, but a cross-site form or no-CORS
 // fetch cannot set a custom header. Every non-GET handler calls this first.

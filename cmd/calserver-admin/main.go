@@ -94,7 +94,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              *addr,
-		Handler:           admin.BasicAuth(creds, app.Handler()),
+		Handler:           app.AuthenticatedHandler(creds),
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,

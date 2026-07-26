@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-// TestBasicAuthGuardsEveryEndpoint verifies that when the admin mux is wrapped
-// with BasicAuth (as cmd/calserver-admin/main.go does), no route — read page,
-// JSON API, or write action — is reachable without valid credentials. A 401
-// uniquely proves the auth wrapper blocked the request: the handlers
-// themselves never return 401, so any other status would mean the request got
-// past the guard.
+// TestBasicAuthGuardsEveryEndpoint verifies that the production handler
+// constructor (App.AuthenticatedHandler — the exact call cmd/calserver-admin
+// uses) leaves no route — read page, JSON API, or write action — reachable
+// without valid credentials. A 401 uniquely proves the auth wrapper blocked
+// the request: the handlers themselves never return 401, so any other status
+// would mean the request got past the guard.
 func TestBasicAuthGuardsEveryEndpoint(t *testing.T) {
 	creds := map[string]string{"root": bcryptHash(t, "s3cret")}
-	h := BasicAuth(creds, testApp().Handler())
+	h := testApp().AuthenticatedHandler(creds)
 
 	type route struct{ method, path string }
 	// Every pattern registered in App.Handler(), plus unregistered paths to
