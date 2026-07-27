@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendar</title>
+<link rel="stylesheet" href="cal.css">
+</head>
+<body>
+<div id="login" hidden>
+  <form id="login-form">
+    <h1>Calendar</h1>
+    <p class="sub">Sign in to your calendar &amp; contacts</p>
+    <label>Username <input id="login-user" autocomplete="username" required></label>
+    <label>Password <input id="login-pass" type="password" autocomplete="current-password" required></label>
+    <label class="row"><input type="checkbox" id="login-stay"> Stay signed in on this device</label>
+    <button type="submit">Sign in</button>
+    <p id="login-error" class="error" role="alert"></p>
+  </form>
+</div>
+
+<header id="topbar" hidden>
+  <span id="brand">Calendar</span>
+  <nav id="mainnav">
+    <a href="#calendar" data-nav="calendar" class="active">Calendar</a>
+    <a href="#contacts" data-nav="contacts">Contacts</a>
+    <a href="#settings" data-nav="settings">Settings</a>
+  </nav>
+  <div id="cal-controls">
+    <button id="nav-today" title="Go to today">Today</button>
+    <button id="nav-prev" title="Previous" aria-label="Previous">‹</button>
+    <button id="nav-next" title="Next" aria-label="Next">›</button>
+    <span id="cal-title" aria-live="polite"></span>
+    <span id="view-seg" role="group" aria-label="View">
+      <button data-view="month" class="active">Month</button>
+      <button data-view="week">Week</button>
+      <button data-view="agenda">Agenda</button>
+    </span>
+  </div>
+  <button id="bell" title="Invitations" aria-label="Invitations">✉<span id="bell-badge" hidden></span></button>
+  <span id="whoami"></span>
+  <button id="signout">Sign out</button>
+</header>
+
+<div id="layout" hidden>
+  <aside id="sidebar">
+    <button id="new-event" class="primary">＋ New event</button>
+    <h2>My calendars</h2>
+    <ul id="cal-list"></ul>
+    <button id="new-calendar" class="ghost">＋ New calendar</button>
+  </aside>
+  <main id="content" tabindex="-1"></main>
+</div>
+
+<aside id="invites-panel" hidden>
+  <div class="panel-head"><h2>Invitations</h2><button id="invites-close" aria-label="Close">×</button></div>
+  <div id="invites-list"></div>
+</aside>
+
+<div id="dialog-host"></div>
+<div id="toast" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

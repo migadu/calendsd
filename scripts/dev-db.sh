@@ -26,6 +26,22 @@ INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
 INSERT INTO calendarinstances (calendarid, principaluri, access, displayname, uri, description, calendarorder, calendarcolor, timezone, transparent)
 SELECT currval('calendars_id_seq'), 'principals/admin', 1, 'default calendar', 'default', '', 0, NULL, NULL, 0;
 SQL
+    # Second principal so sharing, proxy delegation, and local iTIP have a
+    # target (mirrors what storage.AdminWrites.CreateUser inserts: the users
+    # row plus the principal AND its calendar-proxy children — without the
+    # proxy rows delegation to bob silently breaks).
+    # digesta1 = md5("bob:SabreDAV:bob"); password "bob".
+    psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" <<'SQL'
+INSERT INTO users (username, digesta1) VALUES
+('bob', '40d17625c1ef3974fc1138a86b8248fc');
+INSERT INTO principals (uri, email, displayname) VALUES
+('principals/bob', 'bob@example.org', 'Bob'),
+('principals/bob/calendar-proxy-read', NULL, NULL),
+('principals/bob/calendar-proxy-write', NULL, NULL);
+INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
+INSERT INTO calendarinstances (calendarid, principaluri, access, displayname, uri, description, calendarorder, calendarcolor, timezone, transparent)
+SELECT currval('calendars_id_seq'), 'principals/bob', 1, 'default calendar', 'default', '', 0, NULL, NULL, 0;
+SQL
 }
 
 case "${1:-}" in

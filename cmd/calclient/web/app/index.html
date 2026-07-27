@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>calclient — CalDAV/CardDAV demo client</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>calclient</h1>
+  <form id="login-form" autocomplete="off">
+    <input id="login-user" placeholder="username" autocomplete="username">
+    <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
+    <button type="submit" id="login-btn">Log in</button>
+  </form>
+  <span id="session-status">not logged in</span>
+</header>
+<div id="layout">
+  <nav id="tabs"></nav>
+  <main id="panel"></main>
+  <aside id="drawer">
+    <h2>Raw exchange</h2>
+    <div id="exchange">
+      <p class="hint">The last request/response of whichever action ran shows
+      here — the protocol stays visible even where the UI is friendly.</p>
+    </div>
+  </aside>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
