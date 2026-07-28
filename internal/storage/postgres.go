@@ -767,7 +767,7 @@ func (p *Principals) SearchPrincipals(prefix string, search map[xml.Name]string,
 			}
 			continue
 		}
-		args = append(args, "%"+strings.ToLower(needle)+"%")
+		args = append(args, "%"+escapeLike(strings.ToLower(needle))+"%")
 		clauses = append(clauses, "lower("+col+") LIKE $"+strconv.Itoa(len(args)))
 	}
 	if len(clauses) == 0 {

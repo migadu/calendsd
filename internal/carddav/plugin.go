@@ -185,7 +185,15 @@ func (p *Plugin) multigetReport(body []byte, w http.ResponseWriter, r *http.Requ
 	}
 	var paths []string
 	for _, href := range query.hrefs {
-		paths = append(paths, strings.Trim(strings.TrimPrefix(href, p.server.BaseURI), "/"))
+		// Normalize each href through the same base-stripping logic as the
+		// request path (gopath.Clean + base-prefix enforcement + percent-
+		// decoding) rather than a bare TrimPrefix, so encoded and absolute-URL
+		// hrefs resolve and out-of-mount hrefs are rejected.
+		path, err := p.server.ResolveHref(href)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, path)
 	}
 	return p.writeCardResponses(r.Context(), w, paths, query.props)
 }

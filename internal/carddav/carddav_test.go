@@ -125,3 +125,91 @@ func TestAddressbookParamFilter(t *testing.T) {
 		t.Errorf("param-filter TYPE=WORK wrong:\n%s", body)
 	}
 }
+
+// buildServerWithCards is buildServer with a custom card set in book1.
+func buildServerWithCards(cards map[string]*carddav.CardInfo) *dav.Server {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/admin"}}}
+	backend := &carddav.MockBackend{
+		AddressBooks: []carddav.AddressBookInfo{{
+			ID: "1", URI: "book1", PrincipalURI: "principals/admin",
+			Props: map[xmlName]any{{Space: "DAV:", Local: "displayname"}: "Contacts"},
+		}},
+		CardsByBook: map[string]map[string]*carddav.CardInfo{"1": cards},
+	}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(carddav.NewAddressBookRoot(principals, backend, "addressbooks"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/admin"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&carddav.Plugin{})
+	return srv
+}
+
+// TestAddressbookMultigetEncodedHref covers the bug where multigetReport
+// (internal/carddav/plugin.go) strips the base URI from each href with a bare
+// strings.TrimPrefix instead of resolving it like CalDAV's
+// server.ResolveHref, so percent-encoded hrefs — exactly the form the server
+// itself emits for URIs containing spaces etc. — are never decoded and the
+// card comes back 404.
+func TestAddressbookMultigetEncodedHref(t *testing.T) {
+	const cardSpace = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:card3\r\nFN:Carol Space\r\nEMAIL:carol@example.org\r\nEND:VCARD\r\n"
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"my card.vcf": {URI: "my card.vcf", AddressBookID: "1", CardData: []byte(cardSpace)},
+	})
+
+	// The server emits this card's href percent-encoded; a client echoes it
+	// back in the multiget verbatim, so the REPORT must decode it.
+	mg := `<?xml version="1.0"?><c:addressbook-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/><c:address-data/></d:prop>
+	  <d:href>/addressbooks/admin/book1/my%20card.vcf</d:href>
+	</c:addressbook-multiget>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", mg, "Content-Type", "application/xml")
+	if w.Code != 207 || !strings.Contains(w.Body.String(), "Carol Space") {
+		t.Errorf("multiget with percent-encoded href = %d, want address-data for the card:\n%s", w.Code, w.Body.String())
+	}
+}
+
+// TestAddressbookMultigetAbsoluteHref covers the same bug for the
+// absolute-URL href form RFC 6352 allows: CalDAV's ResolveHref strips the
+// scheme/host, the CardDAV multiget's bare TrimPrefix does not.
+func TestAddressbookMultigetAbsoluteHref(t *testing.T) {
+	srv := buildServer()
+	mg := `<?xml version="1.0"?><c:addressbook-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/><c:address-data/></d:prop>
+	  <d:href>http://example.com/addressbooks/admin/book1/card2.vcf</d:href>
+	</c:addressbook-multiget>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", mg, "Content-Type", "application/xml")
+	if w.Code != 207 || !strings.Contains(w.Body.String(), "Bob Jones") {
+		t.Errorf("multiget with absolute-URL href = %d, want address-data for card2:\n%s", w.Code, w.Body.String())
+	}
+}
+
+// TestAddressbookQueryNegateTextMatch covers the bug where the text-match
+// negation (internal/carddav/query.go, textMatch.matches) is applied per
+// property instance instead of after the any-instance-matches quantifier.
+// Sabre semantics: a negated text-match succeeds only if NO instance of the
+// property matches; a card with EMAIL a@x.com plus a second EMAIL must not
+// be returned by negate-condition="yes" on a@x.com.
+func TestAddressbookQueryNegateTextMatch(t *testing.T) {
+	const cardMulti = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:card4\r\nFN:Dave Multi\r\nEMAIL:a@x.com\r\nEMAIL:b@y.com\r\nEND:VCARD\r\n"
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"card1.vcf": {URI: "card1.vcf", AddressBookID: "1", CardData: []byte(card1)},
+		"multi.vcf": {URI: "multi.vcf", AddressBookID: "1", CardData: []byte(cardMulti)},
+	})
+	query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/></d:prop>
+	  <c:filter><c:prop-filter name="EMAIL"><c:text-match match-type="equals" negate-condition="yes">a@x.com</c:text-match></c:prop-filter></c:filter>
+	</c:addressbook-query>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	if w.Code != 207 {
+		t.Fatalf("query status = %d:\n%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "card1.vcf") {
+		t.Errorf("negated match missed card1 (no EMAIL equals a@x.com):\n%s", body)
+	}
+	if strings.Contains(body, "multi.vcf") {
+		t.Errorf("negated match wrongly returned multi.vcf: one of its EMAILs equals a@x.com, so the negated filter must exclude it:\n%s", body)
+	}
+}

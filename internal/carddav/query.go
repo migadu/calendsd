@@ -222,11 +222,17 @@ func matchParamFilters(fields []*vcard.Field, filters []paramFilter, test string
 			} else if pf.textMatch == nil {
 				success = len(values) > 0
 			} else {
+				// Compute the aggregate "does any value match?" first, then
+				// let negate flip the aggregate (sabre's validateTextMatches:
+				// negate is applied after the haystack loop, not per value).
+				anyMatch := false
 				for _, v := range values {
 					if pf.textMatch.matches(v) {
-						success = true
+						anyMatch = true
+						break
 					}
 				}
+				success = pf.textMatch.negate != anyMatch
 			}
 			if success {
 				break
@@ -244,13 +250,17 @@ func matchParamFilters(fields []*vcard.Field, filters []paramFilter, test string
 
 func matchTextMatches(texts []string, matches []textMatch, test string) bool {
 	for _, tm := range matches {
-		success := false
+		// Compute the aggregate "does any instance match?" first, then let
+		// negate flip the aggregate (sabre's validateTextMatches applies
+		// negate after the haystack loop, not per instance).
+		anyMatch := false
 		for _, text := range texts {
 			if tm.matches(text) {
-				success = true
+				anyMatch = true
 				break
 			}
 		}
+		success := tm.negate != anyMatch
 		if test == "anyof" && success {
 			return true
 		}
@@ -261,23 +271,23 @@ func matchTextMatches(texts []string, matches []textMatch, test string) bool {
 	return test == "allof"
 }
 
-// matches applies a text-match, honoring match-type and negation. Both
-// mandatory collations are case-insensitive; i;octet is case-sensitive.
+// matches applies a text-match's match-type to a single instance, WITHOUT
+// negation: negate is a quantifier over "does any instance match?" and is
+// applied by the callers after the instance loop (sabre's validateTextMatches).
+// Both mandatory collations are case-insensitive; i;octet is case-sensitive.
 func (tm textMatch) matches(haystack string) bool {
 	h, needle := haystack, tm.value
 	if tm.collation != "i;octet" {
 		h, needle = strings.ToLower(h), strings.ToLower(needle)
 	}
-	var matched bool
 	switch tm.matchType {
 	case "equals":
-		matched = h == needle
+		return h == needle
 	case "starts-with":
-		matched = strings.HasPrefix(h, needle)
+		return strings.HasPrefix(h, needle)
 	case "ends-with":
-		matched = strings.HasSuffix(h, needle)
+		return strings.HasSuffix(h, needle)
 	default: // contains
-		matched = strings.Contains(h, needle)
+		return strings.Contains(h, needle)
 	}
-	return tm.negate != matched
 }

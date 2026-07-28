@@ -120,10 +120,21 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 		if len(assignments) == 0 {
 			return nil, true
 		}
+		tx, err := b.DB.Begin()
+		if err != nil {
+			return nil, false
+		}
+		defer tx.Rollback()
 		args = append(args, id)
-		if _, err := b.DB.Exec(
+		if _, err := tx.Exec(
 			"UPDATE addressbooks SET "+strings.Join(assignments, ", ")+" WHERE id = $"+strconv.Itoa(len(args)),
 			args...); err != nil {
+			return nil, false
+		}
+		if err := abAddChange(tx, id, "", 2); err != nil {
+			return nil, false
+		}
+		if err := tx.Commit(); err != nil {
 			return nil, false
 		}
 		return nil, true
@@ -261,7 +272,68 @@ func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLev
 		}
 		return out, rows.Err()
 	}
-	return nil, nil
+
+	since, err := strconv.ParseInt(syncToken, 10, 64)
+	if err != nil {
+		return nil, nil // invalid token
+	}
+	query := `SELECT uri, operation, synctoken FROM addressbookchanges
+	           WHERE synctoken >= $1 AND addressbookid = $2 ORDER BY synctoken`
+	if limit > 0 {
+		// One extra row detects truncation, like sabre.
+		query += " LIMIT " + strconv.Itoa(limit+1)
+	}
+	rows, err := b.DB.Query(query, since, addressBookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type change struct {
+		operation int
+		synctoken int64
+	}
+	// Last change per uri wins, in first-seen order (PHP assoc semantics).
+	changes := map[string]change{}
+	var order []string
+	for rows.Next() {
+		var uri string
+		var c change
+		if err := rows.Scan(&uri, &c.operation, &c.synctoken); err != nil {
+			return nil, err
+		}
+		if _, seen := changes[uri]; !seen {
+			order = append(order, uri)
+		}
+		changes[uri] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := &dav.ChangeSet{SyncToken: syncToken}
+	var currentToken int64
+	for count, uri := range order {
+		if limit > 0 && count >= limit {
+			out.Truncated = true
+			break
+		}
+		c := changes[uri]
+		// The client-facing token is one past the last synced change.
+		if c.synctoken+1 > currentToken {
+			currentToken = c.synctoken + 1
+			out.SyncToken = strconv.FormatInt(currentToken, 10)
+		}
+		switch c.operation {
+		case 1:
+			out.Added = append(out.Added, uri)
+		case 2:
+			out.Modified = append(out.Modified, uri)
+		case 3:
+			out.Deleted = append(out.Deleted, uri)
+		}
+	}
+	return out, nil
 }
 
 // abAddChange records an address book change and bumps the synctoken under a
