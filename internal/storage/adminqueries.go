@@ -54,6 +54,24 @@ func (q *AdminQueries) Counts() (*AdminCounts, error) {
 	return &c, nil
 }
 
+// SchemaPresent verifies every table the admin surface reads exists, via a
+// LIMIT 0 probe per table. Unlike Counts it stays O(1) on large databases,
+// so it is safe in a health check that runs on a monitoring interval.
+func (q *AdminQueries) SchemaPresent() error {
+	for _, table := range []string{
+		"principals", "users", "calendars", "calendarinstances",
+		"calendarobjects", "addressbooks", "cards", "schedulingobjects",
+		"propertystorage", "groupmembers", "calendarchanges", "addressbookchanges",
+	} {
+		rows, err := q.DB.Query("SELECT 1 FROM " + table + " LIMIT 0")
+		if err != nil {
+			return fmt.Errorf("table %s: %w", table, err)
+		}
+		rows.Close()
+	}
+	return nil
+}
+
 // AdminChange is one change-log row for the dashboard's recent-activity
 // list. The change tables carry no timestamp (ADMIN-PLAN.md §3.1):
 // LastModified is joined from the live object and is nil for deletes.

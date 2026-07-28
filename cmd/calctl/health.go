@@ -36,6 +36,11 @@ func handleHealth(args []string) {
 		checkServer(serverURL(*urlOverride)),
 		checkDatabase(dsnFor(*dsnOverride)),
 	}
+	// rcptd auth is optional; only a configured URL makes it a component
+	// worth reporting on.
+	if rcptdURL := strings.TrimRight(globalConfig.Server.Rcptd.URL, "/"); rcptdURL != "" {
+		results = append(results, checkRcptd(rcptdURL, rcptdToken()))
+	}
 
 	// Only a hard failure ("unhealthy") fails the command; "degraded"
 	// (e.g. no DSN configured — in-memory mode) is a warning.
@@ -131,9 +136,15 @@ func checkServer(url string) checkResult {
 		}
 	}
 	resp.Body.Close()
-	msg := fmt.Sprintf("HTTP %d", resp.StatusCode)
-	if dav := resp.Header.Get("DAV"); dav != "" {
-		msg += fmt.Sprintf(" (DAV: %s)", dav)
+	var msg string
+	switch {
+	case resp.Header.Get("DAV") != "":
+		msg = "responding (DAV: " + resp.Header.Get("DAV") + ")"
+	case resp.StatusCode == http.StatusUnauthorized:
+		// The expected answer to an unauthenticated probe.
+		msg = "responding (auth required)"
+	default:
+		msg = fmt.Sprintf("responding (HTTP %d)", resp.StatusCode)
 	}
 	return checkResult{
 		Component: "calserver",
@@ -180,7 +191,7 @@ func checkDatabase(dsn string) checkResult {
 		}
 	}
 
-	counts, err := (&storage.AdminQueries{DB: db}).Counts()
+	err = (&storage.AdminQueries{DB: db}).SchemaPresent()
 	d := time.Since(start)
 	if err != nil {
 		return checkResult{
@@ -193,9 +204,74 @@ func checkDatabase(dsn string) checkResult {
 	return checkResult{
 		Component: "database",
 		Status:    "healthy",
-		Message: fmt.Sprintf("%d principals, %d calendars, %d objects, %d cards",
-			counts.Principals, counts.Calendars, counts.CalendarObjects, counts.Cards),
-		Duration: d.Truncate(time.Millisecond).String(),
+		Message:   "connected, sabre schema present",
+		Duration:  d.Truncate(time.Millisecond).String(),
+	}
+}
+
+// rcptdToken resolves the bearer token the same way SharedServerFlags does:
+// config file first, then $RCPTD_AUTH_TOKEN.
+func rcptdToken() string {
+	if t := globalConfig.Server.Rcptd.Token; t != "" {
+		return t
+	}
+	return os.Getenv("RCPTD_AUTH_TOKEN")
+}
+
+// checkRcptd probes the /auth endpoint calserver's rcptd backend actually
+// calls, with a dummy address, and maps the statuses the way the backend
+// interprets them: 404 (unknown user) proves a working service just as well
+// as 200; 401 means our bearer token is rejected; 503 is rcptd's transient
+// CDB fault.
+func checkRcptd(baseURL, token string) checkResult {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		baseURL+"/auth?email=calctl-health-probe%40invalid", nil)
+	if err != nil {
+		return checkResult{
+			Component: "rcptd",
+			Status:    "unhealthy",
+			Endpoint:  baseURL,
+			Message:   fmt.Sprintf("invalid url: %v", err),
+			Duration:  time.Since(start).Truncate(time.Millisecond).String(),
+		}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	d := time.Since(start)
+	if err != nil {
+		return checkResult{
+			Component: "rcptd",
+			Status:    "unhealthy",
+			Endpoint:  baseURL,
+			Message:   err.Error(),
+			Duration:  d.Truncate(time.Millisecond).String(),
+		}
+	}
+	resp.Body.Close()
+
+	status, msg := "unhealthy", fmt.Sprintf("unexpected HTTP %d from /auth", resp.StatusCode)
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNotFound:
+		// 404 = probe address unknown, which proves /auth and its tables
+		// work just as well as a 200 would.
+		status, msg = "healthy", "auth endpoint responding"
+	case http.StatusUnauthorized:
+		msg = "bearer token rejected — check [server.rcptd] token / $RCPTD_AUTH_TOKEN"
+	case http.StatusServiceUnavailable:
+		status, msg = "degraded", "temporarily unavailable (transient table fault)"
+	}
+	return checkResult{
+		Component: "rcptd",
+		Status:    status,
+		Endpoint:  baseURL,
+		Message:   msg,
+		Duration:  d.Truncate(time.Millisecond).String(),
 	}
 }
 

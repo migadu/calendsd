@@ -62,14 +62,22 @@ line:
 
 ```sh
 calctl health                 # OPTIONS-probe the DAV listener + DB ping/schema check
+                              # (+ rcptd /auth probe when [server.rcptd] url is set)
 calctl stats                  # dashboard row counts + recent change-log activity
 calctl doctor                 # §3.7 consistency checks; exit 1 on any finding
+calctl principal list         # principals with email/displayname/login capability
+calctl principal add bob --email bob@example.org --password-stdin < pw
+calctl principal edit bob --name "Robert"        # --email "" clears; --password resets
+calctl principal remove bob --confirm            # refuses while collections exist
+calctl principal auth bob --password-stdin < pw  # verify against digesta1; exit 0 on match
 calctl health --json          # every command takes --json for scripts/monitoring
 calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
 ```
 
 `health` exits 1 on an unhealthy component, `doctor` on any finding, so both
-slot straight into monitoring.
+slot straight into monitoring. The `principal` writes go through the same
+`storage.AdminWrites` carve-out as the admin panel (digesta1 computed under
+the configured realm; override with `--realm`).
 
 ## Test corpus
 

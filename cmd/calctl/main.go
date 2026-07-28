@@ -87,6 +87,8 @@ func main() {
 		handleStats(subArgs)
 	case "doctor":
 		handleDoctor(subArgs)
+	case "principal", "principals":
+		handlePrincipal(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()
@@ -114,6 +116,16 @@ Commands:
   health [--json] [--url URL] [--db DSN]   Check DAV server and database connectivity
   stats [--json] [--db DSN] [--changes N]  Show row counts and recent change-log activity
   doctor [--json] [--db DSN] [--scan-cap N] Run read-only consistency checks (exit 1 on findings)
+  principal list [--json]                  List principals with email/displayname and login capability
+  principal add <user> [--email E] [--name N] (--password P | --password-stdin) [--realm R]
+                                           Create a user plus principal triple (like the admin panel)
+  principal edit <user> [--email E] [--name N] [--password P | --password-stdin] [--realm R]
+                                           Update email/displayname (empty clears) or reset the password
+  principal remove <user> --confirm        Delete the users row and principal triple (refuses while
+                                           the principal still holds calendars or address books)
+  principal auth <user> (--password P | --password-stdin) [--realm R] [--json]
+                                           Verify a password against the stored digesta1 (exit 0 on
+                                           match; detects hashes minted under a different realm)
   version                                  Show version information
 
 Examples:
@@ -124,5 +136,9 @@ Examples:
   calctl stats --changes 25 --json
   calctl doctor
   calctl doctor --scan-cap 50000
+  calctl principal list
+  calctl principal add bob --email bob@example.org --name "Bob" --password-stdin < pw.txt
+  calctl principal edit bob --name "Robert" --email ""
+  calctl principal remove bob --confirm
 `)
 }

@@ -48,6 +48,102 @@ INSERT INTO principals (uri, email, displayname) VALUES
 	return tx.Commit()
 }
 
+// UpdatePrincipal updates a principal's email and/or displayname. A nil
+// field is left untouched; an empty string clears the column to NULL,
+// matching CreateUser's nullif convention. Same carve-out rationale as
+// CreateUser: the principals columns carry no sync state and no backend
+// exposes a write path for them.
+func (w *AdminWrites) UpdatePrincipal(uri string, email, displayName *string) error {
+	var sets []string
+	args := []any{uri}
+	if email != nil {
+		args = append(args, *email)
+		sets = append(sets, fmt.Sprintf("email = nullif($%d, '')", len(args)))
+	}
+	if displayName != nil {
+		args = append(args, *displayName)
+		sets = append(sets, fmt.Sprintf("displayname = nullif($%d, '')", len(args)))
+	}
+	if len(sets) == 0 {
+		return fmt.Errorf("nothing to update")
+	}
+	res, err := w.DB.Exec(
+		`UPDATE principals SET `+strings.Join(sets, ", ")+` WHERE uri = $1`, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no principal %q", uri)
+	}
+	return nil
+}
+
+// DeleteUser is the reverse of CreateUser: it removes the users row (absent
+// for group principals, which is fine) and the principal triple. The
+// principal must hold no calendar instances or address books — owned ones
+// have sync state and shared-in ones are invites, so both must be deleted
+// or unshared through DAV first; this deletes only rows no backend can
+// write. Group-membership rows and scheduling inbox objects referencing the
+// principal go with it — exactly the rows the doctor would otherwise flag
+// as dangling/orphaned.
+func (w *AdminWrites) DeleteUser(username string) error {
+	if username == "" || strings.ContainsAny(username, "/\n") {
+		return fmt.Errorf("invalid username %q", username)
+	}
+	principal := "principals/" + username
+	tx, err := w.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var calendars, books int
+	if err := tx.QueryRow(`SELECT
+		(SELECT count(*) FROM calendarinstances WHERE principaluri = $1),
+		(SELECT count(*) FROM addressbooks WHERE principaluri = $1)`,
+		principal).Scan(&calendars, &books); err != nil {
+		return err
+	}
+	if calendars > 0 || books > 0 {
+		return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first",
+			principal, calendars, books)
+	}
+
+	proxyRead := principal + "/calendar-proxy-read"
+	proxyWrite := principal + "/calendar-proxy-write"
+	if _, err := tx.Exec(`
+DELETE FROM groupmembers
+ WHERE principal_id IN (SELECT id FROM principals WHERE uri IN ($1, $2, $3))
+    OR member_id    IN (SELECT id FROM principals WHERE uri IN ($1, $2, $3))`,
+		principal, proxyRead, proxyWrite); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM schedulingobjects WHERE principaluri = $1`, principal); err != nil {
+		return err
+	}
+	res, err := tx.Exec(
+		`DELETE FROM principals WHERE uri IN ($1, $2, $3)`, principal, proxyRead, proxyWrite)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no principal %q", principal)
+	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE username = $1`, username); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetPassword replaces a user's digesta1 hash.
 func (w *AdminWrites) SetPassword(username, digestA1 string) error {
 	res, err := w.DB.Exec(

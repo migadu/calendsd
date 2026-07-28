@@ -308,6 +308,68 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatal("SetPassword for a missing user succeeded; want error")
 	}
 
+	// UpdatePrincipal: set both fields, then clear one; nil leaves alone.
+	newEmail, newName, empty := "carol2@example.org", "Carol II", ""
+	if err := writes.UpdatePrincipal("principals/carol", &newEmail, &newName); err != nil {
+		t.Fatalf("UpdatePrincipal: %v", err)
+	}
+	var email, displayname string
+	if err := db.QueryRow(`SELECT coalesce(email, ''), coalesce(displayname, '')
+		FROM principals WHERE uri = 'principals/carol'`).Scan(&email, &displayname); err != nil {
+		t.Fatal(err)
+	}
+	if email != newEmail || displayname != newName {
+		t.Fatalf("after update: email=%q displayname=%q", email, displayname)
+	}
+	if err := writes.UpdatePrincipal("principals/carol", &empty, nil); err != nil {
+		t.Fatalf("UpdatePrincipal clear: %v", err)
+	}
+	if err := db.QueryRow(`SELECT coalesce(email, ''), coalesce(displayname, '')
+		FROM principals WHERE uri = 'principals/carol'`).Scan(&email, &displayname); err != nil {
+		t.Fatal(err)
+	}
+	if email != "" || displayname != newName {
+		t.Fatalf("after clear: email=%q displayname=%q, want cleared email only", email, displayname)
+	}
+	if err := writes.UpdatePrincipal("principals/carol", nil, nil); err == nil {
+		t.Fatal("UpdatePrincipal with nothing to change succeeded; want error")
+	}
+	if err := writes.UpdatePrincipal("principals/no-such", &newEmail, nil); err == nil {
+		t.Fatal("UpdatePrincipal for a missing principal succeeded; want error")
+	}
+
+	// DeleteUser: refuses while collections exist, otherwise removes the
+	// users row, principal triple, and group-membership rows.
+	if err := writes.DeleteUser("alice"); err == nil {
+		t.Fatal("DeleteUser for alice (owns a calendar and address book) succeeded; want refusal")
+	}
+	if _, err := db.Exec(`INSERT INTO groupmembers (principal_id, member_id)
+		SELECT g.id, m.id FROM principals g, principals m
+		 WHERE g.uri = 'principals/admin/calendar-proxy-read' AND m.uri = 'principals/carol'`); err != nil {
+		t.Fatal(err)
+	}
+	var carolID int64
+	if err := db.QueryRow(`SELECT id FROM principals WHERE uri = 'principals/carol'`).Scan(&carolID); err != nil {
+		t.Fatal(err)
+	}
+	if err := writes.DeleteUser("carol"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	var leftover int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM users WHERE username = 'carol') +
+		(SELECT count(*) FROM principals WHERE uri = 'principals/carol' OR uri LIKE 'principals/carol/%') +
+		(SELECT count(*) FROM groupmembers WHERE member_id = $1 OR principal_id = $1)`,
+		carolID).Scan(&leftover); err != nil {
+		t.Fatal(err)
+	}
+	if leftover != 0 {
+		t.Fatalf("carol left %d row(s) behind", leftover)
+	}
+	if err := writes.DeleteUser("carol"); err == nil {
+		t.Fatal("DeleteUser for a deleted user succeeded; want error")
+	}
+
 	// Deleting the doctor's orphans must clear exactly those findings.
 	for _, check := range []string{"orphaned-instance", "dangling-groupmember", "orphaned-property"} {
 		n, err := writes.DeleteOrphans(check)
