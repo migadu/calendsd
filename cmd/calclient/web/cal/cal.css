@@ -66,6 +66,33 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 }
 #whoami { color: var(--dim); font-size: .85rem; }
 
+/* menu toggle appears only on narrow screens (see media query) */
+#menu-toggle { display: none; border: none; background: none; font-size: 1.1rem; padding: .2rem .4rem; }
+
+/* identity dropdown: name → Settings / Sign out */
+#usermenu { position: relative; }
+#user-btn { display: inline-flex; align-items: center; gap: .3rem; border: none; background: none; padding: .3rem .5rem; }
+#user-btn:hover { background: #f1f4f7; }
+#user-btn .caret { color: var(--dim); font-size: .7rem; }
+#user-pop {
+  position: absolute; right: 0; top: 100%; margin-top: .35rem; min-width: 10rem; z-index: 40;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow); padding: .3rem; display: flex; flex-direction: column;
+}
+#user-pop a, #user-pop button {
+  text-align: left; text-decoration: none; color: var(--ink); background: none; border: none;
+  border-radius: 6px; padding: .4rem .6rem; font: inherit; cursor: pointer;
+}
+#user-pop a:hover, #user-pop button:hover { background: #f1f4f7; }
+
+/* the calendar sidebar and date/view controls belong only to the calendar
+   view; hide them wholesale on Contacts and Settings. */
+body:not([data-view="calendar"]) #cal-controls,
+body:not([data-view="calendar"]) #sidebar { display: none; }
+
+/* full-screen dimmer behind the narrow-screen drawer (only ever shown there) */
+#scrim { display: none; position: fixed; inset: 0; background: rgba(15, 25, 40, .4); z-index: 44; }
+
 /* ---- layout ---- */
 #layout { display: flex; height: calc(100vh - 3.1rem); }
 #sidebar {
@@ -113,6 +140,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .month .span-bar.cr { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: 0; }
 .month .cell.other { background: #f4f6f8; color: var(--dim); }
 .month .cell.today { background: var(--today); }
+/* tint layers over any cell background (today/other keep their color) */
+.month .cell:hover { box-shadow: inset 0 0 0 999px rgba(29, 39, 51, .035); }
 .month .cell .num { font-size: .78rem; padding: .05rem .3rem; display: inline-block; border-radius: 999px; }
 .month .cell.today .num { background: var(--accent); color: #fff; font-weight: 600; }
 .chip {
@@ -122,13 +151,19 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 }
 .chip.timed { background: none !important; color: var(--ink); padding-left: .2rem; }
 .chip.timed .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: .3rem; }
-.chip.tentative { opacity: .6; font-style: italic; }
+/* unconfirmed invitations (no reply yet, or "maybe") in any view */
+.chip.tentative, .month .span-bar.tentative, .week .block.tentative,
+.agenda .item.tentative { opacity: .6; font-style: italic; }
+/* slight hover on events; timed chips have no fill, so give them one instead */
+.chip:hover, .month .span-bar:hover, .week .block:hover { filter: brightness(1.08); }
+.chip.timed:hover { background: #eef1f4 !important; filter: none; }
 .more { border: none; background: none; font-size: .72rem; color: var(--dim); cursor: pointer; padding: 0 .35rem; }
 
 /* ---- week view ---- */
 .week { display: grid; grid-template-columns: 3.4rem repeat(7, minmax(0, 1fr)); position: relative; }
 .week .head { position: sticky; top: 0; background: var(--bg); z-index: 2; text-align: center; font-size: .8rem; padding: .3rem 0; }
 .week .head.today { color: var(--accent); font-weight: 700; }
+.week .head.weeknum { color: var(--dim); font-weight: 600; font-size: .72rem; align-self: center; }
 .week .allday { min-height: 1.4rem; border-bottom: 1px solid var(--line); border-left: 1px solid var(--line); padding: .1rem; }
 .week .hours { position: relative; }
 .week .hourlabel { height: 3rem; font-size: .68rem; color: var(--dim); text-align: right; padding-right: .35rem; transform: translateY(-.5em); }
@@ -137,7 +172,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .week .hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
 .week .block {
   position: absolute; left: 2px; right: 4px; border-radius: 5px; color: #fff;
-  font-size: .72rem; padding: .15rem .3rem; overflow: hidden; cursor: pointer; border: none; text-align: left;
+  font-size: .72rem; padding: .15rem .3rem; overflow: hidden; cursor: pointer; text-align: left;
+  border: 1px solid rgba(255, 255, 255, .5);   /* separates adjacent overlap columns */
 }
 
 /* ---- agenda ---- */
@@ -149,6 +185,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   border: 1px solid var(--line); border-radius: 8px; padding: .5rem .8rem; margin: .3rem 0;
   cursor: pointer; width: 100%; text-align: left;
 }
+.agenda .item:hover { background: #f7f9fb; border-color: #d3d9df; }
 .agenda .time { color: var(--dim); font-size: .8rem; min-width: 7.5rem; }
 .agenda .dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; align-self: center; }
 .agenda .where { color: var(--dim); font-size: .8rem; margin-left: auto; }
@@ -161,8 +198,14 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 }
 .dialog {
   background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
-  width: 34rem; max-width: 100%; padding: 1.2rem 1.4rem;
+  width: 34rem; max-width: 100%; padding: 1.2rem 1.4rem; position: relative;
 }
+/* corner dismiss for read-only detail popovers (editors use an explicit Cancel) */
+.dialog-close {
+  position: absolute; top: .6rem; right: .7rem; border: none; background: none;
+  color: var(--dim); font-size: 1.4rem; line-height: 1; padding: .1rem .35rem; cursor: pointer;
+}
+.dialog-close:hover { color: var(--ink); }
 .dialog.dialog-wide { width: 40rem; }
 .dialog h2 { margin: 0 0 .8rem; font-size: 1.1rem; }
 .dialog .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem .8rem; }
@@ -249,7 +292,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .contact .chev { color: var(--dim); font-size: 1.2rem; flex-shrink: 0; }
 
 /* contact detail view */
-.detail-head { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; }
+.detail-head { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; padding-right: 1.6rem; }
 .avatar-lg { width: 52px; height: 52px; font-size: 1.15rem; }
 .detail-body { display: flex; flex-direction: column; gap: .1rem; }
 .detail-row { display: flex; gap: .8rem; padding: .4rem 0; border-top: 1px solid var(--line); }
@@ -269,6 +312,9 @@ a.join-btn {
 }
 a.join-btn:hover { filter: brightness(1.08); }
 .join-url { font-size: .8rem; word-break: break-all; }
+.rsvp { display: flex; align-items: center; gap: .5rem; margin-top: .8rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+.rsvp .dl { width: 6rem; flex-shrink: 0; color: var(--dim); font-size: .82rem; }
+.rsvp button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* ---- settings ---- */
 .settings { max-width: 34rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
@@ -276,6 +322,12 @@ a.join-btn:hover { filter: brightness(1.08); }
 .settings h2 { margin: 0 0 .6rem; font-size: .95rem; }
 .settings label { display: flex; align-items: center; gap: .5rem; margin: .35rem 0; }
 .settings .note { color: var(--dim); font-size: .8rem; }
+
+/* ---- drag & drop ---- */
+.drag-ghost { position: fixed; z-index: 70; pointer-events: none; opacity: .85; margin: 0; box-shadow: var(--shadow); }
+.chip.drag-src { opacity: .35; }
+.month .cell.drop-target { box-shadow: inset 0 0 0 2px var(--accent); }
+.week .block.dragging { pointer-events: none; opacity: .75; z-index: 6; box-shadow: var(--shadow); }
 
 /* ---- toast ---- */
 #toast {
@@ -287,7 +339,15 @@ a.join-btn:hover { filter: brightness(1.08); }
 
 /* ---- narrow screens ---- */
 @media (max-width: 760px) {
-  #sidebar { display: none; }
+  #menu-toggle { display: inline-flex; align-items: center; }
   #cal-title { min-width: 0; }
   .dialog .grid { grid-template-columns: 1fr; }
+  /* the calendar list slides in as an off-canvas drawer over the content,
+     so calendar visibility/create/recolor stay reachable on a phone. */
+  body[data-view="calendar"] #sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 15rem; z-index: 45;
+    transform: translateX(-100%); transition: transform .2s ease;
+  }
+  body[data-view="calendar"].sidebar-open #sidebar { transform: translateX(0); box-shadow: var(--shadow); }
+  body.sidebar-open #scrim { display: block; }
 }

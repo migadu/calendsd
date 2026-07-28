@@ -20,11 +20,11 @@
 </div>
 
 <header id="topbar" hidden>
+  <button id="menu-toggle" aria-label="Show calendars" aria-expanded="false">☰</button>
   <span id="brand">Calendar</span>
   <nav id="mainnav">
     <a href="#calendar" data-nav="calendar" class="active">Calendar</a>
     <a href="#contacts" data-nav="contacts">Contacts</a>
-    <a href="#settings" data-nav="settings">Settings</a>
   </nav>
   <div id="cal-controls">
     <button id="nav-today" title="Go to today">Today</button>
@@ -32,15 +32,25 @@
     <button id="nav-next" title="Next" aria-label="Next">›</button>
     <span id="cal-title" aria-live="polite"></span>
     <span id="view-seg" role="group" aria-label="View">
-      <button data-view="month" class="active">Month</button>
+      <button data-view="day">Day</button>
       <button data-view="week">Week</button>
+      <button data-view="month">Month</button>
       <button data-view="agenda">Agenda</button>
     </span>
   </div>
   <button id="bell" title="Invitations" aria-label="Invitations">✉<span id="bell-badge" hidden></span></button>
-  <span id="whoami"></span>
-  <button id="signout">Sign out</button>
+  <div id="usermenu">
+    <button id="user-btn" aria-haspopup="true" aria-expanded="false">
+      <span id="whoami"></span><span class="caret" aria-hidden="true">▾</span>
+    </button>
+    <div id="user-pop" role="menu" hidden>
+      <a href="#settings" data-nav="settings" role="menuitem">Settings</a>
+      <button id="signout" role="menuitem">Sign out</button>
+    </div>
+  </div>
 </header>
+
+<div id="scrim"></div>
 
 <div id="layout" hidden>
   <aside id="sidebar">

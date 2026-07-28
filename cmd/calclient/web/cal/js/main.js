@@ -78,11 +78,23 @@ let currentView = 'calendar';
 function route() {
   const target = (location.hash.replace('#', '') || 'calendar').split('/')[0];
   currentView = ['calendar', 'contacts', 'settings'].includes(target) ? target : 'calendar';
+  // Drives which chrome is relevant: the CSS hides the calendar sidebar and
+  // the date/view controls on any non-calendar view.
+  document.body.dataset.view = currentView;
   for (const a of document.querySelectorAll('#mainnav a')) {
     a.classList.toggle('active', a.dataset.nav === currentView);
   }
-  $('#cal-controls').style.visibility = currentView === 'calendar' ? 'visible' : 'hidden';
+  closeMenus();
   render();
+}
+
+// closeMenus collapses the transient top-bar affordances (identity dropdown
+// and the narrow-screen calendar drawer) — called on navigation and Escape.
+function closeMenus() {
+  document.body.classList.remove('sidebar-open');
+  $('#menu-toggle').setAttribute('aria-expanded', 'false');
+  $('#user-pop').hidden = true;
+  $('#user-btn').setAttribute('aria-expanded', 'false');
 }
 
 export function render() {
@@ -142,9 +154,32 @@ for (const b of document.querySelectorAll('#view-seg button')) {
 }
 $('#bell').addEventListener('click', () => toggleInvites());
 $('#invites-close').addEventListener('click', () => toggleInvites(false));
-$('#new-event').addEventListener('click', () => openEventDialog(null));
+$('#new-event').addEventListener('click', () => { closeMenus(); openEventDialog(null); });
+
+// Identity dropdown (name → Settings / Sign out) in the top-right.
+$('#user-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  const pop = $('#user-pop');
+  pop.hidden = !pop.hidden;
+  $('#user-btn').setAttribute('aria-expanded', String(!pop.hidden));
+});
+$('#user-pop').addEventListener('click', () => { $('#user-pop').hidden = true; });
+document.addEventListener('click', e => {
+  if (!$('#usermenu').contains(e.target)) {
+    $('#user-pop').hidden = true;
+    $('#user-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+
+// Narrow-screen calendar drawer: the hamburger and a full-screen scrim.
+$('#menu-toggle').addEventListener('click', () => {
+  const open = document.body.classList.toggle('sidebar-open');
+  $('#menu-toggle').setAttribute('aria-expanded', String(open));
+});
+$('#scrim').addEventListener('click', closeMenus);
 
 $('#new-calendar').addEventListener('click', async () => {
+  closeMenus();
   const name = prompt('Name for the new calendar:');
   if (!name) return;
   try {
@@ -174,6 +209,7 @@ function renderSidebar() {
 }
 
 function calendarMenu(cal) {
+  closeMenus();
   const dialog = h(`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true">
     <h2>${esc(cal.displayName || cal.name)}</h2>
     <div class="grid">
@@ -224,6 +260,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const overlays = document.querySelectorAll('#dialog-host .overlay');
     if (overlays.length) overlays[overlays.length - 1].remove();  // topmost
+    else if (!$('#user-pop').hidden || document.body.classList.contains('sidebar-open')) closeMenus();
     else toggleInvites(false);
   }
 });

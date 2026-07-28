@@ -51,7 +51,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
   const base = defaultDay ? new Date(defaultDay) : now;
   if (!timed) base.setHours(now.getHours() + 1, 0, 0, 0);
   const start = inst ? inst.start : base;
-  const end = inst ? inst.end : new Date(+base + 36e5);
+  const end = inst ? inst.end : new Date(+base + (store.state.prefs.defaultDuration || 60) * 60000);
   const rrulePreset = inst ? parseRRule(inst.rrule) : { freq: '', ends: 'never' };
   const isRecurring = !!(inst && (inst.rrule || inst.rid));
   const guests = (inst?.attendees ?? []).map(a => ({ ...a }));

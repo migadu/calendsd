@@ -26,7 +26,8 @@ const emit = type => bus.dispatchEvent(new Event(type));
 
 function loadPrefs() {
   // tz: IANA name for display, '' = the device's own time zone.
-  const defaults = { weekStart: 1, hour12: false, tz: '', defaultCal: '', staySignedIn: false };
+  const defaults = { weekStart: 1, hour12: false, tz: '', defaultCal: '', staySignedIn: false,
+    defaultView: 'month', defaultDuration: 60 };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem('calweb.prefs') || '{}') };
   } catch { return { ...defaults }; }
@@ -328,6 +329,29 @@ export async function deleteObject(href) {
   check(await dav.req('DELETE', href), [204]);
 }
 
+// moveEvent shifts a (non-recurring) event by deltaMs — the drag & drop path.
+// DTSTART/DTEND are rewritten in place so alarms, overrides, and unmodeled
+// properties survive; callers guard against recurring events (moving an
+// occurrence needs the editor's scope choice).
+export async function moveEvent(inst, deltaMs) {
+  const { text, etag } = await getObject(inst.href);
+  const master = ical.components(ical.parse(text), 'VEVENT')
+    .find(v => !ical.prop(v, 'RECURRENCE-ID'));
+  const ds = master && ical.prop(master, 'DTSTART');
+  const cantShift = new Error('This event stores its dates in a form that cannot be dragged — use Edit instead.');
+  const start = ds && ical.shiftDate('DTSTART', ds, deltaMs);
+  if (!start) throw cantShift;
+  const props = { DTSTART: start };
+  const de = ical.prop(master, 'DTEND');
+  if (de) {
+    const end = ical.shiftDate('DTEND', de, deltaMs);
+    if (!end) throw cantShift;
+    props.DTEND = end;
+  }
+  await putObject(inst.href, ical.setMasterProps(text, props), etag);
+  await refreshEvents();
+}
+
 export function eventHref(calHref, uid) {
   return calHref + encodeURIComponent(uid) + '.ics';
 }
@@ -421,6 +445,16 @@ export async function answerInvite(invite, partstat) {
   await putObject(eventHref(state.prefs.defaultCal, invite.uid), text, undefined);
   await deleteObject(invite.href).catch(() => {});
   await Promise.all([loadInvites(), refreshEvents()]);
+}
+
+// answerEvent updates our PARTSTAT on an event already stored on the
+// calendar (e.g. an invitation auto-delivered by the server, or changing an
+// earlier answer). As with answerInvite, rewriting the stored copy makes the
+// server deliver the iTIP REPLY to the organizer.
+export async function answerEvent(inst, partstat) {
+  const { text, etag } = await getObject(inst.href);
+  await putObject(inst.href, ical.setPartstat(text, myEmail(), partstat), etag);
+  await refreshEvents();
 }
 
 export async function dismissInvite(invite) {

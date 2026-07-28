@@ -22,6 +22,19 @@ export function renderSettings(main) {
         </select></label>
       <label>Time zone
         <select id="st-tz"></select></label>
+      <label>Default view
+        <select id="st-defview">
+          <option value="month" ${p.defaultView === 'month' ? 'selected' : ''}>Month</option>
+          <option value="week" ${p.defaultView === 'week' ? 'selected' : ''}>Week</option>
+          <option value="agenda" ${p.defaultView === 'agenda' ? 'selected' : ''}>Agenda</option>
+        </select></label>
+      <label>Default event length
+        <select id="st-defdur">
+          <option value="30" ${p.defaultDuration === 30 ? 'selected' : ''}>30 minutes</option>
+          <option value="60" ${p.defaultDuration === 60 ? 'selected' : ''}>1 hour</option>
+          <option value="90" ${p.defaultDuration === 90 ? 'selected' : ''}>1.5 hours</option>
+          <option value="120" ${p.defaultDuration === 120 ? 'selected' : ''}>2 hours</option>
+        </select></label>
       <label>Default calendar for new events and invitations
         <select id="st-defcal"></select></label>
       <p class="note">Times are stored in UTC and shown in the time zone selected above.</p>
@@ -71,6 +84,8 @@ export function renderSettings(main) {
 
   $('#st-weekstart', el).addEventListener('change', ev => store.savePrefs({ weekStart: +ev.target.value }));
   $('#st-hour12', el).addEventListener('change', ev => store.savePrefs({ hour12: ev.target.value === '1' }));
+  $('#st-defview', el).addEventListener('change', ev => store.savePrefs({ defaultView: ev.target.value }));
+  $('#st-defdur', el).addEventListener('change', ev => store.savePrefs({ defaultDuration: +ev.target.value }));
   tzSel.addEventListener('change', ev => store.savePrefs({ tz: ev.target.value }));
   defSel.addEventListener('change', ev => store.savePrefs({ defaultCal: ev.target.value }));
 

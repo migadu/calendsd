@@ -79,6 +79,7 @@ function contactDetail(c) {
   if (!rows.length) rows.push('<p class="empty" style="margin:1rem 0">No other details.</p>');
 
   const dlg = h(`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Contact details">
+    <button class="dialog-close" id="cv-x" aria-label="Close">×</button>
     <div class="detail-head">
       <span class="avatar avatar-lg" aria-hidden="true">${esc(initials(c.fn))}</span>
       <div><h2 style="margin:0">${esc(c.fn)}</h2>${c.title || c.org
@@ -87,13 +88,14 @@ function contactDetail(c) {
     <div class="detail-body">${rows.join('')}</div>
     <div class="actions">
       <button class="danger" id="cv-del">Delete…</button>
-      <button id="cv-close">Close</button>
-      <button class="primary" id="cv-edit">Edit</button>
+      <button id="cv-edit">Edit</button>
+      <button class="primary" id="cv-close">Done</button>
     </div>
   </div></div>`);
   const close = () => dlg.remove();
   dlg.addEventListener('click', ev => { if (ev.target === dlg) close(); });
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
+  $('#cv-x', dlg).addEventListener('click', close);
   $('#cv-close', dlg).addEventListener('click', close);
   $('#cv-edit', dlg).addEventListener('click', () => { close(); contactDialog(c); });
   $('#cv-del', dlg).addEventListener('click', async () => {

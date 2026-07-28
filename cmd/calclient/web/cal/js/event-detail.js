@@ -33,21 +33,49 @@ export function openEventDetail(inst) {
       `<div>${esc(a.email)} <span class="type-tag">${esc(PARTSTAT_LABEL[a.partstat] || a.partstat.toLowerCase())}</span></div>`).join(''));
   }
 
+  // An invitation (someone else organizes, we are on the attendee list) gets
+  // Accept / Maybe / Decline here, so answering — or changing an earlier
+  // answer — doesn't require the invitations panel.
+  const me = store.myEmail().toLowerCase();
+  const isInvite = !!inst.myPartstat && !!inst.organizer && inst.organizer.toLowerCase() !== me;
+  const rsvpBtn = (ps, label) =>
+    `<button data-ps="${ps}"${inst.myPartstat === ps ? ' class="active"' : ''}>${label}</button>`;
+
   const dlg = h(`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Event details">
+    <button class="dialog-close" id="ed-x" aria-label="Close">×</button>
     <div class="detail-head">
       <span class="cal-swatch" style="background:${esc(color)}" aria-hidden="true"></span>
       <h2 style="margin:0">${esc(inst.summary)}</h2>
     </div>
     <div class="detail-body">${rows.join('')}</div>
+    ${isInvite ? `<div class="rsvp"><span class="dl">Going?</span>
+      ${rsvpBtn('ACCEPTED', 'Accept')}${rsvpBtn('TENTATIVE', 'Maybe')}${rsvpBtn('DECLINED', 'Decline')}
+    </div>` : ''}
     <div class="actions">
       <button class="danger" id="ed-del">Delete…</button>
-      <button id="ed-close">Close</button>
-      <button class="primary" id="ed-edit">Edit</button>
+      <button id="ed-edit">Edit</button>
+      <button class="primary" id="ed-close">Done</button>
     </div>
   </div></div>`);
   const close = () => dlg.remove();
   dlg.addEventListener('click', ev => { if (ev.target === dlg) close(); });
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
+  for (const b of dlg.querySelectorAll('.rsvp button[data-ps]')) {
+    b.addEventListener('click', async () => {
+      if (b.dataset.ps === inst.myPartstat) return;
+      for (const x of dlg.querySelectorAll('.rsvp button')) x.disabled = true;
+      try {
+        await store.answerEvent(inst, b.dataset.ps);
+        close();
+        toast(b.dataset.ps === 'DECLINED' ? 'Declined.' :
+          b.dataset.ps === 'TENTATIVE' ? 'Marked as maybe.' : 'Accepted.');
+      } catch (e) {
+        showError(e);
+        for (const x of dlg.querySelectorAll('.rsvp button')) x.disabled = false;
+      }
+    });
+  }
+  $('#ed-x', dlg).addEventListener('click', close);
   $('#ed-close', dlg).addEventListener('click', close);
   $('#ed-edit', dlg).addEventListener('click', () => { close(); openEventDialog(inst); });
   $('#ed-del', dlg).addEventListener('click', async () => {
