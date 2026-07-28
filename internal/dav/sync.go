@@ -232,5 +232,9 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 // ErrInvalidSyncToken mirrors sabre's Exception\InvalidSyncToken (403 with
 // its own exception identity).
 func ErrInvalidSyncToken() *Error {
-	return davError(http.StatusForbidden, "InvalidSyncToken", "Invalid or unknown sync token")
+	e := davError(http.StatusForbidden, "InvalidSyncToken", "Invalid or unknown sync token")
+	// RFC 6578 §3.2 requires the {DAV:}valid-sync-token precondition in the
+	// error body, like sabre.
+	e.Precondition = []xml.Name{{Space: davxml.NSDav, Local: "valid-sync-token"}}
+	return e
 }

@@ -3,54 +3,100 @@ package davxml
 import (
 	"bytes"
 	"encoding/xml"
-	"strings"
+	"io"
 )
-
-type mkcolXML struct {
-	XMLName xml.Name `xml:"DAV: mkcol"`
-	Set     struct {
-		Prop struct {
-			Props []struct {
-				XMLName xml.Name
-				Types   []struct {
-					XMLName xml.Name
-				} `xml:",any"`
-				Value string `xml:",chardata"`
-				Inner string `xml:",innerxml"`
-			} `xml:",any"`
-		} `xml:"prop"`
-	} `xml:"set"`
-}
 
 // ParseMkcol extracts the {DAV:}resourcetype values plus any additional
 // properties from an extended-mkcol body (RFC 5689). A body without
 // resourcetype is an error, like sabre.
+//
+// Like ParsePropertyUpdate, it uses a token walk so element-valued properties
+// are re-serialized *self-contained* — a stored fragment must not depend on
+// prefixes declared by the request document.
 func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
-	var parsed mkcolXML
-	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&parsed); err != nil {
-		return nil, nil, err
-	}
+	dec := xml.NewDecoder(bytes.NewReader(body))
+
+	// Walk: mkcol > set > prop > *property elements*.
+	var stack []xml.Name
 	var resourceType []xml.Name
 	haveResourceType := false
 	props := map[xml.Name]any{}
-	for _, p := range parsed.Set.Prop.Props {
-		if (p.XMLName == xml.Name{Space: NSDav, Local: "resourcetype"}) {
-			haveResourceType = true
-			for _, t := range p.Types {
-				resourceType = append(resourceType, t.XMLName)
+	rootSeen := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			if !rootSeen {
+				return nil, nil, io.ErrUnexpectedEOF
 			}
-			continue
+			break
 		}
-		if strings.Contains(p.Inner, "<") {
-			props[p.XMLName] = []byte(p.Inner)
-		} else {
-			props[p.XMLName] = p.Value
+		if err != nil {
+			return nil, nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			depth := len(stack)
+			name := t.Name
+			isDav := name.Space == NSDav
+			switch {
+			case depth == 0 && (!isDav || name.Local != "mkcol"):
+				return nil, nil, xml.UnmarshalError("expected {DAV:}mkcol root")
+			case depth == 0:
+				rootSeen = true
+			case depth == 3:
+				// A property element inside set > prop.
+				if (name == xml.Name{Space: NSDav, Local: "resourcetype"}) {
+					haveResourceType = true
+					types, err := parseResourceType(dec)
+					if err != nil {
+						return nil, nil, err
+					}
+					resourceType = append(resourceType, types...)
+					continue // subtree fully consumed; no stack push
+				}
+				value, err := parsePropValue(dec, t)
+				if err != nil {
+					return nil, nil, err
+				}
+				props[name] = value
+				continue // subtree fully consumed; no stack push
+			}
+			stack = append(stack, name)
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
 		}
 	}
 	if !haveResourceType {
 		return nil, nil, errMissingResourceType
 	}
 	return resourceType, props, nil
+}
+
+// parseResourceType consumes a {DAV:}resourcetype subtree, returning the names
+// of its immediate child elements (e.g. {DAV:}collection).
+func parseResourceType(dec *xml.Decoder) ([]xml.Name, error) {
+	var types []xml.Name
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				types = append(types, t.Name)
+			}
+			depth++
+		case xml.EndElement:
+			if depth == 0 {
+				return types, nil
+			}
+			depth--
+		}
+	}
 }
 
 type resourceTypeError struct{}

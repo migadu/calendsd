@@ -89,10 +89,11 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 				return false, ErrPreconditionFailed("An If-None-Match header was specified, but the ETag matched (or * was specified).")
 			}
 		}
-		return true, nil // If-None-Match suppresses If-Modified-Since
 	}
 
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+	// If-None-Match only suppresses If-Modified-Since (sabre parity);
+	// If-Unmodified-Since and the If: header are still evaluated below.
+	if ims := r.Header.Get("If-Modified-Since"); ims != "" && r.Header.Get("If-None-Match") == "" {
 		if date, parseErr := http.ParseTime(ims); parseErr == nil {
 			if node == nil {
 				if node, err = s.Tree.NodeForPath(path); err != nil {

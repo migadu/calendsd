@@ -122,9 +122,15 @@ func rootElementName(body []byte) (xml.Name, error) {
 
 // options answers OPTIONS with the DAV and Allow headers.
 func (c *CorePlugin) options(w http.ResponseWriter, r *http.Request) error {
+	// Resolve to the server-relative path (BaseURI stripped, decoded) so
+	// MKCOL is only advertised on genuinely unmapped URIs, like sabre.
+	path, err := c.server.Path(r)
+	if err != nil {
+		path = ""
+	}
 	h := w.Header()
 	h.Set("DAV", strings.Join(c.server.Features(), ", "))
-	h.Set("Allow", strings.Join(c.server.AllowedMethods(r.URL.Path), ", "))
+	h.Set("Allow", strings.Join(c.server.AllowedMethods(path), ", "))
 	h.Set("MS-Author-Via", "DAV")
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Length", "0")
@@ -357,7 +363,9 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 	if pf.Type == davxml.PropfindProp {
 		names = pf.Props
 	}
-	responses, err := c.server.PropertiesForPath(r.Context(), path, names, depth)
+	// allprop with <include> still requests the included properties
+	// (RFC 4918 §9.1) without turning off allprop semantics.
+	responses, err := c.server.PropertiesForPath(r.Context(), path, names, depth, pf.Include...)
 	if err != nil {
 		return err
 	}
@@ -669,9 +677,17 @@ func (c *CorePlugin) copy(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if info.destinationExists {
+		for _, p := range c.server.Plugins() {
+			if hook, ok := p.(BeforeUnbindHook); ok {
+				if err := hook.BeforeUnbind(r, info.destination); err != nil {
+					return err
+				}
+			}
+		}
 		if err := c.server.Tree.Delete(info.destination); err != nil {
 			return err
 		}
+		c.server.fireAfterUnbind(info.destination)
 	}
 	if err := c.server.Tree.Copy(path, info.destination, info.depth); err != nil {
 		return err
@@ -853,7 +869,14 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 		return nil
 	})
 	if file, isFile := node.(File); isFile {
-		pf.Handle(dav("getcontentlength"), func() any { return file.Size() })
+		pf.Handle(dav("getcontentlength"), func() any {
+			// A negative size means unknown (streaming nodes); sabre omits
+			// the property, leaving it a 404 propstat, like GET.
+			if size := file.Size(); size >= 0 {
+				return size
+			}
+			return nil
+		})
 		pf.Handle(dav("getetag"), func() any {
 			if etag := file.ETag(); etag != "" {
 				return etag
@@ -902,6 +925,12 @@ func unescapePath(p string) (string, error) {
 		dec, err := url.PathUnescape(seg)
 		if err != nil {
 			return "", err
+		}
+		// gopath.Clean ran before decoding, so a segment that decodes to
+		// ".", ".." or "" would smuggle a traversal past normalization.
+		// Reject it rather than let it reach a backend as a literal name.
+		if dec == "." || dec == ".." || dec == "" {
+			return "", ErrForbidden("Path contains invalid encoded segment %q", seg)
 		}
 		segs[i] = dec
 	}

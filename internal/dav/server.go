@@ -287,7 +287,7 @@ func xmlEscape(s string) string {
 // PropertiesForPath runs the PROPFIND machinery for a path: depth 0 or 1,
 // one multistatus response element per visited node. Port of sabre's
 // getPropertiesIteratorForPath.
-func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml.Name, depth int) ([]davxml.Response, error) {
+func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml.Name, depth int, include ...xml.Name) ([]davxml.Response, error) {
 	if depth != 0 {
 		depth = 1 // propfind depth infinity stays disabled, like sabre's default
 	}
@@ -303,6 +303,11 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 		node Node
 	}
 	pf := NewPropFind(ctx, path, names, depth)
+	// <include> properties are requested alongside allprop without
+	// suppressing allprop semantics (RFC 4918 §9.1).
+	for _, n := range include {
+		pf.Request(n)
+	}
 	items := []reqItem{{pf, node}}
 	if depth == 1 {
 		if coll, isColl := node.(Collection); isColl {

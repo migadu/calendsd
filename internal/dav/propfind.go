@@ -24,6 +24,10 @@ type PropFind struct {
 	// order they were set.
 	order  []xml.Name
 	result map[xml.Name]propEntry
+	// denied latches when the ACL read gate forbids the node: afterwards no
+	// property may resolve to a 2xx status, so the late phases (node dead
+	// properties, property storage) cannot leak values past the gate.
+	denied bool
 }
 
 type propEntry struct {
@@ -65,6 +69,16 @@ func NewPropFind(ctx context.Context, path string, names []xml.Name, depth int) 
 	return pf
 }
 
+// Request registers an additional property name as requested (status 404
+// until resolved), without affecting allprop semantics. Used for allprop's
+// <include> list.
+func (pf *PropFind) Request(name xml.Name) {
+	if _, dup := pf.result[name]; !dup {
+		pf.order = append(pf.order, name)
+		pf.result[name] = propEntry{status: 404}
+	}
+}
+
 // Path returns the node path this PropFind is for.
 func (pf *PropFind) Path() string { return pf.path }
 
@@ -98,8 +112,17 @@ func (pf *PropFind) clone(path string) *PropFind {
 	return c
 }
 
+// Deny latches the read gate closed: after this call, Handle is a no-op and
+// Set refuses any 2xx status, so node dead properties and property storage
+// cannot surface values the ACL layer already forbade. Non-2xx statuses (the
+// gate's own 403s) still apply.
+func (pf *PropFind) Deny() { pf.denied = true }
+
 // Handle resolves a still-missing property with fn's non-nil result.
 func (pf *PropFind) Handle(name xml.Name, fn func() any) {
+	if pf.denied {
+		return
+	}
 	if e, requested := pf.result[name]; requested && e.status == 404 {
 		if v := fn(); v != nil {
 			pf.result[name] = propEntry{status: 200, value: v}
@@ -110,6 +133,9 @@ func (pf *PropFind) Handle(name xml.Name, fn func() any) {
 // Set forces a property value and status. Unrequested properties are only
 // admitted for allprop requests, like sabre.
 func (pf *PropFind) Set(name xml.Name, value any, status int) {
+	if pf.denied && status/100 == 2 {
+		return
+	}
 	if _, requested := pf.result[name]; !requested {
 		if !pf.allProps {
 			return
