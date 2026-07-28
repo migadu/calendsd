@@ -56,7 +56,11 @@ func TestParity(t *testing.T) {
 	if len(sqlFiles) == 0 {
 		t.Fatal("no schema files found")
 	}
-	for _, f := range sqlFiles {
+	// The calserver extension tables are additive; loading them into the
+	// parity database (which a live sabre also runs against) proves sabre is
+	// unaffected by their presence.
+	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
+	for _, f := range append(sqlFiles, extFiles...) {
 		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-f", f)
 	}
 	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-c",
@@ -179,6 +183,119 @@ func TestParity(t *testing.T) {
 		}
 	})
 
+	t.Run("EventCRUDLifecycle", func(t *testing.T) {
+		// A full create/read/update/delete of one event, alternating the
+		// server that mutates and the server that observes, so every step of
+		// the lifecycle is proven to cross the shared database. This mirrors
+		// the real deployment: events authored in calclient (the Go server)
+		// must appear — and stay in step through edits and deletion — for a
+		// CalDAV client reading through sabre (e.g. Apple Calendar), and the
+		// reverse. Each mutation also asserts the collection ctag advances,
+		// which is the sole signal a polling client uses to re-sync.
+		const (
+			calBase   = "/calendars/admin/default/"
+			crudPath  = "/calendars/admin/default/crud1.ics"
+			origRange = `<c:time-range start="20270310T000000Z" end="20270311T000000Z"/>`
+			newRange  = `<c:time-range start="20270311T000000Z" end="20270312T000000Z"/>`
+		)
+		orig := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//parity//test//EN\r\nBEGIN:VEVENT\r\nUID:crud-1\r\nDTSTAMP:20270101T000000Z\r\nDTSTART:20270310T090000Z\r\nDTEND:20270310T100000Z\r\nSUMMARY:CRUD original\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+
+		// query runs a VEVENT time-range calendar-query (the report a client
+		// issues to populate a month/day view) and returns the multistatus.
+		query := func(c *digestClient, timeRange string) string {
+			t.Helper()
+			q := `<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">` + timeRange + `</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`
+			status, body, _ := c.do(t, "REPORT", calBase, q, "Depth", "1", "Content-Type", "application/xml")
+			if status != 207 {
+				t.Fatalf("calendar-query status = %d: %s", status, body)
+			}
+			return body
+		}
+
+		// CREATE through the Go server (the calclient authoring path).
+		ctag0 := ctagOf(t, sabreClient, calBase)
+		status, body, goHeaders := goClient.do(t, "PUT", crudPath, orig, "Content-Type", "text/calendar")
+		if status != 201 {
+			t.Fatalf("Go create PUT = %d: %s", status, body)
+		}
+		createdETag := goHeaders.Get("ETag")
+
+		// READ back through sabre: exact bytes, matching ETag, and — the
+		// property that actually fills a client's calendar view — the
+		// time-range calendar-query must return it.
+		status, body, sabreHeaders := sabreClient.do(t, "GET", crudPath, "")
+		if status != 200 || body != orig {
+			t.Fatalf("sabre GET of Go-created event = %d:\n%q", status, body)
+		}
+		if sabreHeaders.Get("ETag") != createdETag {
+			t.Errorf("create ETag mismatch: go %s, sabre %s", createdETag, sabreHeaders.Get("ETag"))
+		}
+		if !strings.Contains(query(sabreClient, origRange), "crud1.ics") {
+			t.Error("sabre calendar-query missed the Go-created event (a client's view would be empty)")
+		}
+		ctag1 := ctagOf(t, sabreClient, calBase)
+		if ctag1 == ctag0 {
+			t.Errorf("sabre ctag did not advance after Go create (still %q) — a polling client never re-syncs", ctag1)
+		}
+
+		// UPDATE through sabre (the client-side edit path): new summary, and a
+		// new start time that lands in a different day-range.
+		updated := strings.ReplaceAll(orig, "CRUD original", "CRUD updated")
+		updated = strings.ReplaceAll(updated, "20270310T09", "20270311T14")
+		updated = strings.ReplaceAll(updated, "20270310T10", "20270311T15")
+		status, body, sabreHeaders = sabreClient.do(t, "PUT", crudPath, updated, "Content-Type", "text/calendar")
+		if status != 204 && status != 201 {
+			t.Fatalf("sabre update PUT = %d: %s", status, body)
+		}
+		updatedETag := sabreHeaders.Get("ETag")
+		if updatedETag == createdETag {
+			t.Error("ETag did not change after update")
+		}
+
+		// READ the update back through the Go server: new bytes, new ETag,
+		// and the occurrence prefilter must have moved with it — found in the
+		// new range, absent from the old one.
+		status, body, goHeaders = goClient.do(t, "GET", crudPath, "")
+		if status != 200 || body != updated {
+			t.Fatalf("Go GET of sabre-updated event = %d:\n%q", status, body)
+		}
+		if goHeaders.Get("ETag") != updatedETag {
+			t.Errorf("update ETag mismatch: sabre %s, go %s", updatedETag, goHeaders.Get("ETag"))
+		}
+		if !strings.Contains(query(goClient, newRange), "crud1.ics") {
+			t.Error("Go calendar-query missed the updated event in its new time range")
+		}
+		if strings.Contains(query(goClient, origRange), "crud1.ics") {
+			t.Error("Go calendar-query still matches the old range after update (stale firstoccurence/lastoccurence)")
+		}
+		if ctag2 := ctagOf(t, sabreClient, calBase); ctag2 == ctag1 {
+			t.Errorf("sabre ctag did not advance after the update (still %q)", ctag2)
+		}
+
+		// DELETE through the Go server, then prove the removal crosses to
+		// sabre three ways: GET 404, calendar-query no longer matches, and an
+		// incremental sync-collection reports the href as 404.
+		tokenBeforeDelete := sabreSyncToken(t, sabreClient)
+		status, body, _ = goClient.do(t, "DELETE", crudPath, "")
+		if status != 204 {
+			t.Fatalf("Go DELETE = %d: %s", status, body)
+		}
+		if st, _, _ := sabreClient.do(t, "GET", crudPath, ""); st != 404 {
+			t.Errorf("sabre GET after Go delete = %d, want 404", st)
+		}
+		if strings.Contains(query(sabreClient, newRange), "crud1.ics") {
+			t.Error("sabre calendar-query still returns the deleted event")
+		}
+		syncBody := fmt.Sprintf(`<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:"><d:sync-token>%s</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`, tokenBeforeDelete)
+		status, body, _ = sabreClient.do(t, "REPORT", calBase, syncBody, "Content-Type", "application/xml")
+		if status != 207 {
+			t.Fatalf("sabre sync REPORT after delete = %d: %s", status, body)
+		}
+		if !strings.Contains(body, "crud1.ics") || !strings.Contains(body, "404") {
+			t.Errorf("sabre incremental sync did not report the deletion:\n%s", body)
+		}
+	})
+
 	t.Run("SabreWriteVisibleInGoSync", func(t *testing.T) {
 		// The Go server's own sync-collection REPORT must interoperate
 		// with sabre-issued tokens and sabre-written changes.
@@ -289,6 +406,84 @@ func TestParity(t *testing.T) {
 		status, body, _ = goClient.do(t, "REPORT", "/calendars/user2/default/", query, "Depth", "1", "Content-Type", "application/xml")
 		if status != 207 || !strings.Contains(body, "parity-invite-2") {
 			t.Errorf("Go calendar-query on the attendee calendar missed the sabre-delivered invite (%d):\n%s", status, body)
+		}
+	})
+
+	t.Run("CtagAdvancesOnMutations", func(t *testing.T) {
+		// The collection ctag is the only signal a polling client (iOS,
+		// Thunderbird) uses to decide a calendar changed and needs a re-sync.
+		// Object create/update/delete are covered by EventCRUDLifecycle;
+		// these lock down the *other* mutation paths, so a future write that
+		// forgets to bump synctoken fails here instead of silently stalling a
+		// client until some unrelated change happens to nudge the ctag.
+		//
+		// (The schedule inbox is deliberately not checked: like sabre's
+		// Schedule\Inbox it exposes no getctag/sync-token — clients poll it
+		// directly — so the meaningful scheduling assertion is that the
+		// attendee's *calendar* copy advances that calendar's ctag.)
+		const (
+			adminCal   = "/calendars/admin/default/"
+			archiveCal = "/calendars/admin/archive/"
+			user2Cal   = "/calendars/user2/default/"
+		)
+
+		// (1) A calendar metadata PROPPATCH (rename/recolor) must advance the
+		// ctag — sabre records an empty-uri change for exactly this — and both
+		// servers must then report the same new value.
+		before := ctagOf(t, goClient, adminCal)
+		patch := `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>Renamed default</d:displayname></d:prop></d:set></d:propertyupdate>`
+		if status, body, _ := goClient.do(t, "PROPPATCH", adminCal, patch, "Content-Type", "application/xml"); status != 207 || strings.Contains(body, "403") {
+			t.Fatalf("Go PROPPATCH displayname = %d: %s", status, body)
+		}
+		goCtag := ctagOf(t, goClient, adminCal)
+		if goCtag == before {
+			t.Errorf("ctag did not advance after metadata PROPPATCH (still %q)", goCtag)
+		}
+		if sabreCtag := ctagOf(t, sabreClient, adminCal); sabreCtag != goCtag {
+			t.Errorf("post-PROPPATCH ctag mismatch: go %q, sabre %q", goCtag, sabreCtag)
+		}
+
+		// (2) MOVE of an object between two calendars must advance BOTH the
+		// source and destination ctags — a client watching either collection
+		// has to notice.
+		mk := `<?xml version="1.0"?><c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:set><d:prop><d:displayname>Archive</d:displayname></d:prop></d:set></c:mkcalendar>`
+		if status, body, _ := goClient.do(t, "MKCALENDAR", archiveCal, mk, "Content-Type", "application/xml"); status != 201 {
+			t.Fatalf("Go MKCALENDAR archive = %d: %s", status, body)
+		}
+		moveICS := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//parity//test//EN\r\nBEGIN:VEVENT\r\nUID:parity-move\r\nDTSTAMP:20270101T000000Z\r\nDTSTART:20270401T090000Z\r\nDTEND:20270401T100000Z\r\nSUMMARY:Move me\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+		if status, body, _ := goClient.do(t, "PUT", adminCal+"movesrc.ics", moveICS, "Content-Type", "text/calendar"); status != 201 {
+			t.Fatalf("Go PUT move source = %d: %s", status, body)
+		}
+		srcBefore := ctagOf(t, goClient, adminCal)
+		dstBefore := ctagOf(t, goClient, archiveCal)
+		status, body, _ := goClient.do(t, "MOVE", adminCal+"movesrc.ics", "",
+			"Destination", goClient.base+archiveCal+"movedst.ics")
+		if status != 201 {
+			t.Fatalf("Go MOVE = %d: %s", status, body)
+		}
+		if after := ctagOf(t, goClient, adminCal); after == srcBefore {
+			t.Errorf("source ctag did not advance after MOVE-out (still %q)", after)
+		}
+		if after := ctagOf(t, goClient, archiveCal); after == dstBefore {
+			t.Errorf("destination ctag did not advance after MOVE-in (still %q)", after)
+		}
+		if st, _, _ := goClient.do(t, "GET", adminCal+"movesrc.ics", ""); st != 404 {
+			t.Errorf("source object still present after MOVE = %d, want 404", st)
+		}
+		if st, _, _ := sabreClient.do(t, "GET", archiveCal+"movedst.ics", ""); st != 200 {
+			t.Errorf("sabre cannot GET the moved object at its destination = %d", st)
+		}
+
+		// (3) A scheduling delivery drops a copy into the attendee's calendar;
+		// that calendar's ctag must advance so the attendee's client re-syncs
+		// and sees the new invitation.
+		u2Before := ctagOf(t, goClient, user2Cal)
+		invite := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//parity//test//EN\r\nBEGIN:VEVENT\r\nUID:parity-ctag-invite\r\nDTSTAMP:20270101T000000Z\r\nDTSTART:20270501T100000Z\r\nDTEND:20270501T110000Z\r\nSUMMARY:Invite bump\r\nORGANIZER;CN=Admin:mailto:admin@example.org\r\nATTENDEE;CN=User Two;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:user2@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+		if status, body, _ := goClient.do(t, "PUT", adminCal+"ctag-invite.ics", invite, "Content-Type", "text/calendar"); status != 201 {
+			t.Fatalf("Go PUT invite = %d: %s", status, body)
+		}
+		if after := ctagOf(t, goClient, user2Cal); after == u2Before {
+			t.Errorf("attendee calendar ctag did not advance after scheduling delivery (still %q) — the invite would not sync to the attendee's client", after)
 		}
 	})
 
@@ -408,6 +603,15 @@ func sabreSyncToken(t *testing.T, c *digestClient) string {
 		t.Fatalf("no sync-token in PROPFIND response: %s", body)
 	}
 	return m[1]
+}
+
+// ctagOf reads the CalendarServer getctag of a collection — the value a
+// polling client (iOS, Thunderbird) compares to decide whether to re-sync.
+func ctagOf(t *testing.T, c *digestClient, path string) string {
+	t.Helper()
+	propfind := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><cs:getctag xmlns:cs="http://calendarserver.org/ns/"/></d:prop></d:propfind>`
+	_, body, _ := c.do(t, "PROPFIND", path, propfind, "Depth", "0", "Content-Type", "application/xml")
+	return extractCTag(body)
 }
 
 func extractCTag(body string) string {
