@@ -52,6 +52,25 @@ diff). Basic auth resends the password on every request: keep the listener
 on loopback/LAN or behind TLS. Write actions are off by default, need the
 `X-Admin-Request: 1` header, and audit-log every mutation.
 
+## CLI
+
+`calctl` is the management CLI (same shape as `mqctl`/`rcptctl` in the
+sibling services). It reads the server's `config.toml` (falling back to
+`/etc/calserver/config.toml`, `/usr/local/etc/calserver/config.toml`, then
+`./config.toml`) and exposes the admin panel's read paths from the command
+line:
+
+```sh
+calctl health                 # OPTIONS-probe the DAV listener + DB ping/schema check
+calctl stats                  # dashboard row counts + recent change-log activity
+calctl doctor                 # §3.7 consistency checks; exit 1 on any finding
+calctl health --json          # every command takes --json for scripts/monitoring
+calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
+```
+
+`health` exits 1 on an unhealthy component, `doctor` on any finding, so both
+slot straight into monitoring.
+
 ## Test corpus
 
 The port is driven red→green against fixtures extracted from sabre's own test
