@@ -17,6 +17,11 @@ load_schema() {
     for f in dav/examples/sql/pgsql.*.sql; do
         psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$f"
     done
+    # calserver extension tables (notifications, publications) — additive,
+    # new tables only, so a live sabre on the same DB is unaffected.
+    for f in scripts/schema/pgsql.*.sql; do
+        psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$f"
+    done
     # examples/sql seeds principals/users with an 'admin' account
     # (digesta1 for realm "SabreDAV", password "admin"), but no calendar;
     # give admin an empty default calendar the same way sabre's PDO

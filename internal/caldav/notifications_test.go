@@ -15,6 +15,13 @@ import (
 // sharedSharing builds two servers (one per actor) over one shared backend,
 // so the sharer and the sharee act against the same state.
 func sharedSharing() (backend *caldav.MockSharingBackend, servers map[string]*dav.Server) {
+	return sharedSharingBase("/")
+}
+
+// sharedSharingBase is sharedSharing with an explicit server BaseURI, so tests
+// can exercise non-root deployments (where href construction must include the
+// prefix).
+func sharedSharingBase(base string) (backend *caldav.MockSharingBackend, servers map[string]*dav.Server) {
 	dn := xmlNM{Space: "DAV:", Local: "displayname"}
 	email := xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}
 	principals := &acl.MemoryBackend{Principals: []acl.Principal{
@@ -31,7 +38,7 @@ func sharedSharing() (backend *caldav.MockSharingBackend, servers map[string]*da
 		root := mock.NewCollection("root")
 		root.Attach(acl.NewPrincipalCollection(principals, "principals"))
 		root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
-		srv := dav.NewServer("/", root)
+		srv := dav.NewServer(base, root)
 		srv.AddPlugin(auth.NewLoggedInPlugin(actor))
 		srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 		srv.AddPlugin(&caldav.Plugin{})
@@ -105,5 +112,30 @@ func TestSharingNotificationRoundTrip(t *testing.T) {
 		if !strings.Contains(item, want) {
 			t.Errorf("notification body missing %q:\n%s", want, item)
 		}
+	}
+}
+
+// TestInviteReplySharedAsBaseURI: an accepted invite-reply's <cs:shared-as>
+// href must carry the server's BaseURI under a non-root deployment. The
+// backend returns a request-relative path, so resolveHref joins it onto the
+// base-carrying request URL (/dav/calendars/user2/) — a leading-slash return
+// would drop the prefix.
+func TestInviteReplySharedAsBaseURI(t *testing.T) {
+	_, servers := sharedSharingBase("/dav/")
+	user2 := servers["principals/user2"]
+
+	reply := `<?xml version="1.0"?><cs:invite-reply xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:hosturl><d:href>/dav/calendars/user1/cal1</d:href></cs:hosturl>
+	  <cs:invite-accepted/>
+	</cs:invite-reply>`
+	w := req(t, user2, "POST", "/dav/calendars/user2/", reply, "Content-Type", "application/xml")
+	if w.Code != 200 {
+		t.Fatalf("invite-reply POST = %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	// The mock returns "calendars/blabla/calendar", resolved against the
+	// request path /dav/calendars/user2/ — so the href must start with /dav/.
+	if !strings.Contains(body, "<d:href>/dav/calendars/user2/calendars/blabla/calendar</d:href>") {
+		t.Errorf("shared-as href did not carry the BaseURI:\n%s", body)
 	}
 }

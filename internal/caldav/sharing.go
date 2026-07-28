@@ -50,8 +50,12 @@ type PublishSupport interface {
 
 // ReplySupport marks backends handling share invite replies.
 type ReplySupport interface {
-	// ShareReply returns the path of the accepted calendar, or "".
-	ShareReply(href string, status int, calendarURI, inReplyTo, summary string) (string, error)
+	// ShareReply records the replying principal's accept/decline of the share
+	// identified by href (the invite's hosturl) and returns the accepted
+	// calendar's path relative to the request (the replying principal's
+	// calendar home) — a bare segment, no leading slash, which the caller
+	// resolves against the base-carrying request URL — or "" on decline.
+	ShareReply(principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error)
 }
 
 // MockSharingBackend ports sabre's Backend\MockSharing (with notification
@@ -93,7 +97,7 @@ func (m *MockSharingBackend) Invites(id CalendarID) ([]Sharee, error) {
 func (m *MockSharingBackend) SetPublishStatus(id CalendarID, value bool) error { return nil }
 
 // ShareReply mirrors sabre's mock: accepting yields a fixed calendar path.
-func (m *MockSharingBackend) ShareReply(href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
+func (m *MockSharingBackend) ShareReply(principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
 	if status == InviteAccepted {
 		return "calendars/blabla/calendar", nil
 	}
@@ -255,7 +259,7 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 	if !supported {
 		return dav.ErrNotImplemented("Sharing is not implemented on this backend")
 	}
-	url, err := replies.ShareReply(reply.href, reply.status, reply.calendarURI, reply.inReplyTo, reply.summary)
+	url, err := replies.ShareReply(home.principalURI, reply.href, reply.status, reply.calendarURI, reply.inReplyTo, reply.summary)
 	if err != nil {
 		return err
 	}
@@ -263,7 +267,9 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 	if url != "" {
 		// sabre resolves the returned href relative to the request URL
 		// (LocalHref with contextUri = request path), so a home at
-		// /calendars/user1 yields /calendars/<returned-path>.
+		// /calendars/user1 yields /calendars/<returned-path>. The request path
+		// already carries the BaseURI, so a request-relative return keeps the
+		// prefix — an absolute (leading-slash) return would drop it.
 		resolved := resolveHref(r.URL.Path, url)
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
