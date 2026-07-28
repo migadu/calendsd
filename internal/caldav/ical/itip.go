@@ -432,6 +432,12 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 		for _, id := range newSt.order {
 			get(id).newStatus = newSt.instances[id]
 		}
+	} else if newInfo == nil && oldSt != nil {
+		// The attendee deleted their whole copy of the event: reply DECLINED
+		// for every instance they belonged to.
+		for _, id := range oldSt.order {
+			get(id).newStatus = "DECLINED"
+		}
 	}
 	// A newly-added EXDATE means the attendee dropped that occurrence: reply
 	// DECLINED for it, unless the master itself is declined.
@@ -482,7 +488,11 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 		setPlainProp(ev.Props, goical.PropUID, base.uid)
 		setPlainProp(ev.Props, "SEQUENCE", base.sequence)
 		setPlainProp(ev.Props, "DTSTAMP", nowStamp())
-		if src := instanceOf(newInfo, id); src != nil {
+		src := instanceOf(newInfo, id)
+		if src == nil {
+			src = instanceOf(oldInfo, id)
+		}
+		if src != nil {
 			if ds := src.Props.Get("DTSTART"); ds != nil {
 				ev.Props["DTSTART"] = []goical.Prop{cloneProp(*ds)}
 			}
@@ -709,14 +719,30 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 		if p := replyInfo.master.Props.Get("REQUEST-STATUS"); p != nil {
 			requestStatus, _, _ = strings.Cut(p.Value, ";")
 		}
+		// Apply each reply instance's PARTSTAT to the existing VEVENT matched
+		// by RECURRENCE-ID (master reply -> master component, override reply ->
+		// matching override); a reply for an instance without its own existing
+		// component falls back to the master.
 		for _, comp := range existing.Children {
 			if comp.Name != goical.CompEvent {
+				continue
+			}
+			rid := recurID(comp)
+			partStat := ""
+			if st := replyInfo.perAtt[replier.href]; st != nil {
+				if ps, ok := st.instances[rid]; ok {
+					partStat = ps
+				} else if ps, ok := st.instances["master"]; ok {
+					partStat = ps
+				}
+			}
+			if partStat == "" {
 				continue
 			}
 			atts := comp.Props.Values("ATTENDEE")
 			for i := range atts {
 				if strings.EqualFold(atts[i].Value, replier.href) {
-					atts[i].Params.Set("PARTSTAT", replier.partStat)
+					atts[i].Params.Set("PARTSTAT", partStat)
 					atts[i].Params.Set("SCHEDULE-STATUS", requestStatus)
 					atts[i].Params.Del("RSVP")
 				}

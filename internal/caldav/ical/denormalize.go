@@ -52,6 +52,9 @@ func Denormalize(data []byte) (*Denormalized, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing calendar data: %w", err)
 	}
+	// Resolve Outlook-style non-IANA TZIDs from any embedded VTIMEZONE so the
+	// occurrence-bounds computation can parse their date-times.
+	resolveNonIANATZIDs(cal)
 
 	var comp *goical.Component
 	for _, child := range cal.Children {
@@ -151,7 +154,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 		return dtstart, maxDate, nil
 	}
 
-	set, err := comp.RecurrenceSet(time.UTC)
+	set, err := recurrenceSet(comp, time.UTC)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("building recurrence set: %w", err)
 	}

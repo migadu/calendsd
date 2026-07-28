@@ -31,7 +31,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if err != nil {
 			return false, err
 		}
-		set, err := comp.RecurrenceSet(loc)
+		set, err := recurrenceSet(comp, loc)
 		if err != nil {
 			return false, err
 		}
@@ -239,7 +239,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	if err != nil {
 		return false, err
 	}
-	set, err := master.RecurrenceSet(loc)
+	set, err := recurrenceSet(master, loc)
 	if err != nil || set == nil {
 		return false, err
 	}

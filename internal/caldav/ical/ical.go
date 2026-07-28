@@ -8,13 +8,52 @@ import (
 	"bytes"
 	"sort"
 	"strings"
+	"time"
 
 	goical "github.com/emersion/go-ical"
+	"github.com/teambition/rrule-go"
 )
 
 // Decode parses raw iCalendar bytes into a calendar object.
 func Decode(data []byte) (*goical.Calendar, error) {
 	return goical.NewDecoder(bytes.NewReader(data)).Decode()
+}
+
+// recurrenceSet builds a component's recurrence set, first splitting any
+// multi-value (comma-separated) EXDATE/RDATE property into repeated
+// single-value properties. go-ical's RecurrenceSet calls Prop.DateTime on each
+// EXDATE/RDATE property directly, which errors on the comma list form that
+// RFC 5545 permits (EXDATE:...Z,...Z). The original component is left
+// untouched: only a shallow copy with rewritten date-list props is passed on.
+func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error) {
+	needsSplit := false
+	for _, name := range []string{goical.PropExceptionDates, goical.PropRecurrenceDates} {
+		for _, p := range comp.Props[name] {
+			if strings.Contains(p.Value, ",") {
+				needsSplit = true
+			}
+		}
+	}
+	if !needsSplit {
+		return comp.RecurrenceSet(loc)
+	}
+	shallow := &goical.Component{Name: comp.Name, Props: goical.Props{}, Children: comp.Children}
+	for name, props := range comp.Props {
+		if name != goical.PropExceptionDates && name != goical.PropRecurrenceDates {
+			shallow.Props[name] = props
+			continue
+		}
+		var split []goical.Prop
+		for _, p := range props {
+			for _, v := range strings.Split(p.Value, ",") {
+				cp := cloneProp(p)
+				cp.Value = v
+				split = append(split, cp)
+			}
+		}
+		shallow.Props[name] = split
+	}
+	return shallow.RecurrenceSet(loc)
 }
 
 // ComponentType returns the first non-VTIMEZONE component name (VEVENT, VTODO,

@@ -150,7 +150,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return nil, nil
 	}
 
-	set, err := comp.RecurrenceSet(loc)
+	set, err := recurrenceSet(comp, loc)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,9 @@ import (
 // <C:expand> (RFC 4791 §9.6.5). loc resolves floating times (the calendar's
 // timezone).
 func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*goical.Calendar, error) {
+	// Resolve Outlook-style non-IANA TZIDs from any embedded VTIMEZONE before
+	// expanding, since go-ical cannot load them by name.
+	resolveNonIANATZIDs(cal)
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
 	out.Props.SetText(goical.PropProductID, "-//calserver//calserver//EN")
@@ -131,12 +134,16 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	if err != nil {
 		return nil, err
 	}
-	set, err := master.RecurrenceSet(loc)
+	set, err := recurrenceSet(master, loc)
 	if err != nil {
 		return nil, err
 	}
 
 	var out []*goical.Component
+	// Track override slots the iterator visits, so overrides whose original
+	// recurrence slot falls outside the window (moved elsewhere) can still be
+	// emitted afterward when their new DTSTART lands in [start, end).
+	consumed := make(map[int64]bool, len(overrides))
 	next := set.Iterator()
 	for i := 0; i < maxRecurrences; i++ {
 		occStart, more := next()
@@ -148,6 +155,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 			continue
 		}
 		if override, exists := overrides[occStart.Unix()]; exists {
+			consumed[occStart.Unix()] = true
 			inst, ok, err := utcInstance(override, start, end, loc, true)
 			if err != nil {
 				return nil, err
@@ -161,12 +169,41 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		inst.Props.Del(goical.PropRecurrenceRule)
 		inst.Props.Del(goical.PropRecurrenceDates)
 		inst.Props.Del(goical.PropExceptionDates)
-		setUTCDateTime(inst, goical.PropDateTimeStart, occStart)
-		if master.Props.Get(goical.PropDateTimeEnd) != nil {
-			setUTCDateTime(inst, goical.PropDateTimeEnd, occEnd)
+		// All-day (VALUE=DATE) starts stay DATE-valued rather than being
+		// shifted to a timezone-adjusted UTC date-time, matching the override
+		// path (utcInstance).
+		if dtstartProp.ValueType() == goical.ValueDate {
+			setDateValue(inst, goical.PropDateTimeStart, occStart)
+			if master.Props.Get(goical.PropDateTimeEnd) != nil {
+				setDateValue(inst, goical.PropDateTimeEnd, occEnd)
+			}
+			setDateValue(inst, goical.PropRecurrenceID, occStart)
+		} else {
+			setUTCDateTime(inst, goical.PropDateTimeStart, occStart)
+			if master.Props.Get(goical.PropDateTimeEnd) != nil {
+				setUTCDateTime(inst, goical.PropDateTimeEnd, occEnd)
+			}
+			setUTCDateTime(inst, goical.PropRecurrenceID, occStart)
 		}
-		setUTCDateTime(inst, goical.PropRecurrenceID, occStart)
 		out = append(out, inst)
+	}
+	// Emit overrides whose recurrence slot lay outside the iterated window but
+	// whose (moved) DTSTART falls inside [start, end).
+	var movedKeys []int64
+	for k := range overrides {
+		if !consumed[k] {
+			movedKeys = append(movedKeys, k)
+		}
+	}
+	sort.Slice(movedKeys, func(i, j int) bool { return movedKeys[i] < movedKeys[j] })
+	for _, k := range movedKeys {
+		inst, ok, err := utcInstance(overrides[k], start, end, loc, true)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, inst)
+		}
 	}
 	return out, nil
 }
@@ -207,6 +244,26 @@ func setUTCDateTime(comp *goical.Component, name string, t time.Time) {
 	prop.Params.Del(goical.PropTimezoneID)
 	prop.Params.Del("VALUE")
 	prop.Value = t.UTC().Format("20060102T150405Z")
+	if len(props) > 0 {
+		props[0] = *prop
+		comp.Props[name] = props
+	} else {
+		comp.Props.Set(prop)
+	}
+}
+
+// setDateValue writes a DATE-valued property (all-day), keeping VALUE=DATE and
+// the calendar date in loc, dropping any TZID. t is the occurrence start in the
+// calendar's location, whose date is the wanted calendar day.
+func setDateValue(comp *goical.Component, name string, t time.Time) {
+	props := comp.Props.Values(name)
+	prop := goical.NewProp(name)
+	if len(props) > 0 {
+		prop = &props[0]
+	}
+	prop.Params.Del(goical.PropTimezoneID)
+	prop.Params.Set("VALUE", "DATE")
+	prop.Value = t.Format("20060102")
 	if len(props) > 0 {
 		props[0] = *prop
 		comp.Props[name] = props
