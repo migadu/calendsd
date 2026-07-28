@@ -116,6 +116,19 @@ type SchedulingObject struct {
 }
 
 func (s *SchedulingObject) Name() string { return s.info.URI }
+
+// Owner returns the principal whose inbox holds this message.
+func (s *SchedulingObject) Owner() string { return s.info.PrincipalURI }
+
+// ACL restricts the message to its owner. Without this the node has no
+// ACLHolder and falls back to the default {DAV:}all-for-authenticated grant,
+// letting any authenticated user read another principal's inbox iTIP payloads.
+func (s *SchedulingObject) ACL() []acl.ACE {
+	return []acl.ACE{
+		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
+	}
+}
+
 func (s *SchedulingObject) SetName(string) error {
 	return dav.ErrMethodNotAllowed("Renaming scheduling objects is not allowed")
 }

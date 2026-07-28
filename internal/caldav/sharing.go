@@ -152,11 +152,11 @@ func (p *SharingPlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bo
 		if !isHome {
 			return false, nil
 		}
-		return true, p.inviteReply(w, r, home, body)
+		return true, p.inviteReply(w, r, path, home, body)
 	case cs("publish-calendar"):
-		return p.publish(w, node, true)
+		return p.publish(w, r, path, node, true)
 	case cs("unpublish-calendar"):
-		return p.publish(w, node, false)
+		return p.publish(w, r, path, node, false)
 	}
 	return false, nil
 }
@@ -169,12 +169,8 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	}
 	// Sharing requires the {DAV:}share privilege — granted only on the
 	// owner's own view, so a sharee's POST yields NeedPrivileges (403).
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			if err := checker.CheckPrivileges(r.Context(), calPath, "{DAV:}share"); err != nil {
-				return err
-			}
-		}
+	if err := p.checkPrivilege(r, calPath, "{DAV:}share"); err != nil {
+		return err
 	}
 	sharing, supported := calNode.backend.(SharingSupport)
 	if !supported {
@@ -226,8 +222,31 @@ func requestTime(r *http.Request) time.Time {
 	return time.Now()
 }
 
-// inviteReply processes a sharee's accept/decline.
-func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, home *CalendarHome, body []byte) error {
+// checkPrivilege enforces priv on the target path via the ACL plugin. POST is
+// not covered by the ACL BeforeMethod table, so the sharing actions must check
+// explicitly to keep a non-owner from mutating another principal's state.
+// The right privilege depends on the target node: publish/unpublish and share
+// act on a Calendar (owner-only {DAV:}share), while invite-reply acts on the
+// sharee's own CalendarHome, which grants {DAV:}write (not {DAV:}share) to its
+// owner.
+func (p *SharingPlugin) checkPrivilege(r *http.Request, path, priv string) error {
+	for _, plugin := range p.server.Plugins() {
+		if checker, ok := plugin.(PrivilegeChecker); ok {
+			if err := checker.CheckPrivileges(r.Context(), path, priv); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// inviteReply processes a sharee's accept/decline. It targets the sharee's own
+// CalendarHome, so it requires {DAV:}write there (owner and write-proxies), not
+// the calendar-level {DAV:}share — the home never grants {DAV:}share.
+func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path string, home *CalendarHome, body []byte) error {
+	if err := p.checkPrivilege(r, path, "{DAV:}write"); err != nil {
+		return err
+	}
 	reply, err := parseInviteReply(body)
 	if err != nil {
 		return dav.ErrBadRequest("%s", err)
@@ -257,10 +276,15 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, home
 	return nil
 }
 
-func (p *SharingPlugin) publish(w http.ResponseWriter, node dav.Node, value bool) (bool, error) {
+func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path string, node dav.Node, value bool) (bool, error) {
 	calNode, isCal := node.(*Calendar)
 	if !isCal {
 		return false, nil
+	}
+	// Publishing changes the calendar's sharing state, so it requires the
+	// {DAV:}share privilege (owner-only) just like shareRequest.
+	if err := p.checkPrivilege(r, path, "{DAV:}share"); err != nil {
+		return true, err
 	}
 	publisher, supported := calNode.backend.(PublishSupport)
 	if !supported {

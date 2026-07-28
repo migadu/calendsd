@@ -116,6 +116,18 @@ type NotificationNode struct {
 }
 
 func (nn *NotificationNode) Name() string { return nn.invite.ID + ".xml" }
+
+// Owner returns the principal whose notification inbox holds this item.
+func (nn *NotificationNode) Owner() string { return nn.principalURI }
+
+// ACL restricts the notification to its owner, mirroring the parent
+// Notifications collection. Without this the node has no ACLHolder and falls
+// back to the default {DAV:}all-for-authenticated grant, leaking share
+// invitations cross-user.
+func (nn *NotificationNode) ACL() []acl.ACE {
+	return []acl.ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
+}
+
 func (nn *NotificationNode) SetName(string) error {
 	return dav.ErrMethodNotAllowed("Renaming notifications is not allowed")
 }
