@@ -100,6 +100,10 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	held, err := p.CurrentUserPrivileges(pf.Context(), node)
 	readable := err == nil && slices.Contains(held, "{DAV:}read")
 	if !readable {
+		// Latch the gate closed first so the later node-dead-property and
+		// property-storage phases cannot re-add values at 200 (they run after
+		// this hook and are otherwise blind to the read denial).
+		pf.Deny()
 		for _, name := range pf.Requested() {
 			pf.Set(name, nil, http.StatusForbidden)
 		}
