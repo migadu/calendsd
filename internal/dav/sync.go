@@ -150,7 +150,7 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 
 	syncLevel := 1
 	switch {
-	case req.SyncLevel == "infinite":
+	case req.SyncLevel == "infinity":
 		syncLevel = DepthInfinity
 	case req.SyncLevel != "":
 		if n, convErr := strconv.Atoi(req.SyncLevel); convErr == nil {

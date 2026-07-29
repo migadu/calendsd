@@ -100,6 +100,15 @@ func (h *AddressBookHome) Delete() error           { return dav.ErrForbidden("Pe
 func (h *AddressBookHome) LastModified() time.Time { return time.Time{} }
 func (h *AddressBookHome) Owner() string           { return h.principalURI }
 
+// ACL mirrors sabre's AddressBookHome (ACLTrait::getACL): {DAV:}owner holds
+// {DAV:}all. Being an ACLHolder also puts {DAV:}write-acl in the home's
+// supported-privilege set, matching sabre's current-user-privilege-set.
+func (h *AddressBookHome) ACL() []acl.ACE {
+	return []acl.ACE{
+		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
+	}
+}
+
 func (h *AddressBookHome) Children() ([]dav.Node, error) {
 	infos, err := h.provisioned()
 	if err != nil {
@@ -240,10 +249,11 @@ func (a *AddressBook) PropPatch(pp *dav.PropPatch) { a.backend.UpdateAddressBook
 
 // ACL grants the owner full access, like sabre's AddressBook::getACL.
 func (a *AddressBook) ACL() []acl.ACE {
-	owner := a.Owner()
+	// sabre's AddressBook uses ACLTrait::getACL — {DAV:}owner gets {DAV:}all
+	// (which aggregates read+write, so authorization is unchanged, but the
+	// reported privilege set now includes {DAV:}all like sabre).
 	return []acl.ACE{
-		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
-		{Privilege: "{DAV:}write", Principal: owner, Protected: true},
+		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
 	}
 }
 

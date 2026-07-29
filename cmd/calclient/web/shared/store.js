@@ -16,7 +16,7 @@ export const state = {
   instances: new Map(),    // calHref -> [instance]
   invites: [],             // parsed inbox items
   shareNotifications: [],  // parsed calendar-share invitations (cs:notification)
-  books: [], contacts: [], // carddav
+  books: [], contacts: [], groups: [], // carddav (groups = X-ADDRESSBOOKSERVER-KIND:group cards)
   prefs: loadPrefs(),
 };
 
@@ -484,6 +484,18 @@ export async function deleteObject(href) {
   check(await dav.req('DELETE', href), [204]);
 }
 
+// moveObject relocates an object to another collection via WebDAV MOVE — the
+// path for changing an event's calendar. The server re-homes the object
+// without re-sending scheduling messages (MOVE is exempt from the CANCEL that
+// a DELETE would fire). Destination must be an absolute URI. Overwrite is left
+// at its default (true): the destination filename is UID-derived, so a name
+// clash means a stale copy of the same event (e.g. from an interrupted move) —
+// replacing it is correct, and refusing (Overwrite:F) would 412 forever.
+export async function moveObject(href, destHref) {
+  const dest = new URL(destHref, location.origin).href;
+  check(await dav.req('MOVE', href, { headers: { Destination: dest } }), [201, 204]);
+}
+
 // moveEvent shifts a (non-recurring) event by deltaMs — the drag & drop path.
 // DTSTART/DTEND are rewritten in place so alarms, overrides, and unmodeled
 // properties survive; callers guard against recurring events (moving an
@@ -626,7 +638,7 @@ export async function loadContacts() {
     .filter(x => x.href !== state.abHome &&
       dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.card, 'addressbook')))
     .map(x => ({ href: x.href, displayName: x.props.get(key(NS.d, 'displayname'))?.textContent || 'Contacts' }));
-  const contacts = [];
+  const contacts = [], groups = [];
   for (const book of state.books) {
     const list = await dav.propfind(book.href, ['d:getetag'], '1');
     if (list.status !== 207) continue;
@@ -642,13 +654,24 @@ export async function loadContacts() {
       if (!data) continue;
       const card = ical.components(ical.parse(data), 'VCARD')[0];
       if (!card) continue;
-      contacts.push(parseContact(card, resp.href, book.href,
-        resp.props.get(key(NS.d, 'getetag'))?.textContent ?? ''));
+      const model = parseContact(card, resp.href, book.href,
+        resp.props.get(key(NS.d, 'getetag'))?.textContent ?? '');
+      // A group/list vCard (X-ADDRESSBOOKSERVER-KIND:group) is not a contact —
+      // Apple Contacts files it in the sidebar, so we keep them apart.
+      (model.kind === 'group' ? groups : contacts).push(model);
     }
   }
   contacts.sort((a, b) => a.fn.localeCompare(b.fn));
+  groups.sort((a, b) => a.fn.localeCompare(b.fn));
   state.contacts = contacts;
+  state.groups = groups;
   emit('contacts');
+}
+
+// normalizeUID strips the urn:uuid: prefix Apple uses on group member refs so a
+// group's X-ADDRESSBOOKSERVER-MEMBER values match member cards' UIDs.
+export function normalizeUID(uid) {
+  return String(uid || '').replace(/^urn:uuid:/i, '');
 }
 
 // human type params on EMAIL/TEL, minus the boilerplate ones.
@@ -664,8 +687,19 @@ function parseContact(card, href, book, etag) {
   const n = ical.vcardValue(ical.propValue(card, 'N')); // Family;Given;...
   const adrProp = ical.prop(card, 'ADR');
   const adr = adrProp ? ical.vcardValue(adrProp.value) : [];
+  // Group/list card: X-ADDRESSBOOKSERVER-KIND:group (vCard 3.0) or KIND:group
+  // (4.0); its members are UID refs on X-ADDRESSBOOKSERVER-MEMBER / MEMBER.
+  const kindVal = (ical.propValue(card, 'X-ADDRESSBOOKSERVER-KIND') ||
+    ical.propValue(card, 'KIND')).toLowerCase();
+  const isGroup = kindVal === 'group';
+  const members = isGroup
+    ? card.props.filter(p => p.name === 'X-ADDRESSBOOKSERVER-MEMBER' || p.name === 'MEMBER')
+      .map(p => normalizeUID(p.value))
+    : [];
   return {
     href, book, etag,
+    kind: isGroup ? 'group' : 'individual',
+    members,
     uid: ical.propValue(card, 'UID'),
     fn: ical.icalUnescape(ical.propValue(card, 'FN')),
     last: ical.icalUnescape(n[0] || ''),
@@ -706,10 +740,13 @@ async function ensureBook() {
 
 // saveContact accepts the editor model (see parseContact). New contacts get a
 // UID and land in the first addressbook; edits overwrite in place with ETag.
-export async function saveContact(model) {
+// saveContact writes the editor model. New contacts land in targetBook (the
+// selected address book) when given, otherwise the first/auto-created book.
+export async function saveContact(model, targetBook) {
   const uid = model.uid || crypto.randomUUID();
   const text = ical.buildVCard({ ...model, uid });
-  const target = model.href ?? (await ensureBook()) + encodeURIComponent(uid) + '.vcf';
+  const dir = targetBook || (await ensureBook());
+  const target = model.href ?? dir + encodeURIComponent(uid) + '.vcf';
   await putObject(target, text, model.href ? model.etag : null, 'text/vcard; charset=utf-8');
   await loadContacts();
 }

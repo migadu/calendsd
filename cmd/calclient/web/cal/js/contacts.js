@@ -6,21 +6,36 @@ import * as store from '/shared/store.js';
 import { $, h, esc, toast, showError } from './main.js';
 
 let filter = '';
+// Sidebar selection: {type:'all'} | {type:'book', href} | {type:'group', href}.
+let selection = { type: 'all' };
+let mount = null;
 
 const EMAIL_TYPES = ['', 'HOME', 'WORK', 'OTHER'];
 const TEL_TYPES = ['CELL', 'HOME', 'WORK', 'FAX', 'OTHER'];
 
 export function renderContacts(main) {
+  mount = main;
   main.innerHTML = '';
-  const el = h(`<div class="contacts">
-    <div class="bar">
-      <input id="ct-search" type="search" placeholder="Search contacts…" value="${esc(filter)}">
-      <button class="primary" id="ct-add">＋ New contact</button>
+  const books = store.state.books;
+  const groups = store.state.groups;
+
+  // Forget a selection whose book/group has since disappeared.
+  if (selection.type === 'book' && !books.some(b => b.href === selection.href)) selection = { type: 'all' };
+  if (selection.type === 'group' && !groups.some(g => g.href === selection.href)) selection = { type: 'all' };
+
+  const el = h(`<div class="contacts contacts-2col">
+    <aside class="ct-side" aria-label="Address books and groups"></aside>
+    <div class="ct-main">
+      <div class="bar">
+        <input id="ct-search" type="search" placeholder="Search contacts…" value="${esc(filter)}">
+        <button class="primary" id="ct-add">＋ New contact</button>
+      </div>
+      <div id="ct-rows"></div>
     </div>
-    <div id="ct-rows"></div>
   </div>`);
   main.append(el);
 
+  buildSidebar($('.ct-side', el), books, groups);
   $('#ct-search', el).addEventListener('input', ev => {
     filter = ev.target.value;
     renderRows($('#ct-rows', el));
@@ -29,17 +44,71 @@ export function renderContacts(main) {
   renderRows($('#ct-rows', el));
 }
 
+// buildSidebar renders the address-book list (with an "All Contacts" entry) and,
+// below it, any contact groups — each a selectable filter for the list.
+function buildSidebar(side, books, groups) {
+  side.innerHTML = '';
+  const item = (label, count, active, onClick, cls) => {
+    const b = h(`<button type="button" class="ct-nav ${cls}${active ? ' active' : ''}">
+      <span class="ct-nav-label">${esc(label)}</span>
+      ${count != null ? `<span class="ct-nav-count">${count}</span>` : ''}
+    </button>`);
+    b.addEventListener('click', onClick);
+    side.append(b);
+  };
+  const heading = title => side.append(h(`<div class="ct-side-h">${esc(title)}</div>`));
+
+  heading('Address Books');
+  item('All Contacts', store.state.contacts.length, selection.type === 'all',
+    () => select({ type: 'all' }), 'ct-book');
+  for (const book of books) {
+    const count = store.state.contacts.filter(c => c.book === book.href).length;
+    item(book.displayName, count,
+      selection.type === 'book' && selection.href === book.href,
+      () => select({ type: 'book', href: book.href }), 'ct-book');
+  }
+
+  if (groups.length) {
+    heading('Groups');
+    for (const g of groups) {
+      item(g.fn || 'Group', g.members.length,
+        selection.type === 'group' && selection.href === g.href,
+        () => select({ type: 'group', href: g.href }), 'ct-group');
+    }
+  }
+}
+
+function select(sel) {
+  selection = sel;
+  if (mount) renderContacts(mount);
+}
+
+// visibleContacts narrows the flat contact list to the current sidebar
+// selection: a single book, or a group's members (matched by UID).
+function visibleContacts() {
+  const all = store.state.contacts;
+  if (selection.type === 'book') return all.filter(c => c.book === selection.href);
+  if (selection.type === 'group') {
+    const g = store.state.groups.find(x => x.href === selection.href);
+    const members = new Set(g?.members || []);
+    return all.filter(c => members.has(store.normalizeUID(c.uid)));
+  }
+  return all;
+}
+
 function renderRows(box) {
   box.innerHTML = '';
   const q = filter.trim().toLowerCase();
-  const rows = store.state.contacts.filter(c => !q ||
+  const scoped = visibleContacts();
+  const rows = scoped.filter(c => !q ||
     c.fn.toLowerCase().includes(q) ||
     c.org?.toLowerCase().includes(q) ||
     c.emails.some(e => e.value.toLowerCase().includes(q)));
   if (!rows.length) {
-    box.append(h(`<p class="empty">${store.state.contacts.length
-      ? 'No contacts match your search.'
-      : 'No contacts yet. Add your first one!'}</p>`));
+    const msg = scoped.length ? 'No contacts match your search.'
+      : selection.type === 'all' ? 'No contacts yet. Add your first one!'
+        : 'No contacts here.';
+    box.append(h(`<p class="empty">${msg}</p>`));
     return;
   }
   for (const c of rows) {
@@ -208,7 +277,7 @@ function contactDialog(c) {
         },
         url: q('#cd-url').value.trim(), bday: q('#cd-bday').value.trim(),
         note: q('#cd-note').value.trim(),
-      });
+      }, !c && selection.type === 'book' ? selection.href : undefined);
       close();
       toast('Contact saved.');
     } catch (e) {

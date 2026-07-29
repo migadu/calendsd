@@ -1,0 +1,91 @@
+{
+    "test": "Sabre\\CardDAV\\Davx5Test::testDavx5MultigetVcard4",
+    "seq": 4,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": true,
+        "setupACL": true,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [
+            {
+                "id": "book1",
+                "uri": "book1",
+                "principaluri": "principals/user1",
+                "{DAV:}displayname": "My Contacts"
+            }
+        ],
+        "carddavCards": {
+            "book1": {
+                "card1": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:11111111\r\nFN:Alice Example\r\nN:Example;Alice;;;\r\nEMAIL;TYPE=WORK:alice@example.com\r\nTEL;TYPE=CELL:+15550001\r\nEND:VCARD\r\n",
+                "card2": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:22222222\r\nFN:Bob Example\r\nN:Example;Bob;;;\r\nEMAIL;TYPE=HOME:bob@example.com\r\nEND:VCARD\r\n",
+                "group1": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:99999999\r\nFN:Work\r\nN:Work\r\nX-ADDRESSBOOKSERVER-KIND:group\r\nX-ADDRESSBOOKSERVER-MEMBER:urn:uuid:11111111\r\nX-ADDRESSBOOKSERVER-MEMBER:urn:uuid:22222222\r\nEND:VCARD\r\n"
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "REPORT",
+        "url": "/addressbooks/user1/book1",
+        "headers": {
+            "Depth": [
+                "1"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<card:addressbook-multiget xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">\n  <d:prop>\n    <d:getetag/>\n    <card:address-data content-type=\"text/vcard\" version=\"4.0\"/>\n  </d:prop>\n  <d:href>/addressbooks/user1/book1/card1</d:href>\n  <d:href>/addressbooks/user1/book1/card2</d:href>\n</card:addressbook-multiget>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CardDAV\\AddressBookRoot",
+                    "name": "addressbooks"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAVACL\\PrincipalCollection",
+                    "name": "principals"
+                }
+            ]
+        }
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\"><d:response><d:href>/addressbooks/user1/book1/card1</d:href><d:propstat><d:prop><d:getetag>&quot;48e2aae8616c0d76ec719c4a0e7efc0f&quot;</d:getetag><card:address-data>BEGIN:VCARD&#13;\nVERSION:4.0&#13;\nPRODID:-//Sabre//Sabre VObject 4.6.1//EN&#13;\nUID:11111111&#13;\nFN:Alice Example&#13;\nN:Example;Alice;;;&#13;\nEMAIL;TYPE=WORK:alice@example.com&#13;\nTEL;TYPE=CELL:+15550001&#13;\nEND:VCARD&#13;\n</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/addressbooks/user1/book1/card2</d:href><d:propstat><d:prop><d:getetag>&quot;9d44922bb018858dfdb72e3b19c20d0e&quot;</d:getetag><card:address-data>BEGIN:VCARD&#13;\nVERSION:4.0&#13;\nPRODID:-//Sabre//Sabre VObject 4.6.1//EN&#13;\nUID:22222222&#13;\nFN:Bob Example&#13;\nN:Example;Bob;;;&#13;\nEMAIL;TYPE=HOME:bob@example.com&#13;\nEND:VCARD&#13;\n</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

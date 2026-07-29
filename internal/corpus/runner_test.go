@@ -34,6 +34,15 @@ var passing = map[string]bool{
 	`Sabre\CardDAV\VCFExportTest::testContentDisposition`:                              true,
 	`Sabre\CardDAV\VCFExportTest::testContentDispositionBadChars`:                      true,
 	`Sabre\CardDAV\VCFExportTest::testExport`:                                          true,
+	// DAVx5 (Android) CardDAV request shapes. Two of the four are recorded but
+	// intentionally NOT listed here — they are known, tracked, semantically
+	// harmless divergences:
+	//   - testDavx5MultigetVcard4: go-vcard re-serializes address-data in a
+	//     different property order and omits sabre's PRODID (same vCard data).
+	//   - testDavx5PropfindHome: current-user-privilege-set has the same 22
+	//     privileges as sabre but in a different order (an unordered set).
+	`Sabre\CardDAV\Davx5Test::testDavx5Multiget`:                                       true,
+	`Sabre\CardDAV\Davx5Test::testDavx5PropfindAddressbook`:                            true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteBadXML`:                                 true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteReply`:                                  true,
 	`Sabre\CalDAV\SharingPluginTest::testInviteWrongUrl`:                               true,

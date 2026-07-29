@@ -33,14 +33,22 @@ func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location
 			continue // unparseable objects contribute nothing, like sabre
 		}
 		for _, comp := range cal.Children {
-			if comp.Name != goical.CompEvent {
-				continue
+			switch comp.Name {
+			case goical.CompEvent:
+				p, err := eventBusyPeriods(comp, start, end, loc)
+				if err != nil {
+					return nil, err
+				}
+				periods = append(periods, p...)
+			case "VFREEBUSY":
+				// A stored VFREEBUSY object contributes its own FREEBUSY
+				// periods, like vobject's FreeBusyGenerator::calculateBusy.
+				p, err := freeBusyComponentPeriods(comp, start, end)
+				if err != nil {
+					return nil, err
+				}
+				periods = append(periods, p...)
 			}
-			p, err := eventBusyPeriods(comp, start, end, loc)
-			if err != nil {
-				return nil, err
-			}
-			periods = append(periods, p...)
 		}
 	}
 	periods = coalesce(periods)
@@ -97,6 +105,66 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].start.Before(out[j].start) })
 	return out
+}
+
+// freeBusyComponentPeriods extracts the busy intervals from a stored VFREEBUSY
+// component's FREEBUSY properties, clamped to [start, end). FBTYPE=FREE periods
+// are skipped, mirroring vobject's FreeBusyGenerator.
+func freeBusyComponentPeriods(comp *goical.Component, start, end time.Time) ([]busyPeriod, error) {
+	var out []busyPeriod
+	for _, prop := range comp.Props["FREEBUSY"] {
+		fbType := "BUSY"
+		if t := prop.Params.Get("FBTYPE"); t != "" {
+			fbType = strings.ToUpper(t)
+		}
+		if fbType == "FREE" {
+			continue
+		}
+		for _, periodStr := range strings.Split(prop.Value, ",") {
+			slash := strings.IndexByte(periodStr, '/')
+			if slash < 0 {
+				continue
+			}
+			s, err := parseFreeBusyTime(periodStr[:slash])
+			if err != nil {
+				return nil, err
+			}
+			e, err := parseFreeBusyPeriodEnd(s, periodStr[slash+1:])
+			if err != nil {
+				return nil, err
+			}
+			if !s.Before(end) || !e.After(start) {
+				continue
+			}
+			if s.Before(start) {
+				s = start
+			}
+			if e.After(end) {
+				e = end
+			}
+			out = append(out, busyPeriod{start: s, end: e, fbType: fbType})
+		}
+	}
+	return out, nil
+}
+
+// parseFreeBusyTime parses a FREEBUSY period datetime, which RFC 5545 requires
+// to be a UTC ("Z") value.
+func parseFreeBusyTime(s string) (time.Time, error) {
+	return time.Parse("20060102T150405Z", s)
+}
+
+// parseFreeBusyPeriodEnd resolves the end of a FREEBUSY period: an explicit UTC
+// datetime, or a duration (starting with P/-P/+P) added to the start.
+func parseFreeBusyPeriodEnd(start time.Time, s string) (time.Time, error) {
+	if strings.HasPrefix(s, "P") || strings.HasPrefix(s, "-P") || strings.HasPrefix(s, "+P") {
+		dur, err := (&goical.Prop{Value: s}).Duration()
+		if err != nil {
+			return time.Time{}, err
+		}
+		return start.Add(dur), nil
+	}
+	return parseFreeBusyTime(s)
 }
 
 func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location) ([]busyPeriod, error) {
@@ -156,7 +224,10 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 	}
 	var out []busyPeriod
 	next := set.Iterator()
-	for i := 0; i < maxRecurrences; i++ {
+	// Bounded by the finite window end (see EventInTimeRange); maxTimeRangeScan
+	// is only a pathological-rule backstop, not an occurrence cap that would
+	// truncate a long-running series before its instances in the window.
+	for i := 0; i < maxTimeRangeScan; i++ {
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
 			break

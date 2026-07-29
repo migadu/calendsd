@@ -39,13 +39,26 @@ type PrivilegeSet []xml.Name
 // used by expand-property to inline a referenced resource's properties.
 type ResponseList []Response
 
-func (Text) isValue()         {}
-func (Raw) isValue()          {}
-func (NameSet) isValue()      {}
-func (Href) isValue()         {}
-func (ReportSet) isValue()    {}
-func (PrivilegeSet) isValue() {}
-func (ResponseList) isValue() {}
+// SupportedPrivilege is one node of a {DAV:}supported-privilege-set tree
+// (RFC 3744 §5.3): a privilege name, an optional abstract flag, and nested
+// aggregated privileges. Sabre emits no {DAV:}description, so neither do we.
+type SupportedPrivilege struct {
+	Name       xml.Name
+	Abstract   bool
+	Aggregates []SupportedPrivilege
+}
+
+// SupportedPrivilegeSet renders as {DAV:}supported-privilege-set content.
+type SupportedPrivilegeSet []SupportedPrivilege
+
+func (Text) isValue()                  {}
+func (Raw) isValue()                   {}
+func (NameSet) isValue()               {}
+func (Href) isValue()                  {}
+func (ReportSet) isValue()             {}
+func (PrivilegeSet) isValue()          {}
+func (ResponseList) isValue()          {}
+func (SupportedPrivilegeSet) isValue() {}
 
 // Property is a single property inside a propstat: a qualified name plus its
 // content. A nil Value renders as an empty element.
@@ -120,6 +133,17 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 				case PrivilegeSet:
 					for _, n := range v {
 						collect(n)
+					}
+				case SupportedPrivilegeSet:
+					var walkPriv func(sp SupportedPrivilege)
+					walkPriv = func(sp SupportedPrivilege) {
+						collect(sp.Name)
+						for _, sub := range sp.Aggregates {
+							walkPriv(sub)
+						}
+					}
+					for _, sp := range v {
+						walkPriv(sp)
 					}
 				case ResponseList:
 					for _, nested := range v {
@@ -230,6 +254,12 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 			fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(n, prefix))
 		}
 		fmt.Fprintf(b, "</%s>\n", tag)
+	case SupportedPrivilegeSet:
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, sp := range v {
+			writeSupportedPrivilege(b, sp, prefix)
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
 	case ResponseList:
 		if len(v) == 0 {
 			fmt.Fprintf(b, "    <%s/>\n", tag)
@@ -243,6 +273,21 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 	default:
 		fmt.Fprintf(b, "    <%s/>\n", tag)
 	}
+}
+
+// writeSupportedPrivilege renders one privilege subtree, mirroring sabre's
+// SupportedPrivilegeSet::serializePriv (privilege, optional abstract, then
+// nested supported-privilege children; no description, like sabre).
+func writeSupportedPrivilege(b *bytes.Buffer, sp SupportedPrivilege, prefix map[string]string) {
+	b.WriteString("<d:supported-privilege>")
+	fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(sp.Name, prefix))
+	if sp.Abstract {
+		b.WriteString("<d:abstract/>")
+	}
+	for _, sub := range sp.Aggregates {
+		writeSupportedPrivilege(b, sub, prefix)
+	}
+	b.WriteString("</d:supported-privilege>")
 }
 
 func qualify(n xml.Name, prefix map[string]string) string {

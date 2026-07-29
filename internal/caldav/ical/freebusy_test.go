@@ -47,6 +47,30 @@ func TestGenerateFreeBusyMatchesSabre(t *testing.T) {
 	}
 }
 
+// TestGenerateFreeBusyIncludesStoredVFreeBusy covers that a stored VFREEBUSY
+// object contributes its FREEBUSY periods to the report (skipping FBTYPE=FREE),
+// like vobject's FreeBusyGenerator — previously only VEVENTs were considered.
+func TestGenerateFreeBusyIncludesStoredVFreeBusy(t *testing.T) {
+	obj := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +
+		"BEGIN:VFREEBUSY\r\nUID:fb1\r\n" +
+		"FREEBUSY;FBTYPE=BUSY:20260602T090000Z/20260602T100000Z\r\n" +
+		"FREEBUSY;FBTYPE=FREE:20260602T120000Z/20260602T130000Z\r\n" +
+		"END:VFREEBUSY\r\nEND:VCALENDAR\r\n")
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC)
+	got, err := GenerateFreeBusy([][]byte{obj}, start, end, time.UTC, start)
+	if err != nil {
+		t.Fatalf("GenerateFreeBusy: %v", err)
+	}
+	out := string(got)
+	if !strings.Contains(out, "FREEBUSY:20260602T090000Z/20260602T100000Z") {
+		t.Errorf("stored VFREEBUSY BUSY period missing:\n%s", out)
+	}
+	if strings.Contains(out, "20260602T120000Z") {
+		t.Errorf("FBTYPE=FREE period must be skipped:\n%s", out)
+	}
+}
+
 // fbLines extracts the semantically relevant lines (VFREEBUSY content minus
 // volatile DTSTAMP/PRODID).
 func fbLines(s string) []string {

@@ -62,6 +62,11 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 			return davxml.Raw(`<card:address-data-type content-type="text/vcard" version="3.0"/>` +
 				`<card:address-data-type content-type="text/vcard" version="4.0"/>`)
 		})
+		pf.Handle(card("supported-collation-set"), func() any {
+			return davxml.Raw(`<card:supported-collation>i;ascii-casemap</card:supported-collation>` +
+				`<card:supported-collation>i;octet</card:supported-collation>` +
+				`<card:supported-collation>i;unicode-casemap</card:supported-collation>`)
+		})
 		pf.Handle(card("max-resource-size"), func() any { return 10000000 })
 	}
 	if c, isCard := node.(*Card); isCard {
@@ -70,6 +75,26 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		})
 	}
 	return nil
+}
+
+// InterceptWrite validates vCard bodies on PUT/create, mirroring sabre's
+// CardDAV\Plugin::validateVCard: a body that does not parse as a vCard is
+// rejected with 415 rather than stored raw. Only writes whose parent is an
+// address book are inspected; anything else is left to other handlers.
+func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
+	parentPath, _ := splitPath(path)
+	parent, err := p.server.Tree.NodeForPath(parentPath)
+	if err != nil {
+		return data, nil // not an address-book object write
+	}
+	if _, isBook := parent.(*AddressBook); !isBook {
+		return data, nil
+	}
+	if _, err := decodeVCard(data); err != nil {
+		return nil, dav.ErrUnsupportedMediaType(
+			"This resource only supports valid vCard or jCard data. Parse error: %s", err)
+	}
+	return data, nil
 }
 
 // SupportedReports advertises the CardDAV reports.
@@ -164,6 +189,9 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 			}
 			if ok {
 				matches = append(matches, path+"/"+c.Name())
+				if query.limit > 0 && len(matches) >= query.limit {
+					break
+				}
 			}
 		}
 	case *Card:
@@ -175,7 +203,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 			matches = append(matches, path)
 		}
 	}
-	return p.writeCardResponses(r.Context(), w, matches, query.props)
+	return p.writeCardResponses(r.Context(), w, matches, query.props, query.addrData)
 }
 
 func (p *Plugin) multigetReport(body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -195,10 +223,37 @@ func (p *Plugin) multigetReport(body []byte, w http.ResponseWriter, r *http.Requ
 		}
 		paths = append(paths, path)
 	}
-	return p.writeCardResponses(r.Context(), w, paths, query.props)
+	return p.writeCardResponses(r.Context(), w, paths, query.props, query.addrData)
 }
 
-func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name) error {
+// convertResponseAddressData rewrites the {CARDDAV:}address-data property of a
+// response with its version-converted / property-filtered form, mirroring
+// sabre's post-processing of getPropertiesForPath output.
+func convertResponseAddressData(resp *davxml.Response, spec *addressDataSpec) error {
+	for pi := range resp.Propstats {
+		ps := &resp.Propstats[pi]
+		if ps.Status != http.StatusOK {
+			continue
+		}
+		for i, prop := range ps.Props {
+			if prop.Name != nameAddressData {
+				continue
+			}
+			text, isText := prop.Value.(davxml.Text)
+			if !isText {
+				continue
+			}
+			converted, err := convertCardData([]byte(text), spec)
+			if err != nil {
+				return dav.ErrBadRequest("The vCard object could not be converted: %s", err)
+			}
+			ps.Props[i].Value = davxml.Text(converted)
+		}
+	}
+	return nil
+}
+
+func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, spec *addressDataSpec) error {
 	ms := &davxml.MultiStatus{}
 	for _, cardPath := range paths {
 		responses, err := p.server.PropertiesForPath(ctx, cardPath, props, 0)
@@ -212,7 +267,14 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 			}
 			return err
 		}
-		ms.Responses = append(ms.Responses, responses...)
+		for _, resp := range responses {
+			if spec != nil {
+				if err := convertResponseAddressData(&resp, spec); err != nil {
+					return err
+				}
+			}
+			ms.Responses = append(ms.Responses, resp)
+		}
 	}
 	h := w.Header()
 	h.Set("Content-Type", "application/xml; charset=utf-8")

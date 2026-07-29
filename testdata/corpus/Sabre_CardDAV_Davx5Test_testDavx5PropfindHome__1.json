@@ -1,0 +1,94 @@
+{
+    "test": "Sabre\\CardDAV\\Davx5Test::testDavx5PropfindHome",
+    "seq": 1,
+    "setup": {
+        "setupCalDAV": false,
+        "setupCardDAV": true,
+        "setupACL": true,
+        "setupCalDAVSharing": false,
+        "setupCalDAVScheduling": false,
+        "setupCalDAVSubscriptions": false,
+        "setupCalDAVICSExport": false,
+        "setupLocks": false,
+        "setupFiles": false,
+        "setupPropertyStorage": false,
+        "autoLogin": "user1",
+        "caldavCalendars": [],
+        "caldavCalendarObjects": [],
+        "carddavAddressBooks": [
+            {
+                "id": "book1",
+                "uri": "book1",
+                "principaluri": "principals/user1",
+                "{DAV:}displayname": "My Contacts"
+            }
+        ],
+        "carddavCards": {
+            "book1": {
+                "card1": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:11111111\r\nFN:Alice Example\r\nN:Example;Alice;;;\r\nEMAIL;TYPE=WORK:alice@example.com\r\nTEL;TYPE=CELL:+15550001\r\nEND:VCARD\r\n",
+                "card2": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:22222222\r\nFN:Bob Example\r\nN:Example;Bob;;;\r\nEMAIL;TYPE=HOME:bob@example.com\r\nEND:VCARD\r\n",
+                "group1": "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:99999999\r\nFN:Work\r\nN:Work\r\nX-ADDRESSBOOKSERVER-KIND:group\r\nX-ADDRESSBOOKSERVER-MEMBER:urn:uuid:11111111\r\nX-ADDRESSBOOKSERVER-MEMBER:urn:uuid:22222222\r\nEND:VCARD\r\n"
+            }
+        },
+        "principals": [
+            {
+                "uri": "principals/user1",
+                "{DAV:}displayname": "User 1",
+                "{http://sabredav.org/ns}email-address": "user1.sabredav@sabredav.org",
+                "{http://sabredav.org/ns}vcard-url": "addressbooks/user1/book1/vcard1.vcf"
+            },
+            {
+                "uri": "principals/admin",
+                "{DAV:}displayname": "Admin"
+            },
+            {
+                "uri": "principals/user2",
+                "{DAV:}displayname": "User 2",
+                "{http://sabredav.org/ns}email-address": "user2.sabredav@sabredav.org"
+            }
+        ]
+    },
+    "request": {
+        "method": "PROPFIND",
+        "url": "/addressbooks/user1/",
+        "headers": {
+            "Depth": [
+                "1"
+            ]
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<d:propfind xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\" xmlns:cs=\"http://calendarserver.org/ns/\">\n  <d:prop>\n    <d:resourcetype/>\n    <d:displayname/>\n    <card:addressbook-description/>\n    <cs:getctag/>\n    <d:sync-token/>\n    <d:current-user-privilege-set/>\n    <d:supported-report-set/>\n    <card:max-resource-size/>\n    <card:supported-address-data/>\n    <card:supported-collation-set/>\n  </d:prop>\n</d:propfind>",
+        "tree": {
+            "type": "roots",
+            "roots": [
+                {
+                    "type": "node",
+                    "class": "Sabre\\CardDAV\\AddressBookRoot",
+                    "name": "addressbooks"
+                },
+                {
+                    "type": "node",
+                    "class": "Sabre\\DAVACL\\PrincipalCollection",
+                    "name": "principals"
+                }
+            ]
+        }
+    },
+    "response": {
+        "status": 207,
+        "headers": {
+            "X-Sabre-Version": [
+                "4.7.1"
+            ],
+            "Content-Type": [
+                "application/xml; charset=utf-8"
+            ],
+            "Vary": [
+                "Brief,Prefer"
+            ],
+            "DAV": [
+                "1, 3, extended-mkcol, addressbook, access-control, calendarserver-principal-property-search"
+            ]
+        },
+        "body": "<?xml version=\"1.0\"?>\n<d:multistatus xmlns:d=\"DAV:\" xmlns:s=\"http://sabredav.org/ns\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\"><d:response><d:href>/addressbooks/user1/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype><d:current-user-privilege-set><d:privilege><d:all/></d:privilege><d:privilege><d:read/></d:privilege><d:privilege><d:write/></d:privilege><d:privilege><d:write-properties/></d:privilege><d:privilege><d:write-content/></d:privilege><d:privilege><d:unlock/></d:privilege><d:privilege><d:bind/></d:privilege><d:privilege><d:unbind/></d:privilege><d:privilege><d:write-acl/></d:privilege><d:privilege><d:read-acl/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege></d:current-user-privilege-set><d:supported-report-set><d:supported-report><d:report><d:expand-property/></d:report></d:supported-report><d:supported-report><d:report><d:principal-match/></d:report></d:supported-report><d:supported-report><d:report><d:principal-property-search/></d:report></d:supported-report><d:supported-report><d:report><d:principal-search-property-set/></d:report></d:supported-report></d:supported-report-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat><d:propstat><d:prop><d:displayname/><card:addressbook-description/><x1:getctag xmlns:x1=\"http://calendarserver.org/ns/\"/><d:sync-token/><card:max-resource-size/><card:supported-address-data/><card:supported-collation-set/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response><d:response><d:href>/addressbooks/user1/book1/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype><d:displayname>My Contacts</d:displayname><d:current-user-privilege-set><d:privilege><d:all/></d:privilege><d:privilege><d:read/></d:privilege><d:privilege><d:write/></d:privilege><d:privilege><d:write-properties/></d:privilege><d:privilege><d:write-content/></d:privilege><d:privilege><d:unlock/></d:privilege><d:privilege><d:bind/></d:privilege><d:privilege><d:unbind/></d:privilege><d:privilege><d:write-acl/></d:privilege><d:privilege><d:read-acl/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege></d:current-user-privilege-set><d:supported-report-set><d:supported-report><d:report><card:addressbook-multiget/></d:report></d:supported-report><d:supported-report><d:report><card:addressbook-query/></d:report></d:supported-report><d:supported-report><d:report><d:expand-property/></d:report></d:supported-report><d:supported-report><d:report><d:principal-match/></d:report></d:supported-report><d:supported-report><d:report><d:principal-property-search/></d:report></d:supported-report><d:supported-report><d:report><d:principal-search-property-set/></d:report></d:supported-report></d:supported-report-set><card:max-resource-size>10000000</card:max-resource-size><card:supported-address-data><card:address-data-type content-type=\"text/vcard\" version=\"3.0\"/><card:address-data-type content-type=\"text/vcard\" version=\"4.0\"/><card:address-data-type content-type=\"application/vcard+json\" version=\"4.0\"/></card:supported-address-data><card:supported-collation-set><card:supported-collation>i;ascii-casemap</card:supported-collation><card:supported-collation>i;octet</card:supported-collation><card:supported-collation>i;unicode-casemap</card:supported-collation></card:supported-collation-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat><d:propstat><d:prop><card:addressbook-description/><x1:getctag xmlns:x1=\"http://calendarserver.org/ns/\"/><d:sync-token/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response></d:multistatus>\n"
+    }
+}

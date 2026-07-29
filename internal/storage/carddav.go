@@ -47,7 +47,11 @@ func (b *CardDAV) AddressBooksForUser(principalURI string) ([]carddav.AddressBoo
 			Props: map[xml.Name]any{},
 		}
 		token := strconv.FormatInt(synctoken, 10)
-		info.Props[xml.Name{Space: davxml.NSCalendarServer, Local: "getctag"}] = syncTokenPrefix + token
+		// sabre's CardDAV PDO backend serves getctag as the bare synctoken
+		// (CardDAV/Backend/PDO.php), unlike CalDAV which prefixes it with the
+		// sync-URL. Match that so address-book ctags are identical to a stock
+		// sabre instance sharing the same database.
+		info.Props[xml.Name{Space: davxml.NSCalendarServer, Local: "getctag"}] = token
 		info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "sync-token"}] = token
 		if displayname.Valid && displayname.String != "" {
 			info.Props[xml.Name{Space: davxml.NSDav, Local: "displayname"}] = displayname.String

@@ -139,3 +139,41 @@ func TestParseCalendarQueryRejectsDeepNesting(t *testing.T) {
 		t.Fatalf("valid shallow query rejected: %v", err)
 	}
 }
+
+// TestCalendarQueryRejectsInvertedTimeRange verifies a time-range whose end is
+// not after its start is a parse error (400), matching sabre's CompFilter /
+// PropFilter "The end-date must be larger than the start-date". An open-ended
+// range (only one bound) stays valid.
+func TestCalendarQueryRejectsInvertedTimeRange(t *testing.T) {
+	inverted := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">` +
+		`<d:prop><d:getetag/></d:prop><c:filter><c:comp-filter name="VCALENDAR">` +
+		`<c:comp-filter name="VEVENT">` +
+		`<c:time-range start="20260201T000000Z" end="20260101T000000Z"/>` +
+		`</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`
+	if _, err := caldav.ParseCalendarQuery([]byte(inverted)); err == nil {
+		t.Error("expected inverted time-range (end <= start) to be rejected")
+	}
+
+	openEnded := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">` +
+		`<d:prop><d:getetag/></d:prop><c:filter><c:comp-filter name="VCALENDAR">` +
+		`<c:comp-filter name="VEVENT">` +
+		`<c:time-range start="20260101T000000Z"/>` +
+		`</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`
+	if _, err := caldav.ParseCalendarQuery([]byte(openEnded)); err != nil {
+		t.Errorf("open-ended time-range must stay valid: %v", err)
+	}
+}
+
+// TestCalendarQueryRejectsUnknownCollation verifies an unsupported text-match
+// collation is a parse error (400), matching sabre's StringUtil::textMatch,
+// rather than being silently treated as case-insensitive.
+func TestCalendarQueryRejectsUnknownCollation(t *testing.T) {
+	q := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">` +
+		`<d:prop><d:getetag/></d:prop><c:filter><c:comp-filter name="VCALENDAR">` +
+		`<c:comp-filter name="VEVENT"><c:prop-filter name="SUMMARY">` +
+		`<c:text-match collation="i;made-up">x</c:text-match>` +
+		`</c:prop-filter></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`
+	if _, err := caldav.ParseCalendarQuery([]byte(q)); err == nil {
+		t.Error("expected unknown collation to be rejected")
+	}
+}

@@ -82,6 +82,8 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		hrefs = append(hrefs, p.server.BaseURI+ph.PrincipalURL()+"/")
 		return hrefs
 	})
+	// sabre's Schedule\Plugin reports every principal as an INDIVIDUAL.
+	pf.Handle(cal("calendar-user-type"), func() any { return "INDIVIDUAL" })
 	pf.Handle(cal("schedule-default-calendar-URL"), func() any {
 		if path := p.defaultCalendarPath(ph.PrincipalURL()); path != "" {
 			return davxml.Href{p.server.BaseURI + path + "/"}

@@ -342,7 +342,8 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		// (max-resource-size is advertised, not enforced, matching sabre).
 		pf.Handle(cal("max-resource-size"), func() any { return "10000000" })
 		pf.Handle(cal("supported-calendar-data"), func() any {
-			return davxml.Raw(`<cal:calendar-data content-type="text/calendar" version="2.0"/>`)
+			return davxml.Raw(`<cal:calendar-data content-type="text/calendar" version="2.0"/>` +
+				`<cal:calendar-data content-type="application/calendar+json"/>`)
 		})
 		pf.Handle(cal("supported-collation-set"), func() any {
 			return davxml.Raw(

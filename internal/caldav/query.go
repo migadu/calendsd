@@ -306,33 +306,50 @@ func convertPropFilter(in propFilterXML) (PropFilter, error) {
 	}
 	out.TimeRange = tr
 	for _, pf := range in.ParamFilters {
-		out.ParamFilters = append(out.ParamFilters, convertParamFilter(pf))
+		pfilter, err := convertParamFilter(pf)
+		if err != nil {
+			return out, err
+		}
+		out.ParamFilters = append(out.ParamFilters, pfilter)
 	}
-	out.TextMatch = convertTextMatch(in.TextMatch)
+	tm, err := convertTextMatch(in.TextMatch)
+	if err != nil {
+		return out, err
+	}
+	out.TextMatch = tm
 	return out, nil
 }
 
-func convertParamFilter(in paramFilterXML) ParamFilter {
+func convertParamFilter(in paramFilterXML) (ParamFilter, error) {
+	tm, err := convertTextMatch(in.TextMatch)
+	if err != nil {
+		return ParamFilter{}, err
+	}
 	return ParamFilter{
 		Name:         in.Name,
 		IsNotDefined: in.IsNotDefined != nil,
-		TextMatch:    convertTextMatch(in.TextMatch),
-	}
+		TextMatch:    tm,
+	}, nil
 }
 
-func convertTextMatch(in *textMatchXML) *TextMatch {
+func convertTextMatch(in *textMatchXML) (*TextMatch, error) {
 	if in == nil {
-		return nil
+		return nil, nil
 	}
 	collation := in.Collation
 	if collation == "" {
 		collation = "i;ascii-casemap"
 	}
+	switch collation {
+	case "i;octet", "i;ascii-casemap", "i;unicode-casemap":
+	default:
+		return nil, dav.ErrBadRequest("Collation type: %s is not supported", collation)
+	}
 	return &TextMatch{
 		Collation: collation,
 		Negate:    in.Negate == "yes",
 		Value:     in.Value,
-	}
+	}, nil
 }
 
 // timeRangeableProps are the date properties sabre allows time-range
@@ -355,6 +372,12 @@ func convertTimeRange(in *timeRangeXML) (*TimeRange, error) {
 	end, err := parseICalTime(in.End)
 	if err != nil {
 		return nil, dav.ErrBadRequest("The 'end' attribute of the time-range element is invalid: %s", in.End)
+	}
+	// sabre rejects an inverted range (only when both bounds are given) at
+	// parse time; an open-ended range is still allowed. See CompFilter.php /
+	// PropFilter.php.
+	if !start.IsZero() && !end.IsZero() && !end.After(start) {
+		return nil, dav.ErrBadRequest("The end-date must be larger than the start-date")
 	}
 	return &TimeRange{Start: start, End: end}, nil
 }
@@ -539,14 +562,29 @@ nextFilter:
 // collations (both effectively case-insensitive substring matching; octet is
 // case-sensitive).
 func matchText(haystack string, tm *TextMatch) bool {
-	var matched bool
-	switch tm.Collation {
-	case "i;octet":
-		matched = strings.Contains(haystack, tm.Value)
-	default: // i;ascii-casemap, i;unicode-casemap
-		matched = strings.Contains(strings.ToLower(haystack), strings.ToLower(tm.Value))
-	}
+	// Fold per collation exactly like sabre's StringUtil::textMatch:
+	// i;ascii-casemap uppercases ASCII a-z only, i;unicode-casemap uppercases
+	// with full Unicode, i;octet is byte-exact. CalDAV text-match has no
+	// match-type, so the comparison is always "contains".
+	matched := strings.Contains(foldCollation(haystack, tm.Collation), foldCollation(tm.Value, tm.Collation))
 	return tm.Negate != matched
+}
+
+// foldCollation case-folds s per the RFC 4790 collation, matching sabre.
+func foldCollation(s, collation string) string {
+	switch collation {
+	case "i;octet":
+		return s
+	case "i;ascii-casemap":
+		return strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' {
+				return r - ('a' - 'A')
+			}
+			return r
+		}, s)
+	default: // i;unicode-casemap
+		return strings.ToUpper(s)
+	}
 }
 
 // componentInTimeRange dispatches per component type, mirroring sabre's

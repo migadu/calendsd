@@ -126,6 +126,188 @@ func TestAddressbookParamFilter(t *testing.T) {
 	}
 }
 
+// TestCardPutValidation covers the write-time vCard validation
+// (internal/carddav/plugin.go, InterceptWrite) that mirrors sabre's
+// CardDAV\Plugin::validateVCard: a body that does not parse as a vCard is
+// rejected with 415 instead of being stored raw, while a valid vCard is
+// accepted.
+func TestCardPutValidation(t *testing.T) {
+	srv := buildServer()
+
+	// Non-vCard garbage → 415 Unsupported Media Type, like sabre.
+	w := do(t, srv, "PUT", "/addressbooks/admin/book1/bad.vcf",
+		"this is not a vcard at all", "Content-Type", "text/vcard")
+	if w.Code != 415 {
+		t.Errorf("PUT of non-vCard = %d, want 415:\n%s", w.Code, w.Body.String())
+	}
+
+	// A real vCard is accepted.
+	good := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:new1\r\nFN:New Person\r\nEND:VCARD\r\n"
+	w = do(t, srv, "PUT", "/addressbooks/admin/book1/new1.vcf", good, "Content-Type", "text/vcard")
+	if w.Code != 201 && w.Code != 204 {
+		t.Errorf("PUT of valid vCard = %d, want 201/204:\n%s", w.Code, w.Body.String())
+	}
+}
+
+// TestAddressbookQueryLimit covers <card:limit><card:nresults> truncation
+// (internal/carddav/plugin.go / query.go), matching sabre's
+// addressbookQueryReport limit break.
+func TestAddressbookQueryLimit(t *testing.T) {
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"card1.vcf": {URI: "card1.vcf", AddressBookID: "1", CardData: []byte(card1)},
+		"card2.vcf": {URI: "card2.vcf", AddressBookID: "1", CardData: []byte(card2)},
+	})
+	// No filter → both cards match, but nresults=1 caps the result set at one.
+	query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/></d:prop>
+	  <c:filter/>
+	  <c:limit><c:nresults>1</c:nresults></c:limit>
+	</c:addressbook-query>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	if w.Code != 207 {
+		t.Fatalf("query status = %d:\n%s", w.Code, w.Body.String())
+	}
+	if n := strings.Count(w.Body.String(), "<d:response"); n != 1 {
+		t.Errorf("limit nresults=1 returned %d responses, want 1:\n%s", n, w.Body.String())
+	}
+}
+
+// TestAddressbookQueryUnknownCollation covers parse-time rejection of an
+// unsupported collation (internal/carddav/query.go, convertTextMatch): sabre's
+// StringUtil::textMatch throws BadRequest, so the report is a 400 rather than a
+// silently-defaulted 207.
+func TestAddressbookQueryUnknownCollation(t *testing.T) {
+	srv := buildServer()
+	query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/></d:prop>
+	  <c:filter><c:prop-filter name="FN"><c:text-match collation="i;made-up">alice</c:text-match></c:prop-filter></c:filter>
+	</c:addressbook-query>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	if w.Code != 400 {
+		t.Errorf("unknown collation = %d, want 400:\n%s", w.Code, w.Body.String())
+	}
+}
+
+// TestAddressbookQueryAsciiCasemap covers the collation fold divergence
+// (internal/carddav/query.go, foldCollation): i;ascii-casemap folds only ASCII
+// a-z, so a non-ASCII letter is compared case-sensitively — matching sabre's
+// StringUtil, and unlike i;unicode-casemap which folds it.
+func TestAddressbookQueryAsciiCasemap(t *testing.T) {
+	const cardAccent = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:acc\r\nFN:CAFÉ\r\nEND:VCARD\r\n"
+	cards := map[string]*carddav.CardInfo{
+		"cafe.vcf": {URI: "cafe.vcf", AddressBookID: "1", CardData: []byte(cardAccent)},
+	}
+	q := func(collation string) string {
+		return `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+		  <d:prop><d:getetag/></d:prop>
+		  <c:filter><c:prop-filter name="FN"><c:text-match collation="` + collation + `" match-type="equals">café</c:text-match></c:prop-filter></c:filter>
+		</c:addressbook-query>`
+	}
+
+	// unicode-casemap folds É↔é, so "café" equals "CAFÉ" → match.
+	w := do(t, buildServerWithCards(cards), "REPORT", "/addressbooks/admin/book1/",
+		q("i;unicode-casemap"), "Depth", "1", "Content-Type", "application/xml")
+	if !strings.Contains(w.Body.String(), "cafe.vcf") {
+		t.Errorf("unicode-casemap should match CAFÉ:\n%s", w.Body.String())
+	}
+
+	// ascii-casemap folds only a-z, so É stays uppercase and é stays lowercase
+	// → no match, exactly as sabre computes it.
+	w = do(t, buildServerWithCards(cards), "REPORT", "/addressbooks/admin/book1/",
+		q("i;ascii-casemap"), "Depth", "1", "Content-Type", "application/xml")
+	if strings.Contains(w.Body.String(), "cafe.vcf") {
+		t.Errorf("ascii-casemap must NOT fold É, so café != CAFÉ:\n%s", w.Body.String())
+	}
+}
+
+// TestSupportedCollationSet covers the {CARDDAV:}supported-collation-set
+// property (internal/carddav/plugin.go) sabre reports on address books.
+func TestSupportedCollationSet(t *testing.T) {
+	srv := buildServer()
+	w := do(t, srv, "PROPFIND", "/addressbooks/admin/book1/",
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:prop><c:supported-collation-set/></d:prop></d:propfind>`,
+		"Depth", "0")
+	body := w.Body.String()
+	for _, c := range []string{"i;ascii-casemap", "i;octet", "i;unicode-casemap"} {
+		if !strings.Contains(body, c) {
+			t.Errorf("supported-collation-set missing %q:\n%s", c, body)
+		}
+	}
+}
+
+// richCard has several distinguishable properties so address-data property
+// filtering and version conversion can be observed.
+const richCard = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:rich\r\nFN:Rich Person\r\nN:Person;Rich;;;\r\nEMAIL:rich@example.org\r\nTEL:+15551234\r\nEND:VCARD\r\n"
+
+// TestAddressDataPartialRetrieval covers <card:address-data><card:prop
+// name="…"/> partial retrieval in addressbook-query (internal/carddav
+// convertCardData): only the requested properties plus the forced
+// UID/VERSION/FN are returned, matching sabre's convertVCard property filter.
+func TestAddressDataPartialRetrieval(t *testing.T) {
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"rich.vcf": {URI: "rich.vcf", AddressBookID: "1", CardData: []byte(richCard)},
+	})
+	query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/><c:address-data><c:prop name="EMAIL"/></c:address-data></d:prop>
+	  <c:filter/>
+	</c:addressbook-query>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	if w.Code != 207 {
+		t.Fatalf("query status = %d:\n%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	// Requested EMAIL plus the forced UID/VERSION/FN are kept.
+	for _, want := range []string{"rich@example.org", "UID:rich", "Rich Person", "VERSION:3.0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("partial address-data missing %q:\n%s", want, body)
+		}
+	}
+	// Non-requested, non-forced properties are stripped.
+	if strings.Contains(body, "+15551234") {
+		t.Errorf("partial address-data should have stripped TEL:\n%s", body)
+	}
+}
+
+// TestAddressDataVersionConversion covers version negotiation
+// (internal/carddav convertCardData): a stored 3.0 card requested as 4.0 is
+// upgraded, matching sabre's convertVCard version target.
+func TestAddressDataVersionConversion(t *testing.T) {
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"rich.vcf": {URI: "rich.vcf", AddressBookID: "1", CardData: []byte(richCard)},
+	})
+	query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/><c:address-data version="4.0"/></d:prop>
+	  <c:filter/>
+	</c:addressbook-query>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	body := w.Body.String()
+	if !strings.Contains(body, "VERSION:4.0") {
+		t.Errorf("address-data version=4.0 should upgrade the stored 3.0 card:\n%s", body)
+	}
+	if strings.Contains(body, "VERSION:3.0") {
+		t.Errorf("upgraded card should not still carry VERSION:3.0:\n%s", body)
+	}
+}
+
+// TestAddressDataMultigetIgnoresPropFilter locks the sabre quirk that
+// addressbook-multiget negotiates only the version and ignores nested
+// <prop> filters (unlike addressbook-query): the full card comes back.
+func TestAddressDataMultigetIgnoresPropFilter(t *testing.T) {
+	srv := buildServerWithCards(map[string]*carddav.CardInfo{
+		"rich.vcf": {URI: "rich.vcf", AddressBookID: "1", CardData: []byte(richCard)},
+	})
+	mg := `<?xml version="1.0"?><c:addressbook-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+	  <d:prop><d:getetag/><c:address-data><c:prop name="EMAIL"/></c:address-data></d:prop>
+	  <d:href>/addressbooks/admin/book1/rich.vcf</d:href>
+	</c:addressbook-multiget>`
+	w := do(t, srv, "REPORT", "/addressbooks/admin/book1/", mg, "Content-Type", "application/xml")
+	body := w.Body.String()
+	// The <prop name="EMAIL"/> filter must be ignored, so TEL survives.
+	if !strings.Contains(body, "+15551234") {
+		t.Errorf("multiget must ignore the address-data prop filter and return the whole card:\n%s", body)
+	}
+}
+
 // buildServerWithCards is buildServer with a custom card set in book1.
 func buildServerWithCards(cards map[string]*carddav.CardInfo) *dav.Server {
 	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/admin"}}}

@@ -9,6 +9,13 @@ import (
 	goical "github.com/emersion/go-ical"
 )
 
+// maxTimeRangeScan backstops recurrence iteration that is already bounded by a
+// finite window end. It is far higher than the shared maxRecurrences guard so
+// that matching a long-running rule against a window past its 3500th instance
+// (e.g. a decade-old daily event) is not a false negative, while a pathological
+// sub-daily infinite rule still cannot spin forever.
+const maxTimeRangeScan = 1_000_000
+
 // EventInTimeRange reports whether a VEVENT overlaps [start, end).
 // Port of vobject VEvent::isInTimeRange: recurring events match if any
 // occurrence overlaps; DTEND is non-inclusive. loc resolves floating times.
@@ -36,7 +43,14 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 			return false, err
 		}
 		next := set.Iterator()
-		for i := 0; i < maxRecurrences; i++ {
+		// Iterate until an occurrence overlaps the window or the series passes
+		// its end. Termination is guaranteed by `end` (always finite via
+		// TimeRange.bounds), so — unlike the shared maxRecurrences guard —
+		// there is no artificial occurrence cap that would falsely report "no
+		// match" for a long-running rule whose window lies past the 3500th
+		// instance (sabre's iterator has no such cap either). maxTimeRangeScan
+		// is only a backstop against a pathological sub-daily infinite rule.
+		for i := 0; i < maxTimeRangeScan; i++ {
 			occStart, ok := next()
 			if !ok || !occStart.Before(end) {
 				return false, nil

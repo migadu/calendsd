@@ -5,6 +5,33 @@ import (
 	"time"
 )
 
+// TestRecurringTimeRangeBeyondOldCap covers the fix for the false negative
+// where a long-running rule whose matching window lies past the 3500th
+// occurrence was reported as "no match". A daily event since 2000 is ~9100
+// instances deep by 2025; the query must still match, as sabre's uncapped
+// iterator does.
+func TestRecurringTimeRangeBeyondOldCap(t *testing.T) {
+	data := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +
+		"BEGIN:VEVENT\r\nUID:daily\r\nDTSTAMP:20000101T000000Z\r\n" +
+		"DTSTART:20000101T090000Z\r\nDTEND:20000101T100000Z\r\n" +
+		"RRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	cal, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := cal.Events()[0].Component
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+	in, err := EventInTimeRange(comp, start, end, time.UTC)
+	if err != nil {
+		t.Fatalf("EventInTimeRange: %v", err)
+	}
+	if !in {
+		t.Error("daily-since-2000 event must match a 2025 window (regression: old 3500-cap false negative)")
+	}
+}
+
 // TestRecurrenceCapPreventsDoS ensures a dense open-ended rule cannot pin a
 // core: a FREQ=SECONDLY event queried over an unbounded range must return
 // promptly (bounded by maxRecurrences), not iterate for billions of steps.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -161,7 +162,69 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		}
 		return set
 	})
+	pf.Handle(davName("supported-privilege-set"), func() any {
+		return davxml.SupportedPrivilegeSet{toSupportedPrivilege(supportedPrivileges(node))}
+	})
 	return nil
+}
+
+// Methods contributes no methods to the Allow header: sabre registers the ACL
+// handler but does not advertise ACL in OPTIONS, so neither do we.
+func (p *Plugin) Methods(path string) []string { return nil }
+
+// HandleMethod implements the ACL method (RFC 3744 §8.1), mirroring sabre's
+// DAVACL\Plugin::httpAcl.
+func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
+	if r.Method != "ACL" {
+		return false, nil
+	}
+	return true, p.httpACL(w, r)
+}
+
+func (p *Plugin) httpACL(w http.ResponseWriter, r *http.Request) error {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return dav.ErrBadRequest("XML body expected in ACL request")
+	}
+	// sabre's xml->expect('{DAV:}acl', body) rejects a body that is not a
+	// well-formed {DAV:}acl document with a 400.
+	var doc struct {
+		XMLName xml.Name `xml:"DAV: acl"`
+	}
+	if err := xml.Unmarshal(body, &doc); err != nil || doc.XMLName.Local != "acl" || doc.XMLName.Space != davxml.NSDav {
+		return dav.ErrBadRequest("The body did not contain a valid {DAV:}acl element")
+	}
+
+	path, err := p.server.Path(r)
+	if err != nil {
+		return err
+	}
+	node, err := p.server.Tree.NodeForPath(path)
+	if err != nil {
+		return err // NodeForPath surfaces a 404 for a missing node
+	}
+	if _, isACL := node.(ACLHolder); !isACL {
+		return dav.ErrMethodNotAllowed("This node does not support the ACL method")
+	}
+	// Every node in this server carries a fixed, owner-derived ACL and does not
+	// implement setACL — exactly like sabre's ACLTrait, whose setACL throws
+	// Forbidden. So a well-formed ACL request is recognized but cannot be
+	// applied, yielding the same 403 stock sabre returns against this backend.
+	return dav.ErrForbidden("Setting ACL is not supported on this node")
+}
+
+// toSupportedPrivilege converts an internal privilege tree into its davxml
+// rendering form (clark names resolved to xml.Name).
+func toSupportedPrivilege(p Privilege) davxml.SupportedPrivilege {
+	name, _ := davxml.ParseClark(p.Name)
+	sp := davxml.SupportedPrivilege{Name: name, Abstract: p.Abstract}
+	for _, sub := range p.Aggregates {
+		sp.Aggregates = append(sp.Aggregates, toSupportedPrivilege(sub))
+	}
+	return sp
 }
 
 // SupportedReports advertises the implemented principal reports.
