@@ -65,7 +65,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       </select></label>` : ''}
     <div class="grid">
       <label class="full">Title<input id="ev-title" type="text" value="${esc(inst?.summary === '(no title)' ? '' : inst?.summary ?? '')}" placeholder="Add a title"></label>
-      <label>Calendar<select id="ev-cal" ${inst ? 'disabled' : ''}></select></label>
+      <label>Calendar<select id="ev-cal"></select></label>
       <label class="row" style="align-self:end"><input type="checkbox" id="ev-allday" ${inst?.allDay ? 'checked' : ''}> All day</label>
       <label>Starts<input id="ev-start"></label>
       <label>Ends<input id="ev-end"></label>
@@ -109,16 +109,33 @@ export async function openEventDialog(inst, defaultDay, timed) {
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
   q('#ev-cancel').addEventListener('click', close);
 
-  // calendars — new events can only land on a writable calendar; read-only
-  // shares are excluded from the picker (and editing their events is blocked
-  // below).
+  // calendars — an event can only live on a writable calendar, so the picker
+  // lists just those (a read-only share the event currently sits on is added
+  // so its name still shows, but the whole editor is disabled below). Changing
+  // the calendar of an existing event moves it there on save.
   const roCal = !!inst && store.isReadOnly(inst.calHref);
   const calSel = q('#ev-cal');
-  const calOptions = inst ? store.state.calendars : store.eventCalendars();
+  const writable = store.eventCalendars();
+  const calOptions = inst && !writable.some(c => c.href === inst.calHref)
+    ? [store.state.calendars.find(c => c.href === inst.calHref), ...writable].filter(Boolean)
+    : writable;
   for (const c of calOptions) {
     calSel.append(h(`<option value="${esc(c.href)}">${esc(c.displayName || c.name)}</option>`));
   }
   calSel.value = inst?.calHref || store.state.prefs.defaultCal || calOptions[0]?.href || '';
+
+  // Moving a single occurrence to another calendar isn't well-defined (the
+  // per-occurrence edit only adds an override to the master), so the picker is
+  // locked to the current calendar when "only this event" is chosen, and
+  // always for a read-only share.
+  const scopeSel = q('#ev-scope');
+  function syncCalLock() {
+    const locked = roCal || (scopeSel && scopeSel.value === 'one');
+    calSel.disabled = locked;
+    if (locked && inst) calSel.value = inst.calHref;
+  }
+  syncCalLock();
+  scopeSel?.addEventListener('change', syncCalLock);
 
   // date/time inputs switch type with the all-day toggle
   const allDayBox = q('#ev-allday');
@@ -341,6 +358,12 @@ export async function openEventDialog(inst, defaultDay, timed) {
           RRULE: fields.rrule ? `RRULE:${fields.rrule}` : null,
         };
         await store.putObject(inst.href, ical.setMasterProps(master.text, props), master.etag);
+      }
+      // Calendar changed: relocate the object after the in-place edit. The
+      // picker is locked for the single-occurrence scope, so a differing value
+      // here always means the whole object should move.
+      if (inst && calSel.value && calSel.value !== inst.calHref) {
+        await store.moveObject(inst.href, calSel.value + inst.href.slice(inst.href.lastIndexOf('/') + 1));
       }
       close();
       toast(guests.length ? 'Saved — invitations are on their way.' : 'Saved.');
