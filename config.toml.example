@@ -17,6 +17,10 @@
 # HTTP listener and the WebDAV mount point.
 [server]
 addr = ":8080"          # Listen address (host:port; ":8080" = all interfaces).
+metrics_addr = ""       # Second listener serving Prometheus /metrics and Go
+                        # /debug/pprof, e.g. "127.0.0.1:9464". Plain HTTP, no
+                        # auth: bind loopback or a firewalled interface, never
+                        # the public one. Empty = disabled.
 base_uri = "/"          # URI prefix the server is mounted at (e.g. "/dav/").
 realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
                         # users.digesta1 in the shared database, forever, for
@@ -55,14 +59,22 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
 
 
-# LOGGING (debugging)
+# LOGGING
 # =============================================================================
-# When request_dir is set, every request/response is dumped to one file per
-# request under that directory (method, path, headers, and bounded request and
-# response bodies). The Authorization header is redacted, but the bodies hold
-# calendar/contact data — this is a DAV-client debugging aid, NOT for
-# production. Leave empty to disable.
+# level sets the verbosity of the structured (slog) log on stderr. Rejected
+# logins are logged at "warn" (with the attempted username and client address,
+# never the password); successful logins and a per-request trace are at "debug".
+# The -log-level flag overrides this key; when neither is set, the
+# $CALSERVER_LOG_LEVEL environment variable applies (handy for raising verbosity
+# via systemd without editing this file). calclient honours the same flag/env.
+#
+# When request_dir is set, every request/response is additionally dumped to one
+# file per request under that directory (method, path, headers, and bounded
+# request and response bodies). The Authorization header is redacted, but the
+# bodies hold calendar/contact data — this is a DAV-client debugging aid, NOT
+# for production. Leave empty to disable.
 [logging]
+level = "info"          # debug, info, warn, or error. Empty = info.
 request_dir = ""        # e.g. "/var/tmp/calserver-requests". Empty = disabled.
 
 

@@ -25,6 +25,7 @@ import (
 	"calserver/internal/caldav/ical"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/metrics"
 )
 
 // syncTokenPrefix is sabre's Sync\Plugin::SYNCTOKEN_PREFIX; the ctag/token
@@ -40,6 +41,10 @@ func Open(dsn string) (*sql.DB, error) {
 // CalDAV\Backend\PDO.
 type CalDAV struct {
 	DB *sql.DB
+	// Metrics times the named expensive operations (calendar_query,
+	// changes_for_calendar, create/update_object, scheduling_objects) —
+	// deliberately not every query. A nil Set records nothing.
+	Metrics *metrics.Set
 }
 
 // propertyMap mirrors sabre's PDO::$propertyMap: calendar properties stored
@@ -325,6 +330,7 @@ func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, err
 // calendarQuery. The occurrence filters are NULL-safe so objects without
 // computed bounds are never wrongly excluded — the caller's validator refines.
 func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start, end time.Time) ([]string, error) {
+	defer b.Metrics.DBOpTimer("calendar_query")()
 	q := `SELECT uri FROM calendarobjects WHERE calendarid = $1`
 	args := []any{id.Calendar}
 	if componentType != "" {
@@ -393,6 +399,7 @@ func scanObject(rows *sql.Rows, id caldav.CalendarID) (*caldav.ObjectInfo, error
 // wrapped in one transaction (deliberately safer than sabre's unwrapped
 // statements — see PLAN.md §5).
 func (b *CalDAV) CreateCalendarObject(id caldav.CalendarID, objectURI string, data []byte) (string, error) {
+	defer b.Metrics.DBOpTimer("create_object")()
 	d, err := ical.Denormalize(data)
 	if err != nil {
 		return "", err
@@ -420,6 +427,7 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
 }
 
 func (b *CalDAV) UpdateCalendarObject(id caldav.CalendarID, objectURI string, data []byte) (string, error) {
+	defer b.Metrics.DBOpTimer("update_object")()
 	d, err := ical.Denormalize(data)
 	if err != nil {
 		return "", err
@@ -469,6 +477,7 @@ func (b *CalDAV) DeleteCalendarObject(id caldav.CalendarID, objectURI string) er
 // deduplicated change log since a token (last operation per uri wins), or
 // the full object list for an initial sync.
 func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+	defer b.Metrics.DBOpTimer("changes_for_calendar")()
 	if syncToken == "" {
 		var currentToken sql.NullInt64
 		err := b.DB.QueryRow(`SELECT synctoken FROM calendars WHERE id = $1`, id.Calendar).Scan(&currentToken)
@@ -588,6 +597,7 @@ VALUES ($1, $2, $3, $4)`,
 // SchedulingObjects reads a principal's schedule inbox from the shared
 // schedulingobjects table. Port of PDO getSchedulingObjects.
 func (b *CalDAV) SchedulingObjects(principalURI string) ([]caldav.SchedulingObjectInfo, error) {
+	defer b.Metrics.DBOpTimer("scheduling_objects")()
 	rows, err := b.DB.Query(
 		`SELECT uri, calendardata FROM schedulingobjects WHERE principaluri = $1`, principalURI)
 	if err != nil {

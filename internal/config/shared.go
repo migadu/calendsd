@@ -17,6 +17,10 @@ type Merged struct {
 	Set map[string]bool
 	// DSN is the resolved database DSN.
 	DSN string
+	// LogLevel is the resolved log verbosity (debug/info/warn/error), or
+	// empty for the default. Pass it to logging.Setup, which also honours
+	// $CALSERVER_LOG_LEVEL when this is empty.
+	LogLevel string
 	// Server is the resolved effective server configuration — the surface
 	// server.Config.Canonical() echoes.
 	Server server.Config
@@ -61,6 +65,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	rcptdURL := flag.String("rcptd-url", "", "base URL of an rcptd daemon (e.g. http://127.0.0.1:8090); when set, authenticate Basic logins against its /auth endpoint (Dovecot passwd hashes) instead of the users table. Basic-only (no digesta1) — front with TLS; pair with -auto-provision")
 	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
 	requestLogDir := flag.String("request-log-dir", "", "debug: dump every request/response (headers + bounded bodies, Authorization redacted) to one file per request under this directory; empty disables. Do not use in production")
+	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). Overrides [logging].level; when neither is set, $CALSERVER_LOG_LEVEL applies")
 
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
@@ -87,6 +92,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 		}
 
 		m.DSN = m.Str("db", *dsn, m.File.Database.DSN)
+		m.LogLevel = m.Str("log-level", *logLevel, m.File.Logging.Level)
 		m.Server = server.Config{
 			BaseURI:              m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
 			Realm:                m.Str("realm", *realm, m.File.Server.Realm),

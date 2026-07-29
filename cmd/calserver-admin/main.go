@@ -16,6 +16,7 @@ import (
 	"calserver/internal/admin"
 	"calserver/internal/config"
 	"calserver/internal/dav"
+	"calserver/internal/logging"
 	"calserver/internal/server"
 	"calserver/internal/storage"
 )
@@ -30,6 +31,10 @@ func main() {
 	m, err := resolve()
 	if err != nil {
 		slog.Error("loading config", "err", err)
+		os.Exit(1)
+	}
+	if err := logging.Setup(m.LogLevel); err != nil {
+		slog.Error("configuring logging", "err", err)
 		os.Exit(1)
 	}
 	cfg := m.Server

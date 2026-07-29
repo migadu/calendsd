@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+
+	"calserver/internal/metrics"
 )
 
 // DigestBackend authenticates HTTP Digest credentials (RFC 2617, MD5 +
@@ -21,6 +24,9 @@ type DigestBackend struct {
 	// HashA1 returns the stored md5(user:realm:pass) hex digest for a
 	// user, or ok=false if the user is unknown.
 	HashA1 func(realm, username string) (hash string, ok bool)
+	// Metrics counts attempts and times the check; only requests that
+	// actually present Digest credentials are counted.
+	Metrics *metrics.Set
 }
 
 func (b *DigestBackend) prefix() string {
@@ -39,8 +45,11 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 	if username == "" {
 		return "", false, "No 'Authorization: Digest' header found. Either the client didn't send one, or the server is misconfigured"
 	}
+	start := time.Now()
+	defer func() { b.Metrics.ObserveAuthCheck("digest", time.Since(start).Seconds()) }()
 	a1, ok := b.HashA1(b.Realm, username)
 	if !ok {
+		b.Metrics.AuthAttempt("digest", "bad_credentials")
 		return "", false, "Username or password was incorrect"
 	}
 
@@ -49,6 +58,9 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
 	// downgrade path sabre's Digest also rejects.
 	if params["qop"] != "auth" {
+		// A protocol problem, not wrong credentials: "error", so a
+		// misbehaving client doesn't read as a brute force.
+		b.Metrics.AuthAttempt("digest", "error")
 		return "", false, "Unsupported digest qop value"
 	}
 	expected := md5hex(strings.Join([]string{
@@ -59,8 +71,10 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 	// not track or expire the nonce, matching sabre's Digest), so a captured
 	// Authorization header can be replayed — deploy behind TLS.
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(params["response"])) != 1 {
+		b.Metrics.AuthAttempt("digest", "bad_credentials")
 		return "", false, "Username or password was incorrect"
 	}
+	b.Metrics.AuthAttempt("digest", "ok")
 	return b.prefix() + username, true, ""
 }
 

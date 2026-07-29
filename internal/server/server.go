@@ -20,6 +20,7 @@ import (
 	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
+	"calserver/internal/metrics"
 	"calserver/internal/storage"
 )
 
@@ -67,6 +68,10 @@ type Config struct {
 	// request under this directory. A debugging aid for DAV clients — off by
 	// default; do not enable in production (bodies hold calendar/contact data).
 	RequestLogDir string
+	// Metrics, when non-nil, receives Prometheus observations from the HTTP
+	// middleware, auth backends, storage, and iMip (METRICS-PLAN.md). Not
+	// part of Canonical(): it changes no DAV semantics.
+	Metrics *metrics.Set
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -102,9 +107,12 @@ func (c Config) Canonical() string {
 func New(db *sql.DB, cfg Config) http.Handler {
 	srv := newDAVServer(db, cfg)
 	var h http.Handler = WrapWellKnown(srv, srv.BaseURI)
-	// Request logging wraps outermost so it captures the final status of every
-	// request, including the /.well-known redirects and auth challenges.
-	return WrapRequestLog(h, cfg.RequestLogDir)
+	// Request logging wraps outside the well-known redirect so it captures the
+	// final status of every request, including redirects and auth challenges.
+	h = WrapRequestLog(h, cfg.RequestLogDir)
+	// Metrics wrap outermost too, so the well-known row counts redirects;
+	// order relative to the request log (a debug aid) is immaterial.
+	return WrapMetrics(h, cfg.Metrics, srv.BaseURI)
 }
 
 // WrapWellKnown adds the /.well-known/caldav → base-URI redirect.
@@ -136,10 +144,10 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	}
 
 	principals := &storage.Principals{DB: db}
-	calendars := &storage.CalDAV{DB: db}
+	calendars := &storage.CalDAV{DB: db, Metrics: cfg.Metrics}
 	users := &storage.Users{DB: db}
 
-	addressbooks := &storage.CardDAV{DB: db}
+	addressbooks := &storage.CardDAV{DB: db, Metrics: cfg.Metrics}
 
 	root := mock.NewCollection("root")
 	principalCollection := acl.NewPrincipalCollection(principals, "principals")
@@ -154,6 +162,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	root.Attach(addressBookRoot)
 
 	srv := dav.NewServer(cfg.BaseURI, root)
+	srv.Metrics = cfg.Metrics
 	switch {
 	case authOverride != nil:
 		srv.AddPlugin(authOverride)
@@ -170,18 +179,23 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		rb := auth.NewRcptdBackend(cfg.Realm, cfg.RcptdURL, cfg.RcptdToken, 5*time.Minute)
 		rb.Provision = prov.ensure
 		rb.Logger = slog.Default()
-		srv.AddPlugin(auth.NewPlugin(rb))
+		rb.Metrics = cfg.Metrics
+		ap := auth.NewPlugin(rb)
+		ap.Metrics = cfg.Metrics
+		srv.AddPlugin(ap)
 	default:
-		srv.AddPlugin(auth.NewPlugin(
-			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1},
-			&auth.BasicBackend{Realm: cfg.Realm, Validate: func(username, password string) bool {
+		ap := auth.NewPlugin(
+			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1, Metrics: cfg.Metrics},
+			&auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(username, password string) bool {
 				// Basic verifies against the same digesta1 hash, compared in
 				// constant time so verification does not leak the stored hash.
 				hash, ok := users.HashA1(cfg.Realm, username)
 				return ok && subtle.ConstantTimeCompare(
 					[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
 			}},
-		))
+		)
+		ap.Metrics = cfg.Metrics
+		srv.AddPlugin(ap)
 	}
 	srv.AddPlugin(&acl.Plugin{
 		AdminPrincipals:                   []string{"principals/admin"},
@@ -209,6 +223,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		srv.AddPlugin(&caldav.IMipPlugin{
 			SenderEmail: cfg.IMipSender,
 			Mailer:      &caldav.SMTPMailer{Addr: cfg.IMipSMTP},
+			Metrics:     cfg.Metrics,
 		})
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})

@@ -12,10 +12,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"calserver/internal/metrics"
 	"shared/passwd"
 )
 
@@ -48,6 +50,11 @@ type RcptdBackend struct {
 	// Logger records unusable stored hashes (a user whose only hash uses an
 	// unsupported scheme can never authenticate). Nil disables logging.
 	Logger *slog.Logger
+	// Metrics counts attempts by typed outcome, times the whole check and the
+	// /auth roundtrip separately (disambiguating "rcptd is slow" from "the
+	// hash verify is eating the CPU"), and counts credential-cache hits and
+	// misses. A nil Set records nothing.
+	Metrics *metrics.Set
 
 	// Positive-credential cache: skips the /auth round-trip and the (bcrypt)
 	// verification for repeat logins, which chatty CalDAV clients produce in
@@ -102,7 +109,11 @@ func (b *RcptdBackend) Check(r *http.Request) (string, bool, string) {
 		return "", false, "No 'Authorization: Basic' header found. Either the client didn't send one, or the server is misconfigured"
 	}
 	username = strings.ToLower(username)
-	if ok, reason := b.verify(r.Context(), username, password); !ok {
+	start := time.Now()
+	ok, outcome, reason := b.verify(r.Context(), username, password)
+	b.Metrics.ObserveAuthCheck("rcptd", time.Since(start).Seconds())
+	if !ok {
+		b.Metrics.AuthAttempt("rcptd", outcome)
 		return "", false, reason
 	}
 	principal := b.prefix() + username
@@ -110,9 +121,13 @@ func (b *RcptdBackend) Check(r *http.Request) (string, bool, string) {
 		if err := b.Provision(principal, username); err != nil {
 			// Fail closed: an authenticated user with no principal would hit
 			// confusing downstream errors, so surface it as an auth failure.
+			// Operationally nothing like bad_credentials: a first-login DB
+			// write failed, so it gets its own outcome.
+			b.Metrics.AuthAttempt("rcptd", "provision_error")
 			return "", false, "provisioning failed: " + err.Error()
 		}
 	}
+	b.Metrics.AuthAttempt("rcptd", "ok")
 	return principal, true, ""
 }
 
@@ -120,33 +135,42 @@ func (b *RcptdBackend) Challenge(h http.Header) {
 	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
 }
 
-// verify returns whether the credentials are valid, plus a client-facing
-// reason on failure. "user unknown" and "wrong password" deliberately share
-// one message so the response can't be used to enumerate accounts.
-func (b *RcptdBackend) verify(ctx context.Context, username, password string) (bool, string) {
+// verify returns whether the credentials are valid, a typed outcome for the
+// attempts metric, and a client-facing reason on failure. "user unknown" and
+// "wrong password" deliberately share one message so the response can't be
+// used to enumerate accounts (the metric outcome merges them too — it is
+// aggregate, so nothing leaks, but per-user separation stays out on
+// principle).
+func (b *RcptdBackend) verify(ctx context.Context, username, password string) (ok bool, outcome, reason string) {
 	const bad = "Username or password was incorrect"
 
 	if b.cacheHit(username, password) {
-		return true, ""
+		b.Metrics.AuthCacheEvent("hit")
+		return true, "ok", ""
+	}
+	if b.ttl != 0 {
+		// Only a real consultation counts: with the cache disabled (ttl 0) a
+		// permanent 0% hit rate would read as a broken cache, not a missing one.
+		b.Metrics.AuthCacheEvent("miss")
 	}
 
 	hashes, status, err := b.lookup(ctx, username)
 	if err != nil {
-		return false, "authentication service is unreachable"
+		return false, "unavailable", "authentication service is unreachable"
 	}
 	switch status {
 	case http.StatusOK:
 		// fall through to verification
 	case http.StatusNotFound:
-		return false, bad
+		return false, "bad_credentials", bad
 	case http.StatusServiceUnavailable:
 		// Transient CDB fault on rcptd's side; retryable, not a definitive no.
-		return false, "authentication service is temporarily unavailable"
+		return false, "unavailable", "authentication service is temporarily unavailable"
 	case http.StatusUnauthorized:
 		// Our own bearer token is wrong — an operator misconfiguration.
-		return false, "authentication service rejected this server's credentials"
+		return false, "error", "authentication service rejected this server's credentials"
 	default:
-		return false, fmt.Sprintf("authentication service returned status %d", status)
+		return false, "error", fmt.Sprintf("authentication service returned status %d", status)
 	}
 
 	res := passwd.VerifyAny(hashes, password)
@@ -155,10 +179,10 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (b
 			"user", username, "unsupported", res.Unsupported, "malformed", res.Malformed)
 	}
 	if !res.Matched {
-		return false, bad
+		return false, "bad_credentials", bad
 	}
 	b.cacheStore(username, password)
-	return true, ""
+	return true, "ok", ""
 }
 
 // authResponse is the subset of rcptd's /auth JSON we consume. allowed_from
@@ -176,8 +200,10 @@ func (b *RcptdBackend) lookup(ctx context.Context, email string) (hashes []strin
 	if b.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+b.Token)
 	}
+	start := time.Now()
 	resp, err := b.client().Do(req)
 	if err != nil {
+		b.Metrics.RcptdRequest("error", time.Since(start).Seconds())
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
@@ -185,13 +211,30 @@ func (b *RcptdBackend) lookup(ctx context.Context, email string) (hashes []strin
 	if resp.StatusCode != http.StatusOK {
 		// Drain a bounded amount so the connection can be reused.
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		b.Metrics.RcptdRequest(rcptdCodeLabel(resp.StatusCode), time.Since(start).Seconds())
 		return nil, resp.StatusCode, nil
 	}
 	var ar authResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&ar); err != nil {
+		// A 200 whose body doesn't decode (a proxy error page, a broken
+		// rcptd) fails every login; counting it as code="200" would keep the
+		// rcptd health alert green through the outage.
+		b.Metrics.RcptdRequest("error", time.Since(start).Seconds())
 		return nil, 0, fmt.Errorf("decoding /auth response: %w", err)
 	}
+	b.Metrics.RcptdRequest("200", time.Since(start).Seconds())
 	return ar.PasswordHashes, http.StatusOK, nil
+}
+
+// rcptdCodeLabel keeps the code label a closed set: the statuses verify()
+// distinguishes stay literal, anything else — the remote server chooses the
+// status, so it must not mint series — collapses to "other".
+func rcptdCodeLabel(status int) string {
+	switch status {
+	case http.StatusOK, http.StatusNotFound, http.StatusUnauthorized, http.StatusServiceUnavailable:
+		return strconv.Itoa(status)
+	}
+	return "other"
 }
 
 // mac binds an email+password pair to the per-process key. The NUL separator

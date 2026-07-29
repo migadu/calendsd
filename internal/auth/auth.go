@@ -4,10 +4,12 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"calserver/internal/dav"
+	"calserver/internal/metrics"
 )
 
 // Backend verifies request credentials. Port of sabre's
@@ -34,6 +36,27 @@ type Plugin struct {
 	// fixedPrincipal, when set, authenticates every request as that
 	// principal (the autoLogin mechanism of sabre's test harness).
 	fixedPrincipal string
+
+	// Logger records authentication outcomes: rejected logins at Warn (with
+	// the attempted username and client address, never the password) and
+	// successful ones at Debug. Nil uses slog.Default(). sabre logged none of
+	// this, so a brute-force or a misconfigured client was previously
+	// invisible on the server side.
+	Logger *slog.Logger
+
+	// Metrics counts credential-less probes (backend="none",
+	// outcome="no_credentials"); attempts that carry credentials are counted
+	// by the backend that owns the credential type, so the outcome
+	// classification lives next to the code that knows it. A nil Set records
+	// nothing.
+	Metrics *metrics.Set
+}
+
+func (p *Plugin) logger() *slog.Logger {
+	if p.Logger != nil {
+		return p.Logger
+	}
+	return slog.Default()
 }
 
 // NewPlugin creates the auth plugin with the given backends.
@@ -67,6 +90,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		principal, ok, reason := b.Check(r)
 		if ok {
 			dav.SetPrincipal(r.Context(), principal)
+			p.logger().Debug("auth ok",
+				"principal", principal, "method", r.Method,
+				"path", r.URL.Path, "remote", remoteAddr(r))
 			return true, nil
 		}
 		reasons = append(reasons, reason)
@@ -74,6 +100,27 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	if !p.AutoRequireLogin {
 		return true, nil
 	}
+	// A rejected login was previously silent; record it (never the password)
+	// so wrong logins are visible at the default level. A request with no
+	// credentials at all is the ordinary pre-challenge probe every DAV client
+	// makes, so log that at Debug and only a real credential rejection at Warn.
+	user, presented := attemptedLogin(r)
+	level := slog.LevelDebug
+	if presented {
+		level = slog.LevelWarn
+		if !credentialParsed(r) {
+			// An Authorization header no backend could parse (Bearer, mangled
+			// base64 Basic): no backend counted it, so count it here — a
+			// rejection must never vanish from the attempts series.
+			p.Metrics.AuthAttempt("none", "error")
+		}
+	} else {
+		p.Metrics.AuthAttempt("none", "no_credentials")
+	}
+	p.logger().Log(r.Context(), level, "auth failed",
+		"user", user, "method", r.Method, "path", r.URL.Path,
+		"remote", remoteAddr(r), "reason", strings.Join(reasons, "; "))
+
 	for _, b := range p.backends {
 		b.Challenge(w.Header())
 	}
@@ -82,4 +129,42 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		msg = strings.Join(reasons, ", ")
 	}
 	return false, dav.ErrNotAuthenticated("%s", msg)
+}
+
+// attemptedLogin best-effort extracts the username a client presented, so a
+// rejected login names who tried. presented reports whether the request
+// carried any credentials at all: without it, the log line is just the routine
+// unauthenticated probe that precedes every challenge, not a failed attempt.
+func attemptedLogin(r *http.Request) (user string, presented bool) {
+	if u, _, ok := r.BasicAuth(); ok {
+		return u, true
+	}
+	if params := parseDigestHeader(r.Header.Get("Authorization")); params != nil {
+		return params["username"], true
+	}
+	// Any other non-empty Authorization header (Bearer, base64 that doesn't
+	// decode) still carries a credential: its rejection must log at Warn and
+	// count as an attempt, not read as a routine pre-challenge probe.
+	return "", r.Header.Get("Authorization") != ""
+}
+
+// credentialParsed reports whether the Authorization header parsed as one of
+// the credential types the backends count themselves (Basic or Digest).
+func credentialParsed(r *http.Request) bool {
+	if _, _, ok := r.BasicAuth(); ok {
+		return true
+	}
+	return parseDigestHeader(r.Header.Get("Authorization")) != nil
+}
+
+// remoteAddr reports the client address for a log line. When the request came
+// through the calclient reverse proxy, r.RemoteAddr is the proxy's loopback
+// address, so surface the proxy-supplied X-Forwarded-For too — untrusted (a
+// client can forge it when it reaches calserver directly), but the only way to
+// see the real client behind the proxy.
+func remoteAddr(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff + " (via " + r.RemoteAddr + ")"
+	}
+	return r.RemoteAddr
 }

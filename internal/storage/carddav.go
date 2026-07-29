@@ -12,12 +12,16 @@ import (
 	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/metrics"
 )
 
 // CardDAV is the address book backend over the sabre schema. Port of
 // CardDAV\Backend\PDO.
 type CardDAV struct {
 	DB *sql.DB
+	// Metrics times changes_for_addressbook, the one expensive named
+	// operation here. A nil Set records nothing.
+	Metrics *metrics.Set
 }
 
 var _ carddav.Backend = (*CardDAV)(nil)
@@ -248,6 +252,7 @@ func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
 }
 
 func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+	defer b.Metrics.DBOpTimer("changes_for_addressbook")()
 	// Same shape as the calendar sync transcription.
 	if syncToken == "" {
 		var current sql.NullInt64

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/metrics"
 )
 
 // Server is the WebDAV protocol engine: an http.Handler dispatching methods
@@ -38,6 +39,10 @@ type Server struct {
 	// larger bodies are rejected with 413. Guards against memory-exhaustion
 	// from unbounded PUT/REPORT/PROPFIND bodies. Zero means the default.
 	MaxRequestBodySize int64
+
+	// Metrics, when non-nil, receives protocol-level observations (REPORT
+	// types, sync truncation). A nil Set records nothing.
+	Metrics *metrics.Set
 }
 
 // DefaultMaxRequestBodySize is the request-body cap applied when a Server does

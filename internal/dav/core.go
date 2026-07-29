@@ -90,6 +90,7 @@ func (c *CorePlugin) report(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return ErrBadRequest("%s", err)
 	}
+	c.server.Metrics.ReportRequest(reportTypeLabel(name))
 	for _, p := range c.server.Plugins() {
 		rh, ok := p.(ReportHandler)
 		if !ok {
@@ -104,6 +105,27 @@ func (c *CorePlugin) report(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	return ErrReportNotSupported()
+}
+
+// reportTypeLabel maps a REPORT root element onto the closed metric label
+// set; unknown reports collapse to "other" so the label never grows from
+// request data.
+func reportTypeLabel(name xml.Name) string {
+	const (
+		nsCalDAV  = "urn:ietf:params:xml:ns:caldav"
+		nsCardDAV = "urn:ietf:params:xml:ns:carddav"
+	)
+	switch name {
+	case xml.Name{Space: nsCalDAV, Local: "calendar-query"},
+		xml.Name{Space: nsCalDAV, Local: "calendar-multiget"},
+		xml.Name{Space: nsCalDAV, Local: "free-busy-query"},
+		xml.Name{Space: nsCardDAV, Local: "addressbook-query"},
+		xml.Name{Space: nsCardDAV, Local: "addressbook-multiget"}:
+		return name.Local
+	case xml.Name{Space: davxml.NSDav, Local: "sync-collection"}:
+		return "sync-collection"
+	}
+	return "other"
 }
 
 // rootElementName returns the qualified name of a document's root element.

@@ -79,6 +79,31 @@ slot straight into monitoring. The `principal` writes go through the same
 `storage.AdminWrites` carve-out as the admin panel (digesta1 computed under
 the configured realm; override with `--realm`).
 
+## Metrics
+
+Set `-metrics-addr` (or `[server].metrics_addr`) to serve Prometheus metrics
+and Go pprof on a second plain-HTTP listener (METRICS-PLAN.md has the full
+design and metric inventory):
+
+```sh
+calserver -config config.toml -metrics-addr 127.0.0.1:9464
+curl -s http://127.0.0.1:9464/metrics | grep calserver_
+go tool pprof http://127.0.0.1:9464/debug/pprof/profile
+```
+
+The listener has no TLS and no auth — bind loopback or a firewalled
+interface, never the public one. Empty (the default) disables it entirely.
+All series are named `calserver_*`; every label comes from a closed set
+(normalized method, route pattern, typed auth outcome, …), never from
+request data, so cardinality stays bounded. Sample scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: calserver
+    static_configs:
+      - targets: ["127.0.0.1:9464"]
+```
+
 ## Test corpus
 
 The port is driven red→green against fixtures extracted from sabre's own test

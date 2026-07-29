@@ -14,6 +14,7 @@ func TestLoad(t *testing.T) {
 # calserver config
 [server]
 addr = ":9090"            # inline comment
+metrics_addr = "127.0.0.1:9464"
 base_uri = "/dav/"
 realm = "SabreDAV"
 
@@ -44,6 +45,9 @@ auto_schedule_prefixes = ["resource", "location"]
 
 	if cfg.Server.Addr != ":9090" {
 		t.Errorf("Addr = %q", cfg.Server.Addr)
+	}
+	if cfg.Server.MetricsAddr != "127.0.0.1:9464" {
+		t.Errorf("MetricsAddr = %q", cfg.Server.MetricsAddr)
 	}
 	if cfg.Server.BaseURI != "/dav/" {
 		t.Errorf("BaseURI = %q", cfg.Server.BaseURI)

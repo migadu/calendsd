@@ -15,10 +15,14 @@ import (
 // Zero values mean "unset" so callers can tell a real value from a default.
 type Config struct {
 	Server struct {
-		Addr    string
-		BaseURI string
-		Realm   string
-		TLS     struct {
+		Addr string
+		// MetricsAddr, when set, serves Prometheus /metrics and
+		// /debug/pprof on a second plain-HTTP listener. Bind loopback or a
+		// firewalled interface; it has no TLS and no auth.
+		MetricsAddr string
+		BaseURI     string
+		Realm       string
+		TLS         struct {
 			Cert string
 			Key  string
 		}
@@ -32,8 +36,11 @@ type Config struct {
 	Database struct {
 		DSN string
 	}
-	// Logging holds request-debugging options. Off by default.
+	// Logging holds log-verbosity and request-debugging options.
 	Logging struct {
+		// Level is the log verbosity: debug, info, warn, or error. Empty
+		// means the built-in default (info).
+		Level      string
 		RequestDir string
 	}
 	Scheduling struct {
@@ -71,6 +78,7 @@ func Load(path string) (*Config, error) {
 	list := func(key string) []string { l, _ := flat[key].([]string); return l }
 
 	cfg.Server.Addr = str("server.addr")
+	cfg.Server.MetricsAddr = str("server.metrics_addr")
 	cfg.Server.BaseURI = str("server.base_uri")
 	cfg.Server.Realm = str("server.realm")
 	cfg.Server.TLS.Cert = str("server.tls.cert")
@@ -78,6 +86,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Rcptd.URL = str("server.rcptd.url")
 	cfg.Server.Rcptd.Token = str("server.rcptd.token")
 	cfg.Database.DSN = str("database.dsn")
+	cfg.Logging.Level = str("logging.level")
 	cfg.Logging.RequestDir = str("logging.request_dir")
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
@@ -99,15 +108,17 @@ func Load(path string) (*Config, error) {
 // known is the set of recognised "section.key" paths; anything else is a typo
 // worth reporting rather than silently ignoring.
 var known = map[string]bool{
-	"server.addr": true, "server.base_uri": true, "server.realm": true,
+	"server.addr": true, "server.metrics_addr": true,
+	"server.base_uri": true, "server.realm": true,
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,
-	"database.dsn":            true,
-	"logging.request_dir":     true,
-	"scheduling.imip.smtp":    true, "scheduling.imip.sender": true,
+	"database.dsn":         true,
+	"logging.level":        true,
+	"logging.request_dir":  true,
+	"scheduling.imip.smtp": true, "scheduling.imip.sender": true,
 	"calendarserver.browser": true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
-	"calendarserver.principals_readable":   true,
+	"calendarserver.principals_readable":    true,
 	"calendarserver.auto_schedule_prefixes": true,
 }
 

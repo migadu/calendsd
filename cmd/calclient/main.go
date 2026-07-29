@@ -14,6 +14,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"time"
+
+	"calserver/internal/logging"
 )
 
 //go:embed web
@@ -23,7 +26,13 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8091", "listen address for the client UI and proxy")
 	target := flag.String("target", "http://127.0.0.1:8080", "base URL of the calserver to proxy DAV requests to")
 	devAssets := flag.String("dev-assets", "", "serve client assets from this directory instead of the embedded copy (for iterating without rebuilds)")
+	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). When empty, $CALSERVER_LOG_LEVEL applies")
 	flag.Parse()
+
+	if err := logging.Setup(*logLevel); err != nil {
+		slog.Error("configuring logging", "err", err)
+		os.Exit(1)
+	}
 
 	targetURL, err := url.Parse(*target)
 	if err != nil || targetURL.Scheme == "" || targetURL.Host == "" {
@@ -72,8 +81,57 @@ func main() {
 	mux.Handle("/", proxy)
 
 	slog.Info("calclient listening", "addr", *addr, "target", targetURL.String())
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(*addr, withAccessLog(mux)); err != nil {
 		slog.Error("listen", "err", err)
 		os.Exit(1)
+	}
+}
+
+// withAccessLog logs one line per request. calclient authenticates nothing
+// itself — it proxies to calserver and even strips the challenge on 401s — so
+// without this a wrong login was invisible on the client side. A proxied 401/403
+// (a rejected login) logs at Warn so it shows at the default level; everything
+// else logs at Debug to stay quiet for the static-asset traffic.
+func withAccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+
+		level, msg := slog.LevelDebug, "request"
+		if rec.status == http.StatusUnauthorized || rec.status == http.StatusForbidden {
+			level, msg = slog.LevelWarn, "login rejected"
+		}
+		slog.Log(r.Context(), level, msg,
+			"method", r.Method, "path", r.URL.Path, "status", rec.status,
+			"remote", r.RemoteAddr, "dur", time.Since(start))
+	})
+}
+
+// statusRecorder captures the response status for the access log while passing
+// everything through. It preserves Flush so the reverse proxy can still stream
+// responses (ReverseProxy flushes as it copies).
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.wrote {
+		s.status = code
+		s.wrote = true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(p []byte) (int, error) {
+	s.wrote = true // an implicit 200 if WriteHeader was never called
+	return s.ResponseWriter.Write(p)
+}
+
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }

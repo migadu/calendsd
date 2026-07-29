@@ -209,6 +209,9 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 		})
 	}
 	if changes.Truncated {
+		// The single choke point where both backends' truncation surfaces
+		// (METRICS-PLAN.md §5); the resource type falls out of the path.
+		p.server.Metrics.SyncTruncated(syncResourceLabel(collectionPath))
 		href := p.server.BaseURI
 		if collectionPath != "" {
 			href += encodePath(collectionPath) + "/"
@@ -227,6 +230,18 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 	w.WriteHeader(http.StatusMultiStatus)
 	_, err = w.Write(body)
 	return err
+}
+
+// syncResourceLabel maps a synced collection's path onto the closed resource
+// label set: "calendar", "addressbook", or "other".
+func syncResourceLabel(collectionPath string) string {
+	switch root, _, _ := strings.Cut(collectionPath, "/"); root {
+	case "calendars":
+		return "calendar"
+	case "addressbooks":
+		return "addressbook"
+	}
+	return "other"
 }
 
 // ErrInvalidSyncToken mirrors sabre's Exception\InvalidSyncToken (403 with
