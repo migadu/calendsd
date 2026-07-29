@@ -87,6 +87,55 @@ const (
 	danHref   = "mailto:dan@example.org"
 )
 
+// TestShareTwoCalendarsWithOnePerson guards the fix for sabre's over-strict
+// calendarinstances_principaluri_share_href unique index: because a sharee row
+// stores the invitee's address in share_href and their principal in
+// principaluri — both identical for every calendar shared with that person —
+// that index made the SECOND share to a given sharee fail with a duplicate-key
+// error. The calserver extension schema drops it; sharing two calendars with
+// one person must now succeed and surface both in their home.
+func TestShareTwoCalendarsWithOnePerson(t *testing.T) {
+	backend := sharingDB(t, "calserver_sharing_two")
+
+	// Give Alice a second calendar (the helper seeds one). RETURNING id avoids
+	// a cross-connection currval() in the pooled DB.
+	var cal2 int
+	if err := backend.DB.QueryRow(
+		`INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT') RETURNING id`).Scan(&cal2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.DB.Exec(
+		`INSERT INTO calendarinstances (calendarid, principaluri, access, uri, displayname)
+		 VALUES ($1, 'principals/alice', 1, 'second', 'Alice cal 2')`, cal2); err != nil {
+		t.Fatal(err)
+	}
+
+	cals, err := backend.CalendarsForUser("principals/alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cals) != 2 {
+		t.Fatalf("alice calendars = %d, want 2", len(cals))
+	}
+
+	// Share BOTH calendars with Bob — the second must not collide.
+	for _, cal := range cals {
+		if err := backend.UpdateInvites(cal.ID, []caldav.Sharee{
+			{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessReadWrite},
+		}); err != nil {
+			t.Fatalf("sharing calendar %q with bob: %v", cal.ID.Calendar, err)
+		}
+	}
+
+	bobCals, err := backend.CalendarsForUser("principals/bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bobCals) != 2 {
+		t.Fatalf("bob shared calendars = %d, want 2", len(bobCals))
+	}
+}
+
 func TestCalendarSharing(t *testing.T) {
 	backend := sharingDB(t, "calserver_sharing")
 	calID := ownerCalID(t, backend)

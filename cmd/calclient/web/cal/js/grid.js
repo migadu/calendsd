@@ -121,6 +121,7 @@ export function renderGrid(main) {
 const DRAG_MIN_PX = 5;
 
 function moveBlocker(inst) {
+  if (store.isReadOnly(inst.calHref)) return 'This calendar is shared with you read-only.';
   if (inst.recurring) return 'Recurring events are moved with Edit (one occurrence or the series).';
   const org = inst.organizer?.toLowerCase();
   if (org && org !== store.myEmail().toLowerCase()) return 'Only the organizer can move this event.';

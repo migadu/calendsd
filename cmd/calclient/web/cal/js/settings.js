@@ -60,8 +60,10 @@ export function renderSettings(main) {
   </div>`);
   main.append(el);
 
+  // Only calendars that can hold new events/invitations — a read-only share or
+  // a task/journal collection can't be the default target.
   const defSel = $('#st-defcal', el);
-  for (const c of store.state.calendars) {
+  for (const c of store.eventCalendars()) {
     defSel.append(h(`<option value="${esc(c.href)}" ${c.href === p.defaultCal ? 'selected' : ''}>${esc(c.displayName || c.name)}</option>`));
   }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"calserver/internal/acl"
+	"calserver/internal/caldav/ical"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
 )
@@ -350,11 +351,66 @@ func (c *Calendar) Props(names []xml.Name) (map[xml.Name]any, error) {
 	}
 	out := map[xml.Name]any{}
 	for _, n := range names {
+		// {cs}invite is computed from the live sharee list rather than stored,
+		// so clients (the owner's UI) can read who a calendar is shared with.
+		// It is served on request only — never in the allprops bulk above,
+		// which would add a query per calendar to every home listing.
+		if n == (xml.Name{Space: davxml.NSCalendarServer, Local: "invite"}) {
+			if raw, ok := c.inviteProperty(); ok {
+				out[n] = raw
+			}
+			continue
+		}
 		if v, exists := c.Info.Props[n]; exists {
 			out[n] = v
 		}
 	}
 	return out, nil
+}
+
+// inviteProperty renders the {http://calendarserver.org/ns/}invite property: a
+// <cs:user> per sharee with their address, name, invite status, and access
+// level. Port of sabre's SharingPlugin invite serialization. Returns ok=false
+// when the backend does not support sharing (the property is then omitted); an
+// empty (but supported) roster yields ok=true with no <cs:user> children.
+func (c *Calendar) inviteProperty() (davxml.Raw, bool) {
+	sharing, ok := c.backend.(SharingSupport)
+	if !ok {
+		return nil, false
+	}
+	sharees, err := sharing.Invites(c.Info.ID)
+	if err != nil {
+		return nil, false
+	}
+	var b strings.Builder
+	for _, s := range sharees {
+		// The owner's own row (and any not-shared marker) is not a sharee.
+		if s.Access == AccessSharedOwner || s.Access == AccessNotShared {
+			continue
+		}
+		b.WriteString("<cs:user><d:href>" + xmlEscapeText(s.Href) + "</d:href>")
+		if s.CommonName != "" {
+			b.WriteString("<cs:common-name>" + xmlEscapeText(s.CommonName) + "</cs:common-name>")
+		}
+		switch s.InviteStatus {
+		case InviteAccepted:
+			b.WriteString("<cs:invite-accepted/>")
+		case InviteDeclined:
+			b.WriteString("<cs:invite-declined/>")
+		case InviteInvalid:
+			b.WriteString("<cs:invite-invalid/>")
+		default:
+			b.WriteString("<cs:invite-noresponse/>")
+		}
+		b.WriteString("<cs:access>")
+		if s.Access == AccessReadWrite {
+			b.WriteString("<cs:read-write/>")
+		} else {
+			b.WriteString("<cs:read/>")
+		}
+		b.WriteString("</cs:access></cs:user>")
+	}
+	return davxml.Raw(b.String()), true
 }
 
 func (c *Calendar) PropPatch(pp *dav.PropPatch) {
@@ -447,6 +503,7 @@ type CalendarObject struct {
 	backend  Backend
 	calendar CalendarInfo
 	obj      ObjectInfo
+	view     []byte // memoized per-view payload (see viewData); nil until first served
 }
 
 // NewCalendarObject wraps object info into a file node.
@@ -466,7 +523,26 @@ func (o *CalendarObject) Delete() error {
 func (o *CalendarObject) LastModified() time.Time { return time.Time{} }
 
 func (o *CalendarObject) Get() (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(o.obj.CalendarData)), nil
+	return io.NopCloser(bytes.NewReader(o.viewData())), nil
+}
+
+// viewData is the object as served for this particular view. On a read-only
+// shared view it redacts CLASS:CONFIDENTIAL events to opaque busy blocks,
+// enforcing RFC 5545's confidential access class; the owner, the owner's
+// proxies, and read-write sharees (who can edit, so must see the real object to
+// round-trip it) get the full payload. The read-only view is identified by
+// sabre's read-only marker — the same signal the object ACL keys off, and the
+// one the storage backend actually populates (ACCESS_READ sets it; the
+// ShareAccess field is left zero). The result is memoized because Get, Data,
+// and Size each ask for it within one request.
+func (o *CalendarObject) viewData() []byte {
+	if !(&Calendar{Info: o.calendar}).readOnly() {
+		return o.obj.CalendarData
+	}
+	if o.view == nil {
+		o.view = ical.RedactConfidential(o.obj.CalendarData)
+	}
+	return o.view
 }
 
 func (o *CalendarObject) Put(data io.Reader) (string, error) {
@@ -490,11 +566,13 @@ func (o *CalendarObject) ContentType() string {
 	}
 	return ct
 }
-func (o *CalendarObject) Size() int64  { return int64(len(o.obj.CalendarData)) }
+func (o *CalendarObject) Size() int64  { return int64(len(o.viewData())) }
 func (o *CalendarObject) ETag() string { return o.obj.QuotedETag() }
 
-// Data exposes the raw iCalendar payload.
-func (o *CalendarObject) Data() []byte { return o.obj.CalendarData }
+// Data exposes the iCalendar payload as served for this view (confidential
+// events redacted on a read-only shared view). The REPORT/PROPFIND calendar-data
+// paths read through here, so redaction applies to them as well as to GET.
+func (o *CalendarObject) Data() []byte { return o.viewData() }
 
 // Owner returns the owning principal.
 func (o *CalendarObject) Owner() string { return o.calendar.PrincipalURI }

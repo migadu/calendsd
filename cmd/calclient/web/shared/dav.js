@@ -7,6 +7,7 @@ export const NS = {
   card: 'urn:ietf:params:xml:ns:carddav',
   cs: 'http://calendarserver.org/ns/',
   a: 'http://apple.com/ns/ical/',
+  s: 'http://sabredav.org/ns',
 };
 
 // ---- session -------------------------------------------------------------
@@ -78,7 +79,7 @@ export function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const XMLNS = `xmlns:d="${NS.d}" xmlns:c="${NS.c}" xmlns:card="${NS.card}" xmlns:cs="${NS.cs}" xmlns:a="${NS.a}"`;
+const XMLNS = `xmlns:d="${NS.d}" xmlns:c="${NS.c}" xmlns:card="${NS.card}" xmlns:cs="${NS.cs}" xmlns:a="${NS.a}" xmlns:s="${NS.s}"`;
 
 // props: array of prefixed names like 'd:displayname', 'cs:getctag'.
 export function propfindBody(props) {

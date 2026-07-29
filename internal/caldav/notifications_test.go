@@ -115,6 +115,42 @@ func TestSharingNotificationRoundTrip(t *testing.T) {
 	}
 }
 
+// TestInvitePropertyListsSharees: after sharing a calendar read-write with one
+// person and read-only with another, a PROPFIND of {cs}invite on the owner's
+// calendar must return a <cs:user> per sharee with the right access level, so
+// the owner's client can show who has access.
+func TestInvitePropertyListsSharees(t *testing.T) {
+	_, servers := sharedSharing()
+	user1 := servers["principals/user1"]
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href><cs:common-name>User Two</cs:common-name><cs:read-write/></cs:set>
+	  <cs:set><d:href>mailto:guest@example.org</d:href></cs:set>
+	</cs:share>`
+	if w := req(t, user1, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+
+	w := req(t, user1, "PROPFIND", "/calendars/user1/cal1",
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:invite/></d:prop></d:propfind>`,
+		"Depth", "0")
+	body := w.Body.String()
+	if w.Code != 207 {
+		t.Fatalf("invite PROPFIND = %d:\n%s", w.Code, body)
+	}
+	for _, want := range []string{
+		"<cs:invite>", "mailto:user2@example.org", "User Two", "<cs:read-write/>",
+		"mailto:guest@example.org", "<cs:read/>", "<cs:invite-noresponse/>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("invite property missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Count(body, "<cs:user>") != 2 {
+		t.Errorf("want 2 <cs:user> entries, got:\n%s", body)
+	}
+}
+
 // TestInviteReplySharedAsBaseURI: an accepted invite-reply's <cs:shared-as>
 // href must carry the server's BaseURI under a non-root deployment. The
 // backend returns a request-relative path, so resolveHref joins it onto the

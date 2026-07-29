@@ -191,12 +191,15 @@ $('#new-calendar').addEventListener('click', async () => {
 function renderSidebar() {
   const ul = $('#cal-list');
   ul.innerHTML = '';
-  for (const cal of store.state.calendars) {
+  // calweb is an events app; a task/journal-only collection has nothing to show
+  // here, so keep it out of the calendar list entirely.
+  for (const cal of store.state.calendars.filter(c => c.supportsEvents)) {
     const li = h(`<li>
       <label><input type="checkbox" ${store.state.hidden.has(cal.href) ? '' : 'checked'}>
         <span class="dot" style="background:${esc(store.calColor(cal.href))}"></span>
-        <span class="name">${esc(cal.displayName || cal.name)}</span></label>
-      <button class="gear" title="Calendar settings">⚙</button>
+        <span class="name">${esc(cal.displayName || cal.name)}</span>
+        ${cal.readOnly ? '<span class="ro-badge" title="Shared with you (read-only)">🔒</span>' : ''}</label>
+      <button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">⚙</button>
     </li>`);
     $('input', li).addEventListener('change', ev => {
       if (ev.target.checked) store.state.hidden.delete(cal.href);
@@ -210,22 +213,36 @@ function renderSidebar() {
 
 function calendarMenu(cal) {
   closeMenus();
+  const ro = cal.readOnly;
   const dialog = h(`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true">
     <h2>${esc(cal.displayName || cal.name)}</h2>
+    ${ro ? '<p class="note">🔒 This calendar is shared with you, read-only. You can hide it or remove it from your list, but not edit its events or settings.</p>' : ''}
     <div class="grid">
-      <label>Name<input id="cm-name" value="${esc(cal.displayName || cal.name)}"></label>
-      <label>Color<input id="cm-color" type="color" value="${esc(store.calColor(cal.href))}"></label>
+      <label>Name<input id="cm-name" value="${esc(cal.displayName || cal.name)}" ${ro ? 'disabled' : ''}></label>
+      <label>Color<input id="cm-color" type="color" value="${esc(store.calColor(cal.href))}" ${ro ? 'disabled' : ''}></label>
     </div>
+    ${ro ? '' : `<section class="share">
+      <h3>Shared with</h3>
+      <div id="cm-sharees" class="sharee-list"><p class="note">Loading…</p></div>
+      <p class="note">Invite someone by email. They'll see the calendar in their own list and get an invitation to accept.</p>
+      <div class="share-row">
+        <input id="cm-share-email" type="email" placeholder="person@example.org" autocomplete="off">
+        <label class="row"><input type="checkbox" id="cm-share-rw"> Can edit</label>
+      </div>
+      <div class="share-actions">
+        <button class="primary" id="cm-share">Share</button>
+      </div>
+    </section>`}
     <div class="actions">
-      <button class="danger" id="cm-delete">Delete calendar…</button>
-      <button id="cm-cancel">Cancel</button>
-      <button class="primary" id="cm-save">Save</button>
+      <button class="danger" id="cm-delete">${ro ? 'Remove from my calendars' : 'Delete calendar…'}</button>
+      <button id="cm-cancel">${ro ? 'Close' : 'Cancel'}</button>
+      ${ro ? '' : '<button class="primary" id="cm-save">Save</button>'}
     </div>
   </div></div>`);
   const close = () => dialog.remove();
   dialog.addEventListener('click', ev => { if (ev.target === dialog) close(); });
   $('#cm-cancel', dialog).addEventListener('click', close);
-  $('#cm-save', dialog).addEventListener('click', async () => {
+  $('#cm-save', dialog)?.addEventListener('click', async () => {
     try {
       await store.updateCalendar(cal.href, {
         displayName: $('#cm-name', dialog).value,
@@ -234,12 +251,58 @@ function calendarMenu(cal) {
       close();
     } catch (e) { showError(e); }
   });
+
+  // Sharing (owned calendars only): the live roster plus an invite form.
+  const shareEmail = () => $('#cm-share-email', dialog).value.trim();
+  async function refreshSharees() {
+    const box = $('#cm-sharees', dialog);
+    if (!box) return;
+    try {
+      const sharees = await store.loadSharees(cal.href);
+      box.innerHTML = '';
+      if (!sharees.length) { box.append(h('<p class="note">Not shared with anyone yet.</p>')); return; }
+      for (const s of sharees) {
+        const detail = (s.readWrite ? 'can edit' : 'read-only') +
+          (s.status === 'pending' ? ' · pending' : s.status === 'declined' ? ' · declined' : '');
+        const row = h(`<div class="sharee">
+          <span class="who">${esc(s.commonName || s.email)}</span>
+          <span class="lvl">${esc(detail)}</span>
+          <button class="ghost" data-remove aria-label="Remove ${esc(s.email)}">Remove</button>
+        </div>`);
+        $('[data-remove]', row).addEventListener('click', async ev => {
+          ev.target.disabled = true;
+          try { await store.unshareCalendar(cal.href, s.email); toast(`Removed ${s.email}.`); await refreshSharees(); }
+          catch (e) { showError(e); ev.target.disabled = false; }
+        });
+        box.append(row);
+      }
+    } catch (e) {
+      box.innerHTML = '';
+      box.append(h('<p class="note">Couldn’t load the sharing list.</p>'));
+    }
+  }
+  $('#cm-share', dialog)?.addEventListener('click', async () => {
+    const email = shareEmail();
+    if (!email || !email.includes('@')) { toast('Enter an email address to share with.', true); return; }
+    try {
+      await store.shareCalendar(cal.href, { email, readWrite: $('#cm-share-rw', dialog).checked });
+      toast(`Shared with ${email}.`);
+      $('#cm-share-email', dialog).value = '';
+      $('#cm-share-rw', dialog).checked = false;
+      await refreshSharees();
+    } catch (e) { showError(e); }
+  });
+  if (!ro) refreshSharees();
+
   $('#cm-delete', dialog).addEventListener('click', async () => {
-    if (!confirm(`Delete “${cal.displayName || cal.name}” and all its events? This cannot be undone.`)) return;
+    const msg = ro
+      ? `Remove “${cal.displayName || cal.name}” from your calendars? The owner keeps it; you can be re-invited later.`
+      : `Delete “${cal.displayName || cal.name}” and all its events? This cannot be undone.`;
+    if (!confirm(msg)) return;
     try { await store.deleteCalendar(cal.href); close(); } catch (e) { showError(e); }
   });
   $('#dialog-host').append(dialog);
-  $('#cm-name', dialog).focus();
+  (ro ? $('#cm-cancel', dialog) : $('#cm-name', dialog)).focus();
 }
 
 // ---- store subscriptions -------------------------------------------------
@@ -247,13 +310,17 @@ function calendarMenu(cal) {
 store.bus.addEventListener('calendars', renderSidebar);
 store.bus.addEventListener('events', () => { if (currentView === 'calendar') render(); });
 store.bus.addEventListener('contacts', () => { if (currentView === 'contacts') render(); });
-store.bus.addEventListener('invites', () => {
-  const n = store.state.invites.length;
+// The bell counts scheduling invitations plus still-unanswered calendar shares.
+function updateBell() {
+  const n = store.state.invites.length +
+    store.state.shareNotifications.filter(s => s.status === 'noresponse').length;
   const badge = $('#bell-badge');
   badge.hidden = n === 0;
   badge.textContent = n;
   renderInvites();
-});
+}
+store.bus.addEventListener('invites', updateBell);
+store.bus.addEventListener('sharenotifs', updateBell);
 store.bus.addEventListener('prefs', render);
 
 document.addEventListener('keydown', e => {

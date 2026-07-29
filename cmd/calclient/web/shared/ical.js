@@ -26,7 +26,7 @@ export function dateOnly(v) { return v.replaceAll('-', ''); }
 // buildEvent and the calweb override editor. attendees: email strings or
 // {email, partstat, cn} objects.
 export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = [],
-  organizer, attendees = [], description, location, url, recurrenceId }) {
+  organizer, attendees = [], description, location, url, recurrenceId, confidential }) {
   const dt = allDay
     ? v => `;VALUE=DATE:${dateOnly(v)}`
     : v => `:${utc(v)}`;
@@ -44,6 +44,9 @@ export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = 
       ? `RECURRENCE-ID;VALUE=DATE:${recurrenceId}`
       : `RECURRENCE-ID:${recurrenceId}`);
   }
+  // CLASS:CONFIDENTIAL asks the server to show read-only sharees only that the
+  // time is busy, hiding the title and the details below (RFC 5545 §3.8.1.3).
+  if (confidential) l.push('CLASS:CONFIDENTIAL');
   if (location) l.push(`LOCATION:${icalEscape(location)}`);
   if (description) l.push(`DESCRIPTION:${icalEscape(description)}`);
   if (url) l.push(`URL:${url}`);

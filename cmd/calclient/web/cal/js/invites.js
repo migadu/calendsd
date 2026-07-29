@@ -10,14 +10,60 @@ export function toggleInvites(force) {
   if (!panel.hidden) {
     renderInvites();
     store.loadInvites().catch(() => {});
+    store.loadShareNotifications().catch(() => {});
+  }
+}
+
+// principalName turns a principal href (/principals/alice/) into a bare name
+// for display when no common-name accompanies the share invitation.
+function principalName(href) {
+  return decodeURIComponent(String(href).replace(/\/+$/, '').split('/').pop() || '') || 'Someone';
+}
+
+// renderShareInvites lists calendar-share invitations as cards with
+// Accept / Decline (or Dismiss once answered).
+function renderShareInvites(list) {
+  for (const n of store.state.shareNotifications) {
+    const who = n.organizerName || principalName(n.organizer);
+    const calName = principalName(n.hostHref);
+    const pending = n.status === 'noresponse';
+    const card = h(`<div class="invite">
+      <div class="title">📅 ${esc(calName)}</div>
+      <div class="meta">
+        ${esc(who)} shared a calendar with you · ${n.readWrite ? 'can edit' : 'read-only'}
+        ${n.summary ? '<br>' + esc(n.summary) : ''}
+        ${n.status === 'accepted' ? '<br>Accepted' : n.status === 'declined' ? '<br>Declined' : ''}
+      </div>
+      <div class="actions">${pending ? `
+        <button class="primary" data-share="accept">Accept</button>
+        <button data-share="decline">Decline</button>` : `
+        <button data-share-dismiss>Dismiss</button>`}
+      </div>
+    </div>`);
+    for (const b of card.querySelectorAll('button[data-share]')) {
+      b.addEventListener('click', async () => {
+        for (const x of card.querySelectorAll('button')) x.disabled = true;
+        try {
+          await store.replyShareInvite(n, b.dataset.share === 'accept');
+          toast(b.dataset.share === 'accept' ? 'Calendar added.' : 'Invitation declined.');
+        } catch (e) { showError(e); for (const x of card.querySelectorAll('button')) x.disabled = false; }
+      });
+    }
+    card.querySelector('button[data-share-dismiss]')?.addEventListener('click', async () => {
+      try { await store.dismissShareNotification(n); } catch (e) { showError(e); }
+    });
+    list.append(card);
   }
 }
 
 export function renderInvites() {
   const list = $('#invites-list');
   list.innerHTML = '';
+  renderShareInvites(list);
   if (!store.state.invites.length) {
-    list.append(h('<p class="empty">No pending invitations.</p>'));
+    if (!store.state.shareNotifications.length) {
+      list.append(h('<p class="empty">No pending invitations.</p>'));
+    }
     return;
   }
   for (const inv of store.state.invites) {

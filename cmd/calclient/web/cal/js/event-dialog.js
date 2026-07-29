@@ -87,6 +87,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       </span></label>
       <label class="full">Location<input id="ev-loc" type="text" value="${esc(inst?.location ?? '')}" placeholder="Add a location"></label>
       <label class="full">Meeting link<input id="ev-url" type="url" value="${esc(inst?.url ?? '')}" placeholder="e.g. https://zoom.us/j/123456789"></label>
+      <label class="full row"><input type="checkbox" id="ev-private" ${inst?.confidential ? 'checked' : ''}> Private — anyone this calendar is shared with read-only sees only “Busy”, not the title or details</label>
       <label class="full">Guests<span class="suggest">
         <span class="chips" id="ev-chips"><input id="ev-guest" type="email" placeholder="Invite by name or email…" autocomplete="off"></span>
         <span class="suggest-list" id="ev-suggest" hidden></span></span></label>
@@ -108,12 +109,16 @@ export async function openEventDialog(inst, defaultDay, timed) {
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
   q('#ev-cancel').addEventListener('click', close);
 
-  // calendars
+  // calendars — new events can only land on a writable calendar; read-only
+  // shares are excluded from the picker (and editing their events is blocked
+  // below).
+  const roCal = !!inst && store.isReadOnly(inst.calHref);
   const calSel = q('#ev-cal');
-  for (const c of store.state.calendars) {
+  const calOptions = inst ? store.state.calendars : store.eventCalendars();
+  for (const c of calOptions) {
     calSel.append(h(`<option value="${esc(c.href)}">${esc(c.displayName || c.name)}</option>`));
   }
-  calSel.value = inst?.calHref || store.state.prefs.defaultCal || store.state.calendars[0]?.href || '';
+  calSel.value = inst?.calHref || store.state.prefs.defaultCal || calOptions[0]?.href || '';
 
   // date/time inputs switch type with the all-day toggle
   const allDayBox = q('#ev-allday');
@@ -285,6 +290,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       organizer: guests.length ? store.myEmail() : '',
       attendees: guests,
       rrule,
+      confidential: q('#ev-private').checked,
     };
     // Property lines shared by the in-place edit paths. null removes the
     // property; the attendee list is rewritten wholesale when guests change.
@@ -297,6 +303,8 @@ export async function openEventDialog(inst, defaultDay, timed) {
       ATTENDEE: guests.length
         ? guests.map(g => `ATTENDEE;PARTSTAT=${g.partstat || 'NEEDS-ACTION'};RSVP=TRUE:mailto:${g.email}`)
         : null,
+      // null removes CLASS, restoring the PUBLIC default.
+      CLASS: fields.confidential ? 'CLASS:CONFIDENTIAL' : null,
     };
     try {
       if (!inst) {
@@ -361,6 +369,15 @@ export async function openEventDialog(inst, defaultDay, timed) {
       await store.refreshEvents();
     } catch (e) { showError(e); }
   });
+
+  // A read-only share can be viewed but not written — disable the write
+  // actions and say why, rather than let the save 403.
+  if (roCal) {
+    q('#ev-save').disabled = true;
+    const del = $('#ev-delete', dlg);
+    if (del) del.disabled = true;
+    q('#ev-error').textContent = 'This event is on a calendar shared with you read-only, so it can’t be changed.';
+  }
 
   $('#dialog-host').append(dlg);
   q('#ev-title').focus();

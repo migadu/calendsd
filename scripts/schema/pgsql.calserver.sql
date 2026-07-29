@@ -45,3 +45,18 @@ CREATE TABLE calendarpublications (
 
 ALTER TABLE ONLY calendarpublications
     ADD CONSTRAINT calendarpublications_pkey PRIMARY KEY (calendarid);
+
+
+-- Drop sabre's over-strict calendarinstances_principaluri_share_href unique
+-- index. A sharee row stores the invitee's address (e.g. mailto:bob@…) in
+-- share_href and their principal in principaluri, both identical across every
+-- calendar shared with that person — so this index makes the SECOND share to a
+-- given sharee fail with a duplicate-key error, i.e. you can share at most one
+-- calendar with any one person. The value is faithful to sabre's own PDO
+-- backend, so sabre's pgsql example schema carries the same latent bug; its
+-- own tests never share two calendars with one principal, so it went unseen.
+-- Real integrity is still enforced by calendarinstances_principaluri_calendarid
+-- (a calendar can't be bound into a home twice) and _principaluri_uri (unique
+-- instance path); nothing in calserver or sabre depends on this index, so
+-- dropping it is safe for a co-resident sabre and fixes the same bug for it.
+DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
