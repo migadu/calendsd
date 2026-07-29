@@ -62,6 +62,26 @@ type Config struct {
 		PrincipalsReadable   bool
 		AutoSchedulePrefixes []string
 	}
+	// Retention holds account soft-delete settings.
+	Retention struct {
+		// DeletedDays is how long a soft-deleted account is kept before the
+		// purge job removes it. 0 means the built-in default (see
+		// RetentionDays). Only consulted when scheduling a deletion.
+		DeletedDays int
+	}
+}
+
+// DefaultRetentionDays is the fallback grace period for soft-deleted accounts
+// when [retention].deleted_days is unset or non-positive.
+const DefaultRetentionDays = 30
+
+// RetentionDays applies the DefaultRetentionDays fallback so calserver-admin
+// and calctl default identically.
+func RetentionDays(days int) int {
+	if days <= 0 {
+		return DefaultRetentionDays
+	}
+	return days
 }
 
 // Load reads and parses a TOML config file.
@@ -78,6 +98,7 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	str := func(key string) string { s, _ := flat[key].(string); return s }
 	boolean := func(key string) bool { b, _ := flat[key].(bool); return b }
+	integer := func(key string) int { i, _ := flat[key].(int); return i }
 	list := func(key string) []string { l, _ := flat[key].([]string); return l }
 
 	cfg.Server.Addr = str("server.addr")
@@ -100,6 +121,7 @@ func Load(path string) (*Config, error) {
 	cfg.CalendarServer.ExpandGroups = boolean("calendarserver.expand_groups")
 	cfg.CalendarServer.PrincipalsReadable = boolean("calendarserver.principals_readable")
 	cfg.CalendarServer.AutoSchedulePrefixes = list("calendarserver.auto_schedule_prefixes")
+	cfg.Retention.DeletedDays = integer("retention.deleted_days")
 
 	for key := range flat {
 		if !known[key] {
@@ -125,6 +147,7 @@ var known = map[string]bool{
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
 	"calendarserver.principals_readable":    true,
 	"calendarserver.auto_schedule_prefixes": true,
+	"retention.deleted_days":                true,
 }
 
 // parse reads the TOML subset into a flat map keyed by "section.key".

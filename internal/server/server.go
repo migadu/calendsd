@@ -77,6 +77,12 @@ type Config struct {
 	// middleware, auth backends, storage, and iMip (METRICS-PLAN.md). Not
 	// part of Canonical(): it changes no DAV semantics.
 	Metrics *metrics.Set
+	// RetentionDays is the default grace period, in days, for soft-deleted
+	// accounts (SOFT-DELETE-PLAN.md). Read only when scheduling a deletion;
+	// the auth gate and purge job work off the stored purge_after. Resolved
+	// with config.RetentionDays so it is never zero here. Not part of
+	// Canonical(): it changes no DAV semantics.
+	RetentionDays int
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -171,8 +177,15 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 
 	srv := dav.NewServer(cfg.BaseURI, root)
 	srv.Metrics = cfg.Metrics
+	// tombstoned gates soft-deleted accounts out of every real auth path. It
+	// fails open (allow) on a DB error via the discarded error — a DB blip must
+	// not lock everyone out; the purge job is the backstop (SOFT-DELETE-PLAN
+	// §5, §12).
+	tombstoned := func(principal string) bool { ok, _ := users.IsDeleted(principal); return ok }
 	switch {
 	case authOverride != nil:
+		// The injected-plugin/test path (NewLoggedIn) is left ungated on
+		// purpose, matching how BeforeMethod skips fixedPrincipal.
 		srv.AddPlugin(authOverride)
 	case cfg.RcptdURL != "":
 		// Authenticate against rcptd's /auth (Dovecot hashes verified locally
@@ -190,6 +203,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		rb.Metrics = cfg.Metrics
 		ap := auth.NewPlugin(rb)
 		ap.Metrics = cfg.Metrics
+		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
 	default:
 		ap := auth.NewPlugin(
@@ -203,6 +217,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 			}},
 		)
 		ap.Metrics = cfg.Metrics
+		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
 	}
 	srv.AddPlugin(&acl.Plugin{

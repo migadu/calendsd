@@ -66,9 +66,28 @@
 <span id="provresult"></span>
 </form>
 {{if .User}}
-<h3 class="warn">Delete user</h3>
-<p class="muted">Removes the users row and principal triple for {{.User.Username}}. Without cascade, this refuses while the account still owns any calendar or address book. Cascade also deletes those collections and all their data — irreversible.</p>
-<form class="inline" onsubmit="event.preventDefault(); if (confirm('Delete {{.User.Username}}? This cannot be undone.')) adminPost('/api/delete-user', this, 'delresult')">
+{{if .Deletion}}
+<h3 class="warn">Scheduled for deletion</h3>
+<p class="warn">{{.User.Username}} is soft-deleted and cannot log in. It will be purged after <strong>{{.Deletion.PurgeAfter}}</strong>{{if .Deletion.Reason}} ({{.Deletion.Reason}}){{end}}.</p>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/restore-user', this, 'restoreresult')">
+<input type="hidden" name="username" value="{{.User.Username}}">
+<button>Restore user</button>
+<span id="restoreresult"></span>
+</form>
+{{else}}
+<h3 class="warn">Schedule deletion</h3>
+<p class="muted">Soft-delete {{.User.Username}}: it can no longer log in, but its data is kept until the retention window elapses and the purge job runs. Reversible with Restore until then.</p>
+<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/schedule-delete', this, 'schedresult')">
+<input type="hidden" name="username" value="{{.User.Username}}">
+in <input name="days" type="number" min="1" size="4" placeholder="days"> days
+<input name="reason" size="24" placeholder="reason (optional)">
+<button>Schedule deletion</button>
+<span id="schedresult"></span>
+</form>
+{{end}}
+<h3 class="warn">Delete user now</h3>
+<p class="muted">Immediately removes the users row and principal triple for {{.User.Username}}, bypassing the retention window. Without cascade, this refuses while the account still owns any calendar or address book. Cascade also deletes those collections and all their data — irreversible.</p>
+<form class="inline" onsubmit="event.preventDefault(); if (confirm('Delete {{.User.Username}} now? This cannot be undone.')) adminPost('/api/delete-user', this, 'delresult')">
 <input type="hidden" name="username" value="{{.User.Username}}">
 <label><input type="checkbox" name="cascade" value="1"> cascade (also delete owned collections)</label>
 <button>Delete user</button>

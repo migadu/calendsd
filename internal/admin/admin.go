@@ -106,6 +106,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/create-user", a.createUser)
 	mux.HandleFunc("POST /api/set-password", a.setPassword)
 	mux.HandleFunc("POST /api/delete-user", a.deleteUser)
+	mux.HandleFunc("POST /api/schedule-delete", a.scheduleDelete)
+	mux.HandleFunc("POST /api/restore-user", a.restoreUser)
 	mux.HandleFunc("POST /api/set-delegation", a.setDelegation)
 	mux.HandleFunc("POST /api/proppatch", a.propPatch)
 	mux.HandleFunc("POST /api/provision", a.provision)
@@ -257,6 +259,15 @@ type PrincipalDetail struct {
 
 	Calendars    []CollectionRef `json:"calendars"`
 	AddressBooks []CollectionRef `json:"addressBooks"`
+
+	// Deletion, when non-nil, marks a pending soft-delete with its purge date.
+	Deletion *DeletionInfo `json:"deletion,omitempty"`
+}
+
+// DeletionInfo renders a pending soft-delete on the principal page.
+type DeletionInfo struct {
+	PurgeAfter string `json:"purgeAfter"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 func (a *App) principalData(r *http.Request) (any, error) {
@@ -332,6 +343,20 @@ func (a *App) principalData(r *http.Request) (any, error) {
 			DisplayName: propString(b.Props, "DAV:", "displayname"),
 			ID:          b.ID,
 		})
+	}
+	// Pending soft-delete, if any (read through the writes carve-out; nil in a
+	// deployment with no writes wired, where the danger-zone forms 403 anyway).
+	if a.Writes != nil {
+		dels, err := a.Writes.Deletions()
+		if err != nil {
+			return nil, err
+		}
+		for _, del := range dels {
+			if del.Principal == p.URI {
+				d.Deletion = &DeletionInfo{PurgeAfter: del.PurgeAfter.Format("2006-01-02"), Reason: del.Reason}
+				break
+			}
+		}
 	}
 	return d, nil
 }

@@ -121,8 +121,15 @@ Commands:
                                            Create a user plus principal triple (like the admin panel)
   principal edit <user> [--email E] [--name N] [--password P | --password-stdin] [--realm R]
                                            Update email/displayname (empty clears) or reset the password
-  principal remove <user> --confirm        Delete the users row and principal triple (refuses while
-                                           the principal still holds calendars or address books)
+  principal remove <user> --confirm [--cascade]
+                                           Immediately delete the users row and principal triple
+                                           (refuses while it holds collections unless --cascade)
+  principal delete <user> [--in DAYS] [--reason R] --confirm
+                                           Soft-delete: schedule for purge after a retention window;
+                                           the account cannot log in meanwhile (restore to undo)
+  principal restore <user>                 Cancel a pending soft-delete
+  principal purge-expired [--dry-run]      Permanently remove accounts past their retention window
+                                           (run from cron); --dry-run lists without deleting
   principal auth <user> (--password P | --password-stdin) [--realm R] [--json]
                                            Verify a password against the stored digesta1 (exit 0 on
                                            match; detects hashes minted under a different realm)
@@ -140,5 +147,8 @@ Examples:
   calctl principal add bob --email bob@example.org --name "Bob" --password-stdin < pw.txt
   calctl principal edit bob --name "Robert" --email ""
   calctl principal remove bob --confirm
+  calctl principal delete bob --in 30 --confirm
+  calctl principal restore bob
+  calctl principal purge-expired --dry-run
 `)
 }

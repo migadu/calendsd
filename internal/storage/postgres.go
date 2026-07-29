@@ -843,3 +843,14 @@ func (u *Users) HashA1(realm, username string) (string, bool) {
 		`SELECT digesta1 FROM users WHERE username = $1`, username).Scan(&hash)
 	return hash, err == nil
 }
+
+// IsDeleted reports whether a principal has a pending-deletion tombstone
+// (soft-deleted, not yet purged). It is a single primary-key lookup, cheap
+// enough to call on every authenticated request from the auth gate.
+func (u *Users) IsDeleted(principal string) (bool, error) {
+	var exists bool
+	err := u.DB.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM deleted_principals WHERE principal = $1)`,
+		principal).Scan(&exists)
+	return exists, err
+}

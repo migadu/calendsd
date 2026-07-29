@@ -34,6 +34,9 @@ browser = true
 auto_provision = false
 per_user_props = true
 auto_schedule_prefixes = ["resource", "location"]
+
+[retention]
+deleted_days = 14
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -66,6 +69,20 @@ auto_schedule_prefixes = ["resource", "location"]
 	}
 	if want := []string{"resource", "location"}; !reflect.DeepEqual(cfg.CalendarServer.AutoSchedulePrefixes, want) {
 		t.Errorf("AutoSchedulePrefixes = %v, want %v", cfg.CalendarServer.AutoSchedulePrefixes, want)
+	}
+	if cfg.Retention.DeletedDays != 14 {
+		t.Errorf("Retention.DeletedDays = %d, want 14", cfg.Retention.DeletedDays)
+	}
+}
+
+func TestRetentionDays(t *testing.T) {
+	// Non-positive falls back to the default; a positive value passes through.
+	for _, tc := range []struct{ in, want int }{
+		{0, DefaultRetentionDays}, {-5, DefaultRetentionDays}, {7, 7},
+	} {
+		if got := RetentionDays(tc.in); got != tc.want {
+			t.Errorf("RetentionDays(%d) = %d, want %d", tc.in, got, tc.want)
+		}
 	}
 }
 

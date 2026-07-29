@@ -6,11 +6,13 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -18,6 +20,7 @@ import (
 	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
+	"calserver/internal/storage"
 )
 
 // fakeWrites records the carve-out calls.
@@ -27,6 +30,9 @@ type fakeWrites struct {
 	deleted   []string
 	removed   []string // usernames passed to DeleteUser (guarded)
 	cascaded  []string // usernames passed to DeleteUserCascade
+	scheduled []string // "username days" passed to ScheduleDelete
+	restored  []string // usernames passed to CancelDelete
+	deletions []storage.DeletedPrincipal
 }
 
 func (f *fakeWrites) CreateUser(username, digestA1, email, displayName string) error {
@@ -50,6 +56,20 @@ func (f *fakeWrites) DeleteUser(username string) error {
 func (f *fakeWrites) DeleteUserCascade(username string) error {
 	f.cascaded = append(f.cascaded, username)
 	return nil
+}
+
+func (f *fakeWrites) ScheduleDelete(username string, days int, reason string) error {
+	f.scheduled = append(f.scheduled, fmt.Sprintf("%s %d %s", username, days, reason))
+	return nil
+}
+
+func (f *fakeWrites) CancelDelete(username string) error {
+	f.restored = append(f.restored, username)
+	return nil
+}
+
+func (f *fakeWrites) Deletions() ([]storage.DeletedPrincipal, error) {
+	return f.deletions, nil
 }
 
 func (f *fakeWrites) DeleteOrphans(check string) (int64, error) {
@@ -297,6 +317,57 @@ func TestDeleteUserEndpoint(t *testing.T) {
 	}
 }
 
+func TestSoftDeleteEndpoints(t *testing.T) {
+	a := testAppB()
+	writes := &fakeWrites{}
+	a.Writes = writes
+	a.ReadOnly = false
+	h := a.Handler()
+
+	// No days → default from config (0 → built-in 30).
+	if w := postForm(t, h, "/api/schedule-delete", url.Values{"username": {"carol"}}, true); w.Code != http.StatusOK {
+		t.Fatalf("schedule-delete = %d: %s", w.Code, w.Body.String())
+	}
+	if len(writes.scheduled) != 1 || writes.scheduled[0] != "carol 30 " {
+		t.Fatalf("scheduled = %v, want default 30-day window", writes.scheduled)
+	}
+
+	// Explicit days + reason pass through.
+	if w := postForm(t, h, "/api/schedule-delete",
+		url.Values{"username": {"dave"}, "days": {"7"}, "reason": {"abuse"}}, true); w.Code != http.StatusOK {
+		t.Fatalf("schedule-delete days = %d: %s", w.Code, w.Body.String())
+	}
+	if writes.scheduled[1] != "dave 7 abuse" {
+		t.Fatalf("scheduled = %v", writes.scheduled)
+	}
+
+	// Invalid days rejected before any write.
+	if w := postForm(t, h, "/api/schedule-delete",
+		url.Values{"username": {"dave"}, "days": {"0"}}, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("schedule-delete days=0 = %d", w.Code)
+	}
+	if w := postForm(t, h, "/api/schedule-delete", url.Values{}, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("schedule-delete without username = %d", w.Code)
+	}
+
+	// Restore routes to CancelDelete.
+	if w := postForm(t, h, "/api/restore-user", url.Values{"username": {"carol"}}, true); w.Code != http.StatusOK {
+		t.Fatalf("restore-user = %d: %s", w.Code, w.Body.String())
+	}
+	if len(writes.restored) != 1 || writes.restored[0] != "carol" {
+		t.Fatalf("restored = %v", writes.restored)
+	}
+
+	// Both gated: read-only refuses.
+	a.ReadOnly = true
+	if w := postForm(t, a.Handler(), "/api/schedule-delete", url.Values{"username": {"carol"}}, true); w.Code != http.StatusForbidden {
+		t.Fatalf("schedule-delete in read-only = %d", w.Code)
+	}
+	if w := postForm(t, a.Handler(), "/api/restore-user", url.Values{"username": {"carol"}}, true); w.Code != http.StatusForbidden {
+		t.Fatalf("restore-user in read-only = %d", w.Code)
+	}
+}
+
 func TestPhaseCHTMLForms(t *testing.T) {
 	a := testAppB()
 	a.Writes = &fakeWrites{}
@@ -319,12 +390,29 @@ func TestPhaseCHTMLForms(t *testing.T) {
 		}
 	}
 
-	// The principal page carries the danger-zone delete-user form, wired to
-	// the cascade toggle so an admin can remove an account and its data.
+	// The principal page carries the danger-zone forms: immediate delete
+	// (cascade toggle) and, for a live account, the schedule-deletion form.
 	body := get(t, h, "/principal?path=principals/alice").Body.String()
-	for _, marker := range []string{"/api/delete-user", "cascade", "Delete user"} {
+	for _, marker := range []string{"/api/delete-user", "cascade", "Delete user",
+		"/api/schedule-delete", "Schedule deletion"} {
 		if !strings.Contains(body, marker) {
-			t.Errorf("principal page missing delete-user marker %q", marker)
+			t.Errorf("principal page missing danger-zone marker %q", marker)
 		}
+	}
+
+	// When the account is already scheduled, the page shows the purge date and
+	// a restore form instead of the schedule form.
+	scheduled := testAppB()
+	scheduled.Writes = &fakeWrites{deletions: []storage.DeletedPrincipal{
+		{Principal: "principals/alice", PurgeAfter: time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)},
+	}}
+	sbody := get(t, scheduled.Handler(), "/principal?path=principals/alice").Body.String()
+	for _, marker := range []string{"/api/restore-user", "Restore user", "2026-08-30"} {
+		if !strings.Contains(sbody, marker) {
+			t.Errorf("scheduled principal page missing marker %q", marker)
+		}
+	}
+	if strings.Contains(sbody, "/api/schedule-delete") {
+		t.Error("scheduled principal page still shows the schedule form")
 	}
 }

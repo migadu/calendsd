@@ -47,6 +47,26 @@ ALTER TABLE ONLY calendarpublications
     ADD CONSTRAINT calendarpublications_pkey PRIMARY KEY (calendarid);
 
 
+-- Pending account deletions (soft-delete tombstones). One row exists while an
+-- account is scheduled for deletion but not yet purged. The auth plugin
+-- rejects logins for a tombstoned principal (immediate disable), while its
+-- data stays untouched until the retention window elapses and the purge job
+-- (calctl principal purge-expired) runs DeleteUserCascade. purge_after is
+-- materialized at schedule time so changing the retention config never moves
+-- an already-scheduled purge. No FK to principals: the tombstone must survive
+-- a manually-removed principal (the purge job tolerates that case).
+CREATE TABLE deleted_principals (
+    principal    VARCHAR(200) PRIMARY KEY,   -- "principals/alice"
+    username     VARCHAR(50)  NOT NULL,      -- bare username, for the purge cascade
+    deleted_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    purge_after  TIMESTAMPTZ  NOT NULL,      -- deleted_at + retention window
+    reason       TEXT
+);
+
+CREATE INDEX deleted_principals_purge_after_ix
+    ON deleted_principals USING btree (purge_after);
+
+
 -- Drop sabre's over-strict calendarinstances_principaluri_share_href unique
 -- index. A sharee row stores the invitee's address (e.g. mailto:bob@…) in
 -- share_href and their principal in principaluri, both identical across every

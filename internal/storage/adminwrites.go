@@ -8,9 +8,16 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
+
+// ErrNoPrincipal is returned (wrapped) when a delete targets a principal that
+// no longer exists. The retention purge treats it as "already gone → done"
+// via errors.Is, rather than string-matching the message.
+var ErrNoPrincipal = errors.New("no principal")
 
 // AdminWrites holds the §1 carve-out mutations. Keep this type small and
 // this file the only place the admin app mutates tables directly.
@@ -215,12 +222,142 @@ DELETE FROM groupmembers
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("no principal %q", principal)
+		return fmt.Errorf("no principal %q: %w", principal, ErrNoPrincipal)
 	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE username = $1`, username); err != nil {
 		return err
 	}
 	return nil
+}
+
+// DeletedPrincipal is one pending-deletion tombstone.
+type DeletedPrincipal struct {
+	Principal  string
+	Username   string
+	Reason     string
+	DeletedAt  time.Time
+	PurgeAfter time.Time
+}
+
+// ScheduleDelete soft-deletes an account: it verifies the principal exists,
+// then records a deleted_principals tombstone with purge_after = now() +
+// retainDays days. Re-scheduling an already-tombstoned account updates its
+// window and reason (idempotent). It touches no calendar/card/principal data —
+// the auth gate disables login immediately, and the purge job removes the data
+// once the window elapses. retainDays must be positive.
+func (w *AdminWrites) ScheduleDelete(username string, retainDays int, reason string) error {
+	if username == "" || strings.ContainsAny(username, "/\n") {
+		return fmt.Errorf("invalid username %q", username)
+	}
+	if retainDays <= 0 {
+		return fmt.Errorf("retention days must be positive, got %d", retainDays)
+	}
+	principal := "principals/" + username
+	var exists bool
+	if err := w.DB.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM principals WHERE uri = $1)`, principal).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("no principal %q: %w", principal, ErrNoPrincipal)
+	}
+	// purge_after is materialized now so a later config change never moves it.
+	_, err := w.DB.Exec(`
+INSERT INTO deleted_principals (principal, username, purge_after, reason)
+VALUES ($1, $2, now() + make_interval(days => $3), nullif($4, ''))
+ON CONFLICT (principal) DO UPDATE
+   SET purge_after = excluded.purge_after,
+       reason      = excluded.reason,
+       deleted_at  = now()`,
+		principal, username, retainDays, reason)
+	return err
+}
+
+// CancelDelete removes a pending-deletion tombstone (restore). It errors if the
+// account was not scheduled for deletion.
+func (w *AdminWrites) CancelDelete(username string) error {
+	if username == "" || strings.ContainsAny(username, "/\n") {
+		return fmt.Errorf("invalid username %q", username)
+	}
+	res, err := w.DB.Exec(
+		`DELETE FROM deleted_principals WHERE principal = $1`, "principals/"+username)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("%q is not scheduled for deletion", username)
+	}
+	return nil
+}
+
+// Deletions lists all pending-deletion tombstones, soonest purge first.
+func (w *AdminWrites) Deletions() ([]DeletedPrincipal, error) {
+	return scanDeletions(w.DB.Query(
+		`SELECT principal, username, coalesce(reason, ''), deleted_at, purge_after
+		   FROM deleted_principals ORDER BY purge_after`))
+}
+
+// ExpiredDeletions lists tombstones whose retention window has elapsed
+// (purge_after <= now()), soonest first — what a purge sweep would act on.
+func (w *AdminWrites) ExpiredDeletions() ([]DeletedPrincipal, error) {
+	return scanDeletions(w.DB.Query(
+		`SELECT principal, username, coalesce(reason, ''), deleted_at, purge_after
+		   FROM deleted_principals WHERE purge_after <= now() ORDER BY purge_after`))
+}
+
+// PurgeExpired runs the retention sweep: it permanently removes every account
+// whose window has elapsed and returns what it purged. For each expired
+// tombstone it CLAIMS the row first (delete … WHERE purge_after <= now()
+// RETURNING) and only cascades if the claim won — so a concurrent CancelDelete
+// (restore) that removed the tombstone means the account is left intact. A
+// cascade that finds the principal already gone (ErrNoPrincipal) still counts
+// as purged, since the tombstone is cleared by the claim.
+func (w *AdminWrites) PurgeExpired() ([]DeletedPrincipal, error) {
+	expired, err := w.ExpiredDeletions()
+	if err != nil {
+		return nil, err
+	}
+	var purged []DeletedPrincipal
+	for _, d := range expired {
+		// Claim: decide ownership by the delete, not the earlier read. If a
+		// restore already removed the tombstone, RowsAffected is 0 and we skip.
+		res, err := w.DB.Exec(
+			`DELETE FROM deleted_principals WHERE principal = $1 AND purge_after <= now()`,
+			d.Principal)
+		if err != nil {
+			return purged, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return purged, err
+		} else if n == 0 {
+			continue // lost the race to a restore; leave the account intact
+		}
+		if err := w.DeleteUserCascade(d.Username); err != nil && !errors.Is(err, ErrNoPrincipal) {
+			return purged, fmt.Errorf("purging %s: %w", d.Username, err)
+		}
+		purged = append(purged, d)
+	}
+	return purged, nil
+}
+
+func scanDeletions(rows *sql.Rows, queryErr error) ([]DeletedPrincipal, error) {
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	defer rows.Close()
+	var out []DeletedPrincipal
+	for rows.Next() {
+		var d DeletedPrincipal
+		if err := rows.Scan(&d.Principal, &d.Username, &d.Reason, &d.DeletedAt, &d.PurgeAfter); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // scanIDs runs a single-column query and collects the string ids, used by

@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 
 	"calserver/internal/auth"
+	"calserver/internal/config"
 	davxml "calserver/internal/dav/xml"
 	"calserver/internal/storage"
 )
@@ -26,6 +28,9 @@ type Writes interface {
 	SetPassword(username, digestA1 string) error
 	DeleteUser(username string) error
 	DeleteUserCascade(username string) error
+	ScheduleDelete(username string, days int, reason string) error
+	CancelDelete(username string) error
+	Deletions() ([]storage.DeletedPrincipal, error)
 	DeleteOrphans(check string) (int64, error)
 }
 
@@ -126,6 +131,52 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 		detail += ", along with all owned calendars and address books"
 	}
 	writeJSON(w, writeResult{OK: true, Detail: detail})
+}
+
+func (a *App) scheduleDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.writeGate(w, r) {
+		return
+	}
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	// Default the window from the server config (itself defaulted to 30); an
+	// explicit days= overrides it.
+	days := config.RetentionDays(a.Config.RetentionDays)
+	if v := r.PostFormValue("days"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			http.Error(w, "days must be a positive integer", http.StatusBadRequest)
+			return
+		}
+		days = n
+	}
+	if err := a.Writes.ScheduleDelete(username, days, r.PostFormValue("reason")); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	audit(r, "schedule-delete", "username", username, "days", days)
+	writeJSON(w, writeResult{OK: true,
+		Detail: fmt.Sprintf("scheduled %s for deletion in %d day(s); it can no longer log in", username, days)})
+}
+
+func (a *App) restoreUser(w http.ResponseWriter, r *http.Request) {
+	if !a.writeGate(w, r) {
+		return
+	}
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	if err := a.Writes.CancelDelete(username); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	audit(r, "restore-user", "username", username)
+	writeJSON(w, writeResult{OK: true, Detail: "restored " + username + "; the account can log in again"})
 }
 
 func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {

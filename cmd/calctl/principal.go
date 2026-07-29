@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 
 	"calserver/internal/auth"
+	"calserver/internal/config"
 	davxml "calserver/internal/dav/xml"
 	"calserver/internal/storage"
 )
@@ -35,10 +36,16 @@ func handlePrincipal(args []string) {
 		handlePrincipalEdit(rest)
 	case "remove":
 		handlePrincipalRemove(rest)
+	case "delete":
+		handlePrincipalDelete(rest)
+	case "restore":
+		handlePrincipalRestore(rest)
+	case "purge-expired":
+		handlePrincipalPurgeExpired(rest)
 	case "auth":
 		handlePrincipalAuth(rest)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown principal subcommand: %s (want list, add, edit, remove, or auth)\n", sub)
+		fmt.Fprintf(os.Stderr, "Unknown principal subcommand: %s (want list, add, edit, remove, delete, restore, purge-expired, or auth)\n", sub)
 		os.Exit(1)
 	}
 }
@@ -129,6 +136,9 @@ type principalRow struct {
 	DisplayName string `json:"displayName,omitempty"`
 	Email       string `json:"email,omitempty"`
 	HasUser     bool   `json:"hasUser"`
+	// Deletion is the purge date (YYYY-MM-DD) when this principal is
+	// soft-deleted, empty otherwise.
+	Deletion string `json:"deletion,omitempty"`
 }
 
 func handlePrincipalList(args []string) {
@@ -152,10 +162,19 @@ func handlePrincipalList(args []string) {
 	for _, p := range diags.PrincipalsWithoutUser {
 		noUser[p] = true
 	}
+	deletions, err := (&storage.AdminWrites{DB: q.DB}).Deletions()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list pending deletions: %v\n", err)
+		os.Exit(1)
+	}
+	purgeDate := map[string]string{}
+	for _, d := range deletions {
+		purgeDate[d.Principal] = d.PurgeAfter.Format("2006-01-02")
+	}
 
 	rows := make([]principalRow, 0, len(principals))
 	for _, p := range principals {
-		row := principalRow{URI: p.URI, HasUser: !noUser[p.URI]}
+		row := principalRow{URI: p.URI, HasUser: !noUser[p.URI], Deletion: purgeDate[p.URI]}
 		if v, ok := p.Props[xml.Name{Space: davxml.NSDav, Local: "displayname"}].(string); ok {
 			row.DisplayName = v
 		}
@@ -173,13 +192,13 @@ func handlePrincipalList(args []string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "URI\tDISPLAYNAME\tEMAIL\tUSER")
+	fmt.Fprintln(w, "URI\tDISPLAYNAME\tEMAIL\tUSER\tDELETION")
 	for _, r := range rows {
 		user := "yes"
 		if !r.HasUser {
 			user = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.URI, dash(r.DisplayName), dash(r.Email), user)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.URI, dash(r.DisplayName), dash(r.Email), user, dash(r.Deletion))
 	}
 	w.Flush()
 }
@@ -296,6 +315,84 @@ func handlePrincipalRemove(args []string) {
 			username, username)
 	}
 	fmt.Println("Run `calctl doctor` to spot any leftover property rows.")
+}
+
+// handlePrincipalDelete schedules a soft-delete: the account can no longer log
+// in, but its data is kept until the retention window elapses and
+// `purge-expired` removes it. Restore with `principal restore` meanwhile.
+func handlePrincipalDelete(args []string) {
+	username, rest := takeUsername("delete", args)
+	flags := flag.NewFlagSet("principal delete", flag.ExitOnError)
+	in := flags.Int("in", 0, "Days to keep the account before purge (default: [retention].deleted_days, then 30)")
+	reason := flags.String("reason", "", "Optional note stored with the tombstone")
+	confirm := flags.Bool("confirm", false, "Actually schedule the deletion (required)")
+	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	days := config.RetentionDays(*in)
+	if *in == 0 {
+		days = config.RetentionDays(globalConfig.Retention.DeletedDays)
+	}
+	if !*confirm {
+		fmt.Fprintf(os.Stderr, "This schedules %q for deletion in %d day(s); it cannot log in meanwhile. Re-run with --confirm (restore with `calctl principal restore %s`).\n",
+			username, days, username)
+		os.Exit(1)
+	}
+	q := openAdminQueries(*dsnOverride)
+	if err := (&storage.AdminWrites{DB: q.DB}).ScheduleDelete(username, days, *reason); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to schedule deletion: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Scheduled %s for deletion in %d day(s). It can no longer log in; restore with `calctl principal restore %s`.\n",
+		username, days, username)
+}
+
+// handlePrincipalRestore cancels a pending soft-delete.
+func handlePrincipalRestore(args []string) {
+	username, rest := takeUsername("restore", args)
+	flags := flag.NewFlagSet("principal restore", flag.ExitOnError)
+	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	q := openAdminQueries(*dsnOverride)
+	if err := (&storage.AdminWrites{DB: q.DB}).CancelDelete(username); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to restore: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Restored %s; the account can log in again.\n", username)
+}
+
+// handlePrincipalPurgeExpired runs the retention sweep — the command cron runs.
+// --dry-run lists what would be purged without touching anything.
+func handlePrincipalPurgeExpired(args []string) {
+	flags := flag.NewFlagSet("principal purge-expired", flag.ExitOnError)
+	dryRun := flags.Bool("dry-run", false, "List accounts due for purge without deleting them")
+	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(args)
+
+	writes := &storage.AdminWrites{DB: openAdminQueries(*dsnOverride).DB}
+	if *dryRun {
+		due, err := writes.ExpiredDeletions()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to list expired deletions: %v\n", err)
+			os.Exit(1)
+		}
+		for _, d := range due {
+			fmt.Printf("would purge %s (scheduled %s, due %s)\n",
+				d.Username, d.DeletedAt.Format("2006-01-02"), d.PurgeAfter.Format("2006-01-02"))
+		}
+		fmt.Printf("%d account(s) due for purge.\n", len(due))
+		return
+	}
+	purged, err := writes.PurgeExpired()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Purge failed after removing %d account(s): %v\n", len(purged), err)
+		os.Exit(1)
+	}
+	for _, d := range purged {
+		fmt.Printf("purged %s\n", d.Username)
+	}
+	fmt.Printf("Purged %d expired account(s).\n", len(purged))
 }
 
 // takeUsername enforces the positional-first convention (flag parsing stops

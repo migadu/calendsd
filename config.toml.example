@@ -117,3 +117,16 @@ principals_readable = false # Let any authenticated user read principal
 # (resources/rooms auto-book, declining on a free-busy conflict). Empty
 # disables auto-scheduling.
 auto_schedule_prefixes = []  # e.g. ["resource", "location"]
+
+
+# ACCOUNT RETENTION
+# =============================================================================
+# Soft-delete retention. `calctl principal delete <user>` schedules an account
+# for deletion instead of removing it immediately: the account can no longer
+# log in, but its data is kept until the window below elapses, at which point
+# `calctl principal purge-expired` (run from cron) removes it for good. Restore
+# within the window with `calctl principal restore <user>`.
+[retention]
+deleted_days = 30           # Days to keep a soft-deleted account before purge.
+                            # 0 uses the built-in default (30). Changing this
+                            # never moves an already-scheduled purge.

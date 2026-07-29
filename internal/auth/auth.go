@@ -50,6 +50,14 @@ type Plugin struct {
 	// classification lives next to the code that knows it. A nil Set records
 	// nothing.
 	Metrics *metrics.Set
+
+	// Tombstoned, when non-nil, reports whether an otherwise-authenticated
+	// principal has been soft-deleted (scheduled for deletion). Such requests
+	// are rejected with 403 even though the credentials are valid, disabling
+	// the account immediately without destroying its password. Nil disables
+	// the check — parity with the pre-soft-delete server (SOFT-DELETE-PLAN.md
+	// §5). It runs above the backends, so it covers every auth mechanism.
+	Tombstoned func(principal string) bool
 }
 
 func (p *Plugin) logger() *slog.Logger {
@@ -89,6 +97,16 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	for _, b := range p.backends {
 		principal, ok, reason := b.Check(r)
 		if ok {
+			if p.Tombstoned != nil && p.Tombstoned(principal) {
+				// Valid credentials, but the account is scheduled for deletion:
+				// reject with 403 (not a 401 re-challenge, which would loop) and
+				// never set the principal, so nothing downstream runs as them.
+				p.logger().Warn("auth blocked: account scheduled for deletion",
+					"principal", principal, "method", r.Method,
+					"path", r.URL.Path, "remote", remoteAddr(r))
+				p.Metrics.AuthAttempt("tombstoned", "blocked")
+				return false, dav.ErrForbidden("this account is scheduled for deletion")
+			}
 			dav.SetPrincipal(r.Context(), principal)
 			p.logger().Debug("auth ok",
 				"principal", principal, "method", r.Method,

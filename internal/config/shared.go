@@ -109,6 +109,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			RcptdToken:           rcptdTok,
 			RequestLogDir:        m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
 			AccessLog:            m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
+			RetentionDays:        RetentionDays(m.File.Retention.DeletedDays),
 		}
 		return m, nil
 	}

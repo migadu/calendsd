@@ -7,10 +7,12 @@ package storage_test
 // isn't reachable, like the concurrency test.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
@@ -27,10 +29,11 @@ func TestAdminQueries(t *testing.T) {
 	run(t, root, "dropdb", "--if-exists", dbName)
 	run(t, root, "createdb", dbName)
 	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no schema files found")
+	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
+	if len(sqlFiles) == 0 || len(extFiles) == 0 {
+		t.Fatalf("schema files missing (sabre=%d, ext=%d)", len(sqlFiles), len(extFiles))
 	}
-	for _, f := range sqlFiles {
+	for _, f := range append(sqlFiles, extFiles...) {
 		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
 	}
 	// The pgsql.principals.sql seed ships principals/admin (+ proxy
@@ -410,6 +413,147 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("in-data match limit=1: %d rows trunc=%t err=%v, want 1/false", len(objs), trunc, err)
 	}
 
+	// Soft-delete (retention): ScheduleDelete tombstones live accounts,
+	// IsDeleted/Deletions/ExpiredDeletions report them, CancelDelete restores,
+	// and PurgeExpired claims-then-cascades only the expired ones.
+	users := &storage.Users{DB: db}
+	for _, u := range []string{"dave", "eve", "frank", "grace"} {
+		if err := writes.CreateUser(u, auth.DigestA1(u, "SabreDAV", "pw"), "", ""); err != nil {
+			t.Fatalf("CreateUser(%s): %v", u, err)
+		}
+	}
+
+	if err := writes.ScheduleDelete("ghostuser", 30, ""); !errors.Is(err, storage.ErrNoPrincipal) {
+		t.Fatalf("ScheduleDelete for a missing user = %v, want ErrNoPrincipal", err)
+	}
+	if err := writes.ScheduleDelete("dave", 0, ""); err == nil {
+		t.Fatal("ScheduleDelete with 0 days succeeded; want error")
+	}
+	if err := writes.ScheduleDelete("dave", 30, "cleanup"); err != nil {
+		t.Fatalf("ScheduleDelete(dave): %v", err)
+	}
+	// Tombstone recorded with the reason and a ~30-day window; account data
+	// left fully intact (soft-delete touches nothing but the tombstone table).
+	var purgeAfter time.Time
+	var reason string
+	if err := db.QueryRow(`SELECT purge_after, coalesce(reason, '')
+		FROM deleted_principals WHERE username = 'dave'`).Scan(&purgeAfter, &reason); err != nil {
+		t.Fatalf("dave tombstone: %v", err)
+	}
+	if reason != "cleanup" {
+		t.Fatalf("dave reason = %q, want cleanup", reason)
+	}
+	if d := time.Until(purgeAfter); d < 29*24*time.Hour || d > 31*24*time.Hour {
+		t.Fatalf("dave purge_after is %v away, want ~30 days", d)
+	}
+	var daveRows int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM users WHERE username = 'dave') +
+		(SELECT count(*) FROM principals WHERE uri LIKE 'principals/dave%')`).Scan(&daveRows); err != nil {
+		t.Fatal(err)
+	}
+	if daveRows != 4 { // users row + 3 principal rows, untouched
+		t.Fatalf("dave has %d account rows after soft-delete, want 4 (data must be intact)", daveRows)
+	}
+	if del, err := users.IsDeleted("principals/dave"); err != nil || !del {
+		t.Fatalf("IsDeleted(dave) = %v, %v; want true", del, err)
+	}
+	if del, err := users.IsDeleted("principals/alice"); err != nil || del {
+		t.Fatalf("IsDeleted(alice) = %v, %v; want false", del, err)
+	}
+
+	// Idempotent re-schedule updates the window/reason, never duplicates.
+	if err := writes.ScheduleDelete("dave", 7, "changed"); err != nil {
+		t.Fatalf("re-ScheduleDelete(dave): %v", err)
+	}
+	var daveTombstones int
+	if err := db.QueryRow(`SELECT count(*), coalesce(max(reason), '')
+		FROM deleted_principals WHERE username = 'dave'`).Scan(&daveTombstones, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if daveTombstones != 1 || reason != "changed" {
+		t.Fatalf("re-schedule: rows=%d reason=%q, want 1/changed", daveTombstones, reason)
+	}
+
+	// CancelDelete restores: tombstone gone, account still fully present.
+	if err := writes.CancelDelete("dave"); err != nil {
+		t.Fatalf("CancelDelete(dave): %v", err)
+	}
+	if del, _ := users.IsDeleted("principals/dave"); del {
+		t.Fatal("dave still tombstoned after CancelDelete")
+	}
+	if err := writes.CancelDelete("dave"); err == nil {
+		t.Fatal("CancelDelete for a non-scheduled user succeeded; want error")
+	}
+
+	// ExpiredDeletions returns only windows that have elapsed. Schedule eve and
+	// frank in the past (backdated), grace in the future.
+	for _, u := range []string{"eve", "frank"} {
+		if err := writes.ScheduleDelete(u, 1, ""); err != nil {
+			t.Fatalf("ScheduleDelete(%s): %v", u, err)
+		}
+	}
+	if err := writes.ScheduleDelete("grace", 30, ""); err != nil {
+		t.Fatalf("ScheduleDelete(grace): %v", err)
+	}
+	if _, err := db.Exec(`UPDATE deleted_principals SET purge_after = now() - interval '1 hour'
+		WHERE username IN ('eve', 'frank')`); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := writes.ExpiredDeletions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredNames := map[string]bool{}
+	for _, d := range expired {
+		expiredNames[d.Username] = true
+	}
+	if !expiredNames["eve"] || !expiredNames["frank"] || expiredNames["grace"] {
+		t.Fatalf("ExpiredDeletions = %v, want eve+frank only (grace is future)", expiredNames)
+	}
+
+	// frank's principal is removed out from under the tombstone: PurgeExpired
+	// must tolerate the already-gone case (ErrNoPrincipal) and still purge it.
+	if _, err := db.Exec(`DELETE FROM principals WHERE uri LIKE 'principals/frank%'`); err != nil {
+		t.Fatal(err)
+	}
+	purged, err := writes.PurgeExpired()
+	if err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	purgedNames := map[string]bool{}
+	for _, d := range purged {
+		purgedNames[d.Username] = true
+	}
+	if len(purged) != 2 || !purgedNames["eve"] || !purgedNames["frank"] {
+		t.Fatalf("PurgeExpired purged %v, want exactly eve+frank", purgedNames)
+	}
+	// eve is fully gone; both expired tombstones are cleared.
+	var eveRows, expiredTombstones int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM users WHERE username = 'eve') +
+		(SELECT count(*) FROM principals WHERE uri LIKE 'principals/eve%'),
+		(SELECT count(*) FROM deleted_principals WHERE username IN ('eve', 'frank'))`).
+		Scan(&eveRows, &expiredTombstones); err != nil {
+		t.Fatal(err)
+	}
+	if eveRows != 0 {
+		t.Fatalf("eve left %d account row(s) after purge", eveRows)
+	}
+	if expiredTombstones != 0 {
+		t.Fatalf("%d expired tombstone(s) survived the purge", expiredTombstones)
+	}
+	// grace's future window was untouched: still scheduled, data intact.
+	var graceTombstone, graceRows int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM deleted_principals WHERE username = 'grace'),
+		(SELECT count(*) FROM users WHERE username = 'grace')`).Scan(&graceTombstone, &graceRows); err != nil {
+		t.Fatal(err)
+	}
+	if graceTombstone != 1 || graceRows != 1 {
+		t.Fatalf("grace tombstone=%d userrow=%d, want 1/1 (future purge must not fire)", graceTombstone, graceRows)
+	}
+
 	// DeleteUserCascade: alice owns a calendar (shared to bob) and an address
 	// book with objects, so plain DeleteUser must still refuse. Cascade drops
 	// the owned collections and their data — including bob's sharee instance
@@ -426,9 +570,9 @@ func TestAdminQueries(t *testing.T) {
 		(SELECT count(*) FROM users WHERE username = 'alice') +
 		(SELECT count(*) FROM principals WHERE uri = 'principals/alice' OR uri LIKE 'principals/alice/%') +
 		(SELECT count(*) FROM calendarinstances WHERE principaluri = 'principals/alice') +
-		(SELECT count(*) FROM calendars WHERE id = `+calID+`) +
-		(SELECT count(*) FROM calendarobjects WHERE calendarid = `+calID+`) +
-		(SELECT count(*) FROM calendarchanges WHERE calendarid = `+calID+`) +
+		(SELECT count(*) FROM calendars WHERE id = ` + calID + `) +
+		(SELECT count(*) FROM calendarobjects WHERE calendarid = ` + calID + `) +
+		(SELECT count(*) FROM calendarchanges WHERE calendarid = ` + calID + `) +
 		(SELECT count(*) FROM addressbooks WHERE principaluri = 'principals/alice')`).Scan(&aliceLeft); err != nil {
 		t.Fatal(err)
 	}
