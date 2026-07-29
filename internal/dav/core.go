@@ -199,6 +199,13 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 		contentType = "application/octet-stream"
 	}
 	h.Set("Content-Type", contentType)
+	// Calendar/contact objects are authenticated and change in place under a
+	// stable URL, so a cache that serves a stale body also serves a stale ETag
+	// — which a client then replays as a doomed If-Match, failing its next PUT
+	// with a 412. "private, no-cache" lets a cache store the response but forces
+	// revalidation (a conditional GET, still 304-efficient) before every reuse,
+	// and keeps shared caches from holding one user's data.
+	h.Set("Cache-Control", "private, no-cache")
 	if etag := file.ETag(); etag != "" {
 		h.Set("ETag", etag)
 	}

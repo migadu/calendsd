@@ -258,6 +258,27 @@ func TestPutRejectsPercentEncodedDotDotSegment(t *testing.T) {
 	}
 }
 
+// A stored object served with an ETag but no cache directive can be handed
+// back stale by an intermediate/browser cache, and the stale ETag then fails
+// the client's next If-Match PUT with a 412. GET and HEAD must carry a
+// revalidate-forcing Cache-Control.
+func TestGetHeadSetNoCacheOnObjects(t *testing.T) {
+	f := &memFile{name: "e.ics", contents: []byte("BEGIN:VCALENDAR"), etag: `"v1"`}
+	root := newMemColl("root", f)
+	s := NewServer("/", root)
+
+	for _, method := range []string{"GET", "HEAD"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(method, "/e.ics", nil))
+		if rec.Code != 200 {
+			t.Fatalf("%s = %d: %s", method, rec.Code, rec.Body.String())
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
+			t.Errorf("%s Cache-Control = %q, want %q", method, cc, "private, no-cache")
+		}
+	}
+}
+
 // Bug: core.go's getcontentlength handler serializes file.Size() verbatim, so
 // unknown-size files (-1, treated as unknown by GET) report "-1"; sabre reports
 // the property as 404 instead.

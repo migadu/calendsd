@@ -42,7 +42,12 @@ export async function req(method, path, { headers = {}, body = null, redirect = 
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeout);
   try {
-    res = await fetch(path, { method, headers: h, body, redirect, signal: ac.signal });
+    // cache: 'no-store' keeps the browser HTTP cache out of the loop entirely.
+    // DAV freshness is tracked by ctag/ETag, and object GETs carry an ETag but
+    // no Cache-Control, so a heuristically-cached GET could return a stale body
+    // and ETag — which the editor would then send back as a doomed If-Match,
+    // failing the PUT with a 412 "changed elsewhere" against the newer server copy.
+    res = await fetch(path, { method, headers: h, body, redirect, signal: ac.signal, cache: 'no-store' });
     text = await res.text();
   } catch (e) {
     const msg = e.name === 'AbortError' ? 'request timed out' : `network error: ${e.message}`;
