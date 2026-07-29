@@ -109,10 +109,89 @@ func (w *AdminWrites) DeleteUser(username string) error {
 		return err
 	}
 	if calendars > 0 || books > 0 {
-		return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first",
+		return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade",
 			principal, calendars, books)
 	}
+	if err := deletePrincipalRows(tx, principal, username); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// DeleteUserCascade is DeleteUser without the guard: it first removes every
+// collection the principal owns — calendars (with their objects and change
+// log, mirroring CalDAV.DeleteCalendar's shared-owner branch, which also
+// drops any sharees' instance rows) and address books (with their cards and
+// change log, mirroring CardDAV.DeleteAddressBook) — plus any calendars
+// shared *into* this principal (its own instance rows), then deletes the
+// principal triple and users row. All in one transaction, so a failure
+// leaves the account and its data intact. Property-storage rows are left for
+// the doctor's orphaned-property sweep, same as DeleteUser.
+func (w *AdminWrites) DeleteUserCascade(username string) error {
+	if username == "" || strings.ContainsAny(username, "/\n") {
+		return fmt.Errorf("invalid username %q", username)
+	}
+	principal := "principals/" + username
+	tx, err := w.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Owned calendars (access=1): capture ids first, since the deletes below
+	// remove the very instance rows that mark ownership.
+	ownedCals, err := scanIDs(tx,
+		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
+	if err != nil {
+		return err
+	}
+	for _, id := range ownedCals {
+		for _, q := range []string{
+			`DELETE FROM calendarobjects WHERE calendarid = $1`,
+			`DELETE FROM calendarchanges WHERE calendarid = $1`,
+			`DELETE FROM calendarinstances WHERE calendarid = $1`,
+			`DELETE FROM calendars WHERE id = $1`,
+		} {
+			if _, err := tx.Exec(q, id); err != nil {
+				return err
+			}
+		}
+	}
+	// Any remaining instance rows are shares into this principal; drop them.
+	if _, err := tx.Exec(
+		`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
+		return err
+	}
+
+	ownedBooks, err := scanIDs(tx,
+		`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
+	if err != nil {
+		return err
+	}
+	for _, id := range ownedBooks {
+		for _, q := range []string{
+			`DELETE FROM cards WHERE addressbookid = $1`,
+			`DELETE FROM addressbookchanges WHERE addressbookid = $1`,
+			`DELETE FROM addressbooks WHERE id = $1`,
+		} {
+			if _, err := tx.Exec(q, id); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := deletePrincipalRows(tx, principal, username); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deletePrincipalRows removes the rows shared by both delete paths: the
+// principal's group-membership and scheduling-inbox rows, its principal
+// triple (the principal plus the two proxy sub-principals), and its users
+// row (absent for group principals, which is fine). It errors if no
+// principal row matched, so deleting an unknown account is reported.
+func deletePrincipalRows(tx *sql.Tx, principal, username string) error {
 	proxyRead := principal + "/calendar-proxy-read"
 	proxyWrite := principal + "/calendar-proxy-write"
 	if _, err := tx.Exec(`
@@ -141,7 +220,27 @@ DELETE FROM groupmembers
 	if _, err := tx.Exec(`DELETE FROM users WHERE username = $1`, username); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
+}
+
+// scanIDs runs a single-column query and collects the string ids, used by
+// DeleteUserCascade to capture owned collection ids before deleting the rows
+// that identify them.
+func scanIDs(tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // SetPassword replaces a user's digesta1 hash.

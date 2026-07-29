@@ -25,6 +25,8 @@ type fakeWrites struct {
 	created   []string // "username digestA1 email displayName"
 	passwords map[string]string
 	deleted   []string
+	removed   []string // usernames passed to DeleteUser (guarded)
+	cascaded  []string // usernames passed to DeleteUserCascade
 }
 
 func (f *fakeWrites) CreateUser(username, digestA1, email, displayName string) error {
@@ -37,6 +39,16 @@ func (f *fakeWrites) SetPassword(username, digestA1 string) error {
 		f.passwords = map[string]string{}
 	}
 	f.passwords[username] = digestA1
+	return nil
+}
+
+func (f *fakeWrites) DeleteUser(username string) error {
+	f.removed = append(f.removed, username)
+	return nil
+}
+
+func (f *fakeWrites) DeleteUserCascade(username string) error {
+	f.cascaded = append(f.cascaded, username)
 	return nil
 }
 
@@ -248,6 +260,43 @@ func TestDeleteOrphansEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeleteUserEndpoint(t *testing.T) {
+	a := testAppB()
+	writes := &fakeWrites{}
+	a.Writes = writes
+	a.ReadOnly = false
+	h := a.Handler()
+
+	// Default (no cascade) routes to the guarded DeleteUser.
+	w := postForm(t, h, "/api/delete-user", url.Values{"username": {"carol"}}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete-user = %d: %s", w.Code, w.Body.String())
+	}
+	if len(writes.removed) != 1 || writes.removed[0] != "carol" || len(writes.cascaded) != 0 {
+		t.Fatalf("removed=%v cascaded=%v, want guarded delete of carol", writes.removed, writes.cascaded)
+	}
+
+	// cascade=1 routes to DeleteUserCascade instead.
+	w = postForm(t, h, "/api/delete-user", url.Values{"username": {"dave"}, "cascade": {"1"}}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete-user cascade = %d: %s", w.Code, w.Body.String())
+	}
+	if len(writes.cascaded) != 1 || writes.cascaded[0] != "dave" || len(writes.removed) != 1 {
+		t.Fatalf("removed=%v cascaded=%v, want cascade delete of dave", writes.removed, writes.cascaded)
+	}
+
+	// Username is required.
+	if w := postForm(t, h, "/api/delete-user", url.Values{}, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("delete-user without username = %d", w.Code)
+	}
+
+	// Gated like every other write: read-only refuses.
+	a.ReadOnly = true
+	if w := postForm(t, a.Handler(), "/api/delete-user", url.Values{"username": {"carol"}}, true); w.Code != http.StatusForbidden {
+		t.Fatalf("delete-user in read-only = %d", w.Code)
+	}
+}
+
 func TestPhaseCHTMLForms(t *testing.T) {
 	a := testAppB()
 	a.Writes = &fakeWrites{}
@@ -267,6 +316,15 @@ func TestPhaseCHTMLForms(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), marker) {
 			t.Errorf("GET %s: page does not contain %q", path, marker)
+		}
+	}
+
+	// The principal page carries the danger-zone delete-user form, wired to
+	// the cascade toggle so an admin can remove an account and its data.
+	body := get(t, h, "/principal?path=principals/alice").Body.String()
+	for _, marker := range []string{"/api/delete-user", "cascade", "Delete user"} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("principal page missing delete-user marker %q", marker)
 		}
 	}
 }

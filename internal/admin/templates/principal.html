@@ -65,6 +65,16 @@
 <button>provision default calendar/address book</button>
 <span id="provresult"></span>
 </form>
+{{if .User}}
+<h3 class="warn">Delete user</h3>
+<p class="muted">Removes the users row and principal triple for {{.User.Username}}. Without cascade, this refuses while the account still owns any calendar or address book. Cascade also deletes those collections and all their data — irreversible.</p>
+<form class="inline" onsubmit="event.preventDefault(); if (confirm('Delete {{.User.Username}}? This cannot be undone.')) adminPost('/api/delete-user', this, 'delresult')">
+<input type="hidden" name="username" value="{{.User.Username}}">
+<label><input type="checkbox" name="cascade" value="1"> cascade (also delete owned collections)</label>
+<button>Delete user</button>
+<span id="delresult"></span>
+</form>
+{{end}}
 
 <h2>Credential check</h2>
 <p class="muted">Verifies a password against the stored digesta1 under the configured realm. A known-good password that fails here means the hash was minted under a different realm.</p>

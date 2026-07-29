@@ -409,4 +409,51 @@ func TestAdminQueries(t *testing.T) {
 	if err != nil || len(objs) != 1 || trunc {
 		t.Fatalf("in-data match limit=1: %d rows trunc=%t err=%v, want 1/false", len(objs), trunc, err)
 	}
+
+	// DeleteUserCascade: alice owns a calendar (shared to bob) and an address
+	// book with objects, so plain DeleteUser must still refuse. Cascade drops
+	// the owned collections and their data — including bob's sharee instance
+	// of alice's calendar — then removes the principal triple and users row.
+	// Run last: it destroys the fixture alice everything above relies on.
+	if err := writes.DeleteUser("alice"); err == nil {
+		t.Fatal("DeleteUser for alice (owns collections) succeeded; cascade must be explicit")
+	}
+	if err := writes.DeleteUserCascade("alice"); err != nil {
+		t.Fatalf("DeleteUserCascade: %v", err)
+	}
+	var aliceLeft int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM users WHERE username = 'alice') +
+		(SELECT count(*) FROM principals WHERE uri = 'principals/alice' OR uri LIKE 'principals/alice/%') +
+		(SELECT count(*) FROM calendarinstances WHERE principaluri = 'principals/alice') +
+		(SELECT count(*) FROM calendars WHERE id = `+calID+`) +
+		(SELECT count(*) FROM calendarobjects WHERE calendarid = `+calID+`) +
+		(SELECT count(*) FROM calendarchanges WHERE calendarid = `+calID+`) +
+		(SELECT count(*) FROM addressbooks WHERE principaluri = 'principals/alice')`).Scan(&aliceLeft); err != nil {
+		t.Fatal(err)
+	}
+	if aliceLeft != 0 {
+		t.Fatalf("cascade left %d alice-owned row(s) behind", aliceLeft)
+	}
+	// Bob's only instance was a share of alice's now-deleted calendar, so it
+	// must be gone; bob's own principal/users rows must survive untouched.
+	var bobInstances, bobPrincipal int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM calendarinstances WHERE principaluri = 'principals/bob'),
+		(SELECT count(*) FROM principals WHERE uri = 'principals/bob')`).Scan(&bobInstances, &bobPrincipal); err != nil {
+		t.Fatal(err)
+	}
+	if bobInstances != 0 {
+		t.Fatalf("bob kept %d instance(s) of alice's deleted calendar", bobInstances)
+	}
+	if bobPrincipal != 1 {
+		t.Fatalf("cascade removed bob's principal (%d); it must only drop alice's own rows", bobPrincipal)
+	}
+	// A second cascade of the now-absent alice must error, like DeleteUser.
+	if err := writes.DeleteUserCascade("alice"); err == nil {
+		t.Fatal("DeleteUserCascade for a deleted user succeeded; want error")
+	}
+	if err := writes.DeleteUserCascade("bad/name"); err == nil {
+		t.Fatal("DeleteUserCascade accepted an invalid username; want error")
+	}
 }

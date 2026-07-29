@@ -267,20 +267,34 @@ func handlePrincipalRemove(args []string) {
 	username, rest := takeUsername("remove", args)
 	flags := flag.NewFlagSet("principal remove", flag.ExitOnError)
 	confirm := flags.Bool("confirm", false, "Actually delete (required)")
+	cascade := flags.Bool("cascade", false, "Also delete the user's owned calendars and address books (otherwise removal refuses while any collection remains)")
 	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
 	flags.Parse(rest)
 
 	if !*confirm {
-		fmt.Fprintf(os.Stderr, "This deletes the users row and principal triple for %q. Re-run with --confirm.\n", username)
+		what := "the users row and principal triple"
+		if *cascade {
+			what = "all owned calendars and address books, plus the users row and principal triple"
+		}
+		fmt.Fprintf(os.Stderr, "This deletes %s for %q. Re-run with --confirm.\n", what, username)
 		os.Exit(1)
 	}
-	q := openAdminQueries(*dsnOverride)
-	if err := (&storage.AdminWrites{DB: q.DB}).DeleteUser(username); err != nil {
+	writes := &storage.AdminWrites{DB: openAdminQueries(*dsnOverride).DB}
+	remove := writes.DeleteUser
+	if *cascade {
+		remove = writes.DeleteUserCascade
+	}
+	if err := remove(username); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to remove: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Removed user %s, principals/%s (with proxy sub-principals), and their group-membership and scheduling rows.\n",
-		username, username)
+	if *cascade {
+		fmt.Printf("Removed user %s, principals/%s (with proxy sub-principals), and all owned calendars/address books.\n",
+			username, username)
+	} else {
+		fmt.Printf("Removed user %s, principals/%s (with proxy sub-principals), and their group-membership and scheduling rows.\n",
+			username, username)
+	}
 	fmt.Println("Run `calctl doctor` to spot any leftover property rows.")
 }
 

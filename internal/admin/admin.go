@@ -105,6 +105,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/check-credentials", a.checkCredentials)
 	mux.HandleFunc("POST /api/create-user", a.createUser)
 	mux.HandleFunc("POST /api/set-password", a.setPassword)
+	mux.HandleFunc("POST /api/delete-user", a.deleteUser)
 	mux.HandleFunc("POST /api/set-delegation", a.setDelegation)
 	mux.HandleFunc("POST /api/proppatch", a.propPatch)
 	mux.HandleFunc("POST /api/provision", a.provision)

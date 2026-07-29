@@ -24,6 +24,8 @@ import (
 type Writes interface {
 	CreateUser(username, digestA1, email, displayName string) error
 	SetPassword(username, digestA1 string) error
+	DeleteUser(username string) error
+	DeleteUserCascade(username string) error
 	DeleteOrphans(check string) (int64, error)
 }
 
@@ -94,6 +96,36 @@ func (a *App) setPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	audit(r, "set-password", "username", username, "realm", a.Config.Realm)
 	writeJSON(w, writeResult{OK: true, Detail: "password reset for " + username + " under realm " + a.Config.Realm})
+}
+
+func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
+	if !a.writeGate(w, r) {
+		return
+	}
+	username := r.PostFormValue("username")
+	if username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	// cascade=1 also drops the account's owned calendars and address books;
+	// the default refuses while any collection remains (DAV cleanup first).
+	cascade := r.PostFormValue("cascade") == "1"
+	var err error
+	if cascade {
+		err = a.Writes.DeleteUserCascade(username)
+	} else {
+		err = a.Writes.DeleteUser(username)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	audit(r, "delete-user", "username", username, "cascade", cascade)
+	detail := "deleted user " + username + " and principals/" + username + " (with proxy sub-principals)"
+	if cascade {
+		detail += ", along with all owned calendars and address books"
+	}
+	writeJSON(w, writeResult{OK: true, Detail: detail})
 }
 
 func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
