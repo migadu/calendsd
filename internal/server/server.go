@@ -68,6 +68,11 @@ type Config struct {
 	// request under this directory. A debugging aid for DAV clients — off by
 	// default; do not enable in production (bodies hold calendar/contact data).
 	RequestLogDir string
+	// AccessLog, when true, emits one structured slog line per request
+	// (method, path, status, bytes, duration) through the process logger, so
+	// it shares the main log's rotation. Unlike RequestLogDir it logs no
+	// bodies, so it is safe to leave on. Off by default.
+	AccessLog bool
 	// Metrics, when non-nil, receives Prometheus observations from the HTTP
 	// middleware, auth backends, storage, and iMip (METRICS-PLAN.md). Not
 	// part of Canonical(): it changes no DAV semantics.
@@ -96,10 +101,10 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t reqlog=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t reqlog=%t accesslog=%t",
 		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "", c.RequestLogDir != "")
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog)
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
@@ -110,6 +115,9 @@ func New(db *sql.DB, cfg Config) http.Handler {
 	// Request logging wraps outside the well-known redirect so it captures the
 	// final status of every request, including redirects and auth challenges.
 	h = WrapRequestLog(h, cfg.RequestLogDir)
+	// Access log wraps outside the per-request file dump so its status and byte
+	// count reflect the final response, including well-known redirects.
+	h = WrapAccessLog(h, cfg.AccessLog)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
 	return WrapMetrics(h, cfg.Metrics, srv.BaseURI)

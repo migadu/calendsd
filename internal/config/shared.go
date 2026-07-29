@@ -65,6 +65,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	rcptdURL := flag.String("rcptd-url", "", "base URL of an rcptd daemon (e.g. http://127.0.0.1:8090); when set, authenticate Basic logins against its /auth endpoint (Dovecot passwd hashes) instead of the users table. Basic-only (no digesta1) — front with TLS; pair with -auto-provision")
 	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
 	requestLogDir := flag.String("request-log-dir", "", "debug: dump every request/response (headers + bounded bodies, Authorization redacted) to one file per request under this directory; empty disables. Do not use in production")
+	accessLog := flag.Bool("access-log", false, "log one line per request (method, path, status, bytes, duration) into the main log; overrides [logging].access_log")
 	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). Overrides [logging].level; when neither is set, $CALSERVER_LOG_LEVEL applies")
 
 	return func() (*Merged, error) {
@@ -107,6 +108,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			RcptdURL:             m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
 			RcptdToken:           rcptdTok,
 			RequestLogDir:        m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
+			AccessLog:            m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
 		}
 		return m, nil
 	}

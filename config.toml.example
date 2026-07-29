@@ -68,6 +68,13 @@ dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disa
 # $CALSERVER_LOG_LEVEL environment variable applies (handy for raising verbosity
 # via systemd without editing this file). calclient honours the same flag/env.
 #
+# access_log emits one structured line per request (method, path, status, bytes,
+# duration) into the main log above, so it shares that log's rotation/shipping.
+# It logs no bodies, so unlike request_dir it is safe to leave on. The line's
+# level tracks the status: 5xx at error, other 4xx at warn, everything else
+# (including the routine 401 auth challenge) at info — so raising level to "warn"
+# surfaces only failing requests. The -access-log flag overrides this key.
+#
 # When request_dir is set, every request/response is additionally dumped to one
 # file per request under that directory (method, path, headers, and bounded
 # request and response bodies). The Authorization header is redacted, but the
@@ -75,6 +82,7 @@ dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disa
 # for production. Leave empty to disable.
 [logging]
 level = "info"          # debug, info, warn, or error. Empty = info.
+access_log = false      # one slog line per request into the main log.
 request_dir = ""        # e.g. "/var/tmp/calserver-requests". Empty = disabled.
 
 

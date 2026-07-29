@@ -40,13 +40,15 @@ func WrapMetrics(next http.Handler, set *metrics.Set, baseURI string) http.Handl
 	})
 }
 
-// statusRecorder captures only the response status. The reqlog
-// responseRecorder is not reused here: it buffers bodies and only exists when
-// request logging — a debug aid, off in production — is enabled.
+// statusRecorder captures the response status and byte count (the latter for
+// the access log; the metrics wrapper ignores it). The reqlog responseRecorder
+// is not reused here: it buffers bodies and only exists when request logging —
+// a debug aid, off in production — is enabled.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	wrote  bool
+	status  int
+	wrote   bool
+	written int
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
@@ -59,7 +61,9 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 func (r *statusRecorder) Write(p []byte) (int, error) {
 	r.wrote = true // an implicit 200 if WriteHeader was never called
-	return r.ResponseWriter.Write(p)
+	n, err := r.ResponseWriter.Write(p)
+	r.written += n
+	return n, err
 }
 
 // Flush preserves streaming for clients that rely on it.

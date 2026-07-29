@@ -42,6 +42,9 @@ type Config struct {
 		// means the built-in default (info).
 		Level      string
 		RequestDir string
+		// AccessLog emits one slog line per request into the main log (so it
+		// shares its rotation). Cheap enough to leave on; off by default.
+		AccessLog bool
 	}
 	Scheduling struct {
 		IMip struct {
@@ -88,6 +91,7 @@ func Load(path string) (*Config, error) {
 	cfg.Database.DSN = str("database.dsn")
 	cfg.Logging.Level = str("logging.level")
 	cfg.Logging.RequestDir = str("logging.request_dir")
+	cfg.Logging.AccessLog = boolean("logging.access_log")
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
 	cfg.CalendarServer.Browser = boolean("calendarserver.browser")
@@ -115,6 +119,7 @@ var known = map[string]bool{
 	"database.dsn":         true,
 	"logging.level":        true,
 	"logging.request_dir":  true,
+	"logging.access_log":   true,
 	"scheduling.imip.smtp": true, "scheduling.imip.sender": true,
 	"calendarserver.browser": true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
