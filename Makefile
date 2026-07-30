@@ -6,9 +6,14 @@
 GO    ?= go
 ADDR  ?= :8080
 REALM ?= SabreDAV
-# Version stamped into the binaries (surfaces as calserver_build_info).
-VERSION ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  = -ldflags "-X main.version=$(VERSION)"
+# Build identity stamped into every binary (internal/version): shown by
+# `<binary> -version` and surfaced as calserver_build_info.
+VERSION   ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
+COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS    = -ldflags "-X calserver/internal/version.Version=$(VERSION) \
+             -X calserver/internal/version.Commit=$(COMMIT) \
+             -X calserver/internal/version.Date=$(BUILDTIME)"
 # DSN for the shared dev Postgres started by scripts/dev-db.sh.
 DB    ?= postgres://$(USER)@/calserver?host=$(CURDIR)/.dev/pg
 
@@ -63,15 +68,15 @@ all: vet test ## Vet then run the full Go test suite
 
 build: ## Build the server, admin, demo-client, and CLI binaries into bin/
 	$(GO) build $(LDFLAGS) -o bin/calserver ./cmd/calserver
-	$(GO) build -o bin/calserver-admin ./cmd/calserver-admin
-	$(GO) build -o bin/calclient ./cmd/calclient
-	$(GO) build -o bin/calctl ./cmd/calctl
+	$(GO) build $(LDFLAGS) -o bin/calserver-admin ./cmd/calserver-admin
+	$(GO) build $(LDFLAGS) -o bin/calclient ./cmd/calclient
+	$(GO) build $(LDFLAGS) -o bin/calctl ./cmd/calctl
 
 freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64, consumed by the ansible calserver role)
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calserver-freebsd-amd64 ./cmd/calserver
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -o bin/calserver-admin-freebsd-amd64 ./cmd/calserver-admin
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -o bin/calclient-freebsd-amd64 ./cmd/calclient
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -o bin/calctl-freebsd-amd64 ./cmd/calctl
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calserver-admin-freebsd-amd64 ./cmd/calserver-admin
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calclient-freebsd-amd64 ./cmd/calclient
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calctl-freebsd-amd64 ./cmd/calctl
 
 test: ## Run the full Go test suite
 	$(GO) test ./...

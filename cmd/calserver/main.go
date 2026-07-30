@@ -4,6 +4,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -17,11 +18,8 @@ import (
 	"calserver/internal/metrics"
 	"calserver/internal/server"
 	"calserver/internal/storage"
+	"calserver/internal/version"
 )
-
-// version is stamped at build time via -ldflags "-X main.version=..."; it
-// surfaces as the calserver_build_info metric.
-var version = "dev"
 
 func main() {
 	resolve := config.SharedServerFlags("Postgres DSN of the shared sabre database (e.g. postgres://localhost/calserver); empty runs an in-memory server")
@@ -29,7 +27,13 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", "", "listen address for Prometheus /metrics and /debug/pprof (plain HTTP, no auth — bind loopback or a firewalled interface, e.g. 127.0.0.1:9464); empty disables")
 	tlsCert := flag.String("tls-cert", "", "path to a TLS certificate; enables HTTPS (Basic/Digest send credentials, so terminate TLS here or in front)")
 	tlsKey := flag.String("tls-key", "", "path to the TLS private key (required with -tls-cert)")
+	showVersion := version.Flags()
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.String("calserver"))
+		return
+	}
 
 	m, err := resolve()
 	if err != nil {
@@ -49,7 +53,8 @@ func main() {
 	// is unconditional.
 	var set *metrics.Set
 	if metricsAddrV != "" {
-		set = metrics.New(version)
+		// version.Version surfaces as the calserver_build_info metric.
+		set = metrics.New(version.Version)
 		m.Server.Metrics = set
 	}
 
@@ -96,7 +101,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("listening", "addr", addrV, "base_uri", m.Server.BaseURI, "db", m.DSN != "", "tls", tls)
+	ver, commit, built := version.Info()
+	slog.Info("listening", "addr", addrV, "base_uri", m.Server.BaseURI, "db", m.DSN != "", "tls", tls,
+		"version", ver, "commit", commit, "built", built)
 	if tls {
 		err = httpSrv.ListenAndServeTLS(tlsCertV, tlsKeyV)
 	} else {

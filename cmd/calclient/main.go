@@ -8,6 +8,7 @@ package main
 import (
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"calserver/internal/logging"
+	"calserver/internal/version"
 )
 
 //go:embed web
@@ -27,7 +29,13 @@ func main() {
 	target := flag.String("target", "http://127.0.0.1:8080", "base URL of the calserver to proxy DAV requests to")
 	devAssets := flag.String("dev-assets", "", "serve client assets from this directory instead of the embedded copy (for iterating without rebuilds)")
 	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). When empty, $CALSERVER_LOG_LEVEL applies")
+	showVersion := version.Flags()
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.String("calclient"))
+		return
+	}
 
 	if err := logging.Setup(*logLevel); err != nil {
 		slog.Error("configuring logging", "err", err)
@@ -73,18 +81,34 @@ func main() {
 	// /.well-known/*) meant for the proxy. The static URL paths mirror the
 	// web/ directory layout, so one FileServer covers all three mounts:
 	// /cal/ (end-user app), /app/ (protocol explorer), /shared/ (modules).
-	static := http.FileServer(assets)
+	//
+	// no-cache: embedded assets carry no ETag/Last-Modified (embed.FS has no
+	// mod times), so without an explicit directive a browser may keep running
+	// JS from a previous build after a rebuild + restart — old client code
+	// against a new server, the "still broken after the fix" trap.
+	static := noCacheAssets(http.FileServer(assets))
 	mux.Handle("GET /cal/", static)
 	mux.Handle("GET /app/", static)
 	mux.Handle("GET /shared/", static)
 	mux.Handle("GET /{$}", http.RedirectHandler("/cal/", http.StatusFound))
 	mux.Handle("/", proxy)
 
-	slog.Info("calclient listening", "addr", *addr, "target", targetURL.String())
+	ver, commit, built := version.Info()
+	slog.Info("calclient listening", "addr", *addr, "target", targetURL.String(),
+		"version", ver, "commit", commit, "built", built)
 	if err := http.ListenAndServe(*addr, withAccessLog(mux)); err != nil {
 		slog.Error("listen", "err", err)
 		os.Exit(1)
 	}
+}
+
+// noCacheAssets forces revalidation of the static client assets on every use
+// (see the mux comment above).
+func noCacheAssets(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withAccessLog logs one line per request. calclient authenticates nothing

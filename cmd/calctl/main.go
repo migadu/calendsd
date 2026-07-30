@@ -10,12 +10,7 @@ import (
 	"strings"
 
 	"calserver/internal/config"
-)
-
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
+	"calserver/internal/version"
 )
 
 // globalConfig holds the loaded config file; all-zero when no file was found
@@ -29,7 +24,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Args[1] == "-v" || os.Args[1] == "--version" || os.Args[1] == "version" {
+	if os.Args[1] == "-v" || os.Args[1] == "-version" || os.Args[1] == "--version" || os.Args[1] == "version" {
 		printVersion()
 		os.Exit(0)
 	}
@@ -97,7 +92,7 @@ func main() {
 }
 
 func printVersion() {
-	fmt.Printf("calctl %s (commit: %s, built: %s)\n", version, commit, date)
+	fmt.Println(version.String("calctl"))
 }
 
 func printUsage() {

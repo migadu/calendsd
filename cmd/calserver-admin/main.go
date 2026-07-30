@@ -8,6 +8,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"calserver/internal/logging"
 	"calserver/internal/server"
 	"calserver/internal/storage"
+	"calserver/internal/version"
 )
 
 func main() {
@@ -26,7 +28,13 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8081", "listen address (Basic auth resends the password: loopback/LAN or behind TLS only)")
 	authFile := flag.String("admin-auth", "", "htpasswd file with bcrypt entries (htpasswd -B) for admin logins (required)")
 	readonly := flag.Bool("readonly", true, "disable write actions (Phase C); reads only")
+	showVersion := version.Flags()
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.String("calserver-admin"))
+		return
+	}
 
 	m, err := resolve()
 	if err != nil {
@@ -109,7 +117,9 @@ func main() {
 
 	// Same line calserver logs: drift shows as a string diff (§2).
 	slog.Info("effective config", "config", cfg.Canonical())
-	slog.Info("admin panel listening", "addr", *addr, "readonly", *readonly)
+	ver, commit, built := version.Info()
+	slog.Info("admin panel listening", "addr", *addr, "readonly", *readonly,
+		"version", ver, "commit", commit, "built", built)
 	if err := httpSrv.ListenAndServe(); err != nil {
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
