@@ -96,10 +96,57 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{}
-	str := func(key string) string { s, _ := flat[key].(string); return s }
-	boolean := func(key string) bool { b, _ := flat[key].(bool); return b }
-	integer := func(key string) int { i, _ := flat[key].(int); return i }
-	list := func(key string) []string { l, _ := flat[key].([]string); return l }
+	// A present key of the wrong type must fail like an unknown key does —
+	// silently reading `access_log = "True"` (a string) as false hides the
+	// intended setting behind a healthy-looking startup.
+	var typeErrs []string
+	badType := func(key, want string, got any) {
+		typeErrs = append(typeErrs, fmt.Sprintf("config key %q must be %s, not %s", key, want, describeValue(got)))
+	}
+	str := func(key string) string {
+		v, present := flat[key]
+		if !present {
+			return ""
+		}
+		s, ok := v.(string)
+		if !ok {
+			badType(key, "a quoted string", v)
+		}
+		return s
+	}
+	boolean := func(key string) bool {
+		v, present := flat[key]
+		if !present {
+			return false
+		}
+		b, ok := v.(bool)
+		if !ok {
+			badType(key, "true or false (unquoted)", v)
+		}
+		return b
+	}
+	integer := func(key string) int {
+		v, present := flat[key]
+		if !present {
+			return 0
+		}
+		i, ok := v.(int)
+		if !ok {
+			badType(key, "an integer (unquoted)", v)
+		}
+		return i
+	}
+	list := func(key string) []string {
+		v, present := flat[key]
+		if !present {
+			return nil
+		}
+		l, ok := v.([]string)
+		if !ok {
+			badType(key, "an array of quoted strings", v)
+		}
+		return l
+	}
 
 	cfg.Server.Addr = str("server.addr")
 	cfg.Server.MetricsAddr = str("server.metrics_addr")
@@ -128,7 +175,27 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: unknown config key %q", path, key)
 		}
 	}
+	if len(typeErrs) > 0 {
+		return nil, fmt.Errorf("%s: %s", path, strings.Join(typeErrs, "; "))
+	}
 	return cfg, nil
+}
+
+// describeValue names a parsed value's type and content for type-mismatch
+// errors, e.g. `the string "True"`.
+func describeValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return fmt.Sprintf("the string %q", t)
+	case bool:
+		return fmt.Sprintf("the boolean %v", t)
+	case int:
+		return fmt.Sprintf("the integer %d", t)
+	case []string:
+		return "an array"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // known is the set of recognised "section.key" paths; anything else is a typo

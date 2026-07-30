@@ -97,6 +97,27 @@ func TestLoadUnknownKey(t *testing.T) {
 	}
 }
 
+func TestLoadWrongType(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, body string
+	}{
+		// The classic: a quoted boolean silently read as false before.
+		{"quoted bool", "[logging]\naccess_log = \"True\"\n"},
+		{"bool for string", "[server]\naddr = true\n"},
+		{"string for int", "[retention]\ndeleted_days = \"30\"\n"},
+		{"string for array", "[calendarserver]\nauto_schedule_prefixes = \"resource\"\n"},
+	} {
+		path := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("%s: expected a type error, got nil", tc.name)
+		}
+	}
+}
+
 func TestParseValues(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
