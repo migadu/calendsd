@@ -65,6 +65,8 @@ export async function req(method, path, { headers = {}, body = null, redirect = 
   const out = {
     status: res.status, ok: res.ok, headers: res.headers,
     text, xml, url: res.url, redirected: res.redirected,
+    // Request identity, so an error handler can say which exchange failed.
+    method, path, reqHeaders: h,
   };
   record(method, path, h, body, out, null);
   return out;

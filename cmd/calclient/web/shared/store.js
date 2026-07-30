@@ -47,6 +47,12 @@ export class DavError extends Error {
     this.status = res.status;
     this.conflict = res.status === 412 || res.status === 409;
     this.detail = res.text?.slice(0, 500) ?? '';
+    // The friendly message hides the exchange; log it so a report like
+    // "changed elsewhere" can be traced to the concrete request (method,
+    // path, status, the If-Match sent) from the browser console.
+    const cond = res.reqHeaders?.['If-Match'] ? ` if-match=${res.reqHeaders['If-Match']}`
+      : res.reqHeaders?.['If-None-Match'] ? ` if-none-match=${res.reqHeaders['If-None-Match']}` : '';
+    console.error(`DAV ${res.method ?? '?'} ${res.path ?? res.url ?? '?'} -> ${res.status}${cond}`, this.detail);
   }
 }
 export function friendly(status, fallback) {
