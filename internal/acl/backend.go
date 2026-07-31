@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"calserver/internal/dav"
+	"calserver/internal/pathutil"
 )
 
 // Principal is one principal's identity and properties.
@@ -51,7 +52,7 @@ type MemoryBackend struct {
 func (m *MemoryBackend) PrincipalsByPrefix(prefix string) ([]Principal, error) {
 	var out []Principal
 	for _, p := range m.Principals {
-		if parent, _ := splitPath(p.URI); parent == prefix {
+		if parent, _ := pathutil.Split(p.URI); parent == prefix {
 			out = append(out, p)
 		}
 	}
@@ -97,7 +98,7 @@ func (m *MemoryBackend) SearchPrincipals(prefix string, search map[xml.Name]stri
 	}
 	var out []string
 	for _, p := range m.Principals {
-		if parent, _ := splitPath(p.URI); parent != prefix {
+		if parent, _ := pathutil.Split(p.URI); parent != prefix {
 			continue
 		}
 		matches, misses := 0, 0
@@ -114,15 +115,6 @@ func (m *MemoryBackend) SearchPrincipals(prefix string, search map[xml.Name]stri
 		}
 	}
 	return out, nil
-}
-
-func splitPath(path string) (parent, base string) {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[:i], path[i+1:]
-		}
-	}
-	return "", path
 }
 
 var _ dav.Node = (*PrincipalNode)(nil)

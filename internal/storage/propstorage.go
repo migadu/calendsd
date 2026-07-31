@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -65,43 +66,38 @@ func (p *PropertyStorage) PropPatch(path string, pp *dav.PropPatch) error {
 		// PROPPATCH is all-or-nothing (RFC 4918 §9.2): apply every property
 		// write in one transaction so a failure midway leaves nothing
 		// half-committed.
-		tx, err := p.DB.Begin()
-		if err != nil {
-			return nil, false
-		}
-		defer tx.Rollback()
-		for name, value := range values {
-			clark := davxml.Clark(name)
-			if value == nil {
-				if _, err := tx.Exec(
-					`DELETE FROM propertystorage WHERE path = $1 AND name = $2`,
-					path, clark); err != nil {
-					return nil, false
+		err := withTx(p.DB, func(tx *sql.Tx) error {
+			for name, value := range values {
+				clark := davxml.Clark(name)
+				if value == nil {
+					if _, err := tx.Exec(
+						`DELETE FROM propertystorage WHERE path = $1 AND name = $2`,
+						path, clark); err != nil {
+						return err
+					}
+					continue
 				}
-				continue
-			}
-			var stored []byte
-			valuetype := vtString
-			switch v := value.(type) {
-			case string:
-				stored = []byte(v)
-			case []byte:
-				// A raw XML fragment from the PROPPATCH body.
-				stored, valuetype = v, vtXML
-			default:
-				return nil, false
-			}
-			if _, err := tx.Exec(`
+				var stored []byte
+				valuetype := vtString
+				switch v := value.(type) {
+				case string:
+					stored = []byte(v)
+				case []byte:
+					// A raw XML fragment from the PROPPATCH body.
+					stored, valuetype = v, vtXML
+				default:
+					return fmt.Errorf("unsupported property value type %T", value)
+				}
+				if _, err := tx.Exec(`
 INSERT INTO propertystorage (path, name, valuetype, value) VALUES ($1, $2, $3, $4)
 ON CONFLICT (path, name) DO UPDATE SET valuetype = $3, value = $4`,
-				path, clark, valuetype, stored); err != nil {
-				return nil, false
+					path, clark, valuetype, stored); err != nil {
+					return err
+				}
 			}
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, false
-		}
-		return nil, true
+			return nil
+		})
+		return nil, err == nil
 	})
 	return nil
 }
@@ -117,12 +113,12 @@ func (p *PropertyStorage) Move(source, destination string) error {
 	// Sabre's PDO backend renames the exact path and all children. Do the
 	// select and every rename in one transaction so a failure mid-way cannot
 	// leave the property subtree half-renamed.
-	tx, err := p.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withTx(p.DB, func(tx *sql.Tx) error {
+		return p.moveInTx(tx, source, destination)
+	})
+}
 
+func (p *PropertyStorage) moveInTx(tx *sql.Tx, source, destination string) error {
 	rows, err := tx.Query(
 		`SELECT id, path FROM propertystorage WHERE path = $1 OR path LIKE $2 ESCAPE '\'`,
 		source, escapeLike(source)+"/%")
@@ -153,7 +149,7 @@ func (p *PropertyStorage) Move(source, destination string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func escapeLike(s string) string {

@@ -10,8 +10,8 @@ import (
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
 	"calserver/internal/dav/mock"
+	davxml "calserver/internal/dav/xml"
 )
 
 // leakServer builds a two-user server with one calendar owned by user1 whose

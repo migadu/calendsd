@@ -80,12 +80,14 @@ func (b *CalDAV) UpdateInvites(id caldav.CalendarID, sharees []caldav.Sharee) er
 		return err
 	}
 
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withTx(b.DB, func(tx *sql.Tx) error {
+		return applyShareeChanges(tx, id, sharees, current)
+	})
+}
 
+// applyShareeChanges is UpdateInvites' per-sharee loop, run inside its
+// transaction.
+func applyShareeChanges(tx *sql.Tx, id caldav.CalendarID, sharees, current []caldav.Sharee) error {
 	for _, sharee := range sharees {
 		if sharee.Access == caldav.AccessNoAccess {
 			// Removal: only sharee rows (access 2/3) match, so the owner's
@@ -146,7 +148,7 @@ SELECT $1, $2, $3, displayname, $4, description,
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // findSharee returns the existing invite with the given href, or nil.
@@ -194,60 +196,55 @@ func (b *CalDAV) ShareReply(principalURI, href string, status int, calendarURI, 
 	if !ok {
 		return "", nil
 	}
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
-	// Resolve the shared calendar from the owner's own (access=1) instance,
-	// then the replying principal's instance of that calendar.
-	var calendarID int64
-	err = tx.QueryRow(
-		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND uri = $2 AND access = 1`,
-		ownerPrincipal, ownerURI).Scan(&calendarID)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-
-	var instanceID int64
-	var shareeURI string
-	err = tx.QueryRow(
-		`SELECT id, uri FROM calendarinstances WHERE calendarid = $1 AND principaluri = $2 AND access IN (2, 3)`,
-		calendarID, principalURI).Scan(&instanceID, &shareeURI)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-
-	if status == caldav.InviteDeclined {
-		if _, err := tx.Exec(`DELETE FROM calendarinstances WHERE id = $1`, instanceID); err != nil {
-			return "", err
+	// out stays "" unless the reply is an accept; the calendar segment is
+	// returned relative to the replying principal's home (the invite-reply
+	// request target). A leading-slash absolute path would be passed through
+	// verbatim by resolveHref and drop a non-root BaseURI; a request-relative
+	// segment inherits the request's prefix instead.
+	var out string
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		// Resolve the shared calendar from the owner's own (access=1) instance,
+		// then the replying principal's instance of that calendar.
+		var calendarID int64
+		err := tx.QueryRow(
+			`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND uri = $2 AND access = 1`,
+			ownerPrincipal, ownerURI).Scan(&calendarID)
+		if err == sql.ErrNoRows {
+			return nil
 		}
-		if err := tx.Commit(); err != nil {
-			return "", err
+		if err != nil {
+			return err
 		}
-		return "", nil
-	}
 
-	if _, err := tx.Exec(
-		`UPDATE calendarinstances SET share_invitestatus = $1 WHERE id = $2`,
-		caldav.InviteAccepted, instanceID); err != nil {
+		var instanceID int64
+		var shareeURI string
+		err = tx.QueryRow(
+			`SELECT id, uri FROM calendarinstances WHERE calendarid = $1 AND principaluri = $2 AND access IN (2, 3)`,
+			calendarID, principalURI).Scan(&instanceID, &shareeURI)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if status == caldav.InviteDeclined {
+			_, err := tx.Exec(`DELETE FROM calendarinstances WHERE id = $1`, instanceID)
+			return err
+		}
+
+		if _, err := tx.Exec(
+			`UPDATE calendarinstances SET share_invitestatus = $1 WHERE id = $2`,
+			caldav.InviteAccepted, instanceID); err != nil {
+			return err
+		}
+		out = shareeURI
+		return nil
+	})
+	if err != nil {
 		return "", err
 	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	// Return the calendar segment relative to the replying principal's home
-	// (the invite-reply request target). A leading-slash absolute path would be
-	// passed through verbatim by resolveHref and drop a non-root BaseURI; a
-	// request-relative segment inherits the request's prefix instead.
-	return shareeURI, nil
+	return out, nil
 }
 
 // ownerCalendarFromHref extracts the owning principal and calendar URI from a

@@ -22,7 +22,7 @@ func TestExpandGroupAttendees(t *testing.T) {
 			{URI: "principals/user1", Props: map[xmlNM]any{{Space: sd, Local: "email-address"}: "user1@example.org"}},
 			{URI: "principals/group1", Props: map[xmlNM]any{{Space: sd, Local: "email-address"}: "group1@example.org"}},
 			{URI: "principals/user6", Props: map[xmlNM]any{
-				{Space: sd, Local: "email-address"}:  "user6@example.org",
+				{Space: sd, Local: "email-address"}:   "user6@example.org",
 				{Space: "DAV:", Local: "displayname"}: "User Six",
 			}},
 			{URI: "principals/user7", Props: map[xmlNM]any{{Space: sd, Local: "email-address"}: "user7@example.org"}},

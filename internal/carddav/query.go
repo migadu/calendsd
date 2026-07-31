@@ -79,7 +79,7 @@ type textMatch struct {
 
 type queryXML struct {
 	XMLName xml.Name `xml:"urn:ietf:params:xml:ns:carddav addressbook-query"`
-	Prop *struct {
+	Prop    *struct {
 		Names []struct {
 			XMLName xml.Name
 		} `xml:",any"`

@@ -11,6 +11,7 @@ import (
 
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/pathutil"
 )
 
 // Plugin implements access control: principal properties, principal reports,
@@ -464,7 +465,7 @@ func (p *Plugin) proxyFor(ph PrincipalHolder, proxySuffix string) any {
 	}
 	hrefs := davxml.Href{}
 	for _, g := range groups {
-		if parent, base := splitPath(g); base == proxySuffix {
+		if parent, base := pathutil.Split(g); base == proxySuffix {
 			hrefs = append(hrefs, p.server.BaseURI+parent+"/")
 		}
 	}

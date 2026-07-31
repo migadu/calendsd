@@ -33,26 +33,23 @@ func (w *AdminWrites) CreateUser(username, digestA1, email, displayName string) 
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	tx, err := w.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(
-		`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
-		username, digestA1); err != nil {
-		return fmt.Errorf("creating users row (already exists?): %w", err)
-	}
-	principal := "principals/" + username
-	if _, err := tx.Exec(`
+	return withTx(w.DB, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(
+			`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
+			username, digestA1); err != nil {
+			return fmt.Errorf("creating users row (already exists?): %w", err)
+		}
+		principal := "principals/" + username
+		if _, err := tx.Exec(`
 INSERT INTO principals (uri, email, displayname) VALUES
 	($1, nullif($2, ''), nullif($3, '')),
 	($1 || '/calendar-proxy-read', NULL, NULL),
 	($1 || '/calendar-proxy-write', NULL, NULL)`,
-		principal, email, displayName); err != nil {
-		return fmt.Errorf("creating principal rows (already exist?): %w", err)
-	}
-	return tx.Commit()
+			principal, email, displayName); err != nil {
+			return fmt.Errorf("creating principal rows (already exist?): %w", err)
+		}
+		return nil
+	})
 }
 
 // UpdatePrincipal updates a principal's email and/or displayname. A nil
@@ -102,95 +99,68 @@ func (w *AdminWrites) DeleteUser(username string) error {
 		return fmt.Errorf("invalid username %q", username)
 	}
 	principal := "principals/" + username
-	tx, err := w.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	var calendars, books int
-	if err := tx.QueryRow(`SELECT
-		(SELECT count(*) FROM calendarinstances WHERE principaluri = $1),
-		(SELECT count(*) FROM addressbooks WHERE principaluri = $1)`,
-		principal).Scan(&calendars, &books); err != nil {
-		return err
-	}
-	if calendars > 0 || books > 0 {
-		return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade",
-			principal, calendars, books)
-	}
-	if err := deletePrincipalRows(tx, principal, username); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return withTx(w.DB, func(tx *sql.Tx) error {
+		var calendars, books int
+		if err := tx.QueryRow(`SELECT
+			(SELECT count(*) FROM calendarinstances WHERE principaluri = $1),
+			(SELECT count(*) FROM addressbooks WHERE principaluri = $1)`,
+			principal).Scan(&calendars, &books); err != nil {
+			return err
+		}
+		if calendars > 0 || books > 0 {
+			return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade",
+				principal, calendars, books)
+		}
+		return deletePrincipalRows(tx, principal, username)
+	})
 }
 
 // DeleteUserCascade is DeleteUser without the guard: it first removes every
-// collection the principal owns — calendars (with their objects and change
-// log, mirroring CalDAV.DeleteCalendar's shared-owner branch, which also
-// drops any sharees' instance rows) and address books (with their cards and
-// change log, mirroring CardDAV.DeleteAddressBook) — plus any calendars
-// shared *into* this principal (its own instance rows), then deletes the
-// principal triple and users row. All in one transaction, so a failure
-// leaves the account and its data intact. Property-storage rows are left for
-// the doctor's orphaned-property sweep, same as DeleteUser.
+// collection the principal owns — calendars via deleteCalendarRows (the same
+// cascade CalDAV.DeleteCalendar's shared-owner branch uses, which also drops
+// any sharees' instance rows) and address books via deleteAddressBookRows
+// (shared with CardDAV.DeleteAddressBook) — plus any calendars shared *into*
+// this principal (its own instance rows), then deletes the principal triple
+// and users row. All in one transaction, so a failure leaves the account and
+// its data intact. Property-storage rows are left for the doctor's
+// orphaned-property sweep, same as DeleteUser.
 func (w *AdminWrites) DeleteUserCascade(username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
 	principal := "principals/" + username
-	tx, err := w.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Owned calendars (access=1): capture ids first, since the deletes below
-	// remove the very instance rows that mark ownership.
-	ownedCals, err := scanIDs(tx,
-		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
-	if err != nil {
-		return err
-	}
-	for _, id := range ownedCals {
-		for _, q := range []string{
-			`DELETE FROM calendarobjects WHERE calendarid = $1`,
-			`DELETE FROM calendarchanges WHERE calendarid = $1`,
-			`DELETE FROM calendarinstances WHERE calendarid = $1`,
-			`DELETE FROM calendars WHERE id = $1`,
-		} {
-			if _, err := tx.Exec(q, id); err != nil {
+	return withTx(w.DB, func(tx *sql.Tx) error {
+		// Owned calendars (access=1): capture ids first, since the deletes below
+		// remove the very instance rows that mark ownership.
+		ownedCals, err := scanIDs(tx,
+			`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
+		if err != nil {
+			return err
+		}
+		for _, id := range ownedCals {
+			if err := deleteCalendarRows(tx, id); err != nil {
 				return err
 			}
 		}
-	}
-	// Any remaining instance rows are shares into this principal; drop them.
-	if _, err := tx.Exec(
-		`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
-		return err
-	}
+		// Any remaining instance rows are shares into this principal; drop them.
+		if _, err := tx.Exec(
+			`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
+			return err
+		}
 
-	ownedBooks, err := scanIDs(tx,
-		`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
-	if err != nil {
-		return err
-	}
-	for _, id := range ownedBooks {
-		for _, q := range []string{
-			`DELETE FROM cards WHERE addressbookid = $1`,
-			`DELETE FROM addressbookchanges WHERE addressbookid = $1`,
-			`DELETE FROM addressbooks WHERE id = $1`,
-		} {
-			if _, err := tx.Exec(q, id); err != nil {
+		ownedBooks, err := scanIDs(tx,
+			`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
+		if err != nil {
+			return err
+		}
+		for _, id := range ownedBooks {
+			if err := deleteAddressBookRows(tx, id); err != nil {
 				return err
 			}
 		}
-	}
 
-	if err := deletePrincipalRows(tx, principal, username); err != nil {
-		return err
-	}
-	return tx.Commit()
+		return deletePrincipalRows(tx, principal, username)
+	})
 }
 
 // deletePrincipalRows removes the rows shared by both delete paths: the

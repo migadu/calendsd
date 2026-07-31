@@ -86,11 +86,15 @@ func stringProp(props map[xml.Name]any, name xml.Name) any {
 }
 
 func (b *CardDAV) DeleteAddressBook(id string) error {
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withTx(b.DB, func(tx *sql.Tx) error {
+		return deleteAddressBookRows(tx, id)
+	})
+}
+
+// deleteAddressBookRows removes an address book with its cards and change
+// log. Shared by DeleteAddressBook and AdminWrites.DeleteUserCascade so the
+// two delete paths cannot drift.
+func deleteAddressBookRows(tx *sql.Tx, id string) error {
 	for _, q := range []string{
 		`DELETE FROM cards WHERE addressbookid = $1`,
 		`DELETE FROM addressbookchanges WHERE addressbookid = $1`,
@@ -100,7 +104,7 @@ func (b *CardDAV) DeleteAddressBook(id string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // propertyMapAB maps address book properties to columns.
@@ -128,24 +132,16 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 		if len(assignments) == 0 {
 			return nil, true
 		}
-		tx, err := b.DB.Begin()
-		if err != nil {
-			return nil, false
-		}
-		defer tx.Rollback()
 		args = append(args, id)
-		if _, err := tx.Exec(
-			"UPDATE addressbooks SET "+strings.Join(assignments, ", ")+" WHERE id = $"+strconv.Itoa(len(args)),
-			args...); err != nil {
-			return nil, false
-		}
-		if err := abAddChange(tx, id, "", 2); err != nil {
-			return nil, false
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, false
-		}
-		return nil, true
+		err := withTx(b.DB, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(
+				"UPDATE addressbooks SET "+strings.Join(assignments, ", ")+" WHERE id = $"+strconv.Itoa(len(args)),
+				args...); err != nil {
+				return err
+			}
+			return abAddChange(tx, id, "", 2)
+		})
+		return nil, err == nil
 	})
 }
 
@@ -197,21 +193,16 @@ func scanCard(rows *sql.Rows, addressBookID string) (*carddav.CardInfo, error) {
 
 func (b *CardDAV) CreateCard(addressBookID, uri string, data []byte) (string, error) {
 	etag := cardETag(data)
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`
 INSERT INTO cards (addressbookid, uri, carddata, lastmodified, etag, size)
 VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
-		addressBookID, uri, data, etag, len(data)); err != nil {
-		return "", err
-	}
-	if err := abAddChange(tx, addressBookID, uri, 1); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
+			addressBookID, uri, data, etag, len(data)); err != nil {
+			return err
+		}
+		return abAddChange(tx, addressBookID, uri, 1)
+	})
+	if err != nil {
 		return "", err
 	}
 	return `"` + etag + `"`, nil
@@ -219,40 +210,29 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
 
 func (b *CardDAV) UpdateCard(addressBookID, uri string, data []byte) (string, error) {
 	etag := cardETag(data)
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`
 UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
  WHERE addressbookid = $4 AND uri = $5`,
-		data, etag, len(data), addressBookID, uri); err != nil {
-		return "", err
-	}
-	if err := abAddChange(tx, addressBookID, uri, 2); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
+			data, etag, len(data), addressBookID, uri); err != nil {
+			return err
+		}
+		return abAddChange(tx, addressBookID, uri, 2)
+	})
+	if err != nil {
 		return "", err
 	}
 	return `"` + etag + `"`, nil
 }
 
 func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
-	tx, err := b.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(
-		`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri); err != nil {
-		return err
-	}
-	if err := abAddChange(tx, addressBookID, uri, 3); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return withTx(b.DB, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(
+			`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri); err != nil {
+			return err
+		}
+		return abAddChange(tx, addressBookID, uri, 3)
+	})
 }
 
 func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {

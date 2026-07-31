@@ -9,8 +9,8 @@ import (
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
 	"calserver/internal/dav/mock"
+	davxml "calserver/internal/dav/xml"
 )
 
 // An events-only calendar (supported-calendar-component-set = VEVENT) accepts a

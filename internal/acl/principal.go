@@ -7,6 +7,7 @@ import (
 
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/pathutil"
 )
 
 // PrincipalHolder marks nodes representing a principal (sabre's IPrincipal).
@@ -45,7 +46,7 @@ func NewPrincipalNode(backend Backend, principal Principal) *PrincipalNode {
 }
 
 func (p *PrincipalNode) Name() string {
-	_, name := splitPath(p.principal.URI)
+	_, name := pathutil.Split(p.principal.URI)
 	return name
 }
 
@@ -133,7 +134,7 @@ func NewPrincipalCollection(backend Backend, prefix string) *PrincipalCollection
 }
 
 func (c *PrincipalCollection) Name() string {
-	_, name := splitPath(c.prefix)
+	_, name := pathutil.Split(c.prefix)
 	return name
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/pathutil"
 )
 
 // UserPrincipalNode is a user principal that also acts as a collection hosting
@@ -73,7 +74,7 @@ type ProxyPrincipalNode struct {
 }
 
 func (p *ProxyPrincipalNode) Name() string {
-	_, name := splitPath(p.uri)
+	_, name := pathutil.Split(p.uri)
 	return name
 }
 
@@ -142,7 +143,7 @@ func (p *ProxyPrincipalNode) ACL() []ACE {
 
 // Owner is the parent user principal.
 func (p *ProxyPrincipalNode) Owner() string {
-	parent, _ := splitPath(p.uri)
+	parent, _ := pathutil.Split(p.uri)
 	return parent
 }
 

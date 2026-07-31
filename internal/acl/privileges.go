@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"calserver/internal/dav"
+	"calserver/internal/pathutil"
 )
 
 // Privilege is one node of the supported-privilege tree (RFC 3744 §5.3).
@@ -208,7 +209,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	}
 	exists := p.server.Tree.NodeExists(path)
 	parent := func() string {
-		parentPath, _ := splitPath(path)
+		parentPath, _ := pathutil.Split(path)
 		return parentPath
 	}
 
@@ -262,7 +263,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		if destErr != nil {
 			return true, nil // handler reports the bad destination
 		}
-		destParent, _ := splitPath(dest)
+		destParent, _ := pathutil.Split(dest)
 		if p.server.Tree.NodeExists(dest) {
 			if ok, err := check(destParent, "{DAV:}unbind"); !ok {
 				return ok, err

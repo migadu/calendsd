@@ -14,6 +14,7 @@ import (
 	"calserver/internal/acl"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/pathutil"
 )
 
 // NSCardDAV is the CardDAV namespace.
@@ -52,7 +53,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 
 	if ph, isPrincipal := node.(acl.PrincipalHolder); isPrincipal {
 		pf.Handle(card("addressbook-home-set"), func() any {
-			_, name := splitPath(ph.PrincipalURL())
+			_, name := pathutil.Split(ph.PrincipalURL())
 			return davxml.Href{p.server.BaseURI + "addressbooks/" + name + "/"}
 		})
 		pf.Handle(card("principal-address"), func() any { return nil })
@@ -82,7 +83,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 // rejected with 415 rather than stored raw. Only writes whose parent is an
 // address book are inspected; anything else is left to other handlers.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
-	parentPath, _ := splitPath(path)
+	parentPath, _ := pathutil.Split(path)
 	parent, err := p.server.Tree.NodeForPath(parentPath)
 	if err != nil {
 		return data, nil // not an address-book object write
@@ -286,14 +287,6 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 	w.WriteHeader(http.StatusMultiStatus)
 	_, err = w.Write(out)
 	return err
-}
-
-func splitPath(path string) (parent, base string) {
-	i := strings.LastIndexByte(path, '/')
-	if i < 0 {
-		return "", path
-	}
-	return path[:i], path[i+1:]
 }
 
 // decodeVCard parses vCard bytes.
