@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -39,10 +40,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 			etag = nodeETag()
 			match := false
 			for _, item := range strings.Split(ifMatch, ",") {
-				item = strings.Trim(item, " ")
-				// The \" prefix strip works around an Evolution bug,
-				// like sabre.
-				if item == etag || strings.ReplaceAll(item, `\"`, `"`) == etag {
+				if etagMatches(item, etag) {
 					match = true
 				}
 			}
@@ -50,6 +48,14 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 				if etag != "" {
 					w.Header().Set("ETag", etag)
 				}
+				// A save that 412s here on a single-writer server means the
+				// client's If-Match (from its GET) and the node's current ETag
+				// disagree with no intervening write — log both, byte-for-byte,
+				// so the cause (etag format, stale client copy) is not a guess.
+				slog.Debug("If-Match precondition failed",
+					"method", r.Method, "path", path,
+					"if_match", ifMatch, "node_etag", etag,
+					"if_match_bytes", []byte(ifMatch), "node_etag_bytes", []byte(etag))
 				return false, ErrPreconditionFailed("An If-Match header was specified, but none of the specified ETags matched.")
 			}
 		}
@@ -73,7 +79,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 			if !match {
 				etag = nodeETag()
 				for _, item := range strings.Split(ifNoneMatch, ",") {
-					if strings.Trim(item, " ") == etag && etag != "" {
+					if etagMatches(item, etag) {
 						match = true
 					}
 				}
@@ -122,6 +128,37 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 	}
 
 	return true, s.checkIfConditions(r, path)
+}
+
+// etagMatches reports whether a client-supplied entity-tag (one comma-separated
+// item of an If-Match / If-None-Match header) identifies the node's current
+// ETag. Both sides are normalized first (see normalizeETag). An empty node
+// ETag never matches.
+func etagMatches(clientTag, nodeETag string) bool {
+	if nodeETag == "" {
+		return false
+	}
+	return normalizeETag(clientTag) == normalizeETag(nodeETag)
+}
+
+// normalizeETag canonicalizes an entity-tag for comparison. It drops a leading
+// weak-validator "W/" and unescapes an \"-escaped tag.
+//
+// The W/ strip is what lets conditional writes survive a compressing reverse
+// proxy: an intermediary that gzips a GET (Caddy's `encode`, nginx `gzip`, …)
+// rewrites the strong ETag it forwards into a weak one, because the compressed
+// body is a different representation (RFC 7232 §2.3.1). A browser app then reads
+// `W/"x"` off that GET and replays it as `If-Match: W/"x"` on its PUT — which,
+// under the strong comparison If-Match normally requires, could never match the
+// origin's strong `"x"`, so every save 412s. The underlying entity is the same,
+// so matching them is the correct intent for a whole-body conditional write.
+// The \" unescape works around an Evolution bug, like sabre.
+func normalizeETag(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && (s[0] == 'W' || s[0] == 'w') && s[1] == '/' {
+		s = s[2:]
+	}
+	return strings.ReplaceAll(s, `\"`, `"`)
 }
 
 // IfCondition is one parsed tagged-list of an If header (RFC 4918 §10.4).

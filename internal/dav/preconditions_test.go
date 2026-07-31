@@ -30,6 +30,60 @@ func TestPreconditionIfNoneMatchDoesNotSuppressIfUnmodifiedSince(t *testing.T) {
 	}
 }
 
+// A compressing reverse proxy (Caddy `encode`, nginx `gzip`) rewrites the
+// strong ETag it forwards on a GET into a weak one; the browser app then replays
+// that weak tag as If-Match on its PUT. That conditional write must still match
+// the origin's strong ETag — otherwise every save behind such a proxy 412s.
+func TestPreconditionWeakIfMatchStillMatches(t *testing.T) {
+	file := &memFile{name: "file.txt", contents: []byte("old"), etag: `"tag1"`}
+	s := NewServer("/", newMemColl("root", file))
+
+	req := httptest.NewRequest("PUT", "/file.txt", strings.NewReader("new"))
+	req.Header.Set("If-Match", `W/"tag1"`) // weakened in transit by a gzip proxy
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusPreconditionFailed {
+		t.Fatalf("status = 412; a weak If-Match must match the strong ETag (proxy-gzip case)")
+	}
+	if string(file.contents) != "new" {
+		t.Errorf("PUT body not written; contents = %q, want %q", file.contents, "new")
+	}
+}
+
+// A weak If-Match that names a *different* tag must still fail: the W/ tolerance
+// only strips the weak marker, it does not make mismatched tags match.
+func TestPreconditionWeakIfMatchWrongTagStillFails(t *testing.T) {
+	file := &memFile{name: "file.txt", contents: []byte("old"), etag: `"tag1"`}
+	s := NewServer("/", newMemColl("root", file))
+
+	req := httptest.NewRequest("PUT", "/file.txt", strings.NewReader("new"))
+	req.Header.Set("If-Match", `W/"other"`)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("status = %d, want 412 for a non-matching weak If-Match", rec.Code)
+	}
+	if string(file.contents) != "old" {
+		t.Errorf("PUT body written despite mismatched If-Match; contents = %q", file.contents)
+	}
+}
+
+func TestNormalizeETag(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`"abc"`, `"abc"`},
+		{`W/"abc"`, `"abc"`},
+		{`w/"abc"`, `"abc"`},
+		{` W/"abc" `, `"abc"`},
+		{`\"abc\"`, `"abc"`}, // Evolution escaping
+	} {
+		if got := normalizeETag(tc.in); got != tc.want {
+			t.Errorf("normalizeETag(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // Bug: the same early return also skips the If: header, so a failing tagged
 // condition (RFC 4918 §10.4) is ignored when If-None-Match is present.
 func TestPreconditionIfNoneMatchDoesNotSuppressIfHeader(t *testing.T) {
