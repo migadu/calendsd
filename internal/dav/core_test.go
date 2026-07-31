@@ -261,7 +261,8 @@ func TestPutRejectsPercentEncodedDotDotSegment(t *testing.T) {
 // A stored object served with an ETag but no cache directive can be handed
 // back stale by an intermediate/browser cache, and the stale ETag then fails
 // the client's next If-Match PUT with a 412. GET and HEAD must carry a
-// revalidate-forcing Cache-Control.
+// revalidate-forcing Cache-Control, plus no-transform so a proxy doesn't gzip
+// the body and weaken the ETag (which likewise breaks the next If-Match).
 func TestGetHeadSetNoCacheOnObjects(t *testing.T) {
 	f := &memFile{name: "e.ics", contents: []byte("BEGIN:VCALENDAR"), etag: `"v1"`}
 	root := newMemColl("root", f)
@@ -273,8 +274,8 @@ func TestGetHeadSetNoCacheOnObjects(t *testing.T) {
 		if rec.Code != 200 {
 			t.Fatalf("%s = %d: %s", method, rec.Code, rec.Body.String())
 		}
-		if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
-			t.Errorf("%s Cache-Control = %q, want %q", method, cc, "private, no-cache")
+		if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache, no-transform" {
+			t.Errorf("%s Cache-Control = %q, want %q", method, cc, "private, no-cache, no-transform")
 		}
 	}
 }

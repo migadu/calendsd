@@ -204,8 +204,12 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	// — which a client then replays as a doomed If-Match, failing its next PUT
 	// with a 412. "private, no-cache" lets a cache store the response but forces
 	// revalidation (a conditional GET, still 304-efficient) before every reuse,
-	// and keeps shared caches from holding one user's data.
-	h.Set("Cache-Control", "private, no-cache")
+	// and keeps shared caches from holding one user's data. "no-transform" tells
+	// a reverse proxy not to gzip the body: compression rewrites the strong ETag
+	// into a weak one (RFC 7232 §2.3.1), which the editor then replays as a
+	// weak If-Match that would fail its next conditional PUT (the server
+	// tolerates that in normalizeETag, but not transforming is cleaner).
+	h.Set("Cache-Control", "private, no-cache, no-transform")
 	if etag := file.ETag(); etag != "" {
 		h.Set("ETag", etag)
 	}
