@@ -92,6 +92,33 @@ func TestAuthLogWrongPassword(t *testing.T) {
 	}
 }
 
+// TestAuthLogWrongDigestUser: a rejected Digest login is attributed to the
+// username carried in the Digest header, so brute-force attempts over Digest
+// are as visible as over Basic.
+func TestAuthLogWrongDigestUser(t *testing.T) {
+	cap := &captureHandler{}
+	p := NewPlugin(&DigestBackend{
+		Realm:  "SabreDAV",
+		HashA1: func(string, string) (string, bool) { return "", false },
+	})
+	p.Logger = slog.New(cap)
+
+	r := httptest.NewRequest("PROPFIND", "/", nil)
+	r.Header.Set("Authorization",
+		`Digest username="mallory", realm="SabreDAV", nonce="n", uri="/", qop=auth, nc=00000001, cnonce="c", response="r"`)
+	if proceed, err := p.BeforeMethod(httptest.NewRecorder(), r); proceed || err == nil {
+		t.Fatalf("wrong digest login should be rejected: proceed=%v err=%v", proceed, err)
+	}
+
+	rec, attrs := cap.only(t)
+	if rec.Level != slog.LevelWarn {
+		t.Errorf("level = %v, want WARN (credentials were presented)", rec.Level)
+	}
+	if attrs["user"] != "mallory" {
+		t.Errorf("user attr = %q, want mallory (from the Digest header)", attrs["user"])
+	}
+}
+
 // TestAuthLogNoCredentials: the routine pre-challenge probe (no Authorization
 // header) is not a failed attempt, so it logs at Debug with an empty user, not
 // at Warn.

@@ -2,13 +2,18 @@ package auth
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/bcrypt"
+
+	"calserver/internal/metrics"
 )
 
 // fakeRcptd stands in for the rcptd /auth endpoint. It serves a fixed
@@ -211,3 +216,163 @@ var errProvision = &provisionError{}
 type provisionError struct{}
 
 func (*provisionError) Error() string { return "boom" }
+
+// TestRcptdChallenge: the 401 challenge advertises Basic with the realm.
+func TestRcptdChallenge(t *testing.T) {
+	b := NewRcptdBackend("CalDAV", "http://unused", "", 0)
+	h := http.Header{}
+	b.Challenge(h)
+	if got, want := h.Get("WWW-Authenticate"), `Basic realm="CalDAV", charset="UTF-8"`; got != want {
+		t.Errorf("challenge = %q, want %q", got, want)
+	}
+}
+
+// TestRcptdUnreachable: a transport failure (rcptd down) reads as "service
+// unreachable", never as wrong credentials.
+func TestRcptdUnreachable(t *testing.T) {
+	ts := httptest.NewServer(http.NotFoundHandler())
+	ts.Close() // dial now fails
+	b := NewRcptdBackend("Realm", ts.URL, "", 0)
+
+	_, ok, reason := b.Check(basicReq(t, "user@example.com", "pw"))
+	if ok {
+		t.Fatal("Check succeeded with rcptd unreachable")
+	}
+	if reason != "authentication service is unreachable" {
+		t.Errorf("reason = %q, want the unreachable message", reason)
+	}
+}
+
+// TestRcptdBadBaseURL: a base URL that cannot form a request (operator typo)
+// fails the lookup, surfacing as service-unreachable rather than panicking or
+// leaking a Go error to the client.
+func TestRcptdBadBaseURL(t *testing.T) {
+	b := NewRcptdBackend("Realm", "http://bad host", "", 0)
+	_, ok, reason := b.Check(basicReq(t, "user@example.com", "pw"))
+	if ok {
+		t.Fatal("Check succeeded with an unusable base URL")
+	}
+	if reason != "authentication service is unreachable" {
+		t.Errorf("reason = %q, want the unreachable message", reason)
+	}
+}
+
+// TestRcptdUnexpectedStatus: a status verify() doesn't distinguish (500 here)
+// is a typed "error" outcome naming the code, and the requests metric
+// collapses it to code="other" so a remote server can't mint label series.
+func TestRcptdUnexpectedStatus(t *testing.T) {
+	f := &fakeRcptd{
+		users:  map[string][]string{"user@example.com": {bcryptHashT(t, "s3cret")}},
+		status: http.StatusInternalServerError,
+	}
+	b, _ := newBackend(t, f, 0)
+	set := metrics.New("test")
+	b.Metrics = set
+
+	_, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret"))
+	if ok {
+		t.Fatal("Check succeeded despite a 500 from rcptd")
+	}
+	if reason != "authentication service returned status 500" {
+		t.Errorf("reason = %q, want the status-500 message", reason)
+	}
+	want := `
+# HELP calserver_rcptd_requests_total HTTP lookups against rcptd /auth by status code (or "error" for transport failures).
+# TYPE calserver_rcptd_requests_total counter
+calserver_rcptd_requests_total{code="other"} 1
+`
+	if err := testutil.GatherAndCompare(set.Registry(), strings.NewReader(want),
+		"calserver_rcptd_requests_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+// TestRcptdMalformedBody: a 200 whose body isn't the /auth JSON (a proxy
+// error page) fails the login and counts as code="error", not code="200",
+// so the rcptd health alert sees the outage.
+func TestRcptdMalformedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html>this is not JSON</html>"))
+	}))
+	t.Cleanup(ts.Close)
+	b := NewRcptdBackend("Realm", ts.URL, "", 0)
+	set := metrics.New("test")
+	b.Metrics = set
+
+	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "pw")); ok {
+		t.Fatal("Check succeeded on an undecodable /auth body")
+	}
+	want := `
+# HELP calserver_rcptd_requests_total HTTP lookups against rcptd /auth by status code (or "error" for transport failures).
+# TYPE calserver_rcptd_requests_total counter
+calserver_rcptd_requests_total{code="error"} 1
+`
+	if err := testutil.GatherAndCompare(set.Registry(), strings.NewReader(want),
+		"calserver_rcptd_requests_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+// TestRcptdCustomHTTPClient: an injected HTTP client is used for lookups in
+// place of the default 5s-timeout client.
+func TestRcptdCustomHTTPClient(t *testing.T) {
+	f := &fakeRcptd{users: map[string][]string{
+		"user@example.com": {bcryptHashT(t, "s3cret")},
+	}}
+	b, _ := newBackend(t, f, 0)
+	b.HTTP = &http.Client{Timeout: time.Second}
+
+	if _, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret")); !ok {
+		t.Fatalf("Check with injected client failed: %s", reason)
+	}
+}
+
+// TestRcptdUnusableHashLogged: stored hashes in an unsupported scheme are
+// warned about — such a user can never authenticate, and silence would make
+// that look like a plain wrong password.
+func TestRcptdUnusableHashLogged(t *testing.T) {
+	f := &fakeRcptd{users: map[string][]string{
+		"user@example.com": {"{NOPE}unsupported-scheme"},
+	}}
+	b, _ := newBackend(t, f, 0)
+	cap := &captureHandler{}
+	b.Logger = slog.New(cap)
+
+	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "whatever")); ok {
+		t.Fatal("Check succeeded against an unusable hash")
+	}
+	rec, attrs := cap.only(t)
+	if rec.Level != slog.LevelWarn {
+		t.Errorf("level = %v, want WARN", rec.Level)
+	}
+	if attrs["user"] != "user@example.com" || attrs["unsupported"] != "1" {
+		t.Errorf("attrs = %v, want user and unsupported=1", attrs)
+	}
+}
+
+// TestRcptdCacheStorePurgesExpired: storing a fresh credential drops expired
+// entries, so a churn of distinct logins can't grow the map without bound.
+func TestRcptdCacheStorePurgesExpired(t *testing.T) {
+	f := &fakeRcptd{users: map[string][]string{
+		"user@example.com": {bcryptHashT(t, "s3cret")},
+	}}
+	b, _ := newBackend(t, f, time.Minute)
+
+	// Seed an already-expired entry for another account.
+	b.mu.Lock()
+	b.cache["old@example.com"] = cacheEntry{expiry: time.Now().Add(-time.Second)}
+	b.mu.Unlock()
+
+	if _, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret")); !ok {
+		t.Fatalf("Check failed: %s", reason)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, still := b.cache["old@example.com"]; still {
+		t.Error("expired cache entry survived a store")
+	}
+	if _, cached := b.cache["user@example.com"]; !cached {
+		t.Error("fresh login was not cached")
+	}
+}

@@ -7,6 +7,7 @@ package admin
 // orphan deletion go through the storage.AdminWrites carve-out.
 
 import (
+	"encoding/xml"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -235,8 +236,9 @@ func (a *App) propPatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "property name must be clark-form, e.g. {DAV:}displayname", http.StatusBadRequest)
 		return
 	}
+	remove := r.PostFormValue("remove") == "1"
 	var propXML string
-	if r.PostFormValue("remove") == "1" {
+	if remove {
 		propXML = fmt.Sprintf(`<d:remove><d:prop><x:%s xmlns:x="%s"/></d:prop></d:remove>`,
 			local, xmlEscape(space))
 	} else {
@@ -251,13 +253,39 @@ func (a *App) propPatch(w http.ResponseWriter, r *http.Request) {
 		path = "/" + path
 	}
 	res := davRequest(a.NewSimulator(adminViewPrincipal), "PROPPATCH", path, body, "0")
-	audit(r, "proppatch", "path", path, "name", name, "remove", r.PostFormValue("remove") == "1", "status", res.Code)
-	if res.Code != http.StatusMultiStatus || !strings.Contains(res.Body.String(), "200 OK") {
+	audit(r, "proppatch", "path", path, "name", name, "remove", remove, "status", res.Code)
+	if res.Code != http.StatusMultiStatus || !propstatsOK(res.Body.Bytes()) {
 		http.Error(w, fmt.Sprintf("PROPPATCH not accepted (status %d): %s", res.Code, res.Body.String()),
 			http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, writeResult{OK: true, Detail: "property updated on " + path})
+	detail := "property updated on " + path
+	if remove {
+		detail = "property removed on " + path
+	}
+	writeJSON(w, writeResult{OK: true, Detail: detail})
+}
+
+// propstatsOK reports whether a PROPPATCH multistatus body carries only 2xx
+// propstats. The chain answers a successful set with "200 OK" but a
+// successful remove with "204 No Content" (sabre's convention, see
+// dav.PropPatch), so checking for one literal status is wrong.
+func propstatsOK(body []byte) bool {
+	var ms xmlMultistatus
+	if err := xml.Unmarshal(body, &ms); err != nil {
+		return false
+	}
+	seen := false
+	for _, resp := range ms.Responses {
+		for _, ps := range resp.Propstat {
+			seen = true
+			f := strings.Fields(ps.Status) // "HTTP/1.1 204 No Content"
+			if len(f) < 2 || !strings.HasPrefix(f[1], "2") {
+				return false
+			}
+		}
+	}
+	return seen
 }
 
 func (a *App) provision(w http.ResponseWriter, r *http.Request) {
