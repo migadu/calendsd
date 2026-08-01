@@ -216,8 +216,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	r = r.WithContext(withPrincipalState(r.Context()))
-	// beforeMethod hooks (auth, ACL) run before precondition checks,
-	// matching sabre's event order.
+	// beforeMethod hooks (auth, then ACL) run before precondition checks,
+	// matching sabre's event order. The order is load-bearing for privacy,
+	// not just parity: because ACL rejects an unauthorized principal here
+	// first, a conditional request never reaches checkPreconditions below,
+	// so a 412/304 can't reveal a resource's existence or ETag to a client
+	// that lacks privilege on it. Do not move preconditions ahead of ACL.
 	for _, p := range s.plugins {
 		hook, ok := p.(BeforeMethodHook)
 		if !ok {
