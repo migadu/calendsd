@@ -60,7 +60,7 @@ func main() {
 
 	var srv http.Handler
 	if m.DSN != "" {
-		db, err := storage.Open(m.DSN)
+		db, err := storage.OpenPool(m.DSN, m.DBPool)
 		if err != nil {
 			slog.Error("opening database", "err", err)
 			os.Exit(1)

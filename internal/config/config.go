@@ -41,6 +41,16 @@ type Config struct {
 	}
 	Database struct {
 		DSN string
+		// Connection-pool bounds. All optional; zero/empty means the
+		// storage.DefaultPool value. Tune these when calserver shares a
+		// Postgres with a live sabre instance and load could otherwise open
+		// too many connections.
+		MaxOpenConns int
+		MaxIdleConns int
+		// ConnMaxLifetime is a Go duration string ("5m", "30s"); empty means
+		// the default. Retires connections so the pool recovers across
+		// Postgres failovers and poolers.
+		ConnMaxLifetime string
 	}
 	// Logging holds log-verbosity and request-debugging options.
 	Logging struct {
@@ -165,6 +175,9 @@ func Load(path string) (*Config, error) {
 	cfg.Server.TempFileFilter = boolean("server.temp_file_filter")
 	cfg.Server.TempFileDir = str("server.temp_file_dir")
 	cfg.Database.DSN = str("database.dsn")
+	cfg.Database.MaxOpenConns = integer("database.max_open_conns")
+	cfg.Database.MaxIdleConns = integer("database.max_idle_conns")
+	cfg.Database.ConnMaxLifetime = str("database.conn_max_lifetime")
 	cfg.Logging.Level = str("logging.level")
 	cfg.Logging.RequestDir = str("logging.request_dir")
 	cfg.Logging.AccessLog = boolean("logging.access_log")
@@ -214,11 +227,14 @@ var known = map[string]bool{
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,
 	"server.temp_file_filter": true, "server.temp_file_dir": true,
-	"database.dsn":         true,
-	"logging.level":        true,
-	"logging.request_dir":  true,
-	"logging.access_log":   true,
-	"scheduling.imip.smtp": true, "scheduling.imip.sender": true,
+	"database.dsn":               true,
+	"database.max_open_conns":    true,
+	"database.max_idle_conns":    true,
+	"database.conn_max_lifetime": true,
+	"logging.level":              true,
+	"logging.request_dir":        true,
+	"logging.access_log":         true,
+	"scheduling.imip.smtp":       true, "scheduling.imip.sender": true,
 	"calendarserver.browser": true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
 	"calendarserver.principals_readable":    true,

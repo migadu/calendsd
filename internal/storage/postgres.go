@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	// Registers the pgx database/sql driver.
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -26,9 +27,54 @@ import (
 // format existing clients have stored.
 const syncTokenPrefix = "http://sabre.io/ns/sync/"
 
-// Open connects to the shared Postgres database.
+// Pool bounds the database/sql connection pool. A zero field takes its
+// DefaultPool value, so callers can override only the knobs they care about.
+type Pool struct {
+	// MaxOpen caps total connections. The database/sql default is unlimited,
+	// which lets a load spike open arbitrarily many connections against the
+	// Postgres we share with a live sabre instance and starve it — so we
+	// always set a bound.
+	MaxOpen int
+	// MaxIdle caps idle connections kept for reuse (database/sql default 2).
+	MaxIdle int
+	// ConnMaxLifetime retires a connection after this age, so the pool
+	// recycles across Postgres failovers and connection poolers instead of
+	// clinging to a dead endpoint. Zero (database/sql default) never retires.
+	ConnMaxLifetime time.Duration
+}
+
+// DefaultPool is the conservative bound applied when a field is left zero.
+// Sized to leave headroom under a shared Postgres's max_connections for the
+// live sabre instance, calserver-admin, and calctl.
+var DefaultPool = Pool{MaxOpen: 20, MaxIdle: 5, ConnMaxLifetime: 5 * time.Minute}
+
+// Open connects to the shared Postgres database with DefaultPool bounds —
+// fine for tests and short-lived CLIs. Long-running servers use OpenPool to
+// tune the pool from config.
 func Open(dsn string) (*sql.DB, error) {
-	return sql.Open("pgx", dsn)
+	return OpenPool(dsn, Pool{})
+}
+
+// OpenPool connects and applies pool bounds, filling any zero field from
+// DefaultPool so an unbounded pool can never reach the shared database.
+func OpenPool(dsn string, pool Pool) (*sql.DB, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if pool.MaxOpen <= 0 {
+		pool.MaxOpen = DefaultPool.MaxOpen
+	}
+	if pool.MaxIdle <= 0 {
+		pool.MaxIdle = DefaultPool.MaxIdle
+	}
+	if pool.ConnMaxLifetime <= 0 {
+		pool.ConnMaxLifetime = DefaultPool.ConnMaxLifetime
+	}
+	db.SetMaxOpenConns(pool.MaxOpen)
+	db.SetMaxIdleConns(pool.MaxIdle)
+	db.SetConnMaxLifetime(pool.ConnMaxLifetime)
+	return db, nil
 }
 
 // CalDAV is the calendar backend over the sabre schema. Port of

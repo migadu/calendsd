@@ -64,6 +64,14 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 # server (no persistence) for WebDAV/litmus testing only.
 [database]
 dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
+# Connection-pool bounds. Optional; the defaults (max_open 20, max_idle 5,
+# lifetime 5m) leave headroom under a Postgres shared with a live sabre
+# instance. Raise max_open_conns only if that database has connections to
+# spare. conn_max_lifetime is a Go duration ("5m", "30s") and recycles
+# connections across failovers/poolers.
+# max_open_conns = 20
+# max_idle_conns = 5
+# conn_max_lifetime = "5m"
 
 
 # LOGGING

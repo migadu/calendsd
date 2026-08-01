@@ -2,10 +2,13 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"calserver/internal/server"
+	"calserver/internal/storage"
 )
 
 // Merged is the result of resolving command-line flags over the optional
@@ -17,6 +20,9 @@ type Merged struct {
 	Set map[string]bool
 	// DSN is the resolved database DSN.
 	DSN string
+	// DBPool is the resolved connection-pool bound; zero fields fall back to
+	// storage.DefaultPool. Pass it to storage.OpenPool.
+	DBPool storage.Pool
 	// LogLevel is the resolved log verbosity (debug/info/warn/error), or
 	// empty for the default. Pass it to logging.Setup, which also honours
 	// $CALSERVER_LOG_LEVEL when this is empty.
@@ -95,6 +101,17 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 		}
 
 		m.DSN = m.Str("db", *dsn, m.File.Database.DSN)
+		m.DBPool = storage.Pool{
+			MaxOpen: m.File.Database.MaxOpenConns,
+			MaxIdle: m.File.Database.MaxIdleConns,
+		}
+		if life := m.File.Database.ConnMaxLifetime; life != "" {
+			d, err := time.ParseDuration(life)
+			if err != nil {
+				return nil, fmt.Errorf("database.conn_max_lifetime: %w", err)
+			}
+			m.DBPool.ConnMaxLifetime = d
+		}
 		m.LogLevel = m.Str("log-level", *logLevel, m.File.Logging.Level)
 		m.Server = server.Config{
 			BaseURI:              m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
