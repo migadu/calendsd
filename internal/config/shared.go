@@ -57,6 +57,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	browser := flag.Bool("browser", false, "serve HTML indexes for GET on collections (like sabre's Browser plugin; default matches sabre without it: 501)")
+	tempFileFilter := flag.Bool("temp-file-filter", false, "intercept OS junk files (._*, .DS_Store, Thumbs.db, editor swap files) into a scratch directory instead of the backend, like sabre's TemporaryFileFilterPlugin")
+	tempFileDir := flag.String("temp-file-dir", "", "scratch directory for -temp-file-filter (default: a calserver-tempfiles subdir of the system temp dir)")
 	autoSchedule := flag.String("auto-schedule-prefixes", "", "comma-separated principal-name prefixes (e.g. resource,location) whose scheduling messages are auto-accepted Calendar-Server style; empty disables")
 	principalsReadable := flag.Bool("principals-readable", false, "grant authenticated users read access to principal resources (Calendar-Server behavior)")
 	autoProvision := flag.Bool("auto-provision", false, "recreate the default calendar/addressbook when a principal has none (Calendar-Server behavior)")
@@ -100,6 +102,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			IMipSMTP:             m.Str("imip-smtp", *imipSMTP, m.File.Scheduling.IMip.SMTP),
 			IMipSender:           m.Str("imip-sender", *imipSender, m.File.Scheduling.IMip.Sender),
 			Browser:              m.Bool("browser", *browser, m.File.CalendarServer.Browser),
+			TempFileFilter:       m.Bool("temp-file-filter", *tempFileFilter, m.File.Server.TempFileFilter),
+			TempFileDir:          m.Str("temp-file-dir", *tempFileDir, m.File.Server.TempFileDir),
 			AutoSchedulePrefixes: autoPrefixes,
 			PrincipalsReadable:   m.Bool("principals-readable", *principalsReadable, m.File.CalendarServer.PrincipalsReadable),
 			AutoProvision:        m.Bool("auto-provision", *autoProvision, m.File.CalendarServer.AutoProvision),

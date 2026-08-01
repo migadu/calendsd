@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +38,12 @@ type Config struct {
 	// Browser serves HTML indexes for GET on collections (off by default:
 	// sabre without its Browser plugin answers 501, which the corpus pins).
 	Browser bool
+	// TempFileFilter intercepts OS junk files (._*, .DS_Store, Thumbs.db,
+	// editor swap files) into a scratch directory instead of the backend,
+	// like sabre's TemporaryFileFilterPlugin. Off by default (sabre core has
+	// no such plugin); TempFileDir names the scratch directory when on.
+	TempFileFilter bool
+	TempFileDir    string
 	// AutoProvision recreates the default calendar/addressbook when a
 	// principal has none left (Calendar-Server behavior); off by default.
 	AutoProvision bool
@@ -107,10 +115,10 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t rcptd=%t reqlog=%t accesslog=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t",
 		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog)
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog)
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
@@ -219,6 +227,15 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		ap.Metrics = cfg.Metrics
 		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
+	}
+	if cfg.TempFileFilter {
+		// After auth (temp requests stay authenticated), before ACL and the
+		// core handlers so junk PUTs never reach calendar-data validation.
+		dir := cfg.TempFileDir
+		if dir == "" {
+			dir = filepath.Join(os.TempDir(), "calserver-tempfiles")
+		}
+		srv.AddPlugin(&dav.TempFileFilterPlugin{DataDir: dir})
 	}
 	srv.AddPlugin(&acl.Plugin{
 		AdminPrincipals:                   []string{"principals/admin"},

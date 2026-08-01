@@ -25,6 +25,13 @@ base_uri = "/"          # URI prefix the server is mounted at (e.g. "/dav/").
 realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
                         # users.digesta1 in the shared database, forever, for
                         # both Digest and Basic (see PLAN.md §5).
+temp_file_filter = false # Intercept OS junk files (._*, .DS_Store, Thumbs.db,
+                        # editor swap files) into a scratch directory instead of
+                        # the backend, like sabre's TemporaryFileFilterPlugin
+                        # (sabre's example server enables it; core does not).
+temp_file_dir = ""      # Scratch directory for temp_file_filter. Empty = a
+                        # calserver-tempfiles subdir of the system temp dir.
+                        # Files are never auto-deleted; sweep it externally.
 
 # TLS / HTTPS. Leave both empty to serve plain HTTP (terminate TLS in front,
 # e.g. behind a reverse proxy). Basic/Digest send credentials, so if calserver

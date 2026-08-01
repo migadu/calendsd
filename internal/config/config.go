@@ -32,6 +32,12 @@ type Config struct {
 			URL   string
 			Token string
 		}
+		// TempFileFilter intercepts OS junk files (._*, .DS_Store, ...) into a
+		// scratch directory instead of the backend, like sabre's
+		// TemporaryFileFilterPlugin. TempFileDir is that directory (defaults to
+		// a subdir of the system temp dir when empty). Off by default.
+		TempFileFilter bool
+		TempFileDir    string
 	}
 	Database struct {
 		DSN string
@@ -156,6 +162,8 @@ func Load(path string) (*Config, error) {
 	cfg.Server.TLS.Key = str("server.tls.key")
 	cfg.Server.Rcptd.URL = str("server.rcptd.url")
 	cfg.Server.Rcptd.Token = str("server.rcptd.token")
+	cfg.Server.TempFileFilter = boolean("server.temp_file_filter")
+	cfg.Server.TempFileDir = str("server.temp_file_dir")
 	cfg.Database.DSN = str("database.dsn")
 	cfg.Logging.Level = str("logging.level")
 	cfg.Logging.RequestDir = str("logging.request_dir")
@@ -205,6 +213,7 @@ var known = map[string]bool{
 	"server.base_uri": true, "server.realm": true,
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,
+	"server.temp_file_filter": true, "server.temp_file_dir": true,
 	"database.dsn":         true,
 	"logging.level":        true,
 	"logging.request_dir":  true,
