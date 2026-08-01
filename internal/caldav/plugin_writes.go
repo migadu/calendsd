@@ -119,12 +119,12 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 	// ACL beforeMethod table, so enforce it here — otherwise Add-Member is a
 	// write-authorization bypass (any authenticated user writing into another
 	// principal's calendar).
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			if err := checker.CheckPrivileges(r.Context(), calPath, "{DAV:}bind"); err != nil {
-				return true, err
-			}
-		}
+	checker, err := RequirePrivilegeChecker(p.server)
+	if err != nil {
+		return true, err
+	}
+	if err := checker.CheckPrivileges(r.Context(), calPath, "{DAV:}bind"); err != nil {
+		return true, err
 	}
 
 	raw, err := io.ReadAll(r.Body)

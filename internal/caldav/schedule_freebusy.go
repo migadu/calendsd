@@ -39,13 +39,13 @@ func (p *SchedulePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (b
 	// POST is not covered by the ACL beforeMethod table, so enforce
 	// schedule-send here — otherwise any authenticated user could probe
 	// free-busy from any principal's outbox.
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			if err := checker.CheckPrivileges(r.Context(), path,
-				"{urn:ietf:params:xml:ns:caldav}schedule-send"); err != nil {
-				return true, err
-			}
-		}
+	checker, err := RequirePrivilegeChecker(p.server)
+	if err != nil {
+		return true, err
+	}
+	if err := checker.CheckPrivileges(r.Context(), path,
+		"{urn:ietf:params:xml:ns:caldav}schedule-send"); err != nil {
+		return true, err
 	}
 
 	body, err := io.ReadAll(r.Body)

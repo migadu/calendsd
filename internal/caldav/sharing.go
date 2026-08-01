@@ -234,14 +234,11 @@ func requestTime(r *http.Request) time.Time {
 // sharee's own CalendarHome, which grants {DAV:}write (not {DAV:}share) to its
 // owner.
 func (p *SharingPlugin) checkPrivilege(r *http.Request, path, priv string) error {
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			if err := checker.CheckPrivileges(r.Context(), path, priv); err != nil {
-				return err
-			}
-		}
+	checker, err := RequirePrivilegeChecker(p.server)
+	if err != nil {
+		return err
 	}
-	return nil
+	return checker.CheckPrivileges(r.Context(), path, priv)
 }
 
 // inviteReply processes a sharee's accept/decline. It targets the sharee's own

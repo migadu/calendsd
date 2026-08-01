@@ -284,5 +284,14 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		// Last: only claims GETs no other plugin served.
 		srv.AddPlugin(&dav.BrowserPlugin{})
 	}
+	// The free-busy, Add-Member, outbox schedule-send, and sharing paths
+	// enforce ACL themselves (they sit outside the ACL plugin's BeforeMethod
+	// table) by resolving a PrivilegeChecker and now denying when it is
+	// absent. Assert one is wired here so a future edit that drops or
+	// reorders the acl plugin out of the stack fails loudly at startup
+	// rather than silently changing those paths' authorization.
+	if _, err := caldav.RequirePrivilegeChecker(srv); err != nil {
+		panic(fmt.Sprintf("server: no ACL privilege checker registered: %v", err))
+	}
 	return srv
 }

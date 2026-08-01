@@ -28,6 +28,23 @@ type PrivilegeChecker interface {
 	CheckPrivileges(ctx context.Context, path string, privileges ...string) error
 }
 
+// RequirePrivilegeChecker resolves the registered ACL enforcement surface,
+// failing closed when none is present. The free-busy REPORT, the Add-Member
+// POST, the outbox schedule-send POST, and the sharing actions all enforce
+// their own privilege because those methods sit outside the ACL plugin's
+// BeforeMethod table. If the acl plugin were dropped or reordered out of the
+// stack, iterating for a PrivilegeChecker and skipping when absent would turn
+// each of those into an unauthenticated bypass, not a no-op — so a missing
+// checker is a denial (and compose() also asserts one is wired at startup).
+func RequirePrivilegeChecker(server *dav.Server) (PrivilegeChecker, error) {
+	for _, plugin := range server.Plugins() {
+		if checker, ok := plugin.(PrivilegeChecker); ok {
+			return checker, nil
+		}
+	}
+	return nil, dav.ErrForbidden("access control is not configured on this server")
+}
+
 // freeBusyQueryReport implements the free-busy-query REPORT (RFC 4791
 // §7.10), answering 200 with a text/calendar VFREEBUSY body like sabre.
 func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
@@ -46,13 +63,13 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 
 	// Free-busy is gated by its own privilege ({DAV:}authenticated holds
 	// it via the calendar ACL).
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			if err := checker.CheckPrivileges(r.Context(), path,
-				"{urn:ietf:params:xml:ns:caldav}read-free-busy"); err != nil {
-				return err
-			}
-		}
+	checker, err := RequirePrivilegeChecker(p.server)
+	if err != nil {
+		return err
+	}
+	if err := checker.CheckPrivileges(r.Context(), path,
+		"{urn:ietf:params:xml:ns:caldav}read-free-busy"); err != nil {
+		return err
 	}
 
 	node, err := p.server.Tree.NodeForPath(path)
