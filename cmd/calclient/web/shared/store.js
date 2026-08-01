@@ -16,7 +16,7 @@ export { setRange, refreshEvents, visibleInstances, moveEvent,
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
 export { shareCalendar, loadSharees, unshareCalendar,
   loadShareNotifications, replyShareInvite, dismissShareNotification } from './store/sharing.js';
-export { loadInvites, answerInvite, answerEvent, dismissInvite } from './store/invites.js';
+export { loadInvites, answerInvite, answerEvent, dismissInvite, removeCancelled } from './store/invites.js';
 export { freeBusy } from './store/freebusy.js';
 export { loadContacts, normalizeUID, saveContact, deleteContact,
   searchDirectory } from './store/contacts.js';

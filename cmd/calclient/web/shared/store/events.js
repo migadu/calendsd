@@ -84,6 +84,9 @@ export function instanceFrom(ev, href, calHref, etag) {
     myPartstat: attendees.find(a => a.email.toLowerCase() === me)?.partstat ?? '',
     // CLASS:CONFIDENTIAL — read-only sharees see only a busy block for this event.
     confidential: (ical.propValue(ev, 'CLASS') || '').toUpperCase() === 'CONFIDENTIAL',
+    // STATUS:CANCELLED — the organizer cancelled; the copy lingers (struck
+    // through in the views) until the invitation panel removes it.
+    cancelled: (ical.propValue(ev, 'STATUS') || '').toUpperCase() === 'CANCELLED',
   };
 }
 

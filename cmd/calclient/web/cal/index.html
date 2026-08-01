@@ -38,7 +38,7 @@
       <button data-view="agenda">Agenda</button>
     </span>
   </div>
-  <button id="bell" title="Invitations" aria-label="Invitations">✉<span id="bell-badge" hidden></span></button>
+  <button id="bell" title="Invitations" aria-label="Invitations">🔔<span id="bell-badge" hidden></span></button>
   <div id="usermenu">
     <button id="user-btn" aria-haspopup="true" aria-expanded="false">
       <span id="whoami"></span><span class="caret" aria-hidden="true">▾</span>
@@ -62,7 +62,7 @@
   <main id="content" tabindex="-1"></main>
 </div>
 
-<aside id="invites-panel" hidden>
+<aside id="invites-panel" role="dialog" aria-label="Invitations" tabindex="-1" hidden>
   <div class="panel-head"><h2>Invitations</h2><button id="invites-close" aria-label="Close">×</button></div>
   <div id="invites-list"></div>
 </aside>

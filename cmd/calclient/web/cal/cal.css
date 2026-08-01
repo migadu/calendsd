@@ -278,7 +278,11 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   position: fixed; top: 0; right: 0; bottom: 0; width: 23rem; max-width: 92vw;
   background: var(--panel); border-left: 1px solid var(--line); box-shadow: var(--shadow);
   z-index: 30; display: flex; flex-direction: column;
+  animation: invites-in .18s ease;
 }
+#invites-panel:focus { outline: none; }
+@keyframes invites-in { from { transform: translateX(35%); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #invites-panel { animation: none; } }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: .8rem 1rem; border-bottom: 1px solid var(--line); }
 .panel-head h2 { margin: 0; font-size: 1rem; }
 #invites-list { overflow-y: auto; padding: .8rem; }
@@ -286,8 +290,24 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; margin-bottom: .7rem;
 }
 .invite .title { font-weight: 600; }
-.invite .meta { color: var(--dim); font-size: .8rem; margin: .15rem 0 .5rem; }
+.invite .meta { color: var(--dim); font-size: .8rem; margin: .15rem 0 .5rem; display: flex; flex-direction: column; gap: .15rem; }
 .invite .actions { display: flex; gap: .4rem; }
+.invite .conflict.free { color: var(--ok); }
+.invite .conflict.busy { color: var(--danger); }
+.invite .tz-hint { color: var(--dim); font-size: .72rem; font-style: italic; }
+.invite .reply-status.accepted { color: var(--ok); }
+.invite .reply-status.declined { color: var(--danger); }
+.invite .type-tag.cancelled { color: var(--danger); border-color: var(--danger); }
+.invite .cal-pick { display: block; font-size: .8rem; color: var(--dim); margin-bottom: .5rem; }
+.invite .cal-pick select { font: inherit; margin-left: .3rem; max-width: 14rem; }
+.goto-event { display: block; width: 100%; text-align: left; margin-top: .4rem; }
+
+/* an event still awaiting our reply asks for attention with a dashed edge */
+.chip.needs-action, .month .span-bar.needs-action, .week .block.needs-action,
+.agenda .item.needs-action { outline: 1.5px dashed var(--dim); outline-offset: -1.5px; }
+/* a cancelled event lingers struck-through until removed via the panel */
+.chip.cancelled, .month .span-bar.cancelled, .week .block.cancelled,
+.agenda .item.cancelled { text-decoration: line-through; }
 
 /* ---- contacts ---- */
 .contacts { max-width: 44rem; margin: 0 auto; }

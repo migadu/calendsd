@@ -11,6 +11,7 @@ export const state = {
   range: null,             // {start: Date, end: Date} currently loaded
   instances: new Map(),    // calHref -> [instance]
   invites: [],             // parsed inbox items
+  invitesLoaded: false,    // first inbox fetch finished (drives the panel's loading state)
   shareNotifications: [],  // parsed calendar-share invitations (cs:notification)
   books: [], contacts: [], groups: [], // carddav (groups = X-ADDRESSBOOKSERVER-KIND:group cards)
   prefs: loadPrefs(),

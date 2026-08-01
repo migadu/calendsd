@@ -237,10 +237,13 @@ function attachBlockDrag(block, inst, day) {
 // ---- month ---------------------------------------------------------------
 
 // Invitations we haven't confirmed yet ("maybe" or no reply at all) render
-// semi-transparent in every view.
+// semi-transparent in every view; a no-reply-at-all additionally gets a
+// dashed edge so it visibly asks to be answered. A cancelled event is
+// struck through until the invitations panel removes it.
 function unconfirmedCls(inst) {
-  return inst.myPartstat === 'TENTATIVE' || inst.myPartstat === 'NEEDS-ACTION'
-    ? ' tentative' : '';
+  if (inst.cancelled) return ' tentative cancelled';
+  return inst.myPartstat === 'NEEDS-ACTION' ? ' tentative needs-action'
+    : inst.myPartstat === 'TENTATIVE' ? ' tentative' : '';
 }
 
 function chipFor(inst) {

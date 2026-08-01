@@ -97,6 +97,14 @@ function closeMenus() {
   $('#user-btn').setAttribute('aria-expanded', 'false');
 }
 
+// showCalendarView switches to the calendar view programmatically — used by
+// the invitations panel's "jump to event" button, which can fire from the
+// contacts or settings view. Routing keys off the hash, so setting it drives
+// currentView, the chrome, and the re-render.
+export function showCalendarView() {
+  if (currentView !== 'calendar') location.hash = 'calendar';
+}
+
 export function render() {
   // Don't render (and don't let the grid kick off a range fetch) until the
   // app chrome is actually shown — bus events like 'prefs' can fire during
@@ -312,15 +320,25 @@ store.bus.addEventListener('events', () => { if (currentView === 'calendar') ren
 store.bus.addEventListener('contacts', () => { if (currentView === 'contacts') render(); });
 // The bell counts scheduling invitations plus still-unanswered calendar shares.
 function updateBell() {
-  const n = store.state.invites.length +
+  // Only actionable schedule items count: REQUESTs awaiting a reply and CANCELs
+  // awaiting removal. REPLY/other cards are dismiss-only notifications and would
+  // otherwise inflate the badge with nothing to act on.
+  const pending = store.state.invites
+    .filter(i => i.method === 'REQUEST' || i.method === 'CANCEL').length;
+  const n = pending +
     store.state.shareNotifications.filter(s => s.status === 'noresponse').length;
   const badge = $('#bell-badge');
   badge.hidden = n === 0;
-  badge.textContent = n;
+  badge.textContent = n > 9 ? '9+' : n;
   renderInvites();
 }
 store.bus.addEventListener('invites', updateBell);
 store.bus.addEventListener('sharenotifs', updateBell);
+// The open panel derives conflict lines and its empty-state pointer from the
+// instance cache — refresh it when that cache changes.
+store.bus.addEventListener('events', () => {
+  if (!$('#invites-panel').hidden) renderInvites();
+});
 store.bus.addEventListener('prefs', render);
 
 document.addEventListener('keydown', e => {
