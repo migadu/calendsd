@@ -289,14 +289,35 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .suggest-list button.active { background: #e8f0fd; }
 .suggest-list .mail { color: var(--dim); font-size: .78rem; }
 
-/* availability */
+/* a small dim explanatory line inside the dialog grid */
+.dialog .hint { color: var(--dim); font-size: .78rem; margin: -.2rem 0 .2rem; }
+
+/* availability: a per-guest day timeline with an hour axis */
 .avail { margin-top: .5rem; font-size: .8rem; }
-.avail .lane { display: flex; align-items: center; gap: .5rem; margin: .2rem 0; }
-.avail .bar { position: relative; flex: 1; height: 10px; background: #e6f4ea; border-radius: 4px; overflow: hidden; }
-.avail .busy { position: absolute; top: 0; bottom: 0; background: #d9822b; }
-.avail .slot { position: absolute; top: -2px; bottom: -2px; border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); background: rgba(47, 111, 216, .12); }
-.avail .verdict.ok { color: var(--ok); }
-.avail .verdict.bad { color: var(--danger); }
+.avail-loading { color: var(--dim); }
+.avail-cap { color: var(--dim); margin-bottom: .35rem; }
+.avail-cap b { color: var(--ink); }
+.avail .lane { display: grid; grid-template-columns: 8.5rem 1fr 4rem; align-items: center; gap: .5rem; margin: .18rem 0; }
+.avail .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.avail .track { position: relative; height: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.avail .lane.axis .track { height: 1rem; background: none; border: none; overflow: visible; }
+.avail .tick { position: absolute; transform: translateX(-50%); color: var(--dim); font-size: .68rem; white-space: nowrap; }
+.avail .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.avail .busy { position: absolute; top: 2px; bottom: 2px; background: #e08a2b; border-radius: 3px; z-index: 1; }
+/* the proposed slot sits above busy blocks (translucent, so busy shows through)
+   so the chosen time is always visible even when a guest is busy across it */
+.avail .slot { position: absolute; top: -1px; bottom: -1px; z-index: 2; background: rgba(47, 111, 216, .16);
+  border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+.avail .verdict { font-size: .75rem; text-align: right; white-space: nowrap; }
+.avail .verdict.ok { color: var(--dim); }
+.avail .verdict.bad { color: #b5651d; }
+.avail-sum { margin-top: .45rem; font-weight: 600; }
+.avail-sum.ok { color: var(--accent); }
+.avail-sum.bad { color: #b5651d; }
+.avail-legend { display: flex; gap: 1.1rem; margin-top: .3rem; color: var(--dim); font-size: .72rem; }
+.avail-legend i { display: inline-block; width: 12px; height: 10px; vertical-align: middle; border-radius: 2px; margin-right: .25rem; }
+.avail-legend .k-busy { background: #e08a2b; }
+.avail-legend .k-slot { background: rgba(47, 111, 216, .16); border: 1px solid var(--accent); }
 
 /* ---- invitations panel ---- */
 #invites-panel {

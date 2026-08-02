@@ -5,7 +5,7 @@
 
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
-import { $, h, esc, fmtTime, toast, showError } from './main.js';
+import { $, h, esc, fmtTime, fmtDate, toast, showError } from './main.js';
 
 function localDT(d) {
   const p = n => String(n).padStart(2, '0');
@@ -76,13 +76,14 @@ export async function openEventDialog(inst, defaultDay, timed) {
         <option value="MONTHLY">Every month</option>
         <option value="YEARLY">Every year</option>
       </select></label>
-      <label id="ev-ends-wrap" hidden>Repeat ends<span style="display:flex;gap:.3rem">
+      <label id="ev-ends-wrap" hidden>Repeat ends<span style="display:flex;gap:.3rem;align-items:center">
         <select id="ev-ends">
           <option value="never">never</option>
-          <option value="count">after…</option>
-          <option value="until">on date…</option>
+          <option value="count">after a number of times…</option>
+          <option value="until">on a date…</option>
         </select>
         <input id="ev-count" type="number" min="1" value="10" style="width:4.5rem" hidden>
+        <span id="ev-count-unit" hidden>times</span>
         <input id="ev-until" type="date" hidden>
       </span></label>
       <label class="full">Location<input id="ev-loc" type="text" value="${esc(inst?.location ?? '')}" placeholder="Add a location"></label>
@@ -91,6 +92,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       <label class="full">Guests<span class="suggest">
         <span class="chips" id="ev-chips"><input id="ev-guest" type="email" placeholder="Invite by name or email…" autocomplete="off"></span>
         <span class="suggest-list" id="ev-suggest" hidden></span></span></label>
+      <span class="full hint" id="ev-guest-hint" hidden>When you save, your guests are notified of the change automatically; removing a guest cancels their copy.</span>
       <span class="full avail" id="ev-avail"></span>
       <label class="full">Notes<textarea id="ev-desc" rows="3">${esc(inst?.description ?? '')}</textarea></label>
     </div>
@@ -107,10 +109,13 @@ export async function openEventDialog(inst, defaultDay, timed) {
   dlg.addEventListener('click', ev => { if (ev.target === dlg) close(); });
   // Esc cancels the editor (unless a child, e.g. the guest list, handled it).
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
-  // Enter submits from any single-line field. The Notes textarea keeps Enter
-  // for newlines, and the guest field owns Enter for its autocomplete.
+  // Enter submits from a single-line text field. Skip the Notes textarea (Enter
+  // = newline), the guest field (owns Enter for autocomplete), and <select>
+  // elements (Enter/Space open the native menu — hijacking it would make the
+  // dropdowns feel unusable by keyboard).
   dlg.addEventListener('keydown', ev => {
-    if (ev.key !== 'Enter' || ev.target.tagName === 'TEXTAREA' || ev.target.id === 'ev-guest') return;
+    const t = ev.target;
+    if (ev.key !== 'Enter' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.id === 'ev-guest') return;
     ev.preventDefault();
     q('#ev-save').click();
   });
@@ -199,7 +204,9 @@ export async function openEventDialog(inst, defaultDay, timed) {
   }
   function syncRepeat() {
     endsWrap.hidden = !freqSel.value || freqSel.value === 'CUSTOM';
-    q('#ev-count').hidden = endsSel.value !== 'count';
+    const byCount = endsSel.value === 'count';
+    q('#ev-count').hidden = !byCount;
+    q('#ev-count-unit').hidden = !byCount;
     q('#ev-until').hidden = endsSel.value !== 'until';
   }
   syncRepeat();
@@ -216,6 +223,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       $('button', chip).addEventListener('click', () => { guests.splice(guests.indexOf(g), 1); renderChips(); });
       chips.insertBefore(chip, guestInput);
     }
+    q('#ev-guest-hint').hidden = !guests.length;
     q('#ev-avail').innerHTML = guests.length
       ? '<button type="button" class="ghost" id="ev-check">Check availability</button>' : '';
     $('#ev-check', dlg)?.addEventListener('click', checkAvailability);
@@ -270,36 +278,83 @@ export async function openEventDialog(inst, defaultDay, timed) {
   guestInput.addEventListener('blur', () => setTimeout(closeSuggest, 150));
   renderChips();
 
-  // availability strip: the event's day as a lane, busy blocks from free-busy
+  // availability strip: a per-guest timeline for the event's day, zoomed to a
+  // readable window, with an hour axis, the proposed slot highlighted, busy
+  // blocks (hover for their times), and a per-guest + overall verdict.
   async function checkAvailability() {
     const box = q('#ev-avail');
     const { start: s } = readTimes();
     if (!s) return;
     const dayStart = new Date(s); dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(+dayStart + 864e5);
-    box.innerHTML = 'Checking…';
+    box.innerHTML = '<span class="avail-loading">Checking availability…</span>';
     try {
       const fb = await store.freeBusy(guests.map(g => g.email), dayStart, dayEnd);
       const { start: es, end: ee } = readTimes();
+      if (!es || !ee) { box.innerHTML = ''; return; }
+      const hourOf = t => (+t - +dayStart) / 3600e3;
+
+      // When editing, this event already occupies its slot on the invitees'
+      // calendars, so it would show as a conflict against itself. Subtract the
+      // event's own (saved) interval from each guest's busy time before judging.
+      const selfStart = inst ? +inst.start : null, selfEnd = inst ? +inst.end : null;
+      const minusSelf = busy => {
+        if (selfStart == null) return busy;
+        const out = [];
+        for (const b of busy) {
+          const bs = +b.start, be = +b.end;
+          if (be <= selfStart || bs >= selfEnd) { out.push(b); continue; }
+          if (bs < selfStart) out.push({ start: b.start, end: new Date(selfStart) });
+          if (be > selfEnd) out.push({ start: new Date(selfEnd), end: b.end });
+        }
+        return out;
+      };
+      const lanes = [...fb].map(([email, busy]) => [email, minusSelf(busy)]);
+
+      // Zoom to business hours, widened to include the slot and any busy time
+      // outside them, so the day isn't crammed into a sliver.
+      let lo = 7, hi = 20;
+      lo = Math.min(lo, Math.floor(hourOf(es)));
+      hi = Math.max(hi, Math.ceil(hourOf(ee)));
+      for (const [, busy] of lanes) for (const b of busy) {
+        lo = Math.min(lo, Math.floor(hourOf(b.start)));
+        hi = Math.max(hi, Math.ceil(hourOf(b.end)));
+      }
+      lo = Math.max(0, lo); hi = Math.min(24, hi); if (hi <= lo) hi = Math.min(24, lo + 1);
+      const span = hi - lo;
+      const pos = t => Math.min(100, Math.max(0, (hourOf(t) - lo) / span * 100));
+      const hourLabel = hh => fmtTime(new Date(+dayStart + hh * 3600e3)).replace(':00', '');
+      const step = Math.max(1, Math.ceil(span / 8));
+
       box.innerHTML = '';
+      box.append(h(`<div class="avail-cap">${esc(fmtDate(es))} · proposed <b>${esc(fmtTime(es))} – ${esc(fmtTime(ee))}</b></div>`));
+
+      // hour axis, aligned to the tracks below
+      let ticks = '';
+      for (let hh = lo; hh <= hi; hh += step) ticks += `<span class="tick" style="left:${(hh - lo) / span * 100}%">${esc(hourLabel(hh))}</span>`;
+      box.append(h(`<div class="lane axis"><span class="who"></span><span class="track">${ticks}</span><span class="verdict"></span></div>`));
+
       let allFree = true;
-      for (const [email, busy] of fb) {
-        const lane = h(`<span class="lane"><span style="min-width:10rem">${esc(email)}</span><span class="bar"></span><span class="verdict"></span></span>`);
-        const bar = $('.bar', lane);
-        const pct = t => Math.min(100, Math.max(0, (t - dayStart) / 864e5 * 100));
-        bar.append(h(`<span class="slot" style="left:${pct(es)}%;width:${Math.max(1, pct(ee) - pct(es))}%"></span>`));
+      for (const [email, busy] of lanes) {
+        const lane = h(`<div class="lane"><span class="who" title="${esc(email)}">${esc(email)}</span><span class="track"></span><span class="verdict"></span></div>`);
+        const track = $('.track', lane);
+        for (let hh = lo; hh <= hi; hh += step) track.append(h(`<span class="grid" style="left:${(hh - lo) / span * 100}%"></span>`));
+        track.append(h(`<span class="slot" style="left:${pos(es)}%;width:${Math.max(1.5, pos(ee) - pos(es))}%"></span>`));
         let clash = false;
         for (const b of busy) {
-          bar.append(h(`<span class="busy" style="left:${pct(b.start)}%;width:${Math.max(1, pct(b.end) - pct(b.start))}%"></span>`));
-          if (b.start < ee && b.end > es) clash = true;
+          const allDay = (+b.end - +b.start) >= 23.5 * 3600e3;
+          const tip = allDay ? 'Busy all day' : `Busy ${fmtTime(b.start)} – ${fmtTime(b.end)}`;
+          track.append(h(`<span class="busy" style="left:${pos(b.start)}%;width:${Math.max(1.5, pos(b.end) - pos(b.start))}%" title="${esc(tip)}"></span>`));
+          if (+b.start < +ee && +b.end > +es) clash = true;
         }
         const v = $('.verdict', lane);
-        v.textContent = clash ? 'busy then' : 'free';
+        v.textContent = clash ? '● busy' : '○ free';
         v.className = 'verdict ' + (clash ? 'bad' : 'ok');
         if (clash) allFree = false;
         box.append(lane);
       }
-      box.append(h(`<span class="verdict ${allFree ? 'ok' : 'bad'}">${allFree ? 'Everyone is free ✓' : 'Not everyone is free'}</span>`));
+      box.append(h(`<div class="avail-sum ${allFree ? 'ok' : 'bad'}">${allFree ? '✓ Everyone is free at the proposed time' : '⚠ Someone is busy at the proposed time'}</div>`));
+      box.append(h('<div class="avail-legend"><span><i class="k-slot"></i> proposed time</span><span><i class="k-busy"></i> busy</span></div>'));
     } catch (e) {
       box.innerHTML = '';
       showError(e);
