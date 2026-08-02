@@ -2,16 +2,16 @@
 // collection, and the sharee's invite-reply.
 
 import * as dav from '/shared/dav.js';
-import { $, el, run, setOut, statusMsg, preXML } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, preXML, rowsOr } from '../ui.js';
 import { state } from '../session.js';
 import { calSelect, wireCalSelect, listObjects } from '../collections.js';
 
-const { NS, esc } = dav;
+const { NS, xml } = dav;
 
 export default {
   id: 'sharing', title: 'Sharing',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Calendar sharing</h2>
       <p class="hint">The Postgres storage backend does not implement sharing,
       notifications, or invite replies (sabre PDO parity) — these requests
@@ -37,14 +37,14 @@ export default {
         <button id="sh-reply">POST invite-reply</button>
         <div class="out" id="sh-reply-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
     const sel = wireCalSelect(main);
 
     run($('#sh-share', main), async () => {
-      const rw = $('#sh-rw', main).checked ? '<cs:read-write/>' : '';
-      const body = dav.xmlDoc('cs:share', '', `<cs:set>
-        <d:href>${esc($('#sh-href', main).value.trim())}</d:href>
-        <cs:summary>${esc($('#sh-sum', main).value)}</cs:summary>${rw}
+      const rw = $('#sh-rw', main).checked && xml`<cs:read-write/>`;
+      const body = dav.xmlDoc('cs:share', '', xml`<cs:set>
+        <d:href>${$('#sh-href', main).value.trim()}</d:href>
+        <cs:summary>${$('#sh-sum', main).value}</cs:summary>${rw}
       </cs:set>`);
       const r = await dav.req('POST', sel.value, {
         headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
@@ -54,7 +54,7 @@ export default {
 
     run($('#sh-unshare', main), async () => {
       const body = dav.xmlDoc('cs:share', '',
-        `<cs:remove><d:href>${esc($('#sh-href', main).value.trim())}</d:href></cs:remove>`);
+        xml`<cs:remove><d:href>${$('#sh-href', main).value.trim()}</d:href></cs:remove>`);
       const r = await dav.req('POST', sel.value, {
         headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
       });
@@ -64,10 +64,10 @@ export default {
     run($('#sh-notif', main), async () => {
       const base = state.calHome + 'notifications/';
       const objs = await listObjects(base);
-      const rows = objs.map(o => `<tr><td class="mono">${esc(o.name)}</td>
-        <td><button data-get="${esc(o.href)}">GET</button></td></tr>`).join('');
+      const rows = objs.map(o => frag`<tr><td class="mono">${o.name}</td>
+        <td><button data-get="${o.href}">GET</button></td></tr>`);
       setOut($('#sh-notif-out', main),
-        `<table class="list"><tr><th>notification</th><th></th></tr>${rows || '<tr><td colspan="2">(empty)</td></tr>'}</table><div class="out"></div>`);
+        frag`<table class="list"><tr><th>notification</th><th></th></tr>${rowsOr(rows, 2)}</table><div class="out"></div>`);
       for (const b of $('#sh-notif-out', main).querySelectorAll('button[data-get]')) run(b, async () => {
         const r = await dav.req('GET', b.dataset.get);
         setOut($('#sh-notif-out .out', main), preXML(r.text));
@@ -79,10 +79,10 @@ export default {
     });
 
     run($('#sh-reply', main), async () => {
-      const verdict = $('#sh-accept', main).checked ? '<cs:invite-accepted/>' : '<cs:invite-declined/>';
-      const body = dav.xmlDoc('cs:invite-reply', '', `
-        <cs:hosturl><d:href>${esc($('#sh-host', main).value.trim())}</d:href></cs:hosturl>
-        <cs:in-reply-to>${esc($('#sh-irt', main).value.trim())}</cs:in-reply-to>${verdict}`);
+      const verdict = $('#sh-accept', main).checked ? xml`<cs:invite-accepted/>` : xml`<cs:invite-declined/>`;
+      const body = dav.xmlDoc('cs:invite-reply', '', xml`
+        <cs:hosturl><d:href>${$('#sh-host', main).value.trim()}</d:href></cs:hosturl>
+        <cs:in-reply-to>${$('#sh-irt', main).value.trim()}</cs:in-reply-to>${verdict}`);
       const r = await dav.req('POST', state.calHome, {
         headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
       });

@@ -86,15 +86,15 @@ export async function registerCollection(collectionPath, swPath, scope) {
   const sub = await getSubscription(reg, info.vapidKey);
   const json = sub.toJSON(); // { endpoint, keys: { p256dh, auth } }
 
-  const body = `<?xml version="1.0" encoding="utf-8"?>
+  const body = String(dav.xml`<?xml version="1.0" encoding="utf-8"?>
 <P:push-register xmlns:P="${PUSH_NS}" xmlns:D="DAV:">
   <P:subscription><P:web-push-subscription>
-    <P:push-resource>${dav.esc(json.endpoint)}</P:push-resource>
-    <P:subscription-public-key type="p256dh">${dav.esc(json.keys.p256dh)}</P:subscription-public-key>
-    <P:auth-secret>${dav.esc(json.keys.auth)}</P:auth-secret>
+    <P:push-resource>${json.endpoint}</P:push-resource>
+    <P:subscription-public-key type="p256dh">${json.keys.p256dh}</P:subscription-public-key>
+    <P:auth-secret>${json.keys.auth}</P:auth-secret>
   </P:web-push-subscription></P:subscription>
   <P:trigger><P:content-update><D:depth>infinity</D:depth></P:content-update></P:trigger>
-</P:push-register>`;
+</P:push-register>`);
   const r = await dav.req('POST', collectionPath, {
     headers: { 'Content-Type': 'application/xml; charset=utf-8' },
     body,

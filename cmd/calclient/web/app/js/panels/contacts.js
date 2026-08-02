@@ -3,16 +3,17 @@
 
 import * as dav from '/shared/dav.js';
 import * as ical from '/shared/ical.js';
-import { $, el, run, setOut, statusMsg, pre } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, pre, rowsOr } from '../ui.js';
+import { confirmDialog } from '/shared/dialogs.js';
 import { state } from '../session.js';
 import { bookChildren, listObjects } from '../collections.js';
 
-const { NS, key, esc } = dav;
+const { NS, key, xml } = dav;
 
 export default {
   id: 'contacts', title: 'Contacts',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>CardDAV</h2>
       <fieldset><legend>Addressbooks</legend>
         <button class="primary" id="ct-books">List books</button>
@@ -44,13 +45,13 @@ export default {
         <span id="ct-export-link"></span>
         <div class="out" id="ct-export-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
 
     const sel = $('#ct-sel', main);
     const fillBooks = async () => {
       const books = await bookChildren();
-      sel.innerHTML = books.map(b =>
-        `<option value="${esc(b.href)}">${esc(b.displayName || b.name)}</option>`).join('');
+      sel.replaceChildren(...books.map(b =>
+        html`<option value="${b.href}">${b.displayName || b.name}</option>`));
       return books;
     };
     fillBooks();
@@ -58,22 +59,22 @@ export default {
 
     run($('#ct-books', main), async () => {
       const books = await fillBooks();
-      const rows = books.map(b => `<tr><td class="mono">${esc(b.name)}</td>
-        <td>${esc(b.displayName)}</td><td class="mono">${esc(b.ctag)}</td>
-        <td><button data-del="${esc(b.href)}">DELETE</button></td></tr>`).join('');
-      setOut($('#ct-books-out', main), `<table class="list">
+      const rows = books.map(b => frag`<tr><td class="mono">${b.name}</td>
+        <td>${b.displayName}</td><td class="mono">${b.ctag}</td>
+        <td><button data-del="${b.href}">DELETE</button></td></tr>`);
+      setOut($('#ct-books-out', main), frag`<table class="list">
         <tr><th>uri</th><th>displayname</th><th>getctag</th><th></th></tr>${rows}</table>`);
       for (const b of $('#ct-books-out', main).querySelectorAll('button[data-del]')) run(b, async () => {
-        if (!confirm(`DELETE ${b.dataset.del}?`)) return;
+        if (!await confirmDialog(`DELETE ${b.dataset.del}?`, { confirmLabel: 'Delete', danger: true })) return;
         await dav.req('DELETE', b.dataset.del);
         $('#ct-books', main).click();
       });
     });
 
     run($('#ct-mkcol', main), async () => {
-      const body = dav.xmlDoc('d:mkcol', '', `<d:set><d:prop>
+      const body = dav.xmlDoc('d:mkcol', '', xml`<d:set><d:prop>
         <d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>
-        <d:displayname>${esc($('#ct-bdn', main).value)}</d:displayname>
+        <d:displayname>${$('#ct-bdn', main).value}</d:displayname>
       </d:prop></d:set>`);
       const r = await dav.req('MKCOL', state.abHome + encodeURIComponent($('#ct-bname', main).value) + '/', {
         headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
@@ -83,18 +84,18 @@ export default {
 
     const renderCards = async () => {
       const objs = await listObjects(sel.value);
-      const rows = objs.map(o => `<tr><td class="mono">${esc(o.name)}</td>
-        <td class="mono">${esc(o.etag)}</td>
-        <td><button data-get="${esc(o.href)}">GET</button>
-            <button data-del="${esc(o.href)}">DELETE</button></td></tr>`).join('');
+      const rows = objs.map(o => frag`<tr><td class="mono">${o.name}</td>
+        <td class="mono">${o.etag}</td>
+        <td><button data-get="${o.href}">GET</button>
+            <button data-del="${o.href}">DELETE</button></td></tr>`);
       setOut($('#ct-cards-out', main),
-        `<table class="list"><tr><th>card</th><th>etag</th><th></th></tr>${rows || '<tr><td colspan="3">(empty)</td></tr>'}</table><div class="out"></div>`);
+        frag`<table class="list"><tr><th>card</th><th>etag</th><th></th></tr>${rowsOr(rows, 3)}</table><div class="out"></div>`);
       for (const b of $('#ct-cards-out', main).querySelectorAll('button[data-get]')) run(b, async () => {
         const r = await dav.req('GET', b.dataset.get);
         setOut($('#ct-cards-out .out', main), pre(r.text));
       });
       for (const b of $('#ct-cards-out', main).querySelectorAll('button[data-del]')) run(b, async () => {
-        if (!confirm(`DELETE ${b.dataset.del}?`)) return;
+        if (!await confirmDialog(`DELETE ${b.dataset.del}?`, { confirmLabel: 'Delete', danger: true })) return;
         await dav.req('DELETE', b.dataset.del);
         await renderCards();
       });
@@ -118,34 +119,34 @@ export default {
     const renderCardMS = (r, box) => {
       const rows = dav.msResponses(r.xml).map(x => {
         const data = x.props.get(key(NS.card, 'address-data'))?.textContent ?? '';
-        return `<tr><td class="mono">${esc(x.href)}</td></tr><tr><td>${pre(data)}</td></tr>`;
-      }).join('');
-      setOut(box, statusMsg(r, `${dav.msResponses(r.xml).length} match(es)`) +
-        `<table class="list">${rows}</table>`);
+        return frag`<tr><td class="mono">${x.href}</td></tr><tr><td>${pre(data)}</td></tr>`;
+      });
+      setOut(box, frag`${statusMsg(r, `${dav.msResponses(r.xml).length} match(es)`)}
+        <table class="list">${rows}</table>`);
     };
 
     run($('#ct-query', main), async () => {
-      const body = dav.xmlDoc('card:addressbook-query', '', `
+      const body = dav.xmlDoc('card:addressbook-query', '', xml`
         <d:prop><d:getetag/><card:address-data/></d:prop>
-        <card:filter test="anyof"><card:prop-filter name="${esc($('#ct-field', main).value)}">
-          <card:text-match collation="i;unicode-casemap" match-type="contains">${esc($('#ct-match', main).value)}</card:text-match>
+        <card:filter test="anyof"><card:prop-filter name="${$('#ct-field', main).value}">
+          <card:text-match collation="i;unicode-casemap" match-type="contains">${$('#ct-match', main).value}</card:text-match>
         </card:prop-filter></card:filter>`);
       renderCardMS(await dav.report(sel.value, body), $('#ct-query-out', main));
     });
 
     run($('#ct-mget', main), async () => {
       const hrefs = $('#ct-hrefs', main).value.split('\n').map(s => s.trim()).filter(Boolean)
-        .map(h => `<d:href>${esc(h)}</d:href>`).join('');
+        .map(h => xml`<d:href>${h}</d:href>`);
       const body = dav.xmlDoc('card:addressbook-multiget', '',
-        `<d:prop><d:getetag/><card:address-data/></d:prop>${hrefs}`);
+        xml`<d:prop><d:getetag/><card:address-data/></d:prop>${hrefs}`);
       renderCardMS(await dav.report(sel.value, body), $('#ct-query-out', main));
     });
 
     run($('#ct-export', main), async () => {
       const url = sel.value + '?export';
       const r = await dav.req('GET', url);
-      $('#ct-export-link', main).innerHTML = `<a href="${esc(url)}" download>download</a>`;
-      setOut($('#ct-export-out', main), statusMsg(r, r.headers.get('Content-Type')) + pre(r.text));
+      $('#ct-export-link', main).replaceChildren(html`<a href="${url}" download>download</a>`);
+      setOut($('#ct-export-out', main), frag`${statusMsg(r, r.headers.get('Content-Type'))}${pre(r.text)}`);
     });
   },
 };

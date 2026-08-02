@@ -2,10 +2,10 @@
 // home, object listings) and the reusable calendar <select>.
 
 import * as dav from '/shared/dav.js';
-import { $, run, lastSegment } from './ui.js';
+import { $, html, frag, run, lastSegment } from './ui.js';
 import { state } from './session.js';
 
-const { NS, key, esc } = dav;
+const { NS, key } = dav;
 
 export async function homeChildren() {
   const r = await dav.propfind(state.calHome, [
@@ -33,8 +33,8 @@ export async function homeChildren() {
 
 export async function fillCalendarSelect(sel) {
   const cals = (await homeChildren()).filter(c => c.isCalendar);
-  sel.innerHTML = cals.map(c =>
-    `<option value="${esc(c.href)}">${esc(c.displayName || c.name)}</option>`).join('');
+  sel.replaceChildren(...cals.map(c =>
+    html`<option value="${c.href}">${c.displayName || c.name}</option>`));
   return cals;
 }
 
@@ -61,7 +61,7 @@ export async function listObjects(collection) {
 
 // calSelect is the markup for a calendar picker; wireCalSelect fills it and
 // hooks up its refresh button, returning the <select>.
-export const calSelect = `<label class="fld">calendar<select class="cal-sel"></select></label>
+export const calSelect = frag`<label class="fld">calendar<select class="cal-sel"></select></label>
   <button class="cal-refresh" type="button">↻</button>`;
 
 export function wireCalSelect(root, onReady) {

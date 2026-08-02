@@ -21,7 +21,10 @@ import (
 	"calserver/internal/version"
 )
 
-//go:embed web
+// Only the three served asset trees — never `web` wholesale, which would pull
+// web/e2e (Playwright tests and their node_modules) into the binary.
+//
+//go:embed web/app web/cal web/shared
 var webFS embed.FS
 
 func main() {

@@ -1,16 +1,17 @@
 // subscriptions.js — webcal subscriptions ({cs}subscribed + {cs}source).
 
 import * as dav from '/shared/dav.js';
-import { $, el, run, setOut, statusMsg } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, rowsOr } from '../ui.js';
+import { confirmDialog } from '/shared/dialogs.js';
 import { state } from '../session.js';
 import { homeChildren } from '../collections.js';
 
-const { NS, esc } = dav;
+const { NS, xml } = dav;
 
 export default {
   id: 'subscriptions', title: 'Subscriptions',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Webcal subscriptions</h2>
       <p class="hint">The Postgres storage backend does not store subscriptions
       (sabre PDO parity): expect a 403 "backend does not support subscriptions"
@@ -26,15 +27,15 @@ export default {
         <button id="su-list">List subscriptions</button>
         <div class="out" id="su-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
 
     run($('#su-create', main), async () => {
       // xmlns declared inline: the server re-parses the resourcetype/source
       // fragments standalone, so prefixes bound on the root would be lost.
-      const body = dav.xmlDoc('c:mkcalendar', '', `<d:set><d:prop>
+      const body = dav.xmlDoc('c:mkcalendar', '', xml`<d:set><d:prop>
         <d:resourcetype><d:collection/><subscribed xmlns="${NS.cs}"/></d:resourcetype>
-        <d:displayname>${esc($('#su-dn', main).value)}</d:displayname>
-        <cs:source><href xmlns="${NS.d}">${esc($('#su-src', main).value.trim())}</href></cs:source>
+        <d:displayname>${$('#su-dn', main).value}</d:displayname>
+        <cs:source><href xmlns="${NS.d}">${$('#su-src', main).value.trim()}</href></cs:source>
       </d:prop></d:set>`);
       const r = await dav.req('MKCALENDAR', state.calHome + encodeURIComponent($('#su-name', main).value) + '/', {
         headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
@@ -44,14 +45,14 @@ export default {
 
     const renderSubs = async () => {
       const subs = (await homeChildren()).filter(c => c.isSubscription);
-      const rows = subs.map(s => `<tr><td class="mono">${esc(s.name)}</td>
-        <td>${esc(s.displayName)}</td><td class="mono">${esc(s.source)}</td>
-        <td><button data-del="${esc(s.href)}">DELETE</button></td></tr>`).join('');
-      setOut($('#su-out', main), `<table class="list">
+      const rows = subs.map(s => frag`<tr><td class="mono">${s.name}</td>
+        <td>${s.displayName}</td><td class="mono">${s.source}</td>
+        <td><button data-del="${s.href}">DELETE</button></td></tr>`);
+      setOut($('#su-out', main), frag`<table class="list">
         <tr><th>uri</th><th>displayname</th><th>source</th><th></th></tr>
-        ${rows || '<tr><td colspan="4">(none)</td></tr>'}</table>`);
+        ${rowsOr(rows, 4, '(none)')}</table>`);
       for (const b of $('#su-out', main).querySelectorAll('button[data-del]')) run(b, async () => {
-        if (!confirm(`DELETE ${b.dataset.del}?`)) return;
+        if (!await confirmDialog(`DELETE ${b.dataset.del}?`, { confirmLabel: 'Delete', danger: true })) return;
         await dav.req('DELETE', b.dataset.del);
         await renderSubs();
       });

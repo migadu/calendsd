@@ -3,16 +3,15 @@
 
 import * as dav from '/shared/dav.js';
 import * as ical from '/shared/ical.js';
-import { $, el, run, setOut, statusMsg, pre, localDT, plusHours, icalToLocal } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, pre, localDT, plusHours, icalToLocal } from '../ui.js';
+import { confirmDialog } from '/shared/dialogs.js';
 import { primaryEmail } from '../session.js';
 import { calSelect, wireCalSelect, listObjects } from '../collections.js';
-
-const { esc } = dav;
 
 export default {
   id: 'events', title: 'Events',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Events</h2>
       <fieldset><legend>Objects (PROPFIND depth 1)</legend>
         ${calSelect}
@@ -33,7 +32,7 @@ export default {
         <div class="out" id="ev-put-out"></div>
       </fieldset>
       <div class="out" id="ev-view"></div>
-    </div>`));
+    </div>`);
 
     $('#ev-uid', main).value = ical.newUID();
     $('#ev-start', main).value = localDT(plusHours(1));
@@ -43,23 +42,23 @@ export default {
     const sel = wireCalSelect(main);
     const renderObjects = async () => {
       const objs = await listObjects(sel.value);
-      const rows = objs.map(o => `<tr><td class="mono">${esc(o.name)}</td>
-        <td class="mono">${esc(o.etag)}</td>
-        <td><button data-get="${esc(o.href)}">GET iCal</button>
-            <button data-jcal="${esc(o.href)}">GET jCal</button>
-            <button data-load="${esc(o.href)}" data-etag="${esc(o.etag)}">Load</button>
-            <button data-del="${esc(o.href)}">DELETE</button></td></tr>`).join('');
-      setOut($('#ev-out', main), `<table class="list"><tr><th>object</th><th>etag</th><th></th></tr>${rows}</table>`);
+      const rows = objs.map(o => frag`<tr><td class="mono">${o.name}</td>
+        <td class="mono">${o.etag}</td>
+        <td><button data-get="${o.href}">GET iCal</button>
+            <button data-jcal="${o.href}">GET jCal</button>
+            <button data-load="${o.href}" data-etag="${o.etag}">Load</button>
+            <button data-del="${o.href}">DELETE</button></td></tr>`);
+      setOut($('#ev-out', main), frag`<table class="list"><tr><th>object</th><th>etag</th><th></th></tr>${rows}</table>`);
       const out = $('#ev-out', main);
       for (const b of out.querySelectorAll('button[data-get]')) run(b, async () => {
         const r = await dav.req('GET', b.dataset.get);
-        setOut($('#ev-view', main), statusMsg(r, r.headers.get('Content-Type')) + pre(r.text));
+        setOut($('#ev-view', main), frag`${statusMsg(r, r.headers.get('Content-Type'))}${pre(r.text)}`);
       });
       for (const b of out.querySelectorAll('button[data-jcal]')) run(b, async () => {
         const r = await dav.req('GET', b.dataset.jcal, { headers: { Accept: 'application/calendar+json' } });
         let body = r.text;
         try { body = JSON.stringify(JSON.parse(r.text), null, 2); } catch { /* leave as-is */ }
-        setOut($('#ev-view', main), statusMsg(r, r.headers.get('Content-Type')) + pre(body));
+        setOut($('#ev-view', main), frag`${statusMsg(r, r.headers.get('Content-Type'))}${pre(body)}`);
       });
       for (const b of out.querySelectorAll('button[data-load]')) run(b, async () => {
         const r = await dav.req('GET', b.dataset.load);
@@ -73,7 +72,7 @@ export default {
         $('#ev-ifmatch', main).value = r.headers.get('ETag') ?? b.dataset.etag;
       });
       for (const b of out.querySelectorAll('button[data-del]')) run(b, async () => {
-        if (!confirm(`DELETE ${b.dataset.del}?`)) return;
+        if (!await confirmDialog(`DELETE ${b.dataset.del}?`, { confirmLabel: 'Delete', danger: true })) return;
         await dav.req('DELETE', b.dataset.del);
         await renderObjects();
       });

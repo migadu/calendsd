@@ -3,7 +3,8 @@
 import * as dav from '../dav.js';
 import * as ical from '../ical.js';
 import { state, check, myEmail } from './core.js';
-import { parseICalDate } from './events.js';
+
+const { parseICalDate } = ical;
 
 const { NS } = dav;
 

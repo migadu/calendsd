@@ -1,76 +1,17 @@
-// main.js — calweb boot: login flow, top bar, sidebar, view routing.
+// main.js — calweb boot: login flow, top bar, sidebar, view routing. The
+// app-level helpers (toast, formatting) live in ./ui.js and the DOM
+// construction helpers in /shared/dom.js.
 
 import * as store from '/shared/store.js';
+import { $, html, frag } from '/shared/dom.js';
+import { toast, showError } from './ui.js';
+import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
 import { renderGrid, gridNav, setGridView } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
 import { renderInvites, toggleInvites } from './invites.js';
 import { renderContacts } from './contacts.js';
 import { renderSettings } from './settings.js';
 import * as pushSync from './push-sync.js';
-
-// ---- tiny DOM helpers (shared with the other modules) --------------------
-
-export const $ = (sel, root = document) => root.querySelector(sel);
-export function h(html) {
-  const t = document.createElement('template');
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild;
-}
-export const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-let toastTimer = null;
-export function toast(msg, isError = false) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.classList.toggle('error', isError);
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 6000 : 3000);
-}
-
-// linkify HTML-escapes text, then turns http(s) URLs into clickable links —
-// so a meeting link pasted into a location or notes field is joinable.
-export function linkify(text) {
-  const re = /(https?:\/\/[^\s<]+)/g;
-  let out = '', last = 0, m;
-  while ((m = re.exec(text))) {
-    out += esc(text.slice(last, m.index));
-    out += `<a href="${esc(m[1])}" target="_blank" rel="noreferrer noopener">${esc(m[1])}</a>`;
-    last = m.index + m[1].length;
-  }
-  return out + esc(text.slice(last));
-}
-
-// showError maps any thrown error to a friendly toast (store.DavError
-// already carries friendly text).
-export function showError(e) {
-  console.error(e);
-  toast(e?.message || 'Something went wrong.', true);
-  if (e?.conflict) store.refreshEvents().catch(() => {});
-}
-
-// tzOpt adds the chosen display time zone to a toLocale* options object
-// (empty pref = the device's own zone).
-function tzOpt(opts) {
-  const tz = store.state.prefs.tz;
-  return tz ? { ...opts, timeZone: tz } : opts;
-}
-export function fmtTime(d) {
-  return d.toLocaleTimeString([], tzOpt({ hour: 'numeric', minute: '2-digit', hour12: store.state.prefs.hour12 }));
-}
-export function fmtDate(d) {
-  return d.toLocaleDateString([], tzOpt({ weekday: 'short', month: 'short', day: 'numeric' }));
-}
-export function fmtRange(inst) {
-  if (inst.allDay) {
-    const days = Math.round((inst.end - inst.start) / 864e5);
-    return fmtDate(inst.start) + (days > 1 ? ' – ' + fmtDate(new Date(+inst.end - 864e5)) : '') + ' · all day';
-  }
-  const sameDay = inst.start.toDateString() === inst.end.toDateString();
-  return fmtDate(inst.start) + ' ' + fmtTime(inst.start) + ' – ' +
-    (sameDay ? '' : fmtDate(inst.end) + ' ') + fmtTime(inst.end);
-}
 
 // ---- routing -------------------------------------------------------------
 
@@ -189,7 +130,7 @@ $('#scrim').addEventListener('click', closeMenus);
 
 $('#new-calendar').addEventListener('click', async () => {
   closeMenus();
-  const name = prompt('Name for the new calendar:');
+  const name = await promptDialog('Name for the new calendar', { confirmLabel: 'Create' });
   if (!name) return;
   try {
     await store.createCalendar(name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), name, '');
@@ -203,17 +144,15 @@ function renderSidebar() {
   // calweb is an events app; a task/journal-only collection has nothing to show
   // here, so keep it out of the calendar list entirely.
   for (const cal of store.state.calendars.filter(c => c.supportsEvents)) {
-    const li = h(`<li>
+    const li = html`<li>
       <label><input type="checkbox" ${store.state.hidden.has(cal.href) ? '' : 'checked'}>
-        <span class="dot" style="background:${esc(store.calColor(cal.href))}"></span>
-        <span class="name">${esc(cal.displayName || cal.name)}</span>
-        ${cal.readOnly ? '<span class="ro-badge" title="Shared with you (read-only)">🔒</span>' : ''}</label>
+        <span class="dot" style="background:${store.calColor(cal.href)}"></span>
+        <span class="name">${cal.displayName || cal.name}</span>
+        ${cal.readOnly && frag`<span class="ro-badge" title="Shared with you (read-only)">🔒</span>`}</label>
       <button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">⚙</button>
-    </li>`);
+    </li>`;
     $('input', li).addEventListener('change', ev => {
-      if (ev.target.checked) store.state.hidden.delete(cal.href);
-      else store.state.hidden.add(cal.href);
-      render();
+      store.setCalendarHidden(cal.href, !ev.target.checked);
     });
     $('.gear', li).addEventListener('click', () => calendarMenu(cal));
     ul.append(li);
@@ -223,14 +162,14 @@ function renderSidebar() {
 function calendarMenu(cal) {
   closeMenus();
   const ro = cal.readOnly;
-  const dialog = h(`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true">
-    <h2>${esc(cal.displayName || cal.name)}</h2>
-    ${ro ? '<p class="note">🔒 This calendar is shared with you, read-only. You can hide it or remove it from your list, but not edit its events or settings.</p>' : ''}
+  const dialog = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true">
+    <h2>${cal.displayName || cal.name}</h2>
+    ${ro && frag`<p class="note">🔒 This calendar is shared with you, read-only. You can hide it or remove it from your list, but not edit its events or settings.</p>`}
     <div class="grid">
-      <label>Name<input id="cm-name" value="${esc(cal.displayName || cal.name)}" ${ro ? 'disabled' : ''}></label>
-      <label>Color<input id="cm-color" type="color" value="${esc(store.calColor(cal.href))}" ${ro ? 'disabled' : ''}></label>
+      <label>Name<input id="cm-name" value="${cal.displayName || cal.name}" ${ro ? 'disabled' : ''}></label>
+      <label>Color<input id="cm-color" type="color" value="${store.calColor(cal.href)}" ${ro ? 'disabled' : ''}></label>
     </div>
-    ${ro ? '' : `<section class="share">
+    ${!ro && frag`<section class="share">
       <h3>Shared with</h3>
       <div id="cm-sharees" class="sharee-list"><p class="note">Loading…</p></div>
       <p class="note">Invite someone by email. They'll see the calendar in their own list and get an invitation to accept.</p>
@@ -245,11 +184,11 @@ function calendarMenu(cal) {
     <div class="actions">
       <button class="danger" id="cm-delete">${ro ? 'Remove from my calendars' : 'Delete calendar…'}</button>
       <button id="cm-cancel">${ro ? 'Close' : 'Cancel'}</button>
-      ${ro ? '' : '<button class="primary" id="cm-save">Save</button>'}
+      ${!ro && frag`<button class="primary" id="cm-save">Save</button>`}
     </div>
-  </div></div>`);
+  </div></div>`;
   const close = () => dialog.remove();
-  dialog.addEventListener('click', ev => { if (ev.target === dialog) close(); });
+  openOverlay(dialog, close);
   $('#cm-cancel', dialog).addEventListener('click', close);
   $('#cm-save', dialog)?.addEventListener('click', async () => {
     try {
@@ -269,15 +208,15 @@ function calendarMenu(cal) {
     try {
       const sharees = await store.loadSharees(cal.href);
       box.innerHTML = '';
-      if (!sharees.length) { box.append(h('<p class="note">Not shared with anyone yet.</p>')); return; }
+      if (!sharees.length) { box.append(html`<p class="note">Not shared with anyone yet.</p>`); return; }
       for (const s of sharees) {
         const detail = (s.readWrite ? 'can edit' : 'read-only') +
           (s.status === 'pending' ? ' · pending' : s.status === 'declined' ? ' · declined' : '');
-        const row = h(`<div class="sharee">
-          <span class="who">${esc(s.commonName || s.email)}</span>
-          <span class="lvl">${esc(detail)}</span>
-          <button class="ghost" data-remove aria-label="Remove ${esc(s.email)}">Remove</button>
-        </div>`);
+        const row = html`<div class="sharee">
+          <span class="who">${s.commonName || s.email}</span>
+          <span class="lvl">${detail}</span>
+          <button class="ghost" data-remove aria-label="Remove ${s.email}">Remove</button>
+        </div>`;
         $('[data-remove]', row).addEventListener('click', async ev => {
           ev.target.disabled = true;
           try { await store.unshareCalendar(cal.href, s.email); toast(`Removed ${s.email}.`); await refreshSharees(); }
@@ -285,9 +224,9 @@ function calendarMenu(cal) {
         });
         box.append(row);
       }
-    } catch (e) {
+    } catch {
       box.innerHTML = '';
-      box.append(h('<p class="note">Couldn’t load the sharing list.</p>'));
+      box.append(html`<p class="note">Couldn’t load the sharing list.</p>`);
     }
   }
   $('#cm-share', dialog)?.addEventListener('click', async () => {
@@ -304,13 +243,15 @@ function calendarMenu(cal) {
   if (!ro) refreshSharees();
 
   $('#cm-delete', dialog).addEventListener('click', async () => {
-    const msg = ro
-      ? `Remove “${cal.displayName || cal.name}” from your calendars? The owner keeps it; you can be re-invited later.`
-      : `Delete “${cal.displayName || cal.name}” and all its events? This cannot be undone.`;
-    if (!confirm(msg)) return;
+    const name = cal.displayName || cal.name;
+    const ok = ro
+      ? await confirmDialog(`Remove “${name}” from your calendars? The owner keeps it; you can be re-invited later.`,
+        { confirmLabel: 'Remove', danger: true })
+      : await confirmDialog(`Delete “${name}” and all its events? This cannot be undone.`,
+        { confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
     try { await store.deleteCalendar(cal.href); close(); } catch (e) { showError(e); }
   });
-  $('#dialog-host').append(dialog);
   (ro ? $('#cm-cancel', dialog) : $('#cm-name', dialog)).focus();
 }
 
@@ -349,7 +290,13 @@ store.bus.addEventListener('prefs', render);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const overlays = document.querySelectorAll('#dialog-host .overlay');
-    if (overlays.length) overlays[overlays.length - 1].remove();  // topmost
+    if (overlays.length) {
+      // Close the topmost dialog via its registered handler (see openOverlay)
+      // so promise-based dialogs resolve; fall back to removal for overlays
+      // opened without one.
+      const top = overlays[overlays.length - 1];
+      if (typeof top.close === 'function') top.close(); else top.remove();
+    }
     else if (!$('#user-pop').hidden || document.body.classList.contains('sidebar-open')) closeMenus();
     else toggleInvites(false);
   }

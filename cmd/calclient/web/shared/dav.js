@@ -1,6 +1,16 @@
 // dav.js — the DAV plumbing: an instrumented fetch wrapper plus XML
 // build/parse helpers for multistatus, PROPFIND, REPORT, and PROPPATCH.
 
+import { esc, Raw, render } from './escape.js';
+
+// xml`...` builds an XML fragment with every interpolated value escaped by
+// default — the request-body counterpart of dom.js's frag. Fragments compose
+// (a nested xml`...` passes through unescaped), arrays flatten, and
+// null/booleans render as nothing, so conditional and repeated elements
+// interpolate directly. toString() yields the markup, so results drop
+// straight into xmlDoc()/req() bodies.
+export function xml(strings, ...values) { return new Raw(render(strings, values)); }
+
 export const NS = {
   d: 'DAV:',
   c: 'urn:ietf:params:xml:ns:caldav',
@@ -84,11 +94,6 @@ function record(method, path, reqHeaders, reqBody, res, error) {
 
 // ---- XML building --------------------------------------------------------
 
-export function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 const XMLNS = `xmlns:d="${NS.d}" xmlns:c="${NS.c}" xmlns:card="${NS.card}" xmlns:cs="${NS.cs}" xmlns:a="${NS.a}" xmlns:s="${NS.s}" xmlns:x="${NS.x}"`;
 
 // props: array of prefixed names like 'd:displayname', 'cs:getctag'.
@@ -165,6 +170,12 @@ export function msResponses(xml) {
 // syncToken pulls the top-level {DAV:}sync-token off a multistatus.
 export function syncToken(xml) {
   return xml ? child(xml.documentElement, NS.d, 'sync-token')?.textContent ?? '' : '';
+}
+
+// lastSegment returns the decoded final path segment of an href ('' if none) —
+// how collection and principal hrefs are turned into display names.
+export function lastSegment(href) {
+  return decodeURIComponent(String(href).replace(/\/+$/, '').split('/').pop() || '');
 }
 
 // hrefText returns the text of a {DAV:}href inside a property element.

@@ -23,9 +23,9 @@ export async function loadContacts() {
     const hrefs = dav.msResponses(list.xml).map(x => x.href)
       .filter(h => h !== book.href && !h.endsWith('/'));
     if (!hrefs.length) continue;
-    const body = dav.xmlDoc('card:addressbook-multiget', '',
-      `<d:prop><d:getetag/><card:address-data/></d:prop>` +
-      hrefs.map(h => `<d:href>${dav.esc(h)}</d:href>`).join(''));
+    const body = dav.xmlDoc('card:addressbook-multiget', '', dav.xml`
+      <d:prop><d:getetag/><card:address-data/></d:prop>
+      ${hrefs.map(h => dav.xml`<d:href>${h}</d:href>`)}`);
     const mg = await dav.report(book.href, body, '1');
     for (const resp of dav.msResponses(mg.xml)) {
       const data = resp.props.get(key(NS.card, 'address-data'))?.textContent;
@@ -148,8 +148,8 @@ export async function searchDirectory(q) {
     }
   }
   try {
-    const body = dav.xmlDoc('d:principal-property-search', '', `
-      <d:property-search><d:prop><d:displayname/></d:prop><d:match>${dav.esc(q)}</d:match></d:property-search>
+    const body = dav.xmlDoc('d:principal-property-search', '', dav.xml`
+      <d:property-search><d:prop><d:displayname/></d:prop><d:match>${q}</d:match></d:property-search>
       <d:prop><d:displayname/><c:calendar-user-address-set/></d:prop>`);
     const r = await dav.report('/principals/', body, '0');
     for (const resp of dav.msResponses(r.xml)) {

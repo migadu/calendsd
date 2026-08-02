@@ -95,8 +95,8 @@ export function calColor(href) {
 }
 
 export async function createCalendar(name, displayName, color) {
-  const body = dav.xmlDoc('c:mkcalendar', '', `<d:set><d:prop>
-    <d:displayname>${dav.esc(displayName)}</d:displayname>
+  const body = dav.xmlDoc('c:mkcalendar', '', dav.xml`<d:set><d:prop>
+    <d:displayname>${displayName}</d:displayname>
     <c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>
   </d:prop></d:set>`);
   check(await dav.req('MKCALENDAR', state.calHome + encodeURIComponent(name) + '/', {

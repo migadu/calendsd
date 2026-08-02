@@ -3,15 +3,15 @@
 
 import * as dav from '/shared/dav.js';
 import * as push from '/shared/push.js';
-import { $, el, run, setOut, statusMsg } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg } from '../ui.js';
 import { calSelect, wireCalSelect } from '../collections.js';
 
-const { NS, key, esc } = dav;
+const { NS, key, xml } = dav;
 
 export default {
   id: 'sync', title: 'Sync',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Incremental sync (RFC 6578)</h2>
       <fieldset><legend>sync-collection</legend>
         ${calSelect}
@@ -30,7 +30,7 @@ export default {
         <div class="out" id="sy-push-out"></div>
         <div class="out" id="sy-push-log">No pushes received yet. Change this collection from another client to see one arrive.</div>
       </fieldset>
-    </div>`));
+    </div>`);
     const sel = wireCalSelect(main);
 
     // WebDAV-Push: discover the topic, subscribe the browser, register it, and
@@ -45,41 +45,40 @@ export default {
     }
     push.onMessage(({ topic, syncToken }) => {
       const now = new Date().toLocaleTimeString();
-      $('#sy-push-log', main).innerHTML =
-        `<b>push received ${esc(now)}</b> — topic <span class="mono">${esc(topic || '(none)')}</span>, ` +
-        `sync-token <span class="mono">${esc(syncToken || '(none)')}</span>`;
+      setOut($('#sy-push-log', main),
+        frag`<b>push received ${now}</b> — topic <span class="mono">${topic || '(none)'}</span>, sync-token <span class="mono">${syncToken || '(none)'}</span>`);
     });
     run($('#sy-push-on', main), async () => {
       const { topic } = await push.registerCollection(sel.value, '/app/sw.js', '/app/');
       setOut($('#sy-push-out', main),
-        `Subscribed. topic = <span class="mono">${esc(topic)}</span> for <span class="mono">${esc(sel.value)}</span>`);
+        frag`Subscribed. topic = <span class="mono">${topic}</span> for <span class="mono">${sel.value}</span>`);
     });
     run($('#sy-push-off', main), async () => {
       await push.unregisterCollection(sel.value);
-      setOut($('#sy-push-out', main), `Unsubscribed <span class="mono">${esc(sel.value)}</span>.`);
+      setOut($('#sy-push-out', main), frag`Unsubscribed <span class="mono">${sel.value}</span>.`);
     });
 
     run($('#sy-run', main), async () => {
-      const body = dav.xmlDoc('d:sync-collection', '', `
-        <d:sync-token>${esc($('#sy-token', main).value.trim())}</d:sync-token>
+      const body = dav.xmlDoc('d:sync-collection', '', xml`
+        <d:sync-token>${$('#sy-token', main).value.trim()}</d:sync-token>
         <d:sync-level>1</d:sync-level>
         <d:prop><d:getetag/></d:prop>`);
       const r = await dav.report(sel.value, body, '0');
       const token = dav.syncToken(r.xml);
-      const rows = dav.msResponses(r.xml).map(x => `<tr>
-        <td class="mono">${esc(x.href)}</td>
-        <td class="mono">${esc(x.status || x.props.get(key(NS.d, 'getetag'))?.textContent || '')}</td></tr>`).join('');
-      setOut($('#sy-out', main), statusMsg(r, '') +
-        `<table class="list"><tr><th>href</th><th>etag / status</th></tr>${rows}</table>
-         <p>new token: <span class="mono">${esc(token)}</span> (kept for the next delta)</p>`);
+      const rows = dav.msResponses(r.xml).map(x => frag`<tr>
+        <td class="mono">${x.href}</td>
+        <td class="mono">${x.status || x.props.get(key(NS.d, 'getetag'))?.textContent || ''}</td></tr>`);
+      setOut($('#sy-out', main), frag`${statusMsg(r, '')}
+        <table class="list"><tr><th>href</th><th>etag / status</th></tr>${rows}</table>
+        <p>new token: <span class="mono">${token}</span> (kept for the next delta)</p>`);
       if (token) $('#sy-token', main).value = token;
     });
 
     run($('#sy-ctag', main), async () => {
       const r = await dav.propfind(sel.value, ['cs:getctag', 'd:sync-token'], '0');
       const p = dav.msResponses(r.xml)[0]?.props ?? new Map();
-      setOut($('#sy-ctag-out', main), `getctag = <span class="mono">${esc(p.get(key(NS.cs, 'getctag'))?.textContent ?? '')}</span>,
-        sync-token = <span class="mono">${esc(p.get(key(NS.d, 'sync-token'))?.textContent ?? '')}</span>`);
+      setOut($('#sy-ctag-out', main), frag`getctag = <span class="mono">${p.get(key(NS.cs, 'getctag'))?.textContent ?? ''}</span>,
+        sync-token = <span class="mono">${p.get(key(NS.d, 'sync-token'))?.textContent ?? ''}</span>`);
     });
   },
 };

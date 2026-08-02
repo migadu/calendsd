@@ -1,0 +1,13 @@
+{
+  "name": "calclient-dev",
+  "private": true,
+  "description": "Dev tooling for the calclient web apps: unit tests (node --test) and lint. The apps themselves have no build step. `type: module` also tells node the ES modules under web/ are ESM so tests can import them directly.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'tests/*.test.js'",
+    "lint": "eslint web tests"
+  },
+  "devDependencies": {
+    "eslint": "^9"
+  }
+}

@@ -3,7 +3,11 @@
 // picker, and first-class Cancelled / Reply cards.
 
 import * as store from '/shared/store.js';
-import { $, h, esc, fmtRange, fmtTime, toast, showError, showCalendarView } from './main.js';
+import { lastSegment } from '/shared/dav.js';
+import { $, html, frag } from '/shared/dom.js';
+import { DAY, startOfDay, sameDay } from '/shared/time.js';
+import { fmtRange, fmtTime, toast, showError } from './ui.js';
+import { showCalendarView } from './main.js';
 import { setGridView } from './grid.js';
 import { openEventDetail } from './event-detail.js';
 
@@ -57,21 +61,17 @@ export function toggleInvites(force) {
 
 // principalName turns a principal href (/principals/alice/) into a bare name
 // for display when no common-name accompanies the share invitation.
-function principalName(href) {
-  return decodeURIComponent(String(href).replace(/\/+$/, '').split('/').pop() || '') || 'Someone';
-}
-
-function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+const principalName = href => lastSegment(href) || 'Someone';
 
 // fmtWhen renders an invite's time range with a relative day label when the
 // event is imminent, and hints when the organizer wrote the times in another
 // zone than the one they are displayed in.
 function fmtWhen(inv) {
   if (!inv.start) return '';
-  const days = Math.round((startOfDay(inv.start) - startOfDay(new Date())) / 864e5);
+  const days = Math.round((startOfDay(inv.start) - startOfDay(new Date())) / DAY);
   const rel = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : '';
   let s;
-  if (rel && !inv.allDay && inv.start.toDateString() === inv.end.toDateString()) {
+  if (rel && !inv.allDay && sameDay(inv.start, inv.end)) {
     s = `${rel} ${fmtTime(inv.start)} – ${fmtTime(inv.end)}`;
   } else if (rel && inv.allDay) {
     s = `${rel} · all day`;
@@ -79,10 +79,8 @@ function fmtWhen(inv) {
     s = fmtRange(inv);
   }
   const shownIn = store.state.prefs.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (inv.tzid && inv.tzid !== 'UTC' && inv.tzid !== shownIn) {
-    s += ' <span class="tz-hint">shown in your time zone</span>';
-  }
-  return s;
+  const foreignTz = inv.tzid && inv.tzid !== 'UTC' && inv.tzid !== shownIn;
+  return frag`${s}${foreignTz && frag` <span class="tz-hint">shown in your time zone</span>`}`;
 }
 
 // fillConflicts answers "am I free?" on a card. Inside the loaded range the
@@ -140,19 +138,19 @@ function renderShareInvites(list) {
     const who = n.organizerName || principalName(n.organizer);
     const calName = principalName(n.hostHref);
     const pending = n.status === 'noresponse';
-    const card = h(`<div class="invite">
-      <div class="title">📅 ${esc(calName)}</div>
+    const card = html`<div class="invite">
+      <div class="title">📅 ${calName}</div>
       <div class="meta">
-        ${esc(who)} shared a calendar with you · ${n.readWrite ? 'can edit' : 'read-only'}
-        ${n.summary ? '<br>' + esc(n.summary) : ''}
-        ${n.status === 'accepted' ? '<br>Accepted' : n.status === 'declined' ? '<br>Declined' : ''}
+        ${who} shared a calendar with you · ${n.readWrite ? 'can edit' : 'read-only'}
+        ${n.summary && frag`<br>${n.summary}`}
+        ${n.status === 'accepted' ? frag`<br>Accepted` : n.status === 'declined' ? frag`<br>Declined` : ''}
       </div>
-      <div class="actions">${pending ? `
+      <div class="actions">${pending ? frag`
         <button class="primary" data-share="accept">Accept</button>
-        <button data-share="decline">Decline</button>` : `
+        <button data-share="decline">Decline</button>` : frag`
         <button data-share-dismiss>Dismiss</button>`}
       </div>
-    </div>`);
+    </div>`;
     for (const b of card.querySelectorAll('button[data-share]')) {
       b.addEventListener('click', async () => {
         for (const x of card.querySelectorAll('button')) x.disabled = true;
@@ -177,18 +175,18 @@ function requestCard(inv) {
     ? store.state.prefs.defaultCal : writable[0]?.href;
   // No picker when a copy is already stored (auto-delivered or a reschedule):
   // the answer updates that copy in place, so there is nothing to choose.
-  const pick = !inv.existingHref && writable.length > 1 ? `
+  const pick = !inv.existingHref && writable.length > 1 ? frag`
     <label class="cal-pick">Add to
-      <select>${writable.map(c => `<option value="${esc(c.href)}"${c.href === preferred ? ' selected' : ''}>
-        ${esc(c.displayName || c.name)}</option>`).join('')}</select>
+      <select>${writable.map(c => frag`<option value="${c.href}" ${c.href === preferred ? 'selected' : ''}>
+        ${c.displayName || c.name}</option>`)}</select>
     </label>` : '';
   const guests = (inv.attendees ?? []).length;
-  const card = h(`<div class="invite">
-    <div class="title">${inv.updated ? '<span class="type-tag">updated</span> ' : ''}${esc(inv.summary ?? '(no title)')}</div>
+  const card = html`<div class="invite">
+    <div class="title">${inv.updated && frag`<span class="type-tag">updated</span> `}${inv.summary ?? '(no title)'}</div>
     <div class="meta">
-      ${inv.start ? '<div class="when">' + fmtWhen(inv) + '</div>' : ''}
-      ${inv.location ? '<div>📍 ' + esc(inv.location) + '</div>' : ''}
-      <div>${inv.organizer ? 'From ' + esc(inv.organizer) : ''}${guests > 1 ? ` · ${guests} guests` : ''}</div>
+      ${inv.start && frag`<div class="when">${fmtWhen(inv)}</div>`}
+      ${inv.location && frag`<div>📍 ${inv.location}</div>`}
+      <div>${inv.organizer && frag`From ${inv.organizer}`}${guests > 1 ? ` · ${guests} guests` : ''}</div>
       <div class="conflict">Checking your availability…</div>
     </div>
     ${pick}
@@ -197,7 +195,7 @@ function requestCard(inv) {
       <button data-a="TENTATIVE">Maybe</button>
       <button data-a="DECLINED">Decline</button>
     </div>
-  </div>`);
+  </div>`;
   fillConflicts(card.querySelector('.conflict'), inv);
   for (const b of card.querySelectorAll('button[data-a]')) {
     b.addEventListener('click', async () => {
@@ -218,17 +216,17 @@ function requestCard(inv) {
 // cancelCard renders a CANCEL: the event is dead, so the primary action is
 // removing our stored copy, not just dismissing the notification.
 function cancelCard(inv) {
-  const card = h(`<div class="invite">
-    <div class="title"><span class="type-tag cancelled">cancelled</span> ${esc(inv.summary ?? '(no title)')}</div>
+  const card = html`<div class="invite">
+    <div class="title"><span class="type-tag cancelled">cancelled</span> ${inv.summary ?? '(no title)'}</div>
     <div class="meta">
-      ${inv.start ? '<div class="when">' + fmtWhen(inv) + '</div>' : ''}
-      ${inv.organizer ? 'Cancelled by ' + esc(inv.organizer) : ''}
+      ${inv.start && frag`<div class="when">${fmtWhen(inv)}</div>`}
+      ${inv.organizer && frag`Cancelled by ${inv.organizer}`}
     </div>
     <div class="actions">
       <button class="primary" data-remove>Remove from calendar</button>
       <button data-dismiss>Dismiss</button>
     </div>
-  </div>`);
+  </div>`;
   card.querySelector('[data-remove]').addEventListener('click', async () => {
     card.remove();
     try { await store.removeCancelled(inv); toast('Removed from your calendar.'); }
@@ -243,26 +241,25 @@ function replyCard(inv) {
   const a = (inv.attendees ?? [])[0];
   const verdict = a ? (PARTSTAT_LABEL[a.partstat] || a.partstat.toLowerCase()) : 'replied';
   const cls = a?.partstat === 'ACCEPTED' ? 'accepted' : a?.partstat === 'DECLINED' ? 'declined' : '';
-  const card = h(`<div class="invite">
-    <div class="title">${esc(inv.summary ?? '(no title)')}</div>
+  return html`<div class="invite">
+    <div class="title">${inv.summary ?? '(no title)'}</div>
     <div class="meta">
-      <span class="reply-status ${cls}">${esc(a?.email ?? 'Someone')} ${esc(verdict)}</span>
-      ${inv.start ? '<div class="when">' + fmtWhen(inv) + '</div>' : ''}
+      <span class="reply-status ${cls}">${a?.email ?? 'Someone'} ${verdict}</span>
+      ${inv.start && frag`<div class="when">${fmtWhen(inv)}</div>`}
     </div>
     <div class="actions"><button data-dismiss>Dismiss</button></div>
-  </div>`);
-  return card;
+  </div>`;
 }
 
 function otherCard(inv) {
-  return h(`<div class="invite">
-    <div class="title">${esc(inv.summary ?? '(no title)')}</div>
+  return html`<div class="invite">
+    <div class="title">${inv.summary ?? '(no title)'}</div>
     <div class="meta">
-      ${inv.start ? '<div class="when">' + fmtWhen(inv) + '</div>' : ''}
-      ${inv.organizer ? 'From ' + esc(inv.organizer) : ''} · ${esc(inv.method.toLowerCase())}
+      ${inv.start && frag`<div class="when">${fmtWhen(inv)}</div>`}
+      ${inv.organizer && frag`From ${inv.organizer}`} · ${inv.method.toLowerCase()}
     </div>
     <div class="actions"><button data-dismiss>Dismiss</button></div>
-  </div>`);
+  </div>`;
 }
 
 // emptyState points at the next event still awaiting a reply (an invitation
@@ -271,9 +268,9 @@ function emptyState(list) {
   const now = new Date();
   const next = store.visibleInstances()
     .filter(i => i.myPartstat === 'NEEDS-ACTION' && !i.cancelled && i.end > now)[0];
-  list.append(h('<p class="empty">No pending invitations.</p>'));
+  list.append(html`<p class="empty">No pending invitations.</p>`);
   if (next) {
-    const go = h(`<button class="goto-event">Awaiting your reply: ${esc(next.summary)}</button>`);
+    const go = html`<button class="goto-event">Awaiting your reply: ${next.summary}</button>`;
     go.addEventListener('click', () => {
       toggleInvites(false);
       // The panel can be opened from any view; switch back to the calendar
@@ -293,7 +290,7 @@ export function renderInvites() {
   renderShareInvites(list);
   if (!store.state.invites.length) {
     if (!store.state.shareNotifications.length) {
-      if (!store.state.invitesLoaded) list.append(h('<p class="empty">Loading…</p>'));
+      if (!store.state.invitesLoaded) list.append(html`<p class="empty">Loading…</p>`);
       else emptyState(list);
     }
     return;

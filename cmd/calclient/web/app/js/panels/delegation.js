@@ -2,15 +2,15 @@
 // calendar-proxy-write sub-principals.
 
 import * as dav from '/shared/dav.js';
-import { $, el, run, setOut, statusMsg } from '../ui.js';
+import { $, html, frag, brJoin, run, setOut, statusMsg } from '../ui.js';
 import { state } from '../session.js';
 
-const { NS, key, esc } = dav;
+const { NS, key, xml } = dav;
 
 export default {
   id: 'delegation', title: 'Delegation',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Calendar proxy (delegation)</h2>
       <p class="hint">Delegation = membership of the calendar-proxy-read /
       calendar-proxy-write sub-principals. Needs -principals-readable on the
@@ -28,30 +28,34 @@ export default {
         <button id="dg-for">PROPFIND calendar-proxy-*-for</button>
         <div class="out" id="dg-for-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
 
     const proxyPath = () => state.principal +
       $('input[name="dg-kind"]:checked', main).value + '/';
 
     run($('#dg-set', main), async () => {
       const hrefs = $('#dg-members', main).value.split('\n').map(s => s.trim()).filter(Boolean)
-        .map(h => `<d:href>${esc(h)}</d:href>`).join('');
-      const r = await dav.proppatch(proxyPath(), [{ name: 'd:group-member-set', xml: hrefs }]);
+        .map(h => xml`<d:href>${h}</d:href>`);
+      const r = await dav.proppatch(proxyPath(), [{ name: 'd:group-member-set', xml: xml`${hrefs}` }]);
       setOut($('#dg-out', main), statusMsg(r, 'see multistatus in drawer'));
     });
 
     run($('#dg-show', main), async () => {
       const r = await dav.propfind(proxyPath(), ['d:group-member-set'], '0');
       const p = dav.msResponses(r.xml)[0]?.props.get(key(NS.d, 'group-member-set'));
-      setOut($('#dg-out', main), `members: <span class="mono">${dav.hrefTexts(p).map(esc).join(', ') || '(none)'}</span>`);
+      setOut($('#dg-out', main), frag`members: <span class="mono">${dav.hrefTexts(p).join(', ') || '(none)'}</span>`);
     });
 
     run($('#dg-for', main), async () => {
       const r = await dav.propfind(state.principal, ['cs:calendar-proxy-read-for', 'cs:calendar-proxy-write-for'], '0');
       const p = dav.msResponses(r.xml)[0]?.props ?? new Map();
-      setOut($('#dg-for-out', main), `<table class="list">
-        <tr><th>calendar-proxy-read-for</th><td class="mono">${dav.hrefTexts(p.get(key(NS.cs, 'calendar-proxy-read-for'))).map(esc).join('<br>') || '(none)'}</td></tr>
-        <tr><th>calendar-proxy-write-for</th><td class="mono">${dav.hrefTexts(p.get(key(NS.cs, 'calendar-proxy-write-for'))).map(esc).join('<br>') || '(none)'}</td></tr>
+      const list = name => {
+        const hrefs = dav.hrefTexts(p.get(key(NS.cs, name)));
+        return hrefs.length ? brJoin(hrefs) : '(none)';
+      };
+      setOut($('#dg-for-out', main), frag`<table class="list">
+        <tr><th>calendar-proxy-read-for</th><td class="mono">${list('calendar-proxy-read-for')}</td></tr>
+        <tr><th>calendar-proxy-write-for</th><td class="mono">${list('calendar-proxy-write-for')}</td></tr>
       </table>`);
     });
   },

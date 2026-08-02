@@ -3,15 +3,14 @@
 
 import * as dav from '/shared/dav.js';
 import * as ical from '/shared/ical.js';
-import { $, el, run, setOut, statusMsg, pre, localDT, plusHours } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, pre, localDT, plusHours } from '../ui.js';
+import { DAY } from '/shared/time.js';
 import { calSelect, wireCalSelect } from '../collections.js';
-
-const { esc } = dav;
 
 export default {
   id: 'export', title: 'Export / Add-Member',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Collection export &amp; Add-Member</h2>
       <fieldset><legend>Whole-calendar export (GET ?export)</legend>
         ${calSelect}
@@ -34,9 +33,9 @@ export default {
         <button id="am-run">POST ;add-member</button>
         <div class="out" id="am-out"></div>
       </fieldset>
-    </div>`));
-    $('#ex-start', main).value = localDT(new Date(Date.now() - 30 * 864e5));
-    $('#ex-end', main).value = localDT(new Date(Date.now() + 60 * 864e5));
+    </div>`);
+    $('#ex-start', main).value = localDT(new Date(Date.now() - 30 * DAY));
+    $('#ex-end', main).value = localDT(new Date(Date.now() + 60 * DAY));
     const sel = wireCalSelect(main);
 
     const exportURL = () => {
@@ -55,8 +54,8 @@ export default {
     run($('#ex-run', main), async () => {
       const url = exportURL();
       const r = await dav.req('GET', url);
-      $('#ex-link', main).innerHTML = `<a href="${esc(url)}" download>download</a>`;
-      setOut($('#ex-out', main), statusMsg(r, r.headers.get('Content-Type')) + pre(r.text));
+      $('#ex-link', main).replaceChildren(html`<a href="${url}" download>download</a>`);
+      setOut($('#ex-out', main), frag`${statusMsg(r, r.headers.get('Content-Type'))}${pre(r.text)}`);
     });
 
     run($('#am-run', main), async () => {

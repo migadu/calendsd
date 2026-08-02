@@ -2,6 +2,8 @@
 // edits. The server does the real validation; malformed bodies surface as
 // 4xx in the raw drawer, which is itself a useful demonstration.
 
+import { DAY, localDate, localDT } from './time.js';
+
 export function icalEscape(v) {
   return String(v).replace(/\\/g, '\\\\').replace(/;/g, '\\;')
     .replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
@@ -84,6 +86,26 @@ export function foldLong(line) {
   let out = line.slice(0, 75);
   for (let i = 75; i < line.length; i += 74) out += '\r\n ' + line.slice(i, i + 74);
   return out;
+}
+
+// parseICalDate parses a basic iCal DATE or DATE-TIME value into
+// {allDay, date}, or null if it doesn't parse. A trailing Z parses as UTC; a
+// floating value as local time. This module owns the wire-format grammar —
+// callers that want other shapes (input values, instants) derive from it.
+export function parseICalDate(v, params = {}) {
+  if (params.VALUE === 'DATE' || /^\d{8}$/.test(v)) {
+    return { allDay: true, date: new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) };
+  }
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v);
+  if (!m) return null;
+  return { allDay: false, date: new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]}`) };
+}
+
+// icalToLocal converts a basic DATE-TIME to a datetime-local input value
+// ('' for DATE-only or unparseable input).
+export function icalToLocal(v) {
+  const p = parseICalDate(String(v || ''));
+  return p && !p.allDay ? localDT(p.date) : '';
 }
 
 // parseDuration converts an iCal DURATION (RFC 5545 §3.3.6) to milliseconds,
@@ -207,10 +229,9 @@ export function shiftDate(name, prop, deltaMs) {
   const { value, params = {} } = prop;
   if (params.TZID) return null;
   if (params.VALUE === 'DATE' || /^\d{8}$/.test(value)) {
-    const days = Math.round(deltaMs / 864e5);
+    const days = Math.round(deltaMs / DAY);
     const d = new Date(+value.slice(0, 4), +value.slice(4, 6) - 1, +value.slice(6, 8) + days);
-    const p = x => String(x).padStart(2, '0');
-    return `${name};VALUE=DATE:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+    return `${name};VALUE=DATE:${dateOnly(localDate(d))}`;
   }
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
   if (m) {
@@ -223,6 +244,36 @@ export function shiftDate(name, prop, deltaMs) {
 // icalUnescape reverses icalEscape for display.
 export function icalUnescape(v) {
   return String(v).replace(/\\n/gi, '\n').replace(/\\([\\;,])/g, '$1');
+}
+
+// ---- RRULE presets --------------------------------------------------------
+// The event editor offers only simple repeats (a frequency plus an optional
+// end); anything richer is kept verbatim as a "custom" rule.
+
+// parseRRulePreset maps a simple RRULE onto the preset controls
+// {freq, ends, count, until}; returns null if the rule is too complex to
+// represent, so the editor can preserve it untouched.
+export function parseRRulePreset(rrule) {
+  if (!rrule) return { freq: '', ends: 'never' };
+  const parts = Object.fromEntries(rrule.split(';').map(kv => kv.split('=')));
+  const known = ['FREQ', 'COUNT', 'UNTIL', 'INTERVAL'];
+  if (Object.keys(parts).some(k => !known.includes(k)) || (parts.INTERVAL && parts.INTERVAL !== '1')) return null;
+  if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(parts.FREQ)) return null;
+  return {
+    freq: parts.FREQ,
+    ends: parts.COUNT ? 'count' : parts.UNTIL ? 'until' : 'never',
+    count: parts.COUNT || '10',
+    until: parts.UNTIL ? `${parts.UNTIL.slice(0, 4)}-${parts.UNTIL.slice(4, 6)}-${parts.UNTIL.slice(6, 8)}` : '',
+  };
+}
+
+// buildRRule renders the preset controls back into an RRULE ('' = no repeat).
+export function buildRRule(d) {
+  if (!d.freq) return '';
+  let r = 'FREQ=' + d.freq;
+  if (d.ends === 'count') r += ';COUNT=' + Math.max(1, parseInt(d.count || '1', 10));
+  if (d.ends === 'until' && d.until) r += ';UNTIL=' + dateOnly(d.until) + 'T235959Z';
+  return r;
 }
 
 // buildFreeBusyRequest renders the METHOD:REQUEST VFREEBUSY body an outbox

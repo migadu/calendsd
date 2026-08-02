@@ -1,12 +1,12 @@
 // raw.js — free-form requests through the same instrumented fetch.
 
 import * as dav from '/shared/dav.js';
-import { $, el, run, setOut, statusMsg, pre, preXML } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg, pre, preXML } from '../ui.js';
 
 export default {
   id: 'raw', title: 'Raw',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Raw console</h2>
       <p class="hint">Free-form requests through the same instrumented fetch —
       anything the panels don't cover.</p>
@@ -26,7 +26,7 @@ export default {
         <button class="primary" id="raw-send">Send</button>
         <div class="out" id="raw-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
     $('#raw-body', main).value = dav.propfindBody(['d:resourcetype', 'd:displayname']);
 
     run($('#raw-send', main), async () => {
@@ -37,7 +37,7 @@ export default {
       if (body) headers['Content-Type'] = $('#raw-ct', main).value;
       const r = await dav.req($('#raw-method', main).value.trim().toUpperCase(),
         $('#raw-path', main).value.trim(), { headers, body: body || null });
-      setOut($('#raw-out', main), statusMsg(r, '') + (r.text ? (r.xml ? preXML(r.text) : pre(r.text)) : ''));
+      setOut($('#raw-out', main), frag`${statusMsg(r, '')}${r.text ? (r.xml ? preXML(r.text) : pre(r.text)) : ''}`);
     });
   },
 };

@@ -13,10 +13,9 @@ const { NS, key } = dav;
 // calendarserver {cs}share POST. readWrite=false grants read-only access. The
 // sharee's own calendar home then lists the shared calendar (read-only marked).
 export async function shareCalendar(href, { email, summary = '', readWrite = false }) {
-  const rw = readWrite ? '<cs:read-write/>' : '';
-  const body = dav.xmlDoc('cs:share', '', `<cs:set>
-    <d:href>mailto:${dav.esc(email)}</d:href>
-    <cs:summary>${dav.esc(summary)}</cs:summary>${rw}
+  const body = dav.xmlDoc('cs:share', '', dav.xml`<cs:set>
+    <d:href>mailto:${email}</d:href>
+    <cs:summary>${summary}</cs:summary>${readWrite && dav.xml`<cs:read-write/>`}
   </cs:set>`);
   check(await dav.req('POST', href, {
     headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
@@ -49,7 +48,7 @@ export async function loadSharees(href) {
 // (from loadSharees, or the address used to share).
 export async function unshareCalendar(href, email) {
   const body = dav.xmlDoc('cs:share', '',
-    `<cs:remove><d:href>mailto:${dav.esc(email)}</d:href></cs:remove>`);
+    dav.xml`<cs:remove><d:href>mailto:${email}</d:href></cs:remove>`);
   check(await dav.req('POST', href, {
     headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
   }), [200]);
@@ -98,10 +97,10 @@ export async function loadShareNotifications() {
 // notification is dismissed and the calendar list refreshed (an accepted share
 // becomes writable/visible, a declined one drops away).
 export async function replyShareInvite(notif, accepted) {
-  const verdict = accepted ? '<cs:invite-accepted/>' : '<cs:invite-declined/>';
-  const body = dav.xmlDoc('cs:invite-reply', '',
-    `<cs:hosturl><d:href>${dav.esc(notif.hostHref)}</d:href></cs:hosturl>` +
-    `<cs:in-reply-to>${dav.esc(notif.uid)}</cs:in-reply-to>${verdict}`);
+  const body = dav.xmlDoc('cs:invite-reply', '', dav.xml`
+    <cs:hosturl><d:href>${notif.hostHref}</d:href></cs:hosturl>
+    <cs:in-reply-to>${notif.uid}</cs:in-reply-to>
+    ${accepted ? dav.xml`<cs:invite-accepted/>` : dav.xml`<cs:invite-declined/>`}`);
   check(await dav.req('POST', state.calHome, {
     headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
   }), [200]);

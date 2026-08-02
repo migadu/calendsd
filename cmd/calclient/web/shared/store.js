@@ -11,7 +11,7 @@ export { state, bus, savePrefs, DavError, friendly, myEmail } from './store/core
 export { haveSession, login, logout, restore, startPolling, stopPolling } from './store/session.js';
 export { loadCalendars, eventCalendars, isReadOnly, calColor,
   createCalendar, updateCalendar, deleteCalendar } from './store/calendars.js';
-export { setRange, refreshEvents, visibleInstances, moveEvent,
+export { setRange, refreshEvents, visibleInstances, setCalendarHidden, moveEvent,
   eventHref, ridValue, instanceKey } from './store/events.js';
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
 export { shareCalendar, loadSharees, unshareCalendar,

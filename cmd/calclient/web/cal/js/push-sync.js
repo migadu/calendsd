@@ -5,7 +5,7 @@
 
 import * as store from '/shared/store.js';
 import * as push from '/shared/push.js';
-import { toast } from './main.js';
+import { toast } from './ui.js';
 import { flashInstances } from './grid.js';
 
 const PREF_KEY = 'calclient.push.enabled';

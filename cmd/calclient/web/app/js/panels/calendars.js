@@ -2,16 +2,17 @@
 // color/description.
 
 import * as dav from '/shared/dav.js';
-import { $, el, run, setOut, statusMsg } from '../ui.js';
+import { $, html, frag, run, setOut, statusMsg } from '../ui.js';
+import { confirmDialog } from '/shared/dialogs.js';
 import { state } from '../session.js';
 import { homeChildren, calSelect, wireCalSelect } from '../collections.js';
 
-const { NS, key, esc } = dav;
+const { NS, key, xml } = dav;
 
 export default {
   id: 'calendars', title: 'Calendars',
   render(main) {
-    main.append(el(`<div>
+    main.append(html`<div>
       <h2>Calendars</h2>
       <fieldset><legend>List (PROPFIND depth 1 on the calendar home)</legend>
         <button class="primary" id="cal-list">List calendars</button>
@@ -33,22 +34,22 @@ export default {
         <button id="cal-verify">Re-PROPFIND</button>
         <div class="out" id="cal-patch-out"></div>
       </fieldset>
-    </div>`));
+    </div>`);
 
     const renderList = async () => {
       const cals = await homeChildren();
-      const rows = cals.filter(c => c.isCalendar).map(c => `<tr>
-        <td class="mono">${esc(c.name)}</td><td>${esc(c.displayName)}</td>
-        <td class="mono">${esc(c.color)}</td><td>${esc(c.description)}</td>
-        <td class="mono">${esc(c.components.join(','))}</td>
-        <td class="mono">${esc(c.ctag)}</td>
-        <td><button data-del="${esc(c.href)}">DELETE</button></td></tr>`).join('');
-      setOut($('#cal-out', main), `<table class="list">
+      const rows = cals.filter(c => c.isCalendar).map(c => frag`<tr>
+        <td class="mono">${c.name}</td><td>${c.displayName}</td>
+        <td class="mono">${c.color}</td><td>${c.description}</td>
+        <td class="mono">${c.components.join(',')}</td>
+        <td class="mono">${c.ctag}</td>
+        <td><button data-del="${c.href}">DELETE</button></td></tr>`);
+      setOut($('#cal-out', main), frag`<table class="list">
         <tr><th>uri</th><th>displayname</th><th>color</th><th>description</th><th>components</th><th>getctag</th><th></th></tr>
         ${rows}</table>`);
       for (const b of $('#cal-out', main).querySelectorAll('button[data-del]')) {
         run(b, async () => {
-          if (!confirm(`DELETE ${b.dataset.del}?`)) return;
+          if (!await confirmDialog(`DELETE ${b.dataset.del}?`, { confirmLabel: 'Delete', danger: true })) return;
           await dav.req('DELETE', b.dataset.del);
           await renderList();
         });
@@ -58,9 +59,9 @@ export default {
 
     run($('#cal-create', main), async () => {
       const comps = [$('#cal-ve', main).checked && 'VEVENT', $('#cal-vt', main).checked && 'VTODO']
-        .filter(Boolean).map(c => `<c:comp name="${c}"/>`).join('');
-      const body = dav.xmlDoc('c:mkcalendar', '', `<d:set><d:prop>
-        <d:displayname>${esc($('#cal-dn', main).value)}</d:displayname>
+        .filter(Boolean).map(c => xml`<c:comp name="${c}"/>`);
+      const body = dav.xmlDoc('c:mkcalendar', '', xml`<d:set><d:prop>
+        <d:displayname>${$('#cal-dn', main).value}</d:displayname>
         <c:supported-calendar-component-set>${comps}</c:supported-calendar-component-set>
       </d:prop></d:set>`);
       const r = await dav.req('MKCALENDAR', state.calHome + encodeURIComponent($('#cal-name', main).value) + '/', {
@@ -80,8 +81,8 @@ export default {
     run($('#cal-verify', main), async () => {
       const r = await dav.propfind(sel.value, ['a:calendar-color', 'c:calendar-description'], '0');
       const p = dav.msResponses(r.xml)[0]?.props ?? new Map();
-      setOut($('#cal-patch-out', main), `color = <span class="mono">${esc(p.get(key(NS.a, 'calendar-color'))?.textContent ?? '(unset)')}</span>,
-        description = <span class="mono">${esc(p.get(key(NS.c, 'calendar-description'))?.textContent ?? '(unset)')}</span>`);
+      setOut($('#cal-patch-out', main), frag`color = <span class="mono">${p.get(key(NS.a, 'calendar-color'))?.textContent ?? '(unset)'}</span>,
+        description = <span class="mono">${p.get(key(NS.c, 'calendar-description'))?.textContent ?? '(unset)'}</span>`);
     });
   },
 };

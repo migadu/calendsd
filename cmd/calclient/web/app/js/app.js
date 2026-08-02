@@ -4,7 +4,7 @@
 // as a protocol explorer.
 
 import * as dav from '/shared/dav.js';
-import { $, el, pre } from './ui.js';
+import { $, html, frag, pre, setOut } from './ui.js';
 import { discover } from './session.js';
 
 import discoverPanel from './panels/discover.js';
@@ -22,8 +22,6 @@ import contactsPanel from './panels/contacts.js';
 import aclPanel from './panels/acl.js';
 import rawPanel from './panels/raw.js';
 
-const { esc } = dav;
-
 // Tab order.
 const PANELS = [
   discoverPanel, calendarsPanel, eventsPanel, queryPanel, syncPanel,
@@ -36,24 +34,24 @@ const PANELS = [
 dav.setOnExchange(({ method, path, reqHeaders, reqBody, res, error }) => {
   const box = $('#exchange');
   const reqHdrs = Object.entries(reqHeaders).map(([k, v]) => `${k}: ${v}`).join('\n');
-  let html = `<div class="req-line">${esc(method)} ${esc(path)}</div>`;
-  html += `<details open><summary>request headers</summary>${pre(reqHdrs || '(none)')}</details>`;
-  if (reqBody) html += `<details open><summary>request body</summary>${pre(String(reqBody))}</details>`;
+  const parts = [frag`<div class="req-line">${method} ${path}</div>`,
+    frag`<details open><summary>request headers</summary>${pre(reqHdrs || '(none)')}</details>`];
+  if (reqBody) parts.push(frag`<details open><summary>request body</summary>${pre(String(reqBody))}</details>`);
   if (error) {
-    html += `<div class="status-err">${esc(error)}</div>`;
+    parts.push(frag`<div class="status-err">${error}</div>`);
   } else {
     const cls = res.status < 400 ? 'status-ok' : 'status-err';
     let line = `HTTP ${res.status}`;
     if (res.redirected) line += ` (redirected → ${res.url.replace(location.origin, '')})`;
-    html += `<div class="req-line ${cls}">${esc(line)}</div>`;
+    parts.push(frag`<div class="req-line ${cls}">${line}</div>`);
     const respHdrs = [...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join('\n');
-    html += `<details open><summary>response headers</summary>${pre(respHdrs)}</details>`;
+    parts.push(frag`<details open><summary>response headers</summary>${pre(respHdrs)}</details>`);
     if (res.text) {
       const body = res.xml ? dav.prettyXML(res.text) : res.text;
-      html += `<details open><summary>response body</summary>${pre(body)}</details>`;
+      parts.push(frag`<details open><summary>response body</summary>${pre(body)}</details>`);
     }
   }
-  box.innerHTML = html;
+  setOut(box, parts);
 });
 
 // ---- login ---------------------------------------------------------------
@@ -83,14 +81,14 @@ function activate(id) {
   const main = $('#panel');
   main.innerHTML = '';
   if (!dav.session.auth) {
-    main.append(el('<p class="hint">Log in first (top bar) — e.g. admin / admin against the dev server.</p>'));
+    main.append(html`<p class="hint">Log in first (top bar) — e.g. admin / admin against the dev server.</p>`);
     return;
   }
   p.render(main);
 }
 
 for (const p of PANELS) {
-  const b = el(`<button data-id="${p.id}">${esc(p.title)}</button>`);
+  const b = html`<button data-id="${p.id}">${p.title}</button>`;
   b.addEventListener('click', () => activate(p.id));
   $('#tabs').append(b);
 }

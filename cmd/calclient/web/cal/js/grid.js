@@ -1,9 +1,14 @@
 // grid.js — the calendar projections: month grid, week view, agenda list.
 // All three render the same expanded-instance cache; navigation adjusts the
-// loaded range via store.setRange.
+// loaded range via store.setRange. The pure placement math (overlap columns,
+// multi-day lanes) lives in layout.js.
 
 import * as store from '/shared/store.js';
-import { $, h, esc, fmtTime, fmtDate, toast, showError } from './main.js';
+import { $, html, frag } from '/shared/dom.js';
+import { DAY, HOUR, startOfDay, addDays, sameDay, nextDate, isoWeek,
+  startOfWeek as weekStartOf, tzDayStart as tzDayStartIn } from '/shared/time.js';
+import { layoutColumns, spans } from './layout.js';
+import { fmtTime, fmtDate, toast, showError } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
 import { openEventDetail } from './event-detail.js';
 
@@ -18,46 +23,9 @@ narrowMQ.addEventListener('change', e => {
   if (e.matches && view === 'week' && !$('#topbar').hidden) setGridView('day');
 });
 
-const DAY = 864e5;
-function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-function addDays(d, n) { return new Date(+d + n * DAY); }
-
-// ---- display time zone ---------------------------------------------------
-// The app can show a time zone other than the browser's (prefs.tz). Event
-// labels already format in that zone; the grid's vertical geometry (block
-// tops, the now-line, day membership) must use the SAME zone or blocks drift
-// by the browser↔pref offset. These map a calendar date to the absolute
-// instant of its midnight *in the display zone*.
-function tzOffsetMs(date, tz) {
-  // Re-reading the instant's wall clock in tz vs in UTC (both parsed the same
-  // way) cancels the browser's own zone, leaving tz's offset from UTC.
-  return new Date(date.toLocaleString('en-US', { timeZone: tz }))
-       - new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
-}
-function tzDayStart(day) {
-  const tz = store.state.prefs.tz;
-  if (!tz) return startOfDay(day);                 // '' = device zone: local midnight is right
-  const guess = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate());
-  return new Date(guess - tzOffsetMs(new Date(guess), tz));
-}
-function nextDate(day) { return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1); }
-
-// ISO-8601 week number, anchored on the Thursday of the date's ISO week so it
-// is stable regardless of the user's Monday/Sunday week-start preference.
-function isoWeek(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3);   // Thursday of this week
-  const jan4 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  jan4.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7) + 3);
-  return 1 + Math.round((d - jan4) / (7 * DAY));
-}
-function startOfWeek(d) {
-  const ws = store.state.prefs.weekStart ?? 1;
-  const x = startOfDay(d);
-  const shift = (x.getDay() - ws + 7) % 7;
-  return addDays(x, -shift);
-}
-function sameDay(a, b) { return a.toDateString() === b.toDateString(); }
+// Preference-aware wrappers over the pure helpers in /shared/time.js.
+function tzDayStart(day) { return tzDayStartIn(day, store.state.prefs.tz); }
+function startOfWeek(d) { return weekStartOf(d, store.state.prefs.weekStart ?? 1); }
 
 // visible range for the current view (used for data loading)
 function range() {
@@ -152,7 +120,7 @@ export function renderGrid(main) {
 // measured in the display zone so it lines up with the zone's hour labels.
 function nowTopRem() {
   const n = new Date();
-  return Math.max(0, (n - tzDayStart(n)) / 36e5) * HOUR_REM;
+  return Math.max(0, (n - tzDayStart(n)) / HOUR) * HOUR_REM;
 }
 
 // centerOnNow scrolls the timed grid so the current-time line sits mid-viewport
@@ -312,10 +280,10 @@ function unconfirmedCls(inst) {
 function chipFor(inst) {
   const color = store.calColor(inst.calHref);
   const tentative = unconfirmedCls(inst);
-  const key = esc(store.instanceKey(inst));
+  const key = store.instanceKey(inst);
   const chip = inst.allDay
-    ? h(`<button class="chip${tentative}" data-key="${key}" style="background:${esc(color)}">${esc(inst.summary)}</button>`)
-    : h(`<button class="chip timed${tentative}" data-key="${key}"><span class="dot" style="background:${esc(color)}"></span>${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
+    ? html`<button class="chip${tentative}" data-key="${key}" style="background:${color}">${inst.summary}</button>`
+    : html`<button class="chip timed${tentative}" data-key="${key}"><span class="dot" style="background:${color}"></span>${fmtTime(inst.start)} ${inst.summary}</button>`;
   chip.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
   return chip;
 }
@@ -338,52 +306,26 @@ export function flashInstances(keys) {
   return n;
 }
 
-// spans() returns the multi-day events overlapping a week [weekStart, +7d),
-// each assigned a lane (greedy) and the columns it covers within the week.
-function spans(instances, weekStart) {
-  const weekEnd = addDays(weekStart, 7);
-  const col = d => Math.min(6, Math.max(0, Math.floor((startOfDay(d) - weekStart) / DAY)));
-  const multi = instances
-    .filter(i => +i.end - +i.start > DAY && +i.start < +weekEnd && +i.end > +weekStart
-      && (col(new Date(+i.end - 1)) > col(i.start) || +i.start < +weekStart))
-    .map(i => ({
-      inst: i,
-      colStart: col(i.start < weekStart ? weekStart : i.start),
-      colEnd: col(new Date(Math.min(+i.end - 1, +weekEnd - 1))),
-      contLeft: +i.start < +weekStart,
-      contRight: +i.end > +weekEnd,
-    }))
-    .sort((a, b) => a.colStart - b.colStart || (b.colEnd - b.colStart) - (a.colEnd - a.colStart));
-  const laneEnds = []; // last covered column per lane
-  for (const s of multi) {
-    let lane = laneEnds.findIndex(end => end < s.colStart);
-    if (lane === -1) { lane = laneEnds.length; laneEnds.push(-1); }
-    laneEnds[lane] = s.colEnd;
-    s.lane = lane;
-  }
-  return { multi, laneCount: laneEnds.length };
-}
-
 function renderMonth(instances) {
   const { start } = range();
   const today = startOfDay(new Date());
-  const el = h('<div class="month"></div>');
-  const dow = h('<div class="dow"></div>');
+  const el = html`<div class="month"></div>`;
+  const dow = html`<div class="dow"></div>`;
   for (let i = 0; i < 7; i++) {
-    dow.append(h(`<div>${addDays(start, i).toLocaleDateString([], { weekday: 'short' })}</div>`));
+    dow.append(html`<div>${addDays(start, i).toLocaleDateString([], { weekday: 'short' })}</div>`);
   }
   el.append(dow);
-  const weeks = h('<div class="weeks"></div>');
+  const weeks = html`<div class="weeks"></div>`;
   for (let w = 0; w < 6; w++) {
     const weekStart = addDays(start, w * 7);
     const { multi, laneCount } = spans(instances, weekStart);
-    const row = h('<div class="weeks-row"></div>');
+    const row = html`<div class="weeks-row"></div>`;
     const MAX = 3;
     for (let d = 0; d < 7; d++) {
       const day = addDays(weekStart, d);
-      const cell = h(`<div class="cell${day.getMonth() !== cursor.getMonth() ? ' other' : ''}${sameDay(day, today) ? ' today' : ''}" role="button" tabindex="0" data-date="${+day}"><span class="num">${day.getDate()}</span></div>`);
+      const cell = html`<div class="cell${day.getMonth() !== cursor.getMonth() ? ' other' : ''}${sameDay(day, today) ? ' today' : ''}" role="button" tabindex="0" data-date="${+day}"><span class="num">${day.getDate()}</span></div>`;
       // reserve vertical room so single-day chips clear the spanning bars
-      if (laneCount) cell.append(h(`<div class="bar-space" style="height:${laneCount * 1.25}rem"></div>`));
+      if (laneCount) cell.append(html`<div class="bar-space" style="height:${laneCount * 1.25}rem"></div>`);
       const single = eventsOnDay(instances, day).filter(i => +i.end - +i.start <= DAY);
       for (const inst of single.slice(0, MAX)) {
         const chip = chipFor(inst);
@@ -392,7 +334,7 @@ function renderMonth(instances) {
       }
       const extra = single.length - MAX;
       if (extra > 0) {
-        const more = h(`<button class="more">+${extra} more</button>`);
+        const more = html`<button class="more">+${extra} more</button>`;
         more.addEventListener('click', ev => { ev.stopPropagation(); setGridView('agenda', day); });
         cell.append(more);
       }
@@ -403,13 +345,13 @@ function renderMonth(instances) {
     }
     // spanning-bar overlay, aligned to the same 7 columns
     if (multi.length) {
-      const bars = h('<div class="week-bars"></div>');
+      const bars = html`<div class="week-bars"></div>`;
       for (const s of multi) {
         const color = store.calColor(s.inst.calHref);
-        const bar = h(`<button class="span-bar${s.contLeft ? ' cl' : ''}${s.contRight ? ' cr' : ''}${unconfirmedCls(s.inst)}"
-          data-key="${esc(store.instanceKey(s.inst))}"
-          style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${esc(color)}"
-          title="${esc(s.inst.summary)}">${s.contLeft ? '‹ ' : ''}${esc(s.inst.summary)}</button>`);
+        const bar = html`<button class="span-bar${s.contLeft ? ' cl' : ''}${s.contRight ? ' cr' : ''}${unconfirmedCls(s.inst)}"
+          data-key="${store.instanceKey(s.inst)}"
+          style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${color}"
+          title="${s.inst.summary}">${s.contLeft ? '‹ ' : ''}${s.inst.summary}</button>`;
         bar.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(s.inst); });
         bars.append(bar);
       }
@@ -425,77 +367,52 @@ function renderMonth(instances) {
 
 const HOUR_REM = 3;
 
-// layoutColumns splits a day's timed events into side-by-side columns so that
-// overlapping events sit next to each other instead of stacking. Each event is
-// tagged with {col, cols}: its column index and the width of its overlap
-// cluster (a maximal run of transitively-overlapping events).
-function layoutColumns(evs) {
-  const sorted = evs.slice().sort((a, b) => a.start - b.start || b.end - a.end);
-  const out = [];
-  let cluster = [], clusterEnd = -Infinity;
-  const flush = () => {
-    const cols = cluster.reduce((m, x) => Math.max(m, x.col), 0) + 1;
-    for (const x of cluster) { x.cols = cols; out.push(x); }
-    cluster = [];
-  };
-  for (const inst of sorted) {
-    const s = +inst.start, e = +inst.end;
-    if (cluster.length && s >= clusterEnd) flush();   // no overlap with the run so far
-    const used = new Set(cluster.filter(x => +x.inst.end > s).map(x => x.col));
-    let col = 0; while (used.has(col)) col++;          // leftmost free column
-    cluster.push({ inst, col });
-    clusterEnd = Math.max(clusterEnd, e);
-  }
-  flush();
-  return out;
-}
-
 function renderTimed(instances, days) {
   const { start } = range();
   const today = startOfDay(new Date());
-  const el = h('<div class="week"></div>');
+  const el = html`<div class="week"></div>`;
   el.style.gridTemplateColumns = `3.4rem repeat(${days}, minmax(0, 1fr))`;
 
   // corner cell above the hour gutter carries the ISO week number (Google/Apple
   // do the same). Anchor mid-week so it is right whether the week starts Mon or Sun.
   const wk = isoWeek(addDays(start, days > 1 ? 3 : 0));
-  el.append(h(`<div class="head weeknum" title="Week ${wk}">W${wk}</div>`));
+  el.append(html`<div class="head weeknum" title="Week ${wk}">W${wk}</div>`);
   for (let d = 0; d < days; d++) {
     const day = addDays(start, d);
-    el.append(h(`<div class="head${sameDay(day, today) ? ' today' : ''}">${esc(fmtDate(day))}</div>`));
+    el.append(html`<div class="head${sameDay(day, today) ? ' today' : ''}">${fmtDate(day)}</div>`);
   }
 
-  el.append(h('<div class="allday"></div>'));
+  el.append(html`<div class="allday"></div>`);
   for (let d = 0; d < days; d++) {
     const day = addDays(start, d);
-    const lane = h('<div class="allday"></div>');
+    const lane = html`<div class="allday"></div>`;
     for (const inst of eventsOnDay(instances, day).filter(i => i.allDay)) lane.append(chipFor(inst));
     el.append(lane);
   }
 
-  const labels = h('<div class="hours"></div>');
+  const labels = html`<div class="hours"></div>`;
   for (let hr = 0; hr < 24; hr++) {
-    labels.append(h(`<div class="hourlabel">${hr === 0 ? '' : (store.state.prefs.hour12 ? ((hr % 12) || 12) + (hr < 12 ? ' am' : ' pm') : hr + ':00')}</div>`));
+    labels.append(html`<div class="hourlabel">${hr === 0 ? '' : (store.state.prefs.hour12 ? ((hr % 12) || 12) + (hr < 12 ? ' am' : ' pm') : hr + ':00')}</div>`);
   }
   el.append(labels);
 
   for (let d = 0; d < days; d++) {
     const day = addDays(start, d);
     const top = tzDayStart(day);   // this column's midnight in the display zone
-    const col = h(`<div class="col${sameDay(day, today) ? ' today' : ''}" data-date="${+day}"></div>`);
-    for (let hr = 1; hr < 24; hr++) col.append(h(`<div class="hline" style="top:${hr * HOUR_REM}rem"></div>`));
+    const col = html`<div class="col${sameDay(day, today) ? ' today' : ''}" data-date="${+day}"></div>`;
+    for (let hr = 1; hr < 24; hr++) col.append(html`<div class="hline" style="top:${hr * HOUR_REM}rem"></div>`);
     for (const p of layoutColumns(eventsOnDay(instances, day).filter(i => !i.allDay))) {
       const inst = p.inst;
-      const s = Math.max(0, (inst.start - top) / 36e5);
-      const e = Math.min(24, (inst.end - top) / 36e5);
+      const s = Math.max(0, (inst.start - top) / HOUR);
+      const e = Math.min(24, (inst.end - top) / HOUR);
       const w = 100 / p.cols;
-      const block = h(`<button class="block${unconfirmedCls(inst)}" data-key="${esc(store.instanceKey(inst))}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${esc(store.calColor(inst.calHref))}">${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
+      const block = html`<button class="block${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${store.calColor(inst.calHref)}">${fmtTime(inst.start)} ${inst.summary}</button>`;
       block.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
       attachBlockDrag(block, inst, day);
       col.append(block);
     }
     // the current-time line, drawn only in today's column
-    if (sameDay(day, today)) col.append(h(`<div class="now-line" style="top:${nowTopRem()}rem"></div>`));
+    if (sameDay(day, today)) col.append(html`<div class="now-line" style="top:${nowTopRem()}rem"></div>`);
     col.addEventListener('click', ev => {
       const rect = col.getBoundingClientRect();
       const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -514,24 +431,24 @@ function renderTimed(instances, days) {
 function renderAgenda(instances) {
   const { start, end } = range();
   const today = startOfDay(new Date());
-  const el = h('<div class="agenda"></div>');
+  const el = html`<div class="agenda"></div>`;
   let any = false;
   for (let day = new Date(start); day < end; day = addDays(day, 1)) {
     const evs = eventsOnDay(instances, day);
     if (!evs.length) continue;
     any = true;
-    el.append(h(`<h3 class="${sameDay(day, today) ? 'today' : ''}">${esc(day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3>`));
+    el.append(html`<h3 class="${sameDay(day, today) ? 'today' : ''}">${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>`);
     for (const inst of evs) {
-      const item = h(`<button class="item${unconfirmedCls(inst)}" data-key="${esc(store.instanceKey(inst))}">
-        <span class="dot" style="background:${esc(store.calColor(inst.calHref))}"></span>
-        <span class="time">${inst.allDay ? 'all day' : esc(fmtTime(inst.start)) + ' – ' + esc(fmtTime(inst.end))}</span>
-        <span class="what">${esc(inst.summary)}</span>
-        ${inst.location ? `<span class="where">📍 ${esc(inst.location)}</span>` : ''}
-      </button>`);
+      const item = html`<button class="item${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}">
+        <span class="dot" style="background:${store.calColor(inst.calHref)}"></span>
+        <span class="time">${inst.allDay ? 'all day' : fmtTime(inst.start) + ' – ' + fmtTime(inst.end)}</span>
+        <span class="what">${inst.summary}</span>
+        ${inst.location && frag`<span class="where">📍 ${inst.location}</span>`}
+      </button>`;
       item.addEventListener('click', () => openEventDetail(inst));
       el.append(item);
     }
   }
-  if (!any) el.append(h('<p class="empty">Nothing planned in this period. Click “＋ New event” to add something.</p>'));
+  if (!any) el.append(html`<p class="empty">Nothing planned in this period. Click “＋ New event” to add something.</p>`);
   return el;
 }

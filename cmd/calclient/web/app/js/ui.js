@@ -1,16 +1,13 @@
-// ui.js — tiny DOM and formatting helpers shared by every panel.
+// ui.js — panel helpers on top of the shared DOM and time modules. The DOM
+// construction/escaping primitives and the date helpers are re-exported so
+// panels have a single import for their UI needs.
 
 import * as dav from '/shared/dav.js';
+import { frag } from '/shared/dom.js';
 
-const { esc } = dav;
-
-export const $ = (sel, root = document) => root.querySelector(sel);
-
-export function el(html) {
-  const t = document.createElement('template');
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild;
-}
+export { $, html, frag, raw, esc, brJoin } from '/shared/dom.js';
+export { localDT, plusHours } from '/shared/time.js';
+export { icalToLocal } from '/shared/ical.js';
 
 // run wires a button to an async action, disabling it while the action runs.
 export function run(btn, fn) {
@@ -20,29 +17,24 @@ export function run(btn, fn) {
   });
 }
 
-export function setOut(box, html) { box.innerHTML = html; }
+// setOut renders a frag/raw value (or plain text, which is escaped like any
+// other interpolation) into an output box — the sink keeps dom.js's
+// escape-by-default rule instead of trusting arbitrary strings.
+export function setOut(box, out) { box.innerHTML = frag`${out}`; }
+
+// rowsOr renders a list of <tr> frags, or a single placeholder row spanning
+// `cols` columns when the list is empty.
+export function rowsOr(rows, cols, label = '(empty)') {
+  return rows.length ? rows : frag`<tr><td colspan="${cols}">${label}</td></tr>`;
+}
 
 export function statusMsg(res, okText) {
   const cls = res.ok || res.status === 207 ? 'msg-ok' : 'msg-err';
-  return `<span class="${cls}">HTTP ${res.status}</span> ${esc(okText ?? '')}`;
+  return frag`<span class="${cls}">HTTP ${res.status}</span> ${okText ?? ''}`;
 }
 
-export function pre(text) { return `<pre>${esc(text)}</pre>`; }
+export function pre(text) { return frag`<pre>${text}</pre>`; }
 export function preXML(text) { return pre(dav.prettyXML(text)); }
 
-export function lastSegment(href) {
-  return decodeURIComponent(href.replace(/\/+$/, '').split('/').pop() || '/');
-}
-
-// datetime-local <-> iCal helpers
-export function localDT(d) {
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-export function plusHours(h) { const d = new Date(); d.setHours(d.getHours() + h, 0, 0, 0); return d; }
-export function icalToLocal(v) {
-  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v || '');
-  if (!m) return '';
-  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]}`;
-  return localDT(new Date(iso));
-}
+// lastSegment: dav's, with '/' standing in for the root path in listings.
+export const lastSegment = href => dav.lastSegment(href) || '/';

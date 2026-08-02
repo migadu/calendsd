@@ -3,12 +3,13 @@
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
 import * as pushSync from './push-sync.js';
-import { $, h, esc, toast, showError } from './main.js';
+import { $, html, frag } from '/shared/dom.js';
+import { toast, showError } from './ui.js';
 
 export function renderSettings(main) {
   main.innerHTML = '';
   const p = store.state.prefs;
-  const el = h(`<div class="settings">
+  const el = html`<div class="settings">
     <section>
       <h2>Display</h2>
       <label>Week starts on
@@ -61,20 +62,20 @@ export function renderSettings(main) {
     </section>
     <section>
       <h2>Account</h2>
-      <p>Signed in as <strong>${esc(store.state.displayName || store.state.user)}</strong>
-        ${store.myEmail() ? '(' + esc(store.myEmail()) + ')' : ''}</p>
+      <p>Signed in as <strong>${store.state.displayName || store.state.user}</strong>
+        ${store.myEmail() && frag`(${store.myEmail()})`}</p>
       <p class="note">${p.staySignedIn
         ? 'You stay signed in on this device until you sign out.'
         : 'You are signed in for this browser session only.'}</p>
     </section>
-  </div>`);
+  </div>`;
   main.append(el);
 
   // Only calendars that can hold new events/invitations — a read-only share or
   // a task/journal collection can't be the default target.
   const defSel = $('#st-defcal', el);
   for (const c of store.eventCalendars()) {
-    defSel.append(h(`<option value="${esc(c.href)}" ${c.href === p.defaultCal ? 'selected' : ''}>${esc(c.displayName || c.name)}</option>`));
+    defSel.append(html`<option value="${c.href}" ${c.href === p.defaultCal ? 'selected' : ''}>${c.displayName || c.name}</option>`);
   }
 
   // Time zone list: the browser's own IANA set when available, otherwise a
@@ -89,9 +90,9 @@ export function renderSettings(main) {
   let zones;
   try { zones = Intl.supportedValuesOf('timeZone'); }
   catch { zones = ['UTC', 'Europe/Zurich', 'Europe/London', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', device]; }
-  tzSel.append(h(`<option value="" ${!p.tz ? 'selected' : ''}>Device default — ${esc(device.replace(/_/g, ' '))} (${esc(off)})</option>`));
+  tzSel.append(html`<option value="" ${!p.tz ? 'selected' : ''}>Device default — ${device.replace(/_/g, ' ')} (${off})</option>`);
   for (const z of [...new Set(zones)].sort()) {
-    tzSel.append(h(`<option value="${esc(z)}" ${p.tz === z ? 'selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`));
+    tzSel.append(html`<option value="${z}" ${p.tz === z ? 'selected' : ''}>${z.replace(/_/g, ' ')}</option>`);
   }
 
   $('#st-weekstart', el).addEventListener('change', ev => store.savePrefs({ weekStart: +ev.target.value }));
@@ -113,10 +114,10 @@ export function renderSettings(main) {
 
   const exp = $('#st-export', el);
   for (const c of store.state.calendars) {
-    exp.append(h(`<label><a href="${esc(c.href)}?export" download="${esc(c.name)}.ics">Download “${esc(c.displayName || c.name)}” as .ics</a></label>`));
+    exp.append(html`<label><a href="${c.href}?export" download="${c.name}.ics">Download “${c.displayName || c.name}” as .ics</a></label>`);
   }
   for (const b of store.state.books) {
-    exp.append(h(`<label><a href="${esc(b.href)}?export" download="contacts.vcf">Download “${esc(b.displayName)}” as .vcf</a></label>`));
+    exp.append(html`<label><a href="${b.href}?export" download="contacts.vcf">Download “${b.displayName}” as .vcf</a></label>`);
   }
 
   $('#st-import', el).addEventListener('change', async ev => {

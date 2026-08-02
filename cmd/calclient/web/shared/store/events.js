@@ -4,6 +4,7 @@
 
 import * as dav from '../dav.js';
 import * as ical from '../ical.js';
+import { DAY, HOUR, localDate } from '../time.js';
 import { state, emit, myEmail } from './core.js';
 import { getObject, putObject } from './objects.js';
 
@@ -19,7 +20,7 @@ export async function fetchCalendarEvents(cal) {
   if (!state.range) return;
   const s = ical.utc(state.range.start.toISOString());
   const e = ical.utc(state.range.end.toISOString());
-  const body = dav.xmlDoc('c:calendar-query', '', `
+  const body = dav.xmlDoc('c:calendar-query', '', dav.xml`
     <d:prop><d:getetag/><c:calendar-data><c:expand start="${s}" end="${e}"/></c:calendar-data></d:prop>
     <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">
       <c:time-range start="${s}" end="${e}"/>
@@ -40,26 +41,17 @@ export async function fetchCalendarEvents(cal) {
   state.instances.set(cal.href, out);
 }
 
-export function parseICalDate(v, params = {}) {
-  if (params.VALUE === 'DATE' || /^\d{8}$/.test(v)) {
-    return { allDay: true, date: new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) };
-  }
-  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v);
-  if (!m) return null;
-  return { allDay: false, date: new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]}`) };
-}
-
 export function instanceFrom(ev, href, calHref, etag) {
   const dtstart = ical.prop(ev, 'DTSTART');
   if (!dtstart) return null;
-  const s = parseICalDate(dtstart.value, dtstart.params);
+  const s = ical.parseICalDate(dtstart.value, dtstart.params);
   if (!s) return null;
   const dtend = ical.prop(ev, 'DTEND');
-  const e = dtend ? parseICalDate(dtend.value, dtend.params) : null;
+  const e = dtend ? ical.parseICalDate(dtend.value, dtend.params) : null;
   const durMs = !e ? ical.parseDuration(ical.propValue(ev, 'DURATION')) : null;
   const end = e ? e.date
     : durMs != null ? new Date(+s.date + durMs)
-    : new Date(+s.date + (s.allDay ? 864e5 : 36e5));
+    : new Date(+s.date + (s.allDay ? DAY : HOUR));
   const me = myEmail().toLowerCase();
   const attendees = ev.props.filter(p => p.name === 'ATTENDEE').map(p => ({
     email: p.value.replace(/^mailto:/i, ''),
@@ -88,6 +80,15 @@ export function instanceFrom(ev, href, calHref, etag) {
     // through in the views) until the invitation panel removes it.
     cancelled: (ical.propValue(ev, 'STATUS') || '').toUpperCase() === 'CANCELLED',
   };
+}
+
+// setCalendarHidden toggles a calendar off/on in the views. Views go through
+// this (not state.hidden directly) so every 'events' subscriber re-renders,
+// keeping the one-way state → bus → render flow honest.
+export function setCalendarHidden(href, hidden) {
+  if (hidden) state.hidden.add(href);
+  else state.hidden.delete(href);
+  emit('events');
 }
 
 // visibleInstances flattens the cache for enabled calendars, hiding events
@@ -146,9 +147,6 @@ export function instanceKey(inst) {
 // ridValue renders an instance's RECURRENCE-ID value for EXDATE/overrides.
 export function ridValue(inst) {
   if (inst.rid) return inst.rid;
-  if (inst.allDay) {
-    const p = n => String(n).padStart(2, '0');
-    return `${inst.start.getFullYear()}${p(inst.start.getMonth() + 1)}${p(inst.start.getDate())}`;
-  }
+  if (inst.allDay) return ical.dateOnly(localDate(inst.start));
   return ical.utc(inst.start.toISOString());
 }
