@@ -1,5 +1,12 @@
 const { test, expect } = require('@playwright/test');
-const { login } = require('./helpers');
+const { login, deleteEventsContaining } = require('./helpers');
+
+// The spec writes a uniquely-named event to the shared dev DB; sweep this
+// run's copy AND any strays from earlier runs, or they pile up in today's
+// month cell until new chips hide behind "+N more" and the locator times out.
+test.afterEach(async ({ request }) => {
+  await deleteEventsContaining(request, 'fb-self-');
+});
 
 // Regression for the "busy against itself" bug: editing a saved event must not
 // count that event's own slot as a conflict for its invitees.
