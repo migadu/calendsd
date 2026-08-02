@@ -133,13 +133,13 @@ export function renderSettings(main) {
     const file = ev.target.files[0];
     if (!file) return;
     const note = $('#st-import-note', el);
-    note.textContent = 'Importing…';
+    const bar = $('#st-import-bar', el);
+    note.textContent = 'Reading…';
     try {
       const text = await file.text();
       const tree = ical.parse(text);
       const events = ical.components(tree, 'VEVENT');
       const cards = ical.components(tree, 'VCARD');
-      let done = 0;
       // events grouped by UID (a recurring event and its overrides share one file)
       const byUid = new Map();
       for (const ev2 of events) {
@@ -147,40 +147,65 @@ export function renderSettings(main) {
         if (!byUid.has(uid)) byUid.set(uid, []);
         byUid.get(uid).push(ev2);
       }
+      const total = byUid.size + cards.length;
+      if (!total) { note.textContent = 'Nothing to import in that file.'; return; }
+
+      // Know what's already here so re-importing the same file skips existing
+      // contacts (matched by UID) instead of failing on the create-only PUT.
+      await store.loadContacts();
+      const existing = new Set(store.state.contacts.map(c => store.normalizeUID(c.uid)));
+
+      let done = 0, added = 0, skipped = 0, failed = 0;
+      bar.max = total; bar.value = 0; bar.hidden = false;
+      const tick = () => { bar.value = ++done; note.textContent = `Importing… ${done}/${total}`; };
+
       for (const [uid, group] of byUid) {
-        const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calweb import//EN'];
-        for (const ev2 of group) {
-          lines.push('BEGIN:VEVENT');
-          for (const prop of ev2.props) {
-            const params = Object.entries(prop.params).map(([k, v]) => `;${k}=${v}`).join('');
-            lines.push(ical.foldLong(`${prop.name}${params}:${prop.value}`));
+        try {
+          const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calweb import//EN'];
+          for (const ev2 of group) {
+            lines.push('BEGIN:VEVENT');
+            for (const prop of ev2.props) {
+              const params = Object.entries(prop.params).map(([k, v]) => `;${k}=${v}`).join('');
+              lines.push(ical.foldLong(`${prop.name}${params}:${prop.value}`));
+            }
+            lines.push('END:VEVENT');
           }
-          lines.push('END:VEVENT');
-        }
-        lines.push('END:VCALENDAR');
-        await store.putObject(store.eventHref(store.state.prefs.defaultCal, uid),
-          lines.join('\r\n') + '\r\n', undefined);
-        done++;
+          lines.push('END:VCALENDAR');
+          await store.putObject(store.eventHref(store.state.prefs.defaultCal, uid),
+            lines.join('\r\n') + '\r\n', undefined);
+          added++;
+        } catch { failed++; }
+        tick();
       }
       for (const card of cards) {
         const uid = ical.propValue(card, 'UID') || crypto.randomUUID();
-        const fn = ical.icalUnescape(ical.propValue(card, 'FN')) || 'Imported contact';
-        await store.saveContact({
-          uid, fn,
-          emails: card.props.filter(x => x.name === 'EMAIL').map(p => ({ value: p.value, type: '' })),
-          tels: card.props.filter(x => x.name === 'TEL').map(p => ({ value: p.value, type: '' })),
-          org: ical.icalUnescape(ical.propValue(card, 'ORG')),
-          preserve: card.props.filter(p => !ical.MANAGED_VCARD.has(p.name)).map(ical.vcardLine),
-        });
-        done++;
+        if (existing.has(store.normalizeUID(uid))) { skipped++; tick(); continue; }
+        try {
+          const fn = ical.icalUnescape(ical.propValue(card, 'FN')) || 'Imported contact';
+          await store.saveContact({
+            uid, fn,
+            emails: card.props.filter(x => x.name === 'EMAIL').map(p => ({ value: p.value, type: '' })),
+            tels: card.props.filter(x => x.name === 'TEL').map(p => ({ value: p.value, type: '' })),
+            org: ical.icalUnescape(ical.propValue(card, 'ORG')),
+            preserve: card.props.filter(p => !ical.MANAGED_VCARD.has(p.name)).map(ical.vcardLine),
+          });
+          existing.add(store.normalizeUID(uid));
+          added++;
+        } catch { failed++; }
+        tick();
       }
-      note.textContent = done ? `Imported ${done} item(s).` : 'Nothing to import in that file.';
-      toast(`Imported ${done} item(s).`);
+
+      const summary = [`Imported ${added}`];
+      if (skipped) summary.push(`skipped ${skipped} already present`);
+      if (failed) summary.push(`${failed} failed`);
+      note.textContent = summary.join(', ') + '.';
+      toast(`Imported ${added} item(s).`);
       await Promise.all([store.refreshEvents(), store.loadContacts()]);
     } catch (e) {
       note.textContent = '';
       showError(e);
     } finally {
+      bar.hidden = true;
       ev.target.value = '';
     }
   });
