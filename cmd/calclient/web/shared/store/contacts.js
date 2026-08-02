@@ -176,6 +176,23 @@ export async function createGroup(name, targetBook) {
   await loadContacts();
 }
 
+// renameGroup changes a group's name. A group is a vCard, not a collection, so
+// this rewrites its FN in place (text surgery keeps KIND and the member list
+// byte-for-byte) rather than a PROPPATCH.
+export async function renameGroup(href, displayName) {
+  const { text, etag } = await getObject(href);
+  const fnLine = ical.foldLong(`FN:${ical.icalEscape(displayName.trim())}`);
+  let replaced = false;
+  const lines = ical.unfold(text).map(l => {
+    if (!/^FN[;:]/i.test(l)) return l;
+    replaced = true;
+    return fnLine;
+  });
+  if (!replaced) lines.splice(Math.max(1, lines.length - 1), 0, fnLine); // no FN? insert before END
+  await putObject(href, ical.fold(lines), etag, 'text/vcard; charset=utf-8');
+  await loadContacts();
+}
+
 // deleteGroup removes a group card; its member contacts are unaffected.
 export async function deleteGroup(href) {
   await deleteObject(href);

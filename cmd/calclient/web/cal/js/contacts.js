@@ -97,7 +97,7 @@ function buildSidebar(side, books, groups) {
     item(g.fn || 'Group', g.members.length,
       selection.type === 'group' && selection.href === g.href,
       () => select({ type: 'group', href: g.href }), 'ct-group',
-      { onDelete: () => deleteGroupFlow(g) });
+      { onRename: () => renameGroupFlow(g), onDelete: () => deleteGroupFlow(g) });
   }
 }
 
@@ -133,6 +133,14 @@ async function addGroupFlow() {
     await store.createGroup(name.trim(), selection.type === 'book' ? selection.href : undefined);
     toast(`Group “${name.trim()}” created.`);
   } catch (e) { showError(e); }
+}
+
+async function renameGroupFlow(g) {
+  const name = await promptDialog('Rename group', { confirmLabel: 'Rename', value: g.fn });
+  const trimmed = name?.trim();
+  if (!trimmed || trimmed === g.fn) return;
+  try { await store.renameGroup(g.href, trimmed); toast('Group renamed.'); }
+  catch (e) { showError(e); }
 }
 
 async function deleteGroupFlow(g) {

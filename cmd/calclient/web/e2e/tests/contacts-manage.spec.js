@@ -101,6 +101,27 @@ test.describe('contacts management', () => {
     await expect(page.locator('.ct-group', { hasText: name })).toHaveCount(0);
   });
 
+  test('rename a group from the sidebar', async ({ page }) => {
+    await login(page);
+    await gotoContacts(page);
+    const name = `${TAG} Team`;
+    const renamed = `${TAG} Squad`;
+
+    await page.getByRole('button', { name: 'Add Groups' }).click();
+    await page.fill('.dialog input', name);
+    await page.click('.dialog button.primary');
+    await expect(page.locator('.ct-group', { hasText: name })).toBeVisible();
+
+    const row = page.locator('.ct-nav-row', { hasText: name });
+    await row.hover();
+    await row.getByRole('button', { name: `Rename ${name}` }).click();
+    await page.fill('.dialog input', renamed);
+    await page.click('.dialog button.primary');
+
+    await expect(page.locator('.ct-group', { hasText: renamed })).toBeVisible();
+    await expect(page.locator('.ct-group', { hasText: name })).toHaveCount(0);
+  });
+
   test('re-importing the same .vcf skips existing contacts', async ({ page }) => {
     await login(page);
     await page.evaluate(() => { location.hash = 'settings'; });
