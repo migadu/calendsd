@@ -58,18 +58,26 @@ function buildSidebar(side, books, groups) {
     h.append(add);
     side.append(h);
   };
-  const item = (label, count, active, onClick, cls, onDelete) => {
+  const item = (label, count, active, onClick, cls, { onRename, onDelete } = {}) => {
     const btn = html`<button type="button" class="ct-nav ${cls}${active ? ' active' : ''}">
       <span class="ct-nav-label">${label}</span>
       ${count != null && frag`<span class="ct-nav-count">${count}</span>`}
     </button>`;
     btn.addEventListener('click', onClick);
-    if (!onDelete) { side.append(btn); return; }
-    // A button can't nest a button, so the delete control is a sibling in a row.
+    if (!onRename && !onDelete) { side.append(btn); return; }
+    // A button can't nest a button, so the row controls are siblings.
     const row = html`<div class="ct-nav-row"></div>`;
-    const del = html`<button type="button" class="ct-nav-del" aria-label="Delete ${label}" title="Delete">×</button>`;
-    del.addEventListener('click', ev => { ev.stopPropagation(); onDelete(); });
-    row.append(btn, del);
+    row.append(btn);
+    if (onRename) {
+      const ren = html`<button type="button" class="ct-nav-act" aria-label="Rename ${label}" title="Rename">✎</button>`;
+      ren.addEventListener('click', ev => { ev.stopPropagation(); onRename(); });
+      row.append(ren);
+    }
+    if (onDelete) {
+      const del = html`<button type="button" class="ct-nav-act ct-nav-del" aria-label="Delete ${label}" title="Delete">×</button>`;
+      del.addEventListener('click', ev => { ev.stopPropagation(); onDelete(); });
+      row.append(del);
+    }
     side.append(row);
   };
 
@@ -81,7 +89,7 @@ function buildSidebar(side, books, groups) {
     item(book.displayName, count,
       selection.type === 'book' && selection.href === book.href,
       () => select({ type: 'book', href: book.href }), 'ct-book',
-      () => deleteBookFlow(book, count));
+      { onRename: () => renameBookFlow(book), onDelete: () => deleteBookFlow(book, count) });
   }
 
   heading('Groups', addGroupFlow);
@@ -89,7 +97,7 @@ function buildSidebar(side, books, groups) {
     item(g.fn || 'Group', g.members.length,
       selection.type === 'group' && selection.href === g.href,
       () => select({ type: 'group', href: g.href }), 'ct-group',
-      () => deleteGroupFlow(g));
+      { onDelete: () => deleteGroupFlow(g) });
   }
 }
 
@@ -97,6 +105,14 @@ async function addBookFlow() {
   const name = await promptDialog('Name for the new address book', { confirmLabel: 'Create' });
   if (!name?.trim()) return;
   try { await store.createBook(name.trim()); toast(`Address book “${name.trim()}” created.`); }
+  catch (e) { showError(e); }
+}
+
+async function renameBookFlow(book) {
+  const name = await promptDialog('Rename address book', { confirmLabel: 'Rename', value: book.displayName });
+  const trimmed = name?.trim();
+  if (!trimmed || trimmed === book.displayName) return;
+  try { await store.renameBook(book.href, trimmed); toast('Address book renamed.'); }
   catch (e) { showError(e); }
 }
 

@@ -381,13 +381,14 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .ct-side-add { border: none; background: none; color: var(--dim); cursor: pointer;
   font-size: 1rem; line-height: 1; padding: 0 .25rem; border-radius: 5px; }
 .ct-side-add:hover { background: #f1f4f7; color: var(--accent); }
-/* a book/group row: the selectable nav button plus a hover-revealed delete */
+/* a book/group row: the selectable nav button plus hover-revealed actions */
 .ct-nav-row { display: flex; align-items: center; }
 .ct-nav-row .ct-nav { flex: 1; min-width: 0; }
-.ct-nav-del { border: none; background: none; color: var(--dim); cursor: pointer;
-  font-size: 1.05rem; line-height: 1; padding: .1rem .35rem; border-radius: 5px; visibility: hidden; }
-.ct-nav-row:hover .ct-nav-del { visibility: visible; }
-.ct-nav-del:hover { color: var(--danger); background: #f1f4f7; }
+.ct-nav-act { border: none; background: none; color: var(--dim); cursor: pointer;
+  font-size: 1rem; line-height: 1; padding: .1rem .3rem; border-radius: 5px; visibility: hidden; }
+.ct-nav-row:hover .ct-nav-act { visibility: visible; }
+.ct-nav-act:hover { color: var(--accent); background: #f1f4f7; }
+.ct-nav-del:hover { color: var(--danger); }
 .ct-nav { display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
   padding: .4rem .55rem; border: 0; border-radius: 7px; background: none; color: inherit;
   font: inherit; cursor: pointer; }

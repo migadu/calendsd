@@ -152,6 +152,12 @@ export async function createBook(displayName) {
   return href;
 }
 
+// renameBook changes an address book's display name (CardDAV PROPPATCH).
+export async function renameBook(href, displayName) {
+  check(await dav.proppatch(href, [{ name: 'd:displayname', value: displayName.trim() }]), [207]);
+  await loadContacts();
+}
+
 // deleteBook removes an address book and everything in it.
 export async function deleteBook(href) {
   await deleteObject(href);

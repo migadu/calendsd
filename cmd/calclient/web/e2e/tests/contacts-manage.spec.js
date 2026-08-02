@@ -60,6 +60,28 @@ test.describe('contacts management', () => {
     await expect(page.locator('.ct-nav', { hasText: name })).toHaveCount(0);
   });
 
+  test('rename an address book from the sidebar', async ({ page }) => {
+    await login(page);
+    await gotoContacts(page);
+    const name = `${TAG} Book`;
+    const renamed = `${TAG} Renamed`;
+
+    await page.getByRole('button', { name: 'Add Address Books' }).click();
+    await page.fill('.dialog input', name);
+    await page.click('.dialog button.primary');
+    await expect(page.locator('.ct-nav', { hasText: name })).toBeVisible();
+
+    // Rename via the row's ✎ (revealed on hover).
+    const row = page.locator('.ct-nav-row', { hasText: name });
+    await row.hover();
+    await row.getByRole('button', { name: `Rename ${name}` }).click();
+    await page.fill('.dialog input', renamed);
+    await page.click('.dialog button.primary');
+
+    await expect(page.locator('.ct-nav', { hasText: renamed })).toBeVisible();
+    await expect(page.locator('.ct-nav', { hasText: name })).toHaveCount(0);
+  });
+
   test('create and delete a group from the sidebar', async ({ page }) => {
     await login(page);
     await gotoContacts(page);
