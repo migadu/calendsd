@@ -10,6 +10,7 @@ export const state = {
   hidden: new Set(),       // calendar hrefs toggled off in the sidebar
   range: null,             // {start: Date, end: Date} currently loaded
   instances: new Map(),    // calHref -> [instance]
+  tasks: new Map(),        // calHref -> [task] (task lists, see store/tasks.js)
   invites: [],             // parsed inbox items
   invitesLoaded: false,    // first inbox fetch finished (drives the panel's loading state)
   shareNotifications: [],  // parsed calendar-share invitations (cs:notification)

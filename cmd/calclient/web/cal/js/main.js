@@ -9,6 +9,7 @@ import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
 import { renderGrid, gridNav, setGridView } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
 import { renderInvites, toggleInvites } from './invites.js';
+import { renderTasks } from './tasks.js';
 import { renderContacts } from './contacts.js';
 import { renderSettings } from './settings.js';
 import * as pushSync from './push-sync.js';
@@ -19,7 +20,7 @@ let currentView = 'calendar';
 
 function route() {
   const target = (location.hash.replace('#', '') || 'calendar').split('/')[0];
-  currentView = ['calendar', 'contacts', 'settings'].includes(target) ? target : 'calendar';
+  currentView = ['calendar', 'tasks', 'contacts', 'settings'].includes(target) ? target : 'calendar';
   // Drives which chrome is relevant: the CSS hides the calendar sidebar and
   // the date/view controls on any non-calendar view.
   document.body.dataset.view = currentView;
@@ -54,6 +55,7 @@ export function render() {
   if ($('#topbar').hidden) return;
   const main = $('#content');
   if (currentView === 'calendar') renderGrid(main);
+  else if (currentView === 'tasks') renderTasks(main);
   else if (currentView === 'contacts') renderContacts(main);
   else renderSettings(main);
 }
@@ -263,6 +265,10 @@ store.bus.addEventListener('calendars', renderSidebar);
 pushSync.wirePushRefresh();
 store.bus.addEventListener('calendars', () => pushSync.syncSubscriptions());
 store.bus.addEventListener('events', () => { if (currentView === 'calendar') render(); });
+store.bus.addEventListener('tasks', () => { if (currentView === 'tasks') render(); });
+// The tasks view re-renders on calendar refreshes too: renderTasks calls the
+// ctag-guarded loadTasks, so the 30 s poll picks up remote task changes.
+store.bus.addEventListener('calendars', () => { if (currentView === 'tasks') render(); });
 store.bus.addEventListener('contacts', () => { if (currentView === 'contacts') render(); });
 // The bell counts scheduling invitations plus still-unanswered calendar shares.
 function updateBell() {

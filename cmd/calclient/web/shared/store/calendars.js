@@ -28,8 +28,10 @@ export async function loadCalendars() {
         // server sends no such property on our own calendars, so absent = writable.
         readOnly: truthyProp(x.props.get(key(NS.s, 'read-only'))),
         // A task/journal-only collection can't hold VEVENTs; an absent set means
-        // "all component types" per RFC 4791, so treat empty as event-capable.
+        // "all component types" per RFC 4791, so treat empty as event-capable
+        // (and likewise task-capable).
         supportsEvents: comps.length === 0 || comps.includes('VEVENT'),
+        supportsTasks: comps.length === 0 || comps.includes('VTODO'),
         isCalendar: dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.c, 'calendar')),
       };
     })

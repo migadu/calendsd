@@ -20,3 +20,5 @@ export { loadInvites, answerInvite, answerEvent, dismissInvite, removeCancelled 
 export { freeBusy } from './store/freebusy.js';
 export { loadContacts, normalizeUID, saveContact, deleteContact,
   searchDirectory } from './store/contacts.js';
+export { taskLists, writableTaskLists, loadTasks, dueBucket,
+  createTask, updateTask, setTaskDone, deleteTask, createTaskList } from './store/tasks.js';

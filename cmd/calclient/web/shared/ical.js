@@ -70,6 +70,27 @@ export function buildEvent(fields) {
     .join('\r\n') + '\r\n';
 }
 
+// buildTodo renders a single-VTODO VCALENDAR for the tasks view. due is a
+// date input value (YYYY-MM-DD, written as VALUE=DATE) or a Date/ISO string
+// (written as UTC DATE-TIME); null omits DUE.
+export function buildTodo({ uid, summary, due, description }) {
+  const l = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calclient//EN',
+    'BEGIN:VTODO',
+    `UID:${uid}`,
+    `DTSTAMP:${stamp()}`,
+    `SUMMARY:${icalEscape(summary)}`,
+    'STATUS:NEEDS-ACTION',
+  ];
+  if (due) {
+    l.push(/^\d{4}-\d{2}-\d{2}$/.test(due)
+      ? `DUE;VALUE=DATE:${dateOnly(due)}` : `DUE:${utc(due)}`);
+  }
+  if (description) l.push(`DESCRIPTION:${icalEscape(description)}`);
+  l.push('END:VTODO', 'END:VCALENDAR');
+  return l.join('\r\n') + '\r\n';
+}
+
 // ---- text-level edits on stored objects ---------------------------------
 // These operate on unfolded lines so stored properties the client does not
 // model (VALARM, X-props, ...) survive untouched.
@@ -118,13 +139,16 @@ export function parseDuration(v) {
   return (m[1] === '-' ? -1 : 1) * secs * 1000;
 }
 
-// masterEventRange finds [begin, end] line indexes (inclusive) of the first
-// VEVENT without a RECURRENCE-ID (the recurrence master / the plain event).
-function masterEventRange(lines) {
+// masterComponentRange finds [begin, end] line indexes (inclusive) of the
+// first component of the given type without a RECURRENCE-ID (the recurrence
+// master / the plain object).
+function masterComponentRange(lines, comp) {
+  const begin_ = new RegExp(`^BEGIN:${comp}$`, 'i');
+  const end_ = new RegExp(`^END:${comp}$`, 'i');
   let begin = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^BEGIN:VEVENT/i.test(lines[i])) begin = i;
-    else if (/^END:VEVENT/i.test(lines[i]) && begin >= 0) {
+    if (begin_.test(lines[i])) begin = i;
+    else if (end_.test(lines[i]) && begin >= 0) {
       const block = lines.slice(begin, i + 1);
       if (!block.some(l => /^RECURRENCE-ID/i.test(l))) return [begin, i];
       begin = -1;
@@ -150,7 +174,7 @@ export function setPartstat(text, email, partstat) {
 // from the master VEVENT.
 export function addExdate(text, dtValue, allDay) {
   const lines = unfold(text);
-  const range = masterEventRange(lines);
+  const range = masterComponentRange(lines, 'VEVENT');
   if (!range) return text;
   const ex = allDay ? `EXDATE;VALUE=DATE:${dtValue}` : `EXDATE:${dtValue}`;
   lines.splice(range[1], 0, ex);
@@ -181,14 +205,16 @@ export function addOverride(text, overrideEventLines) {
 }
 
 // setMasterProps replaces, inserts, or removes top-level properties on the
-// master VEVENT while leaving everything else — nested VALARMs, sibling
-// override VEVENTs, EXDATEs, and properties this client doesn't model —
+// master component (the first `comp` — VEVENT by default, VTODO for tasks —
+// without a RECURRENCE-ID) while leaving everything else — nested VALARMs,
+// sibling components, EXDATEs, and properties this client doesn't model —
 // untouched. `props` maps an upper-case NAME to the full iCal line to emit
 // (params included), an array of lines (for multi-valued props like ATTENDEE),
-// or null to delete the property. Absent props are appended before END:VEVENT.
-export function setMasterProps(text, props) {
+// or null to delete the property. Absent props are appended before the
+// component's END line.
+export function setMasterProps(text, props, comp = 'VEVENT') {
   const lines = unfold(text);
-  const range = masterEventRange(lines);
+  const range = masterComponentRange(lines, comp);
   if (!range) return text;
   const [b, e] = range;
   const want = new Map(Object.entries(props).map(([k, v]) => [k.toUpperCase(), v]));
@@ -202,14 +228,14 @@ export function setMasterProps(text, props) {
     const line = lines[i];
     if (/^BEGIN:/i.test(line)) { depth++; body.push(line); continue; }
     if (/^END:/i.test(line)) {
-      if (--depth === 0) { // closing the master VEVENT: flush new properties
+      if (--depth === 0) { // closing the master component: flush new properties
         for (const [name, val] of want) if (!seen.has(name)) push(body, val);
       }
       body.push(line);
       continue;
     }
-    // Only rewrite direct VEVENT properties (depth 1); depth 2 is inside a
-    // nested VALARM, whose DESCRIPTION/etc must stay untouched.
+    // Only rewrite the component's direct properties (depth 1); depth 2 is
+    // inside a nested VALARM, whose DESCRIPTION/etc must stay untouched.
     if (depth === 1) {
       const name = (/^([^;:]+)/.exec(line)?.[1] || '').toUpperCase();
       if (want.has(name)) {
