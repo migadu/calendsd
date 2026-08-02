@@ -40,6 +40,13 @@
             # Shared database
             pkgs.postgresql_16
 
+            # calweb end-to-end tests (Playwright). The browsers come from
+            # nixpkgs (playwright-driver.browsers) rather than a download; the
+            # @playwright/test npm version in cmd/calclient/web/e2e must match
+            # pkgs.playwright-driver.version (see shellHook echo below).
+            pkgs.nodejs
+            pkgs.playwright-driver
+
           ]
           # WebDAV conformance suite (phase 1 gate) — not packaged for darwin;
           # run via Linux CI or build from source there.
@@ -50,6 +57,13 @@
             export PGHOST="$PWD/.dev/pg"
             export PGDATABASE=calserver
             export GOFLAGS=-mod=mod
+
+            # Playwright: use the Nix-provided browsers instead of downloading
+            # them, and skip host-requirement validation (non-NixOS hosts).
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+            export PLAYWRIGHT_VERSION="${pkgs.playwright-driver.version}"
+            echo "playwright-driver ${pkgs.playwright-driver.version} — pin @playwright/test to this in cmd/calclient/web/e2e/package.json"
           '';
         };
       });
