@@ -135,6 +135,14 @@ export function eventHref(calHref, uid) {
   return calHref + encodeURIComponent(uid) + '.ics';
 }
 
+// instanceKey is a stable id for one rendered occurrence, used to correlate a
+// grid element with a cache entry (e.g. to flash an event that just changed).
+// href identifies the stored object; the start disambiguates the occurrences an
+// expanded recurring series produces from the same object.
+export function instanceKey(inst) {
+  return `${inst.href}#${+inst.start}`;
+}
+
 // ridValue renders an instance's RECURRENCE-ID value for EXDATE/overrides.
 export function ridValue(inst) {
   if (inst.rid) return inst.rid;

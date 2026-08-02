@@ -22,6 +22,26 @@ const DAY = 864e5;
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function addDays(d, n) { return new Date(+d + n * DAY); }
 
+// ---- display time zone ---------------------------------------------------
+// The app can show a time zone other than the browser's (prefs.tz). Event
+// labels already format in that zone; the grid's vertical geometry (block
+// tops, the now-line, day membership) must use the SAME zone or blocks drift
+// by the browser↔pref offset. These map a calendar date to the absolute
+// instant of its midnight *in the display zone*.
+function tzOffsetMs(date, tz) {
+  // Re-reading the instant's wall clock in tz vs in UTC (both parsed the same
+  // way) cancels the browser's own zone, leaving tz's offset from UTC.
+  return new Date(date.toLocaleString('en-US', { timeZone: tz }))
+       - new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+}
+function tzDayStart(day) {
+  const tz = store.state.prefs.tz;
+  if (!tz) return startOfDay(day);                 // '' = device zone: local midnight is right
+  const guess = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate());
+  return new Date(guess - tzOffsetMs(new Date(guess), tz));
+}
+function nextDate(day) { return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1); }
+
 // ISO-8601 week number, anchored on the Thursday of the date's ISO week so it
 // is stable regardless of the user's Monday/Sunday week-start preference.
 function isoWeek(date) {
@@ -63,11 +83,13 @@ export function gridNav(delta) {
   else if (view === 'week') cursor = addDays(cursor, 7 * delta);
   else if (view === 'day') cursor = addDays(cursor, delta);
   else cursor = addDays(cursor, 30 * delta);
+  centerNextRender = true;
   reload();
 }
 
 export function setGridView(v, anchor) {
   view = v;
+  centerNextRender = true;
   if (anchor) cursor = startOfDay(anchor);
   for (const b of document.querySelectorAll('#view-seg button')) {
     b.classList.toggle('active', b.dataset.view === v);
@@ -94,23 +116,61 @@ function title() {
   return `${s} – ${e}`;
 }
 
-// instances overlapping [dayStart, dayStart+1d)
+// instances overlapping the calendar date `day`, with the day's boundaries
+// taken in the display zone so an event near midnight lands in the right column.
 function eventsOnDay(instances, day) {
-  const s = +day, e = +day + DAY;
+  const s = +tzDayStart(day), e = +tzDayStart(nextDate(day));
   return instances.filter(i => +i.start < e && +i.end > s);
 }
+
+// centerNextRender scrolls the next timed render to the current-time line
+// instead of preserving the viewport. Set by intentional navigation (Today,
+// prev/next, switching to week/day); cleared once consumed, so background
+// refreshes (the 30s poll) keep the user's scroll position steady.
+let centerNextRender = true;
 
 export function renderGrid(main) {
   for (const b of document.querySelectorAll('#view-seg button')) b.classList.toggle('active', b.dataset.view === view);
   $('#cal-title').textContent = title();
   if (!store.state.range) { reload(); return; }
   const instances = store.visibleInstances();
+  const prevScroll = main.scrollTop;
   main.innerHTML = '';
   if (view === 'month') main.append(renderMonth(instances));
   else if (view === 'week') main.append(renderTimed(instances, 7));
   else if (view === 'day') main.append(renderTimed(instances, 1));
   else main.append(renderAgenda(instances));
+  // Timed views scroll; keep the viewport where it was across a re-render,
+  // except right after navigation, when we jump to the current-time line.
+  if (view === 'week' || view === 'day') {
+    if (centerNextRender) { centerOnNow(main); centerNextRender = false; }
+    else main.scrollTop = prevScroll;
+  }
 }
+
+// nowTopRem is the current time's offset (in rem) down the 24-hour column,
+// measured in the display zone so it lines up with the zone's hour labels.
+function nowTopRem() {
+  const n = new Date();
+  return Math.max(0, (n - tzDayStart(n)) / 36e5) * HOUR_REM;
+}
+
+// centerOnNow scrolls the timed grid so the current-time line sits mid-viewport
+// (Google-style). With no line visible (today isn't in range) it rests at the
+// top rather than leaving the previous position dangling.
+function centerOnNow(main) {
+  const line = main.querySelector('.now-line');
+  if (!line) { main.scrollTop = 0; return; }
+  const target = main.scrollTop + (line.getBoundingClientRect().top - main.getBoundingClientRect().top)
+    - main.clientHeight / 2;
+  main.scrollTop = Math.max(0, target);
+}
+
+// Nudge the current-time line down every minute without a full re-render.
+setInterval(() => {
+  const top = nowTopRem() + 'rem';
+  for (const line of document.querySelectorAll('.week .now-line')) line.style.top = top;
+}, 60_000);
 
 // ---- drag to move --------------------------------------------------------
 // Pointer-based drag: month chips move between day cells, week/day blocks
@@ -242,18 +302,40 @@ function attachBlockDrag(block, inst, day) {
 // struck through until the invitations panel removes it.
 function unconfirmedCls(inst) {
   if (inst.cancelled) return ' tentative cancelled';
-  return inst.myPartstat === 'NEEDS-ACTION' ? ' tentative needs-action'
+  // An unanswered invite must stand out, so it is NOT dimmed like a "maybe":
+  // needs-action gets the bold dashed edge + "?" badge (see cal.css) at full
+  // opacity; only a tentative "maybe" reply gets the faded/italic treatment.
+  return inst.myPartstat === 'NEEDS-ACTION' ? ' needs-action'
     : inst.myPartstat === 'TENTATIVE' ? ' tentative' : '';
 }
 
 function chipFor(inst) {
   const color = store.calColor(inst.calHref);
   const tentative = unconfirmedCls(inst);
+  const key = esc(store.instanceKey(inst));
   const chip = inst.allDay
-    ? h(`<button class="chip${tentative}" style="background:${esc(color)}">${esc(inst.summary)}</button>`)
-    : h(`<button class="chip timed${tentative}"><span class="dot" style="background:${esc(color)}"></span>${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
+    ? h(`<button class="chip${tentative}" data-key="${key}" style="background:${esc(color)}">${esc(inst.summary)}</button>`)
+    : h(`<button class="chip timed${tentative}" data-key="${key}"><span class="dot" style="background:${esc(color)}"></span>${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
   chip.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
   return chip;
+}
+
+// flashInstances briefly highlights the grid elements for the given instance
+// keys (see store.instanceKey), drawing the eye to events that just changed
+// under an incoming push. Returns how many elements were on screen to flash, so
+// the caller can fall back to a toast when the change is out of view.
+export function flashInstances(keys) {
+  const want = new Set(keys);
+  let n = 0;
+  for (const el of document.querySelectorAll('#content [data-key]')) {
+    if (!want.has(el.dataset.key)) continue;
+    el.classList.remove('flash-change');
+    void el.offsetWidth;            // restart the animation if it is re-flashed
+    el.classList.add('flash-change');
+    setTimeout(() => el.classList.remove('flash-change'), 3200);
+    n++;
+  }
+  return n;
 }
 
 // spans() returns the multi-day events overlapping a week [weekStart, +7d),
@@ -325,6 +407,7 @@ function renderMonth(instances) {
       for (const s of multi) {
         const color = store.calColor(s.inst.calHref);
         const bar = h(`<button class="span-bar${s.contLeft ? ' cl' : ''}${s.contRight ? ' cr' : ''}${unconfirmedCls(s.inst)}"
+          data-key="${esc(store.instanceKey(s.inst))}"
           style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${esc(color)}"
           title="${esc(s.inst.summary)}">${s.contLeft ? '‹ ' : ''}${esc(s.inst.summary)}</button>`);
         bar.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(s.inst); });
@@ -398,18 +481,21 @@ function renderTimed(instances, days) {
 
   for (let d = 0; d < days; d++) {
     const day = addDays(start, d);
+    const top = tzDayStart(day);   // this column's midnight in the display zone
     const col = h(`<div class="col${sameDay(day, today) ? ' today' : ''}" data-date="${+day}"></div>`);
     for (let hr = 1; hr < 24; hr++) col.append(h(`<div class="hline" style="top:${hr * HOUR_REM}rem"></div>`));
     for (const p of layoutColumns(eventsOnDay(instances, day).filter(i => !i.allDay))) {
       const inst = p.inst;
-      const s = Math.max(0, (inst.start - day) / 36e5);
-      const e = Math.min(24, (inst.end - day) / 36e5);
+      const s = Math.max(0, (inst.start - top) / 36e5);
+      const e = Math.min(24, (inst.end - top) / 36e5);
       const w = 100 / p.cols;
-      const block = h(`<button class="block${unconfirmedCls(inst)}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${esc(store.calColor(inst.calHref))}">${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
+      const block = h(`<button class="block${unconfirmedCls(inst)}" data-key="${esc(store.instanceKey(inst))}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${esc(store.calColor(inst.calHref))}">${esc(fmtTime(inst.start))} ${esc(inst.summary)}</button>`);
       block.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
       attachBlockDrag(block, inst, day);
       col.append(block);
     }
+    // the current-time line, drawn only in today's column
+    if (sameDay(day, today)) col.append(h(`<div class="now-line" style="top:${nowTopRem()}rem"></div>`));
     col.addEventListener('click', ev => {
       const rect = col.getBoundingClientRect();
       const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -436,7 +522,7 @@ function renderAgenda(instances) {
     any = true;
     el.append(h(`<h3 class="${sameDay(day, today) ? 'today' : ''}">${esc(day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3>`));
     for (const inst of evs) {
-      const item = h(`<button class="item${unconfirmedCls(inst)}">
+      const item = h(`<button class="item${unconfirmedCls(inst)}" data-key="${esc(store.instanceKey(inst))}">
         <span class="dot" style="background:${esc(store.calColor(inst.calHref))}"></span>
         <span class="time">${inst.allDay ? 'all day' : esc(fmtTime(inst.start)) + ' – ' + esc(fmtTime(inst.end))}</span>
         <span class="what">${esc(inst.summary)}</span>

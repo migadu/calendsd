@@ -129,6 +129,13 @@ VALUES ($1, $2, $3, $4)`,
 		objectURI, token, calendarID, operation); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`UPDATE calendars SET synctoken = $1 WHERE id = $2`, token+1, calendarID)
+	if _, err := tx.Exec(`UPDATE calendars SET synctoken = $1 WHERE id = $2`, token+1, calendarID); err != nil {
+		return err
+	}
+	// Notify the WebDAV-Push dispatcher (internal/push) that this calendar
+	// changed. pg_notify delivers on COMMIT only, so a rolled-back write emits
+	// nothing; with no LISTENer (push disabled) it is a cheap no-op. The
+	// payload is the collection key the worker maps to subscriptions/topic.
+	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, "calendar:"+calendarID)
 	return err
 }

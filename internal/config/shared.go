@@ -131,6 +131,13 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			RequestLogDir:        m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
 			AccessLog:            m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
 			RetentionDays:        RetentionDays(m.File.Retention.DeletedDays),
+			Push: server.PushConfig{
+				Enabled:         m.File.Push.Enabled,
+				VAPIDSubject:    m.File.Push.VAPIDSubject,
+				VAPIDPublicKey:  m.File.Push.VAPIDPublicKey,
+				VAPIDPrivateKey: m.File.Push.VAPIDPrivateKey,
+				TopicSecret:     m.File.Push.TopicSecret,
+			},
 		}
 		return m, nil
 	}

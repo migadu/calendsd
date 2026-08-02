@@ -2,6 +2,7 @@
 // fast-path.
 
 import * as dav from '/shared/dav.js';
+import * as push from '/shared/push.js';
 import { $, el, run, setOut, statusMsg } from '../ui.js';
 import { calSelect, wireCalSelect } from '../collections.js';
 
@@ -22,8 +23,41 @@ export default {
         <button id="sy-ctag">PROPFIND getctag + sync-token</button>
         <div class="out" id="sy-ctag-out"></div>
       </fieldset>
+      <fieldset><legend>WebDAV-Push (Web Push)</legend>
+        <p class="note" id="sy-push-support"></p>
+        <button class="primary" id="sy-push-on">Enable push on this collection</button>
+        <button id="sy-push-off">Disable</button>
+        <div class="out" id="sy-push-out"></div>
+        <div class="out" id="sy-push-log">No pushes received yet. Change this collection from another client to see one arrive.</div>
+      </fieldset>
     </div>`));
     const sel = wireCalSelect(main);
+
+    // WebDAV-Push: discover the topic, subscribe the browser, register it, and
+    // show incoming pushes live. Uses the explorer's own service worker (/app/).
+    const supportNote = $('#sy-push-support', main);
+    if (!push.supported()) {
+      supportNote.textContent = 'This browser cannot do Web Push (needs a secure context: https or localhost).';
+      $('#sy-push-on', main).disabled = true;
+      $('#sy-push-off', main).disabled = true;
+    } else {
+      supportNote.textContent = 'Enable to receive an encrypted Web Push when this collection changes, then a sync-collection REPORT.';
+    }
+    push.onMessage(({ topic, syncToken }) => {
+      const now = new Date().toLocaleTimeString();
+      $('#sy-push-log', main).innerHTML =
+        `<b>push received ${esc(now)}</b> — topic <span class="mono">${esc(topic || '(none)')}</span>, ` +
+        `sync-token <span class="mono">${esc(syncToken || '(none)')}</span>`;
+    });
+    run($('#sy-push-on', main), async () => {
+      const { topic } = await push.registerCollection(sel.value, '/app/sw.js', '/app/');
+      setOut($('#sy-push-out', main),
+        `Subscribed. topic = <span class="mono">${esc(topic)}</span> for <span class="mono">${esc(sel.value)}</span>`);
+    });
+    run($('#sy-push-off', main), async () => {
+      await push.unregisterCollection(sel.value);
+      setOut($('#sy-push-out', main), `Unsubscribed <span class="mono">${esc(sel.value)}</span>.`);
+    });
 
     run($('#sy-run', main), async () => {
       const body = dav.xmlDoc('d:sync-collection', '', `

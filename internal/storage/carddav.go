@@ -338,7 +338,11 @@ INSERT INTO addressbookchanges (uri, synctoken, addressbookid, operation)
 VALUES ($1, $2, $3, $4)`, uri, token, addressBookID, operation); err != nil {
 		return err
 	}
-	_, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+1, addressBookID)
+	if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+1, addressBookID); err != nil {
+		return err
+	}
+	// WebDAV-Push notification (see addChange in sync.go for the rationale).
+	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
 	return err
 }
 

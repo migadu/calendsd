@@ -145,3 +145,25 @@ auto_schedule_prefixes = []  # e.g. ["resource", "location"]
 deleted_days = 30           # Days to keep a soft-deleted account before purge.
                             # 0 uses the built-in default (30). Changing this
                             # never moves an already-scheduled purge.
+
+
+# WEBDAV-PUSH
+# =============================================================================
+# Server-initiated change notifications (PUSH-PLAN.md), so clients that speak
+# WebDAV-Push (DAVx5 >= 4.4.2, and this project's web client) learn of calendar
+# / address-book changes within seconds instead of polling. Delivered as
+# encrypted Web Push (RFC 8030/8291) authenticated with VAPID (RFC 8292).
+# Note: iOS/macOS Calendar do NOT support WebDAV-Push and are unaffected.
+#
+# Generate the VAPID keypair once, e.g. `calserver push-keys` or the npm
+# `web-push generate-vapid-keys`, and a random topic_secret (e.g.
+# `openssl rand -base64 32`). The private key and topic secret are SECRETS:
+# keep this file out of version control and readable only by the service user.
+# When enabled = true, all three of vapid_public_key, vapid_private_key and
+# topic_secret must be set or the server refuses to start.
+[push]
+enabled = false             # Master switch for WebDAV-Push.
+vapid_subject = ""          # RFC 8292 'sub' claim, e.g. "mailto:admin@example.com".
+vapid_public_key = ""       # base64url P-256 VAPID public key.
+vapid_private_key = ""      # base64url P-256 VAPID private key (SECRET).
+topic_secret = ""           # HMAC key for opaque per-collection topics (SECRET).

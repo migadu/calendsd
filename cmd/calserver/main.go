@@ -3,12 +3,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"calserver/internal/config"
@@ -16,6 +19,7 @@ import (
 	"calserver/internal/dav/mock"
 	"calserver/internal/logging"
 	"calserver/internal/metrics"
+	"calserver/internal/push"
 	"calserver/internal/server"
 	"calserver/internal/storage"
 	"calserver/internal/version"
@@ -58,7 +62,13 @@ func main() {
 		m.Server.Metrics = set
 	}
 
+	// A signal-cancelled context drives graceful shutdown of the HTTP server
+	// and the WebDAV-Push worker (which holds a LISTEN connection).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	var srv http.Handler
+	var pushWorker *push.Worker
 	if m.DSN != "" {
 		db, err := storage.OpenPool(m.DSN, m.DBPool)
 		if err != nil {
@@ -72,7 +82,7 @@ func main() {
 		set.RegisterDBStats(db)
 		// Same line calserver-admin logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
-		srv = server.New(db, m.Server)
+		srv, pushWorker = server.NewWithBackground(db, m.Server, m.DSN)
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
 		// (litmus props class) can exercise PROPPATCH.
@@ -83,6 +93,12 @@ func main() {
 
 	if metricsAddrV != "" {
 		go serveMetrics(metricsAddrV, set)
+	}
+
+	// Deliver WebDAV-Push notifications in the background (advertisement and
+	// registration already work through the plugin; this drives delivery).
+	if pushWorker != nil {
+		go pushWorker.Run(ctx)
 	}
 
 	httpSrv := &http.Server{
@@ -101,6 +117,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Shut the HTTP server down when a termination signal cancels ctx, so the
+	// listener stops and the push worker's ctx (shared) unwinds its LISTEN
+	// connection cleanly.
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutCtx); err != nil {
+			slog.Warn("graceful shutdown", "err", err)
+		}
+	}()
+
 	ver, commit, built := version.Info()
 	slog.Info("listening", "addr", addrV, "base_uri", m.Server.BaseURI, "db", m.DSN != "", "tls", tls,
 		"version", ver, "commit", commit, "built", built)
@@ -109,7 +137,9 @@ func main() {
 	} else {
 		err = httpSrv.ListenAndServe()
 	}
-	if err != nil {
+	// A clean Shutdown returns ErrServerClosed from ListenAndServe; that is the
+	// expected exit on SIGINT/SIGTERM, not a failure.
+	if err != nil && err != http.ErrServerClosed {
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
 	}

@@ -85,6 +85,25 @@ type Config struct {
 		// RetentionDays). Only consulted when scheduling a deletion.
 		DeletedDays int
 	}
+	// Push holds WebDAV-Push settings (PUSH-PLAN.md). Off by default; when
+	// Enabled, the VAPID keys and TopicSecret must be set or the server fails
+	// closed at startup.
+	Push struct {
+		// Enabled turns on WebDAV-Push advertisement, registration, and
+		// notification delivery.
+		Enabled bool
+		// VAPIDSubject is the RFC 8292 'sub' claim (a mailto: or https: URL
+		// identifying this server to the push service).
+		VAPIDSubject string
+		// VAPIDPublicKey / VAPIDPrivateKey are the base64url-encoded P-256
+		// VAPID keypair (generate once; the private key is a secret).
+		VAPIDPublicKey  string
+		VAPIDPrivateKey string
+		// TopicSecret is the HMAC key deriving the opaque per-collection push
+		// topic. A secret; changing it re-topics every collection (clients
+		// re-register on their next discovery).
+		TopicSecret string
+	}
 }
 
 // DefaultRetentionDays is the fallback grace period for soft-deleted accounts
@@ -190,6 +209,11 @@ func Load(path string) (*Config, error) {
 	cfg.CalendarServer.PrincipalsReadable = boolean("calendarserver.principals_readable")
 	cfg.CalendarServer.AutoSchedulePrefixes = list("calendarserver.auto_schedule_prefixes")
 	cfg.Retention.DeletedDays = integer("retention.deleted_days")
+	cfg.Push.Enabled = boolean("push.enabled")
+	cfg.Push.VAPIDSubject = str("push.vapid_subject")
+	cfg.Push.VAPIDPublicKey = str("push.vapid_public_key")
+	cfg.Push.VAPIDPrivateKey = str("push.vapid_private_key")
+	cfg.Push.TopicSecret = str("push.topic_secret")
 
 	for key := range flat {
 		if !known[key] {
@@ -240,6 +264,11 @@ var known = map[string]bool{
 	"calendarserver.principals_readable":    true,
 	"calendarserver.auto_schedule_prefixes": true,
 	"retention.deleted_days":                true,
+	"push.enabled":                          true,
+	"push.vapid_subject":                    true,
+	"push.vapid_public_key":                 true,
+	"push.vapid_private_key":                true,
+	"push.topic_secret":                     true,
 }
 
 // parse reads the TOML subset into a flat map keyed by "section.key".

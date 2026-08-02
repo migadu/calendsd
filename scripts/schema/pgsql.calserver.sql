@@ -67,6 +67,40 @@ CREATE INDEX deleted_principals_purge_after_ix
     ON deleted_principals USING btree (purge_after);
 
 
+-- WebDAV-Push subscriptions (PUSH-PLAN.md). One row per (collection, Web Push
+-- endpoint): a client POSTs a {https://bitfire.at/webdav-push}push-register body
+-- to a calendar/addressbook collection and the dispatcher (internal/push) sends
+-- an encrypted Web Push message when that collection's synctoken changes. This
+-- is a NEW calserver-only table; a co-resident sabre never references it.
+--
+-- collection_id is the numeric calendars.id / addressbooks.id (as text) the
+-- pg_notify('dav_push', 'calendar:<id>') payload carries. token is the opaque,
+-- random id that names the subscription resource for DELETE (unsubscribe).
+-- last_synctoken is seeded to the collection's current synctoken at register
+-- time so the startup catch-up sweep only fires for changes actually missed.
+CREATE TABLE push_subscriptions (
+    id               BIGSERIAL PRIMARY KEY,
+    token            TEXT NOT NULL,             -- opaque resource id (Location)
+    collection_kind  TEXT NOT NULL,             -- 'calendar' | 'addressbook'
+    collection_id    TEXT NOT NULL,             -- numeric calendars/addressbooks id
+    collection_path  TEXT NOT NULL,             -- base-relative path (for ACL re-check)
+    principal_uri    TEXT NOT NULL,             -- subscriber (for ACL re-check + scoping)
+    push_resource    TEXT NOT NULL,             -- Web Push endpoint (RFC 8030)
+    p256dh           TEXT NOT NULL,             -- subscription public key
+    auth_secret      TEXT NOT NULL,             -- subscription auth secret
+    last_synctoken   BIGINT NOT NULL DEFAULT 0, -- last synctoken pushed to this sub
+    expires          TIMESTAMPTZ NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Re-registering the same endpoint on the same collection updates the row
+    -- (keys/expiry) rather than duplicating it (WebDAV-Push §5 idempotency).
+    UNIQUE (collection_kind, collection_id, push_resource)
+);
+
+CREATE UNIQUE INDEX push_subscriptions_token ON push_subscriptions (token);
+CREATE INDEX push_subscriptions_lookup
+    ON push_subscriptions (collection_kind, collection_id);
+
+
 -- Drop sabre's over-strict calendarinstances_principaluri_share_href unique
 -- index. A sharee row stores the invitee's address (e.g. mailto:bob@…) in
 -- share_href and their principal in principaluri, both identical across every

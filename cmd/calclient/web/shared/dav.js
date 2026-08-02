@@ -8,6 +8,9 @@ export const NS = {
   cs: 'http://calendarserver.org/ns/',
   a: 'http://apple.com/ns/ical/',
   s: 'http://sabredav.org/ns',
+  // calclient's own namespace, for app-private dead properties (e.g. the
+  // synced user-preferences blob). Other DAV clients round-trip it untouched.
+  x: 'https://calclient.app/ns',
 };
 
 // ---- session -------------------------------------------------------------
@@ -86,7 +89,7 @@ export function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const XMLNS = `xmlns:d="${NS.d}" xmlns:c="${NS.c}" xmlns:card="${NS.card}" xmlns:cs="${NS.cs}" xmlns:a="${NS.a}" xmlns:s="${NS.s}"`;
+const XMLNS = `xmlns:d="${NS.d}" xmlns:c="${NS.c}" xmlns:card="${NS.card}" xmlns:cs="${NS.cs}" xmlns:a="${NS.a}" xmlns:s="${NS.s}" xmlns:x="${NS.x}"`;
 
 // props: array of prefixed names like 'd:displayname', 'cs:getctag'.
 export function propfindBody(props) {

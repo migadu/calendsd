@@ -6,6 +6,7 @@ import { openEventDialog } from './event-dialog.js';
 import { renderInvites, toggleInvites } from './invites.js';
 import { renderContacts } from './contacts.js';
 import { renderSettings } from './settings.js';
+import * as pushSync from './push-sync.js';
 
 // ---- tiny DOM helpers (shared with the other modules) --------------------
 
@@ -316,6 +317,10 @@ function calendarMenu(cal) {
 // ---- store subscriptions -------------------------------------------------
 
 store.bus.addEventListener('calendars', renderSidebar);
+// WebDAV-Push: refresh instantly on an incoming push, and keep the browser's
+// subscriptions in step with the user's calendars (a no-op unless enabled).
+pushSync.wirePushRefresh();
+store.bus.addEventListener('calendars', () => pushSync.syncSubscriptions());
 store.bus.addEventListener('events', () => { if (currentView === 'calendar') render(); });
 store.bus.addEventListener('contacts', () => { if (currentView === 'contacts') render(); });
 // The bell counts scheduling invitations plus still-unanswered calendar shares.

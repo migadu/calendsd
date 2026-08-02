@@ -32,3 +32,14 @@ func Principal(ctx context.Context) string {
 	}
 	return ""
 }
+
+// ContextWithPrincipal returns a context carrying principal as the
+// authenticated principal, for server-internal callers that act on a
+// principal's behalf outside an HTTP request. The WebDAV-Push worker uses it
+// to re-check {DAV:}read via the ACL plugin before dispatching a notification,
+// reproducing the principal state ServeHTTP installs on a real request.
+func ContextWithPrincipal(ctx context.Context, principal string) context.Context {
+	ctx = withPrincipalState(ctx)
+	SetPrincipal(ctx, principal)
+	return ctx
+}

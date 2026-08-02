@@ -23,6 +23,7 @@ import (
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
 	"calserver/internal/metrics"
+	"calserver/internal/push"
 	"calserver/internal/storage"
 )
 
@@ -91,6 +92,21 @@ type Config struct {
 	// with config.RetentionDays so it is never zero here. Not part of
 	// Canonical(): it changes no DAV semantics.
 	RetentionDays int
+	// Push holds WebDAV-Push settings (PUSH-PLAN.md). When Enabled, compose()
+	// registers the push plugin and asserts the VAPID keys / topic secret are
+	// present (fail closed). The worker that delivers notifications is started
+	// separately via NewWithBackground.
+	Push PushConfig
+}
+
+// PushConfig carries the WebDAV-Push VAPID keypair and topic secret. Mirrors
+// config.Config.Push; kept in this package so callers depend only on server.
+type PushConfig struct {
+	Enabled         bool
+	VAPIDSubject    string
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	TopicSecret     string
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -115,16 +131,54 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
 		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog)
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
+}
+
+// pushConfig projects the server config onto the push package's config,
+// filling in the mount prefix the plugin needs for absolute Location URLs.
+func (c Config) pushConfig() push.Config {
+	base := c.BaseURI
+	if base == "" {
+		base = "/"
+	}
+	if !strings.HasPrefix(base, "/") {
+		base = "/" + base
+	}
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
+	}
+	return push.Config{
+		VAPIDSubject:    c.Push.VAPIDSubject,
+		VAPIDPublicKey:  c.Push.VAPIDPublicKey,
+		VAPIDPrivateKey: c.Push.VAPIDPrivateKey,
+		TopicSecret:     c.Push.TopicSecret,
+		BaseURI:         base,
+	}
 }
 
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
 // redirect real clients use for discovery (RFC 6764).
 func New(db *sql.DB, cfg Config) http.Handler {
+	h, _ := NewWithBackground(db, cfg, "")
+	return h
+}
+
+// NewWithBackground is New plus any long-running background service the config
+// enables. When [push] is on and dsn is non-empty, worker is non-nil and the
+// caller MUST run worker.Run(ctx) to deliver notifications (advertisement and
+// registration work without it; only delivery needs the worker). dsn is the
+// Postgres DSN the worker opens its dedicated LISTEN connection with.
+func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.Worker) {
 	srv := newDAVServer(db, cfg)
+	var worker *push.Worker
+	if cfg.Push.Enabled && dsn != "" {
+		store := &push.Store{DB: db}
+		worker = push.NewWorker(cfg.pushConfig(), store,
+			push.NewWebPushSender(cfg.pushConfig()), srv, dsn, slog.Default())
+	}
 	var h http.Handler = WrapWellKnown(srv, srv.BaseURI)
 	// Request logging wraps outside the well-known redirect so it captures the
 	// final status of every request, including redirects and auth challenges.
@@ -134,7 +188,7 @@ func New(db *sql.DB, cfg Config) http.Handler {
 	h = WrapAccessLog(h, cfg.AccessLog)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
-	return WrapMetrics(h, cfg.Metrics, srv.BaseURI)
+	return WrapMetrics(h, cfg.Metrics, srv.BaseURI), worker
 }
 
 // WrapWellKnown adds the /.well-known/caldav → base-URI redirect.
@@ -242,6 +296,17 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
 	})
 	srv.AddPlugin(&caldav.Plugin{})
+	// WebDAV-Push (PUSH-PLAN.md). Registered here on purpose: after the ACL
+	// plugin (so its PropFind values honor the read-deny latch) and after
+	// caldav.Plugin, but before SharingPlugin (so a collection POST reaches it
+	// first and a non-push body is passed on intact). Enabled-but-unconfigured
+	// fails closed at startup, mirroring the ACL assertion below.
+	if cfg.Push.Enabled {
+		if !cfg.pushConfig().Valid() {
+			panic("server: [push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+		}
+		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), &push.Store{DB: db}))
+	}
 	schedule := &caldav.SchedulePlugin{ExpandGroups: cfg.ExpandGroups}
 	if len(cfg.AutoSchedulePrefixes) > 0 {
 		prefixes := cfg.AutoSchedulePrefixes

@@ -2,6 +2,7 @@
 
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
+import * as pushSync from './push-sync.js';
 import { $, h, esc, toast, showError } from './main.js';
 
 export function renderSettings(main) {
@@ -30,6 +31,7 @@ export function renderSettings(main) {
         </select></label>
       <label>Default event length
         <select id="st-defdur">
+          <option value="15" ${p.defaultDuration === 15 ? 'selected' : ''}>15 minutes</option>
           <option value="30" ${p.defaultDuration === 30 ? 'selected' : ''}>30 minutes</option>
           <option value="60" ${p.defaultDuration === 60 ? 'selected' : ''}>1 hour</option>
           <option value="90" ${p.defaultDuration === 90 ? 'selected' : ''}>1.5 hours</option>
@@ -48,6 +50,14 @@ export function renderSettings(main) {
     <section>
       <h2>Export</h2>
       <div id="st-export"></div>
+    </section>
+    <section>
+      <h2>Notifications</h2>
+      <label class="row"><input type="checkbox" id="st-push" ${pushSync.pushEnabled() ? 'checked' : ''} ${pushSync.pushSupported() ? '' : 'disabled'}>
+        Instant updates (push)</label>
+      <p class="note">${pushSync.pushSupported()
+        ? 'Get changes within seconds via WebDAV-Push instead of waiting for the periodic refresh. Your browser will ask permission to show notifications.'
+        : 'This browser cannot receive push (it needs a secure context — https, or localhost during development).'}</p>
     </section>
     <section>
       <h2>Account</h2>
@@ -90,6 +100,16 @@ export function renderSettings(main) {
   $('#st-defdur', el).addEventListener('change', ev => store.savePrefs({ defaultDuration: +ev.target.value }));
   tzSel.addEventListener('change', ev => store.savePrefs({ tz: ev.target.value }));
   defSel.addEventListener('change', ev => store.savePrefs({ defaultCal: ev.target.value }));
+
+  $('#st-push', el)?.addEventListener('change', async ev => {
+    try {
+      await pushSync.setPushEnabled(ev.target.checked);
+      toast(ev.target.checked ? 'Instant updates on.' : 'Instant updates off.');
+    } catch (e) {
+      ev.target.checked = pushSync.pushEnabled();
+      showError(e);
+    }
+  });
 
   const exp = $('#st-export', el);
   for (const c of store.state.calendars) {

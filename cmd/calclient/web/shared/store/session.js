@@ -8,6 +8,7 @@ import { loadCalendars } from './calendars.js';
 import { loadInvites } from './invites.js';
 import { loadShareNotifications } from './sharing.js';
 import { loadContacts } from './contacts.js';
+import { loadServerPrefs, wirePrefsSync, resetPrefsSync } from './prefs.js';
 
 const { NS, key } = dav;
 
@@ -33,6 +34,7 @@ export function logout() {
   dav.session.logout();
   localStorage.removeItem('calweb.user');
   localStorage.removeItem('calweb.auth');
+  resetPrefsSync();
   stopPolling();
   emit('session');
 }
@@ -75,6 +77,11 @@ async function discover() {
 }
 
 async function bootstrap() {
+  // Mirror pref changes to the server from here on, then pull the account's
+  // stored prefs over the local cache before the first render so this device
+  // adopts the settings last saved on any device.
+  wirePrefsSync();
+  await loadServerPrefs();
   await loadCalendars();
   loadInvites().catch(() => {});
   loadShareNotifications().catch(() => {});

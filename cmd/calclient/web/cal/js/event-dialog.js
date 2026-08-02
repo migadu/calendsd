@@ -107,6 +107,13 @@ export async function openEventDialog(inst, defaultDay, timed) {
   dlg.addEventListener('click', ev => { if (ev.target === dlg) close(); });
   // Esc cancels the editor (unless a child, e.g. the guest list, handled it).
   dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } });
+  // Enter submits from any single-line field. The Notes textarea keeps Enter
+  // for newlines, and the guest field owns Enter for its autocomplete.
+  dlg.addEventListener('keydown', ev => {
+    if (ev.key !== 'Enter' || ev.target.tagName === 'TEXTAREA' || ev.target.id === 'ev-guest') return;
+    ev.preventDefault();
+    q('#ev-save').click();
+  });
   q('#ev-cancel').addEventListener('click', close);
 
   // calendars — an event can only live on a writable calendar, so the picker
@@ -150,7 +157,34 @@ export async function openEventDialog(inst, defaultDay, timed) {
     }
   }
   syncDateInputs();
-  allDayBox.addEventListener('change', syncDateInputs);
+
+  // Moving the start drags the end with it, keeping the duration fixed — so
+  // changing a 1–2pm slot to 5pm makes it 5–6pm. We track the previous start
+  // and shift the end by the same delta. Re-baseline whenever the all-day
+  // toggle rewrites both inputs.
+  const startInp = q('#ev-start'), endInp = q('#ev-end');
+  // Native datetime-local pickers show 12- or 24-hour time per the element's
+  // locale, not the app's. Force it to follow the user's clock preference via
+  // `lang` (honored by Chromium): a 24-hour locale when 12-hour is off, a
+  // 12-hour one when it's on, so the editor matches the rest of the UI.
+  const timeLang = store.state.prefs.hour12 ? 'en-US' : 'en-GB';
+  startInp.setAttribute('lang', timeLang);
+  endInp.setAttribute('lang', timeLang);
+  const parseInput = inp => {
+    if (!inp.value) return null;
+    return inp.type === 'date' ? new Date(inp.value + 'T00:00') : new Date(inp.value);
+  };
+  const setInput = (inp, d) => { inp.value = inp.type === 'date' ? localDate(d) : localDT(d); };
+  let prevStart = parseInput(startInp);
+  startInp.addEventListener('input', () => {
+    const ns = parseInput(startInp);
+    if (!ns) return;
+    const delta = prevStart ? +ns - +prevStart : 0;
+    const ce = parseInput(endInp);
+    if (delta && ce) setInput(endInp, new Date(+ce + delta));
+    prevStart = ns;
+  });
+  allDayBox.addEventListener('change', () => { syncDateInputs(); prevStart = parseInput(startInp); });
 
   // repeat controls
   const freqSel = q('#ev-freq'), endsWrap = q('#ev-ends-wrap'), endsSel = q('#ev-ends');
