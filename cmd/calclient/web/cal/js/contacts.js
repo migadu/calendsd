@@ -5,7 +5,7 @@
 import * as store from '/shared/store.js';
 import { $, html, frag, brJoin } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
-import { confirmDialog, openOverlay } from '/shared/dialogs.js';
+import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
 
 let filter = '';
 // Sidebar selection: {type:'all'} | {type:'book', href} | {type:'group', href}.
@@ -47,37 +47,84 @@ export function renderContacts(main) {
 }
 
 // buildSidebar renders the address-book list (with an "All Contacts" entry) and,
-// below it, any contact groups — each a selectable filter for the list.
+// below it, any contact groups. Each heading carries a ＋ to create one; each
+// book/group (not "All Contacts") reveals a × to delete it.
 function buildSidebar(side, books, groups) {
   side.innerHTML = '';
-  const item = (label, count, active, onClick, cls) => {
-    const b = html`<button type="button" class="ct-nav ${cls}${active ? ' active' : ''}">
+  const heading = (title, onAdd) => {
+    const h = html`<div class="ct-side-h"><span>${title}</span></div>`;
+    const add = html`<button type="button" class="ct-side-add" aria-label="Add ${title}" title="Add ${title}">＋</button>`;
+    add.addEventListener('click', onAdd);
+    h.append(add);
+    side.append(h);
+  };
+  const item = (label, count, active, onClick, cls, onDelete) => {
+    const btn = html`<button type="button" class="ct-nav ${cls}${active ? ' active' : ''}">
       <span class="ct-nav-label">${label}</span>
       ${count != null && frag`<span class="ct-nav-count">${count}</span>`}
     </button>`;
-    b.addEventListener('click', onClick);
-    side.append(b);
+    btn.addEventListener('click', onClick);
+    if (!onDelete) { side.append(btn); return; }
+    // A button can't nest a button, so the delete control is a sibling in a row.
+    const row = html`<div class="ct-nav-row"></div>`;
+    const del = html`<button type="button" class="ct-nav-del" aria-label="Delete ${label}" title="Delete">×</button>`;
+    del.addEventListener('click', ev => { ev.stopPropagation(); onDelete(); });
+    row.append(btn, del);
+    side.append(row);
   };
-  const heading = title => side.append(html`<div class="ct-side-h">${title}</div>`);
 
-  heading('Address Books');
+  heading('Address Books', addBookFlow);
   item('All Contacts', store.state.contacts.length, selection.type === 'all',
     () => select({ type: 'all' }), 'ct-book');
   for (const book of books) {
     const count = store.state.contacts.filter(c => c.book === book.href).length;
     item(book.displayName, count,
       selection.type === 'book' && selection.href === book.href,
-      () => select({ type: 'book', href: book.href }), 'ct-book');
+      () => select({ type: 'book', href: book.href }), 'ct-book',
+      () => deleteBookFlow(book, count));
   }
 
-  if (groups.length) {
-    heading('Groups');
-    for (const g of groups) {
-      item(g.fn || 'Group', g.members.length,
-        selection.type === 'group' && selection.href === g.href,
-        () => select({ type: 'group', href: g.href }), 'ct-group');
-    }
+  heading('Groups', addGroupFlow);
+  for (const g of groups) {
+    item(g.fn || 'Group', g.members.length,
+      selection.type === 'group' && selection.href === g.href,
+      () => select({ type: 'group', href: g.href }), 'ct-group',
+      () => deleteGroupFlow(g));
   }
+}
+
+async function addBookFlow() {
+  const name = await promptDialog('Name for the new address book', { confirmLabel: 'Create' });
+  if (!name?.trim()) return;
+  try { await store.createBook(name.trim()); toast(`Address book “${name.trim()}” created.`); }
+  catch (e) { showError(e); }
+}
+
+async function deleteBookFlow(book, count) {
+  const msg = count
+    ? `Delete “${book.displayName}” and its ${count} contact${count === 1 ? '' : 's'}? This cannot be undone.`
+    : `Delete “${book.displayName}”?`;
+  if (!await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) return;
+  if (selection.type === 'book' && selection.href === book.href) selection = { type: 'all' };
+  try { await store.deleteBook(book.href); toast('Address book deleted.'); }
+  catch (e) { showError(e); }
+}
+
+async function addGroupFlow() {
+  const name = await promptDialog('Name for the new group', { confirmLabel: 'Create' });
+  if (!name?.trim()) return;
+  try {
+    await store.createGroup(name.trim(), selection.type === 'book' ? selection.href : undefined);
+    toast(`Group “${name.trim()}” created.`);
+  } catch (e) { showError(e); }
+}
+
+async function deleteGroupFlow(g) {
+  if (!await confirmDialog(`Delete the group “${g.fn || 'Group'}”? The contacts in it aren't deleted.`,
+    { confirmLabel: 'Delete', danger: true })) return;
+  if (selection.type === 'group' && selection.href === g.href) selection = { type: 'all' };
+  try { await store.deleteGroup(g.href); toast('Group deleted.'); }
+  catch (e) { showError(e); }
 }
 
 function select(sel) {
@@ -173,7 +220,194 @@ function contactDetail(c) {
     try { await store.deleteContact(c.href); close(); toast('Contact deleted.'); }
     catch (e) { showError(e); }
   });
+
+  // Surface a merge path only on the handful of cards that actually have a
+  // likely duplicate — no global banner, no permanent toolbar button.
+  const dup = store.findDuplicatesOf(c, store.state.contacts);
+  if (dup) {
+    const others = dup.contacts.filter(x => x.href !== c.href);
+    const label = others.length === 1
+      ? `Possible duplicate of ${others[0].fn || 'another contact'}`
+      : `Possible duplicate of ${others.length} contacts`;
+    const banner = html`<div class="dup-banner">
+      <span>${label}</span><button type="button" class="ghost">Review &amp; merge</button>
+    </div>`;
+    banner.querySelector('button').addEventListener('click', () => { close(); mergeDialog(dup); });
+    $('.detail-body', dlg).prepend(banner);
+  }
   $('#cv-close', dlg).focus();
+}
+
+// confidenceBadge labels a cluster: strong email/phone overlap ("Likely") vs a
+// name-only match ("Possible").
+function confidenceBadge(confidence) {
+  return frag`<span class="type-tag">${confidence === 'high' ? 'Likely' : 'Possible'}</span>`;
+}
+
+const SCALAR_LABELS = { org: 'Organization', title: 'Job title', url: 'Website', bday: 'Birthday', note: 'Notes' };
+const CONFLICT_LABELS = { fn: 'Name', ...SCALAR_LABELS };
+
+// humanType renders a vCard TYPE (CELL/HOME/WORK) the way the rest of the UI
+// does — capitalized, with CELL shown as the friendlier "Mobile".
+function humanType(t) {
+  if (!t) return '';
+  return t.toUpperCase() === 'CELL' ? 'Mobile' : t[0] + t.slice(1).toLowerCase();
+}
+
+// Friendly names for the vCard properties the editor doesn't model but the
+// merge still carries through (see mergePreview's `preserve`).
+const PRESERVED_LABELS = {
+  PHOTO: 'Photo', LOGO: 'Logo', CATEGORIES: 'Categories', NICKNAME: 'Nickname',
+  IMPP: 'Instant messaging', ADR: 'Additional address', GEO: 'Location',
+  ANNIVERSARY: 'Anniversary', ROLE: 'Role', RELATED: 'Related', LANG: 'Language',
+  SOUND: 'Sound', KEY: 'Key', TZ: 'Time zone', GENDER: 'Gender',
+};
+
+// preservedLabels turns the carried-through property lines into a deduped,
+// human list (with a count when a property repeats), so the preview can show
+// that nothing beyond the modeled fields is silently dropped.
+function preservedLabels(lines) {
+  const counts = new Map();
+  for (const l of lines) {
+    const name = (/^([^;:]+)/.exec(l)?.[1] || '').toUpperCase();
+    if (!name) continue;
+    const label = PRESERVED_LABELS[name]
+      || (name.startsWith('X-') ? name : name[0] + name.slice(1).toLowerCase());
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts].map(([label, n]) => (n > 1 ? `${label} (${n})` : label));
+}
+
+// previewPanel renders the card a merge would produce. Fields the cluster
+// disagrees on (name, org, …) become a <select> (class mg-conflict) so the user
+// picks the winner; everything else — including the unioned emails and phones,
+// each with its Home/Mobile/Work type — is shown read-only.
+function previewPanel(p) {
+  const el = html`<div class="mg-preview"><div class="fg-head"><span>Merged result</span></div></div>`;
+  const line = (label, value) => el.append(
+    html`<div class="detail-row"><span class="dl">${label}</span><span class="dv">${value}</span></div>`);
+  const tag = t => t && frag` <span class="type-tag">${humanType(t)}</span>`;
+  const conflicted = new Set(p.conflicts.map(c => c.field));
+  if (!conflicted.has('fn')) line('Name', p.fn);
+  for (const e of p.emails) line('Email', frag`${e.value}${tag(e.type)}`);
+  for (const t of p.tels) line('Phone', frag`${t.value}${tag(t.type)}`);
+  for (const c of p.conflicts) {
+    // The <select> is a live element, so append it into the row's value cell
+    // rather than interpolating it (the template engine would stringify it).
+    const row = html`<div class="detail-row"><span class="dl">${CONFLICT_LABELS[c.field] || c.field}</span><span class="dv"></span></div>`;
+    row.querySelector('.dv').append(
+      html`<select class="mg-conflict" data-field="${c.field}">${
+        c.values.map(v => frag`<option value="${v}" ${v === p[c.field] ? 'selected' : ''}>${v}</option>`)}</select>`);
+    el.append(row);
+  }
+  for (const [field, label] of Object.entries(SCALAR_LABELS)) {
+    if (conflicted.has(field) || !p[field]) continue;
+    line(label, field === 'note' ? brJoin(p[field].split('\n')) : p[field]);
+  }
+  const a = p.adr || {};
+  const addr = [a.street, [a.postal, a.city].filter(Boolean).join(' '), a.region, a.country].filter(Boolean);
+  if (addr.length) line('Address', brJoin(addr));
+  // Everything the editor doesn't model (photo, categories, X-*, a second
+  // address, …) is merged too — name it so nothing looks dropped.
+  const kept = preservedLabels(p.preserve);
+  if (kept.length) line('Also kept', frag`<span class="mail">${kept.join(', ')}</span>`);
+  return el;
+}
+
+// mergeDialog is the shared review dialog for one duplicate cluster, opened from
+// the per-contact affordance or the Settings sweep. Resolves true if a merge
+// was performed (so the sweep can refresh), false on any dismissal.
+function mergeDialog(cluster) {
+  return new Promise(resolve => {
+    const preview = store.mergePreview(cluster);
+    const n = preview.losers.length;
+    const dlg = html`<div class="overlay"><div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-label="Merge duplicates">
+      <h2>Merge ${cluster.contacts.length} contacts ${confidenceBadge(cluster.confidence)}</h2>
+      <p class="note">Their emails, phones and addresses are combined into one card.${
+        preview.conflicts.length ? ' Choose a value where the contacts disagree.' : ''}</p>
+      <div id="mg-body"></div>
+      <p class="error" id="mg-error"></p>
+      <div class="actions">
+        <button id="mg-cancel">Cancel</button>
+        <button class="primary" id="mg-merge">Merge…</button>
+      </div>
+    </div></div>`;
+    // While the merge is in flight the dialog stays open and locked — a spinner
+    // on the button, and scrim/Escape/Cancel ignored — so its several
+    // round-trips can't be interrupted half-applied.
+    let busy = false;
+    const done = merged => { dlg.remove(); resolve(merged); };
+    openOverlay(dlg, () => { if (!busy) done(false); });
+    $('#mg-body', dlg).append(previewPanel(preview));
+
+    const mergeBtn = $('#mg-merge', dlg), cancelBtn = $('#mg-cancel', dlg);
+    cancelBtn.addEventListener('click', () => { if (!busy) done(false); });
+    mergeBtn.addEventListener('click', async () => {
+      // Apply the user's choice for each conflicting field. A chosen display
+      // name also pulls its matching N (first/last) so they stay consistent.
+      for (const sel of dlg.querySelectorAll('.mg-conflict')) preview[sel.dataset.field] = sel.value;
+      const nm = preview.nameOptions.find(o => o.fn === preview.fn);
+      if (nm) { preview.first = nm.first; preview.last = nm.last; }
+      if (!await confirmDialog(`Merge these ${n + 1} contacts into one? The other ${n} will be deleted.`,
+        { confirmLabel: 'Merge', danger: true })) return;
+      busy = true;
+      $('#mg-error', dlg).textContent = '';
+      mergeBtn.disabled = cancelBtn.disabled = true;
+      mergeBtn.classList.add('is-busy');
+      mergeBtn.textContent = 'Merging…';
+      try {
+        await store.mergeContacts(preview, preview.losers);
+        toast('Contacts merged.');
+        done(true);
+      } catch (e) {
+        busy = false;
+        mergeBtn.disabled = cancelBtn.disabled = false;
+        mergeBtn.classList.remove('is-busy');
+        mergeBtn.textContent = 'Merge…';
+        if (e.conflict) $('#mg-error', dlg).textContent = e.message;
+        else showError(e);
+      }
+    });
+  });
+}
+
+// contactsDedupSweep is the whole-book cleanup opened from Settings: lists every
+// duplicate cluster with a Review button, refreshing as merges complete.
+export function contactsDedupSweep() {
+  const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Duplicate contacts">
+    <button class="dialog-close" id="dd-x" aria-label="Close">×</button>
+    <h2 id="dd-title">Duplicate contacts</h2>
+    <div id="dd-list" class="dd-list"></div>
+    <div class="actions"><button class="primary" id="dd-close">Done</button></div>
+  </div></div>`;
+  const close = () => dlg.remove();
+  openOverlay(dlg, close);
+  $('#dd-x', dlg).addEventListener('click', close);
+  $('#dd-close', dlg).addEventListener('click', close);
+
+  const list = $('#dd-list', dlg);
+  const paint = () => {
+    const clusters = store.findDuplicateClusters(store.state.contacts);
+    // Count the cards that would be removed by merging every group (all but the
+    // one kept per group) — the tangible "how many duplicates" number.
+    const extra = clusters.reduce((n, cl) => n + cl.contacts.length - 1, 0);
+    $('#dd-title', dlg).textContent = extra
+      ? `Duplicate contacts — ${extra} in ${clusters.length} ${clusters.length === 1 ? 'group' : 'groups'}`
+      : 'Duplicate contacts';
+    list.innerHTML = '';
+    if (!clusters.length) { list.append(html`<p class="empty">No duplicates found.</p>`); return; }
+    for (const cl of clusters) {
+      const row = html`<div class="dd-row">
+        <span class="who"><div>${cl.contacts.map(c => c.fn || 'Unnamed').join(', ')}</div>
+          <div class="mail">${cl.contacts.length} cards ${confidenceBadge(cl.confidence)}</div></span>
+      </div>`;
+      const btn = html`<button type="button">Review</button>`;
+      btn.addEventListener('click', async () => { if (await mergeDialog(cl)) paint(); });
+      row.append(btn);
+      list.append(row);
+    }
+  };
+  paint();
 }
 
 // formatBday renders YYYY-MM-DD / YYYYMMDD as a friendly date.

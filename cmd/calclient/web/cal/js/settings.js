@@ -5,6 +5,7 @@ import * as ical from '/shared/ical.js';
 import * as pushSync from './push-sync.js';
 import { $, html, frag } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
+import { contactsDedupSweep } from './contacts.js';
 
 export function renderSettings(main) {
   main.innerHTML = '';
@@ -46,7 +47,13 @@ export function renderSettings(main) {
       <h2>Import</h2>
       <label>Add events or contacts from a file (.ics or .vcf)
         <input id="st-import" type="file" accept=".ics,.vcf,text/calendar,text/vcard"></label>
+      <progress id="st-import-bar" class="import-bar" value="0" max="1" hidden></progress>
       <p class="note" id="st-import-note"></p>
+    </section>
+    <section>
+      <h2>Contacts</h2>
+      <p><button id="st-dedup">Find duplicate contacts…</button></p>
+      <p class="note">Scans each address book for cards that share an email, phone, or name, and lets you review and merge them.</p>
     </section>
     <section>
       <h2>Export</h2>
@@ -111,6 +118,8 @@ export function renderSettings(main) {
       showError(e);
     }
   });
+
+  $('#st-dedup', el).addEventListener('click', () => contactsDedupSweep());
 
   const exp = $('#st-export', el);
   for (const c of store.state.calendars) {

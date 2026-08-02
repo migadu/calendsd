@@ -5,7 +5,8 @@
 import * as dav from '../dav.js';
 import * as ical from '../ical.js';
 import { state, emit, check } from './core.js';
-import { putObject, deleteObject } from './objects.js';
+import { getObject, putObject, deleteObject } from './objects.js';
+import { rewriteMemberLines } from './dedup.js';
 
 const { NS, key } = dav;
 
@@ -131,6 +132,97 @@ export async function saveContact(model, targetBook) {
 export async function deleteContact(href) {
   await deleteObject(href);
   await loadContacts();
+}
+
+// createBook makes a new address book (CardDAV MKCOL), deriving a URL-safe,
+// collision-free collection name from the display name.
+export async function createBook(displayName) {
+  const name = displayName.trim() || 'Contacts';
+  const base = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'contacts';
+  let slug = base;
+  for (let n = 2; state.books.some(b => b.href === state.abHome + slug + '/'); n++) slug = `${base}-${n}`;
+  const href = state.abHome + slug + '/';
+  const body = dav.xmlDoc('d:mkcol', '', dav.xml`<d:set><d:prop>
+    <d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>
+    <d:displayname>${name}</d:displayname></d:prop></d:set>`);
+  check(await dav.req('MKCOL', href, {
+    headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
+  }), [201]);
+  await loadContacts();
+  return href;
+}
+
+// deleteBook removes an address book and everything in it.
+export async function deleteBook(href) {
+  await deleteObject(href);
+  await loadContacts();
+}
+
+// createGroup writes an empty group card (X-ADDRESSBOOKSERVER-KIND:group) into
+// targetBook, or the first/auto-created book. Members are added elsewhere.
+export async function createGroup(name, targetBook) {
+  const uid = crypto.randomUUID();
+  const fn = ical.icalEscape((name || '').trim() || 'New Group');
+  const dir = targetBook || (await ensureBook());
+  const text = ['BEGIN:VCARD', 'VERSION:3.0', `UID:${uid}`, `FN:${fn}`, `N:${fn};;;;`,
+    'X-ADDRESSBOOKSERVER-KIND:group', 'END:VCARD'].join('\r\n') + '\r\n';
+  await putObject(dir + encodeURIComponent(uid) + '.vcf', text, null, 'text/vcard; charset=utf-8');
+  await loadContacts();
+}
+
+// deleteGroup removes a group card; its member contacts are unaffected.
+export async function deleteGroup(href) {
+  await deleteObject(href);
+  await loadContacts();
+}
+
+function mergeConflict() {
+  const e = new Error('A contact changed since you opened this — the list has been reloaded. Please review the duplicates again.');
+  e.conflict = true;
+  return e;
+}
+
+// mergeContacts collapses a duplicate cluster into `survivor` (a merged model
+// carrying the survivor card's href/etag/uid) and removes the `losers`
+// ([{href, etag, uid}]). Ordering makes a mid-merge failure safe: the survivor
+// is written first, then group references are repointed, then losers deleted —
+// so at any interruption the book holds either the merged survivor plus
+// not-yet-deleted losers (re-running dedup finishes the job) or the untouched
+// originals. This idempotency, not an undo, is the safety story.
+export async function mergeContacts(survivor, losers) {
+  // The preview was built from possibly-stale in-memory models; re-fetch and
+  // confirm nothing moved under us before writing (each ETag-guarded step would
+  // 412 anyway, but failing early avoids a half-applied merge).
+  await loadContacts();
+  const byHref = new Map(state.contacts.map(c => [c.href, c]));
+  const cur = byHref.get(survivor.href);
+  if (!cur || cur.etag !== survivor.etag) throw mergeConflict();
+  for (const l of losers) {
+    const c = byHref.get(l.href);
+    if (!c || c.etag !== l.etag) throw mergeConflict();
+  }
+
+  await saveContact(survivor); // in-place overwrite (If-Match survivor.etag)
+  await rewriteGroupMembers(losers.map(l => l.uid), survivor.uid);
+  for (const l of losers) await deleteObject(l.href, l.etag);
+  await loadContacts();
+}
+
+// rewriteGroupMembers repoints every group card that lists a merged-away UID at
+// the survivor's UID, so a merge never leaves a group with a dangling member.
+// saveContact/buildVCard are shaped for person cards (they emit FN/N and treat
+// member lines as opaque preserve text), so this is text surgery on the raw
+// card followed by an ETag-guarded PUT. The urn:uuid: prefix normalizeUID
+// strips is kept on the rewritten line, and any resulting duplicate member
+// (the group already listed the survivor too) is collapsed.
+async function rewriteGroupMembers(loserUids, survivorUid) {
+  const gone = new Set(loserUids.map(normalizeUID));
+  for (const g of state.groups) {
+    if (!g.members.some(m => gone.has(normalizeUID(m)))) continue;
+    const { text, etag } = await getObject(g.href);
+    const out = rewriteMemberLines(ical.unfold(text), loserUids, survivorUid);
+    await putObject(g.href, ical.fold(out), etag, 'text/vcard; charset=utf-8');
+  }
 }
 
 // searchDirectory merges cached contacts and a principal search for the

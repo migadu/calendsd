@@ -16,8 +16,12 @@ export async function putObject(href, text, etag, contentType = 'text/calendar; 
   return check(await dav.req('PUT', href, { headers, body: text }), [201, 204]);
 }
 
-export async function deleteObject(href) {
-  check(await dav.req('DELETE', href), [204]);
+// deleteObject removes a resource. Pass an etag to make the DELETE conditional
+// (If-Match) so a resource edited elsewhere since we last read it 412s instead
+// of being silently destroyed — the merge path relies on this.
+export async function deleteObject(href, etag) {
+  const headers = etag ? { 'If-Match': etag } : {};
+  check(await dav.req('DELETE', href, { headers }), [204]);
 }
 
 // moveObject relocates an object to another collection via WebDAV MOVE — the
