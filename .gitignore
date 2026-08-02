@@ -10,5 +10,9 @@ dav/vendor/
 /bin/
 *.test
 
+# node (calclient dev tooling — eslint/unit-test deps; the lockfile is generated)
+node_modules/
+/cmd/calclient/package-lock.json
+
 # local claude settings
 .claude/
