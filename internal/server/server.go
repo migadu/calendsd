@@ -36,6 +36,12 @@ type Config struct {
 	// attendees; when IMipSMTP is empty, iMip is disabled.
 	IMipSender string
 	IMipSMTP   string
+	// IMipSendAsOrganizer puts the scheduling sender's own address (organizer
+	// for invitations, attendee for replies) in the From header of scheduling
+	// emails (IMipSender stays the SMTP envelope sender — a split sender). Only
+	// safe when the relay can DKIM-sign for those local domain(s); off by
+	// default. See caldav.IMipPlugin.SendAsOrganizer.
+	IMipSendAsOrganizer bool
 	// Browser serves HTML indexes for GET on collections (off by default:
 	// sabre without its Browser plugin answers 501, which the corpus pins).
 	Browser bool
@@ -131,8 +137,8 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
-		base, realm, c.IMipSMTP != "", c.AutoProvision, c.PerUserProps,
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
+		base, realm, c.IMipSMTP != "", c.IMipSendAsOrganizer, c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
 		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
@@ -326,9 +332,10 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	srv.AddPlugin(&carddav.Plugin{})
 	if cfg.IMipSMTP != "" {
 		srv.AddPlugin(&caldav.IMipPlugin{
-			SenderEmail: cfg.IMipSender,
-			Mailer:      &caldav.SMTPMailer{Addr: cfg.IMipSMTP},
-			Metrics:     cfg.Metrics,
+			SenderEmail:     cfg.IMipSender,
+			SendAsOrganizer: cfg.IMipSendAsOrganizer,
+			Mailer:          &caldav.SMTPMailer{Addr: cfg.IMipSMTP},
+			Metrics:         cfg.Metrics,
 		})
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})

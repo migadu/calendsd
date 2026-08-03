@@ -107,7 +107,15 @@ request_dir = ""        # e.g. "/var/tmp/calserver-requests". Empty = disabled.
 # empty to disable outbound email (local iTIP delivery still works).
 [scheduling.imip]
 smtp = ""               # SMTP host:port, e.g. "mail.example.org:587".
-sender = ""             # From address for invitation emails.
+sender = ""             # Envelope sender (MAIL FROM) and, by default, the From
+                        # header of invitation emails.
+send_as_organizer = false  # true: put the scheduling sender's own address in
+                        # the From header instead — the organizer for invites,
+                        # the attendee for replies (always a local principal);
+                        # sender stays the envelope sender (a split sender).
+                        # Only safe when your SMTP relay can DKIM-sign for those
+                        # local domain(s), or recipients fail DMARC and junk the
+                        # mail. A malformed sender address falls back to sender.
 
 
 # CALENDAR SERVER COMPATIBILITY

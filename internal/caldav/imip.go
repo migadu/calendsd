@@ -32,8 +32,18 @@ func (m *SMTPMailer) Send(from string, to []string, msg []byte) error {
 // ExternalDeliverer consulted by the SchedulePlugin when local delivery
 // doesn't apply.
 type IMipPlugin struct {
-	// SenderEmail is the From address (the server's own address).
+	// SenderEmail is the server's own address. It is always the SMTP envelope
+	// sender (MAIL FROM), so bounces return to the server and SPF aligns on the
+	// server's domain. Unless SendAsOrganizer is set it is also the From header.
 	SenderEmail string
+	// SendAsOrganizer puts the scheduling sender's own address in the From
+	// header — the organizer for invitations (REQUEST/CANCEL), the replying
+	// attendee for replies (REPLY); always a local principal — while SenderEmail
+	// stays the SMTP envelope sender (a split sender). Only safe when the relay
+	// can DKIM-sign for those local domain(s), or receivers will fail DMARC; off
+	// by default. A malformed sender address falls back to SenderEmail. When
+	// off, From is SenderEmail and the sender's address goes in Reply-To.
+	SendAsOrganizer bool
 	// Mailer performs the actual send.
 	Mailer Mailer
 	// Metrics counts deliveries by outcome — the schedule-status branches
@@ -92,14 +102,33 @@ func (p *IMipPlugin) DeliverExternal(msg *ical.Message) bool {
 	// crafted event cannot inject additional headers (Bcc, a forged body) into
 	// the outgoing message.
 	body := ical.EncodeLenient(msg.Calendar)
-	headers := []string{
-		"Reply-To: " + formatAddress(msg.SenderName, sender),
-		"From: " + formatAddress(msg.SenderName, p.SenderEmail),
-		"To: " + formatAddress(msg.RecipientName, recipient),
-		"Subject: " + stripHeaderChars(subject),
-		"MIME-Version: 1.0",
-		"Content-Type: text/calendar; charset=UTF-8; method=" + stripHeaderChars(msg.Method),
+	// The envelope sender (MAIL FROM, passed to Mailer.Send below) is always the
+	// server's own address. In SendAsOrganizer mode the visible From is the
+	// scheduling sender instead — a split sender — so Reply-To would only
+	// duplicate it. Fall back to the default framing when that address is
+	// malformed (a mis-provisioned principal): an invalid From is rejected by
+	// strict relays, and the server address keeps the invite deliverable.
+	sendAsOrganizer := p.SendAsOrganizer
+	if sendAsOrganizer {
+		if _, err := mail.ParseAddress(sender); err != nil {
+			sendAsOrganizer = false
+		}
 	}
+	var headers []string
+	if sendAsOrganizer {
+		headers = append(headers, "From: "+formatAddress(msg.SenderName, sender))
+	} else {
+		headers = append(headers,
+			"Reply-To: "+formatAddress(msg.SenderName, sender),
+			"From: "+formatAddress(msg.SenderName, p.SenderEmail),
+		)
+	}
+	headers = append(headers,
+		"To: "+formatAddress(msg.RecipientName, recipient),
+		"Subject: "+stripHeaderChars(subject),
+		"MIME-Version: 1.0",
+		"Content-Type: text/calendar; charset=UTF-8; method="+stripHeaderChars(msg.Method),
+	)
 	email := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + string(body))
 
 	if p.Mailer == nil {

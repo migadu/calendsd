@@ -62,6 +62,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
 	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
+	imipSendAsOrganizer := flag.Bool("imip-send-as-organizer", false, "put the scheduling sender's own address (organizer for invitations, attendee for replies) in the From header of iMip emails (imip-sender stays the envelope sender); only safe when the relay can DKIM-sign for those local domains")
 	browser := flag.Bool("browser", false, "serve HTML indexes for GET on collections (like sabre's Browser plugin; default matches sabre without it: 501)")
 	tempFileFilter := flag.Bool("temp-file-filter", false, "intercept OS junk files (._*, .DS_Store, Thumbs.db, editor swap files) into a scratch directory instead of the backend, like sabre's TemporaryFileFilterPlugin")
 	tempFileDir := flag.String("temp-file-dir", "", "scratch directory for -temp-file-filter (default: a calserver-tempfiles subdir of the system temp dir)")
@@ -118,6 +119,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			Realm:                m.Str("realm", *realm, m.File.Server.Realm),
 			IMipSMTP:             m.Str("imip-smtp", *imipSMTP, m.File.Scheduling.IMip.SMTP),
 			IMipSender:           m.Str("imip-sender", *imipSender, m.File.Scheduling.IMip.Sender),
+			IMipSendAsOrganizer:  m.Bool("imip-send-as-organizer", *imipSendAsOrganizer, m.File.Scheduling.IMip.SendAsOrganizer),
 			Browser:              m.Bool("browser", *browser, m.File.CalendarServer.Browser),
 			TempFileFilter:       m.Bool("temp-file-filter", *tempFileFilter, m.File.Server.TempFileFilter),
 			TempFileDir:          m.Str("temp-file-dir", *tempFileDir, m.File.Server.TempFileDir),
