@@ -3,6 +3,7 @@
 // notes). Fields the editor doesn't model are preserved on save by the store.
 
 import * as store from '/shared/store.js';
+import { icalUnescape } from '/shared/ical.js';
 import { $, html, frag, brJoin } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
@@ -171,6 +172,12 @@ function visibleContacts() {
 
 function renderRows(box) {
   box.innerHTML = '';
+  // First load still in flight — show a spinner rather than a bare "no contacts"
+  // (which would read as an empty address book).
+  if (!store.state.contactsLoaded) {
+    box.append(html`<p class="ct-loading"><span class="spinner" aria-hidden="true"></span>Loading contacts…</p>`);
+    return;
+  }
   const q = filter.trim().toLowerCase();
   const scoped = visibleContacts();
   const rows = scoped.filter(c => !q ||
@@ -203,7 +210,11 @@ function initials(fn) {
 
 // contactDetail shows a read-only card with every stored field, plus Edit and
 // Delete. Emails/phones/website are actionable links.
-function contactDetail(c) {
+async function contactDetail(c) {
+  // During the brief window before the full-card pass finishes, the clicked
+  // contact may be a list-pass stub missing address/notes/preserved props;
+  // refetch it so the detail (and any later Edit) has the complete card.
+  try { c = await store.ensureFullContact(c); } catch (e) { showError(e); return; }
   const rows = [];
   const line = (label, value) => rows.push(
     frag`<div class="detail-row"><span class="dl">${label}</span><span class="dv">${value}</span></div>`);
@@ -256,7 +267,15 @@ function contactDetail(c) {
     const banner = html`<div class="dup-banner">
       <span>${label}</span><button type="button" class="ghost">Review &amp; merge</button>
     </div>`;
-    banner.querySelector('button').addEventListener('click', () => { close(); mergeDialog(dup); });
+    banner.querySelector('button').addEventListener('click', async () => {
+      // mergePreview reads every field (incl. preserved props) of all cluster
+      // members, so upgrade any list-pass stubs to full cards first.
+      try {
+        const full = await Promise.all(dup.contacts.map(x => store.ensureFullContact(x)));
+        close();
+        mergeDialog({ ...dup, contacts: full });
+      } catch (e) { showError(e); }
+    });
     $('.detail-body', dlg).prepend(banner);
   }
   $('#cv-close', dlg).focus();
@@ -271,13 +290,6 @@ function confidenceBadge(confidence) {
 const SCALAR_LABELS = { org: 'Organization', title: 'Job title', url: 'Website', bday: 'Birthday', note: 'Notes' };
 const CONFLICT_LABELS = { fn: 'Name', ...SCALAR_LABELS };
 
-// humanType renders a vCard TYPE (CELL/HOME/WORK) the way the rest of the UI
-// does — capitalized, with CELL shown as the friendlier "Mobile".
-function humanType(t) {
-  if (!t) return '';
-  return t.toUpperCase() === 'CELL' ? 'Mobile' : t[0] + t.slice(1).toLowerCase();
-}
-
 // Friendly names for the vCard properties the editor doesn't model but the
 // merge still carries through (see mergePreview's `preserve`).
 const PRESERVED_LABELS = {
@@ -287,34 +299,98 @@ const PRESERVED_LABELS = {
   SOUND: 'Sound', KEY: 'Key', TZ: 'Time zone', GENDER: 'Gender',
 };
 
+// Friendly names for the Apple X- properties that ride along on cards exported
+// from Contacts.app — the ones that otherwise show up as raw "X-ABLABEL".
+const X_LABELS = {
+  'X-ABLABEL': 'Custom label', 'X-ABADR': 'Address label',
+  'X-ABRELATEDNAMES': 'Related name', 'X-ABDATE': 'Custom date',
+  'X-SOCIALPROFILE': 'Social profile', 'X-ABSHOWAS': 'Show as',
+};
+
+// Preserved properties whose value is an opaque blob (base64) — summarize them
+// rather than dumping the payload into the "Also kept" disclosure.
+const OPAQUE_PRESERVED = new Set(['PHOTO', 'LOGO', 'SOUND', 'KEY']);
+
+// prettyPreservedName turns a raw vCard property name into a human label. Apple
+// groups related lines under an item prefix (item1.URL / item1.X-ABLABEL); strip
+// it, then map known names and clean up remaining X-* ones.
+function prettyPreservedName(rawName) {
+  const name = String(rawName || '').replace(/^item\d+\./i, '').toUpperCase();
+  if (PRESERVED_LABELS[name]) return PRESERVED_LABELS[name];
+  if (X_LABELS[name]) return X_LABELS[name];
+  if (name.startsWith('X-')) {
+    return name.slice(2).replace(/[-_]+/g, ' ').toLowerCase().replace(/^./, s => s.toUpperCase());
+  }
+  return name ? name[0] + name.slice(1).toLowerCase() : String(rawName || '');
+}
+
+// Apple wraps custom label text as _$!<HomePage>!$_ — unwrap it for display.
+function unwrapAppleLabel(v) {
+  const m = /^_\$!<(.*)>!\$_$/.exec(v);
+  return m ? m[1] : v;
+}
+
 // preservedLabels turns the carried-through property lines into a deduped,
-// human list (with a count when a property repeats), so the preview can show
-// that nothing beyond the modeled fields is silently dropped.
+// human list (with a count when a property repeats) — the "Also kept" summary
+// that shows nothing beyond the modeled fields is silently dropped.
 function preservedLabels(lines) {
   const counts = new Map();
   for (const l of lines) {
-    const name = (/^([^;:]+)/.exec(l)?.[1] || '').toUpperCase();
-    if (!name) continue;
-    const label = PRESERVED_LABELS[name]
-      || (name.startsWith('X-') ? name : name[0] + name.slice(1).toLowerCase());
+    const raw = /^([^;:]+)/.exec(l)?.[1] || '';
+    if (!raw) continue;
+    const label = prettyPreservedName(raw);
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts].map(([label, n]) => (n > 1 ? `${label} (${n})` : label));
 }
 
+// preservedDetails expands each carried-through vCard line into a readable
+// {label, value} pair, so the "Also kept" disclosure can show what's actually in
+// there instead of just naming the properties.
+function preservedDetails(lines) {
+  return lines.map(l => {
+    const colon = l.indexOf(':');
+    const raw = /^([^;:]+)/.exec(colon < 0 ? l : l.slice(0, colon))?.[1] || '';
+    const name = raw.replace(/^item\d+\./i, '').toUpperCase();
+    let value = colon < 0 ? '' : unwrapAppleLabel(icalUnescape(l.slice(colon + 1)));
+    if (OPAQUE_PRESERVED.has(name)) value = '(embedded data)';
+    else if (value.length > 120) value = value.slice(0, 120) + '…';
+    return { label: prettyPreservedName(raw), value };
+  });
+}
+
+// mergeMultiGroup renders an editable email/phone section (header + Add button +
+// the unioned rows) into the merge preview, reusing the contact editor's
+// multiRow. The union is often noisy — a near-duplicate the normalizer kept, or
+// an entry whose type is wrong or missing — so the user can retype, remove, or
+// add before the merge is written; each row's type dropdown keeps Mobile/Home/…
+// visible and changeable. Returns the rows container for collectMulti().
+function mergeMultiGroup(parent, label, items, types, inputType, addType) {
+  const group = html`<div class="field-group mg-multi">
+    <div class="fg-head"><span>${label}</span><button type="button" class="ghost">＋ Add ${label.toLowerCase()}</button></div>
+    <div class="mg-rows"></div>
+  </div>`;
+  const box = group.querySelector('.mg-rows');
+  for (const it of items) multiRow(box, it, types, inputType);
+  group.querySelector('.fg-head button').addEventListener('click',
+    () => multiRow(box, { value: '', type: addType }, types, inputType).querySelector('.mr-val').focus());
+  parent.append(group);
+  return box;
+}
+
 // previewPanel renders the card a merge would produce. Fields the cluster
 // disagrees on (name, org, …) become a <select> (class mg-conflict) so the user
-// picks the winner; everything else — including the unioned emails and phones,
-// each with its Home/Mobile/Work type — is shown read-only.
+// picks the winner; the unioned emails and phones are editable rows (see
+// mergeMultiGroup); the rest is read-only. The email/phone rows containers are
+// stashed on the element so mergeDialog can collect the user's edits back.
 function previewPanel(p) {
   const el = html`<div class="mg-preview"><div class="fg-head"><span>Merged result</span></div></div>`;
   const line = (label, value) => el.append(
     html`<div class="detail-row"><span class="dl">${label}</span><span class="dv">${value}</span></div>`);
-  const tag = t => t && frag` <span class="type-tag">${humanType(t)}</span>`;
   const conflicted = new Set(p.conflicts.map(c => c.field));
   if (!conflicted.has('fn')) line('Name', p.fn);
-  for (const e of p.emails) line('Email', frag`${e.value}${tag(e.type)}`);
-  for (const t of p.tels) line('Phone', frag`${t.value}${tag(t.type)}`);
+  el._emailsBox = mergeMultiGroup(el, 'Email', p.emails, EMAIL_TYPES, 'email', '');
+  el._telsBox = mergeMultiGroup(el, 'Phone', p.tels, TEL_TYPES, 'tel', 'CELL');
   for (const c of p.conflicts) {
     // The <select> is a live element, so append it into the row's value cell
     // rather than interpolating it (the template engine would stringify it).
@@ -332,9 +408,17 @@ function previewPanel(p) {
   const addr = [a.street, [a.postal, a.city].filter(Boolean).join(' '), a.region, a.country].filter(Boolean);
   if (addr.length) line('Address', brJoin(addr));
   // Everything the editor doesn't model (photo, categories, X-*, a second
-  // address, …) is merged too — name it so nothing looks dropped.
-  const kept = preservedLabels(p.preserve);
-  if (kept.length) line('Also kept', frag`<span class="mail">${kept.join(', ')}</span>`);
+  // address, …) is merged too. Summarize it so nothing looks dropped, and let
+  // the row expand to the actual carried-through values on demand.
+  if (p.preserve.length) {
+    const details = html`<details class="mg-kept">
+      <summary><span class="dl">Also kept</span><span class="dv mail">${preservedLabels(p.preserve).join(', ')}</span></summary>
+    </details>`;
+    for (const item of preservedDetails(p.preserve)) {
+      details.append(html`<div class="detail-row mg-kept-row"><span class="dl">${item.label}</span><span class="dv">${item.value}</span></div>`);
+    }
+    el.append(details);
+  }
   return el;
 }
 
@@ -362,7 +446,8 @@ function mergeDialog(cluster) {
     let busy = false;
     const done = merged => { dlg.remove(); resolve(merged); };
     openOverlay(dlg, () => { if (!busy) done(false); });
-    $('#mg-body', dlg).append(previewPanel(preview));
+    const panel = previewPanel(preview);
+    $('#mg-body', dlg).append(panel);
 
     const mergeBtn = $('#mg-merge', dlg), cancelBtn = $('#mg-cancel', dlg);
     cancelBtn.addEventListener('click', () => { if (!busy) done(false); });
@@ -370,6 +455,9 @@ function mergeDialog(cluster) {
       // Apply the user's choice for each conflicting field. A chosen display
       // name also pulls its matching N (first/last) so they stay consistent.
       for (const sel of dlg.querySelectorAll('.mg-conflict')) preview[sel.dataset.field] = sel.value;
+      // Take the edited (added/retyped/removed) emails and phones as the result.
+      preview.emails = collectMulti(panel._emailsBox);
+      preview.tels = collectMulti(panel._telsBox);
       const nm = preview.nameOptions.find(o => o.fn === preview.fn);
       if (nm) { preview.first = nm.first; preview.last = nm.last; }
       if (!await confirmDialog(`Merge these ${n + 1} contacts into one? The other ${n} will be deleted.`,

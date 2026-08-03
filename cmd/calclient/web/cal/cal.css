@@ -415,6 +415,12 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .contact .who { flex: 1; min-width: 0; }
 .contact .mail { color: var(--dim); font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contact .chev { color: var(--dim); font-size: 1.2rem; flex-shrink: 0; }
+.ct-loading { display: flex; align-items: center; justify-content: center; gap: .5rem; color: var(--dim); margin: 3rem 0; }
+.spinner {
+  display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 /* contact detail view */
 .detail-head { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; padding-right: 1.6rem; }
@@ -445,6 +451,9 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .dd-row:first-child { border-top: none; }
 .dd-row button { flex-shrink: 0; }
 .import-bar { width: 100%; height: .5rem; margin: .3rem 0; }
+.import-status { display: flex; align-items: center; gap: .6rem; }
+.import-status .note { flex: 1; margin: 0; }
+.import-status button { flex-shrink: 0; }
 button.is-busy::before {
   content: ''; display: inline-block; width: .8em; height: .8em; margin-right: .45em;
   vertical-align: -.1em; border: 2px solid currentColor; border-right-color: transparent;

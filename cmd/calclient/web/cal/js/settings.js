@@ -1,7 +1,6 @@
 // settings.js — preferences, import and export.
 
 import * as store from '/shared/store.js';
-import * as ical from '/shared/ical.js';
 import * as pushSync from './push-sync.js';
 import { $, html, frag } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
@@ -48,7 +47,10 @@ export function renderSettings(main) {
       <label>Add events or contacts from a file (.ics or .vcf)
         <input id="st-import" type="file" accept=".ics,.vcf,text/calendar,text/vcard"></label>
       <progress id="st-import-bar" class="import-bar" value="0" max="1" hidden></progress>
-      <p class="note" id="st-import-note"></p>
+      <div class="import-status">
+        <p class="note" id="st-import-note"></p>
+        <button type="button" id="st-import-cancel" class="ghost" hidden>Cancel</button>
+      </div>
     </section>
     <section>
       <h2>Contacts</h2>
@@ -129,84 +131,56 @@ export function renderSettings(main) {
     exp.append(html`<label><a href="${b.href}?export" download="contacts.vcf">Download “${b.displayName}” as .vcf</a></label>`);
   }
 
+  // Reflect any import that's already running/finished (e.g. started before we
+  // navigated away and back), then wire the file picker and Cancel button.
+  updateImportProgress(el);
   $('#st-import', el).addEventListener('change', async ev => {
     const file = ev.target.files[0];
     if (!file) return;
-    const note = $('#st-import-note', el);
-    const bar = $('#st-import-bar', el);
-    note.textContent = 'Reading…';
+    ev.target.value = ''; // allow re-picking the same file after this run
     try {
-      const text = await file.text();
-      const tree = ical.parse(text);
-      const events = ical.components(tree, 'VEVENT');
-      const cards = ical.components(tree, 'VCARD');
-      // events grouped by UID (a recurring event and its overrides share one file)
-      const byUid = new Map();
-      for (const ev2 of events) {
-        const uid = ical.propValue(ev2, 'UID') || crypto.randomUUID();
-        if (!byUid.has(uid)) byUid.set(uid, []);
-        byUid.get(uid).push(ev2);
-      }
-      const total = byUid.size + cards.length;
-      if (!total) { note.textContent = 'Nothing to import in that file.'; return; }
-
-      // Know what's already here so re-importing the same file skips existing
-      // contacts (matched by UID) instead of failing on the create-only PUT.
-      await store.loadContacts();
-      const existing = new Set(store.state.contacts.map(c => store.normalizeUID(c.uid)));
-
-      let done = 0, added = 0, skipped = 0, failed = 0;
-      bar.max = total; bar.value = 0; bar.hidden = false;
-      const tick = () => { bar.value = ++done; note.textContent = `Importing… ${done}/${total}`; };
-
-      for (const [uid, group] of byUid) {
-        try {
-          const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calweb import//EN'];
-          for (const ev2 of group) {
-            lines.push('BEGIN:VEVENT');
-            for (const prop of ev2.props) {
-              const params = Object.entries(prop.params).map(([k, v]) => `;${k}=${v}`).join('');
-              lines.push(ical.foldLong(`${prop.name}${params}:${prop.value}`));
-            }
-            lines.push('END:VEVENT');
-          }
-          lines.push('END:VCALENDAR');
-          await store.putObject(store.eventHref(store.state.prefs.defaultCal, uid),
-            lines.join('\r\n') + '\r\n', undefined);
-          added++;
-        } catch { failed++; }
-        tick();
-      }
-      for (const card of cards) {
-        const uid = ical.propValue(card, 'UID') || crypto.randomUUID();
-        if (existing.has(store.normalizeUID(uid))) { skipped++; tick(); continue; }
-        try {
-          const fn = ical.icalUnescape(ical.propValue(card, 'FN')) || 'Imported contact';
-          await store.saveContact({
-            uid, fn,
-            emails: card.props.filter(x => x.name === 'EMAIL').map(p => ({ value: p.value, type: '' })),
-            tels: card.props.filter(x => x.name === 'TEL').map(p => ({ value: p.value, type: '' })),
-            org: ical.icalUnescape(ical.propValue(card, 'ORG')),
-            preserve: card.props.filter(p => !ical.MANAGED_VCARD.has(p.name)).map(ical.vcardLine),
-          });
-          existing.add(store.normalizeUID(uid));
-          added++;
-        } catch { failed++; }
-        tick();
-      }
-
-      const summary = [`Imported ${added}`];
-      if (skipped) summary.push(`skipped ${skipped} already present`);
-      if (failed) summary.push(`${failed} failed`);
-      note.textContent = summary.join(', ') + '.';
-      toast(`Imported ${added} item(s).`);
-      await Promise.all([store.refreshEvents(), store.loadContacts()]);
+      const job = await store.startImport(file);
+      if (job.status === 'done' || job.status === 'cancelled') toast(`Imported ${job.added} item(s).`);
     } catch (e) {
-      note.textContent = '';
       showError(e);
-    } finally {
-      bar.hidden = true;
-      ev.target.value = '';
     }
   });
+  $('#st-import-cancel', el).addEventListener('click', () => store.cancelImport());
+  $('#st-import', el).disabled = store.importRunning();
+}
+
+// importStatusText renders the current job as a one-line status. The running
+// line covers the pre-parse "Reading…" phase (total still 0) and the per-item
+// progress; terminal states summarize what was written.
+function importStatusText(job) {
+  if (!job) return '';
+  if (job.status === 'running') return job.total ? `Importing… ${job.done}/${job.total}` : 'Reading…';
+  if (job.status === 'empty') return 'Nothing to import in that file.';
+  if (job.status === 'error') return job.error || 'Import failed.';
+  const verb = job.status === 'cancelled' ? 'Cancelled — imported' : 'Imported';
+  const parts = [`${verb} ${job.added}`];
+  if (job.skipped) parts.push(`skipped ${job.skipped} already present`);
+  if (job.failed) parts.push(`${job.failed} failed`);
+  return parts.join(', ') + '.';
+}
+
+// updateImportProgress paints the import section from store.state.importJob. It
+// queries the live DOM (root defaults to the document) so it always targets the
+// currently-mounted Settings panel — the store-held job is the source of truth,
+// so leaving and returning to Settings re-attaches to a still-running import.
+export function updateImportProgress(root = document) {
+  const bar = $('#st-import-bar', root);
+  if (!bar) return; // Settings not currently mounted
+  const note = $('#st-import-note', root);
+  const cancel = $('#st-import-cancel', root);
+  const input = $('#st-import', root);
+  const job = store.state.importJob;
+  const running = job?.status === 'running';
+
+  note.textContent = importStatusText(job);
+  cancel.hidden = !running;
+  input.disabled = running;
+  if (running && job.total) { bar.max = job.total; bar.value = job.done; bar.hidden = false; }
+  else if (running) { bar.removeAttribute('value'); bar.hidden = false; } // indeterminate while reading
+  else bar.hidden = true;
 }

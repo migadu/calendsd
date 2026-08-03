@@ -18,8 +18,9 @@ export { shareCalendar, loadSharees, unshareCalendar,
   loadShareNotifications, replyShareInvite, dismissShareNotification } from './store/sharing.js';
 export { loadInvites, answerInvite, answerEvent, dismissInvite, removeCancelled } from './store/invites.js';
 export { freeBusy } from './store/freebusy.js';
-export { loadContacts, normalizeUID, saveContact, deleteContact, mergeContacts,
+export { loadContacts, initContacts, ensureFullContact, normalizeUID, saveContact, deleteContact, mergeContacts,
   createBook, renameBook, deleteBook, createGroup, renameGroup, deleteGroup, searchDirectory } from './store/contacts.js';
 export { findDuplicatesOf, findDuplicateClusters, mergePreview } from './store/dedup.js';
+export { startImport, cancelImport, importRunning } from './store/import.js';
 export { taskLists, writableTaskLists, loadTasks, dueBucket,
   createTask, updateTask, setTaskDone, deleteTask, createTaskList } from './store/tasks.js';

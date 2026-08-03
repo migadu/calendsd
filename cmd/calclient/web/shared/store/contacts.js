@@ -10,41 +10,124 @@ import { rewriteMemberLines } from './dedup.js';
 
 const { NS, key } = dav;
 
-export async function loadContacts() {
+// LIST_PROPS is the minimum a contact/group *row* needs — name, the primary
+// email/phone/org shown as the subtitle, and the KIND/MEMBER properties that
+// separate groups from people and drive the sidebar counts. Fetching only these
+// (via addressbook-query's property whitelist) skips the bulky PHOTO blobs, so
+// the list paints fast; the full cards are pulled in a second pass. UID/VERSION/
+// FN are always returned by the server, so they're omitted here.
+const LIST_PROPS = ['N', 'EMAIL', 'TEL', 'ORG', 'TITLE',
+  'X-ADDRESSBOOKSERVER-KIND', 'KIND', 'X-ADDRESSBOOKSERVER-MEMBER', 'MEMBER'];
+
+// discoverBooks refreshes state.books from the address-book home. Returns false
+// when the home itself couldn't be read (nothing to load).
+async function discoverBooks() {
   const r = await dav.propfind(state.abHome, ['d:resourcetype', 'd:displayname'], '1');
-  if (r.status !== 207) return;
+  if (r.status !== 207) return false;
   state.books = dav.msResponses(r.xml)
     .filter(x => x.href !== state.abHome &&
       dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.card, 'addressbook')))
     .map(x => ({ href: x.href, displayName: x.props.get(key(NS.d, 'displayname'))?.textContent || 'Contacts' }));
+  return true;
+}
+
+// cardModelsFromReport parses the vCards in a multistatus REPORT body into
+// {contacts, groups}. When `partial` is set (the light list pass) each model is
+// flagged so the editor knows to refetch the whole card before saving — the
+// filtered cards omit PHOTO and every other property `preserve` round-trips.
+function cardModelsFromReport(xml, book, partial) {
   const contacts = [], groups = [];
-  for (const book of state.books) {
-    const list = await dav.propfind(book.href, ['d:getetag'], '1');
-    if (list.status !== 207) continue;
-    const hrefs = dav.msResponses(list.xml).map(x => x.href)
-      .filter(h => h !== book.href && !h.endsWith('/'));
-    if (!hrefs.length) continue;
-    const body = dav.xmlDoc('card:addressbook-multiget', '', dav.xml`
-      <d:prop><d:getetag/><card:address-data/></d:prop>
-      ${hrefs.map(h => dav.xml`<d:href>${h}</d:href>`)}`);
-    const mg = await dav.report(book.href, body, '1');
-    for (const resp of dav.msResponses(mg.xml)) {
-      const data = resp.props.get(key(NS.card, 'address-data'))?.textContent;
-      if (!data) continue;
-      const card = ical.components(ical.parse(data), 'VCARD')[0];
-      if (!card) continue;
-      const model = parseContact(card, resp.href, book.href,
-        resp.props.get(key(NS.d, 'getetag'))?.textContent ?? '');
-      // A group/list vCard (X-ADDRESSBOOKSERVER-KIND:group) is not a contact —
-      // Apple Contacts files it in the sidebar, so we keep them apart.
-      (model.kind === 'group' ? groups : contacts).push(model);
-    }
+  for (const resp of dav.msResponses(xml)) {
+    if (resp.href === book.href || resp.href.endsWith('/')) continue;
+    const data = resp.props.get(key(NS.card, 'address-data'))?.textContent;
+    if (!data) continue;
+    const card = ical.components(ical.parse(data), 'VCARD')[0];
+    if (!card) continue;
+    const model = parseContact(card, resp.href, book.href,
+      resp.props.get(key(NS.d, 'getetag'))?.textContent ?? '');
+    if (partial) model.partial = true;
+    // A group/list vCard (X-ADDRESSBOOKSERVER-KIND:group) is not a contact —
+    // Apple Contacts files it in the sidebar, so we keep them apart.
+    (model.kind === 'group' ? groups : contacts).push(model);
   }
-  contacts.sort((a, b) => a.fn.localeCompare(b.fn));
-  groups.sort((a, b) => a.fn.localeCompare(b.fn));
+  return { contacts, groups };
+}
+
+// fetchBook pulls one address book's cards in a single addressbook-query REPORT
+// (an empty filter matches every card), avoiding the extra PROPFIND the old
+// multiget path needed to list hrefs first. `props` restricts the returned
+// address-data to a property whitelist (the fast list pass); omit it for whole
+// cards.
+async function fetchBook(book, props) {
+  const dataEl = props
+    ? dav.xml`<card:address-data>${props.map(p => dav.xml`<card:prop name="${p}"/>`)}</card:address-data>`
+    : dav.xml`<card:address-data/>`;
+  const body = dav.xmlDoc('card:addressbook-query', '', dav.xml`
+    <d:prop><d:getetag/>${dataEl}</d:prop>
+    <card:filter/>`);
+  const r = await dav.report(book.href, body, '1');
+  if (r.status !== 207) return { contacts: [], groups: [] };
+  return cardModelsFromReport(r.xml, book, !!props);
+}
+
+// gatherBooks fetches every book in parallel and returns the merged, sorted
+// {contacts, groups}. A book that fails contributes nothing rather than aborting
+// the whole load.
+async function gatherBooks(props) {
+  const results = await Promise.all(
+    state.books.map(b => fetchBook(b, props).catch(() => ({ contacts: [], groups: [] }))));
+  const contacts = results.flatMap(r => r.contacts).sort((a, b) => a.fn.localeCompare(b.fn));
+  const groups = results.flatMap(r => r.groups).sort((a, b) => a.fn.localeCompare(b.fn));
+  return { contacts, groups };
+}
+
+function applyContacts({ contacts, groups }) {
   state.contacts = contacts;
   state.groups = groups;
   emit('contacts');
+}
+
+// loadContacts does a full refresh: rediscover the books and pull whole cards.
+// It's what every mutation below calls, so state always ends up holding complete
+// models (the editor and the dedup sweep rely on that). The two-pass fast path
+// used at sign-in is initContacts.
+export async function loadContacts() {
+  if (!await discoverBooks()) return;
+  applyContacts(await gatherBooks(null));
+}
+
+// initContacts is the first load after sign-in. It paints a lightweight list as
+// soon as the property-filtered pass returns, then fills in the full cards in
+// the background. contactsLoaded gates the view's loading spinner; it flips true
+// with the first (light) paint so the spinner clears the moment names appear.
+export async function initContacts() {
+  state.contactsLoaded = false;
+  try {
+    if (!await discoverBooks()) return;
+    const light = await gatherBooks(LIST_PROPS);
+    state.contactsLoaded = true;   // clear the spinner as soon as names are up
+    applyContacts(light);          // first paint: names + primary email/phone
+    applyContacts(await gatherBooks(null)); // background: full cards replace stubs
+  } finally {
+    // Whatever happened (success, empty home, or a failed fetch), stop showing
+    // the loading spinner — a stuck spinner is worse than an empty list.
+    if (!state.contactsLoaded) { state.contactsLoaded = true; emit('contacts'); }
+  }
+}
+
+// ensureFullContact upgrades a partial (list-pass) model to a complete one by
+// refetching its card, so opening or editing a contact during the brief window
+// before the full pass finishes still sees every field (and doesn't drop
+// PHOTO/CATEGORIES/etc. on save). A no-op for already-complete models.
+export async function ensureFullContact(c) {
+  if (!c?.partial) return c;
+  const { text, etag } = await getObject(c.href);
+  const card = ical.components(ical.parse(text), 'VCARD')[0];
+  if (!card) return c;
+  const full = parseContact(card, c.href, c.book, etag);
+  const i = state.contacts.indexOf(c);
+  if (i >= 0) state.contacts[i] = full;
+  return full;
 }
 
 // normalizeUID strips the urn:uuid: prefix Apple uses on group member refs so a
@@ -117,15 +200,22 @@ async function ensureBook() {
   return href;
 }
 
-// saveContact writes the editor model (see parseContact). New contacts get a
-// UID and land in targetBook (the selected address book) when given, otherwise
-// the first/auto-created book; edits overwrite in place with ETag.
-export async function saveContact(model, targetBook) {
+// putContact writes the editor model (see parseContact) without reloading the
+// list. New contacts get a UID and land in targetBook (the selected address
+// book) when given, otherwise the first/auto-created book; edits overwrite in
+// place with ETag. The bulk importer calls this in a loop and reloads once.
+export async function putContact(model, targetBook) {
   const uid = model.uid || crypto.randomUUID();
   const text = ical.buildVCard({ ...model, uid });
   const dir = targetBook || (await ensureBook());
   const target = model.href ?? dir + encodeURIComponent(uid) + '.vcf';
   await putObject(target, text, model.href ? model.etag : null, 'text/vcard; charset=utf-8');
+}
+
+// saveContact writes one contact and refreshes the list — the interactive
+// editor path.
+export async function saveContact(model, targetBook) {
+  await putContact(model, targetBook);
   await loadContacts();
 }
 

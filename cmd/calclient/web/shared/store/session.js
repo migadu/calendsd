@@ -7,7 +7,7 @@ import { state, emit, savePrefs, check, DavError } from './core.js';
 import { loadCalendars } from './calendars.js';
 import { loadInvites } from './invites.js';
 import { loadShareNotifications } from './sharing.js';
-import { loadContacts } from './contacts.js';
+import { initContacts } from './contacts.js';
 import { loadServerPrefs, wirePrefsSync, resetPrefsSync } from './prefs.js';
 
 const { NS, key } = dav;
@@ -85,7 +85,7 @@ async function bootstrap() {
   await loadCalendars();
   loadInvites().catch(() => {});
   loadShareNotifications().catch(() => {});
-  loadContacts().catch(() => {});
+  initContacts().catch(() => {});
   startPolling();
 }
 

@@ -11,7 +11,7 @@ import { openEventDialog } from './event-dialog.js';
 import { renderInvites, toggleInvites } from './invites.js';
 import { renderTasks } from './tasks.js';
 import { renderContacts } from './contacts.js';
-import { renderSettings } from './settings.js';
+import { renderSettings, updateImportProgress } from './settings.js';
 import * as pushSync from './push-sync.js';
 
 // ---- routing -------------------------------------------------------------
@@ -270,6 +270,10 @@ store.bus.addEventListener('tasks', () => { if (currentView === 'tasks') render(
 // ctag-guarded loadTasks, so the 30 s poll picks up remote task changes.
 store.bus.addEventListener('calendars', () => { if (currentView === 'tasks') render(); });
 store.bus.addEventListener('contacts', () => { if (currentView === 'contacts') render(); });
+// Import runs in the store, so its progress bar survives view switches: update
+// the Settings panel in place (a no-op when it isn't mounted) rather than
+// re-rendering, so the file input and focus are left alone.
+store.bus.addEventListener('import', () => { if (currentView === 'settings') updateImportProgress(); });
 // The bell counts scheduling invitations plus still-unanswered calendar shares.
 function updateBell() {
   // Only actionable schedule items count: REQUESTs awaiting a reply and CANCELs

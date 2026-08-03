@@ -15,6 +15,8 @@ export const state = {
   invitesLoaded: false,    // first inbox fetch finished (drives the panel's loading state)
   shareNotifications: [],  // parsed calendar-share invitations (cs:notification)
   books: [], contacts: [], groups: [], // carddav (groups = X-ADDRESSBOOKSERVER-KIND:group cards)
+  contactsLoaded: false,   // first contacts pass finished (drives the view's loading spinner)
+  importJob: null,         // in-flight/last file import; survives view switches (see store/import.js)
   prefs: loadPrefs(),
 };
 
