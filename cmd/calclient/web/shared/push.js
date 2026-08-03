@@ -6,7 +6,7 @@
 //
 // Only the browser needs to speak this; the server side is internal/push.
 
-import * as dav from '/shared/dav.js';
+import * as dav from './dav.js';
 
 export const PUSH_NS = 'https://bitfire.at/webdav-push';
 
@@ -137,8 +137,8 @@ export function onMessage(cb) {
 }
 
 // urlB64ToUint8Array converts a base64url VAPID key to the Uint8Array the Push
-// API's applicationServerKey expects.
-function urlB64ToUint8Array(base64) {
+// API's applicationServerKey expects. Exported for unit testing.
+export function urlB64ToUint8Array(base64) {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(b64);
