@@ -20,8 +20,10 @@ test('editing an event does not report the event itself as busy', async ({ page 
   // Create a timed event today with a guest, then save.
   await page.click('#new-event');
   await page.fill('#ev-title', title);
-  await page.fill('#ev-start', `${ymd}T09:00`);
-  await page.fill('#ev-end', `${ymd}T09:30`);
+  await page.fill('#ev-start', ymd);
+  await page.fill('#ev-start-time', '09:00');
+  await page.fill('#ev-end', ymd);
+  await page.fill('#ev-end-time', '09:30');
   await page.fill('#ev-guest', 'bob@example.org');
   await page.locator('#ev-guest').press('Enter');
   await page.click('#ev-save');

@@ -6,9 +6,7 @@
 // Browsers come from Nix (playwright-driver): run inside `nix develop`, which
 // sets PLAYWRIGHT_BROWSERS_PATH, so no browser download happens. Keep
 // @playwright/test pinned to pkgs.playwright-driver.version. Add the
-// firefox/webkit projects below to check datetime-local and dialog behaviour
-// across engines (native <input type=datetime-local> renders differently per
-// engine — that is what these projects are for).
+// firefox/webkit projects below to check dialog behaviour across engines.
 const { defineConfig, devices } = require('@playwright/test');
 
 module.exports = defineConfig({

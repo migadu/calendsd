@@ -6,7 +6,7 @@
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
 import { $, html, frag } from '/shared/dom.js';
-import { DAY, localDT, localDate } from '/shared/time.js';
+import { DAY, localDate, formatTimeOfDay, parseTimeOfDay } from '/shared/time.js';
 import { toast, showError } from './ui.js';
 import { createGuestField } from './guest-field.js';
 import { checkAvailability } from './availability.js';
@@ -40,8 +40,15 @@ export async function openEventDialog(inst, defaultDay, timed) {
       <label class="full">Title<input id="ev-title" type="text" value="${inst?.summary === '(no title)' ? '' : inst?.summary ?? ''}" placeholder="Add a title"></label>
       <label>Calendar<select id="ev-cal"></select></label>
       <label class="row" style="align-self:end"><input type="checkbox" id="ev-allday" ${inst?.allDay ? 'checked' : ''}> All day</label>
-      <label>Starts<input id="ev-start"></label>
-      <label>Ends<input id="ev-end"></label>
+      <label>Starts<span class="dt-pair">
+        <input id="ev-start" type="date">
+        <input id="ev-start-time" type="text" class="time-field" list="ev-times" autocomplete="off" spellcheck="false">
+      </span></label>
+      <label>Ends<span class="dt-pair">
+        <input id="ev-end" type="date">
+        <input id="ev-end-time" type="text" class="time-field" list="ev-times" autocomplete="off" spellcheck="false">
+      </span></label>
+      <datalist id="ev-times"></datalist>
       <label>Repeat<select id="ev-freq" ${isRecurring ? 'disabled' : ''}>
         <option value="">Does not repeat</option>
         <option value="DAILY">Every day</option>
@@ -120,47 +127,72 @@ export async function openEventDialog(inst, defaultDay, timed) {
   syncCalLock();
   scopeSel?.addEventListener('change', syncCalLock);
 
-  // date/time inputs switch type with the all-day toggle
+  // date/time inputs: a native date input plus our own time text field. The
+  // time is not the native datetime-local half because browsers format that
+  // per the *browser* locale (Chromium ignores the element's lang attribute),
+  // so the app's 12/24-hour preference was not honored. Formatting and parsing
+  // the field ourselves makes the clock pref authoritative; a datalist offers
+  // half-hour choices in the same format. The all-day toggle hides the time
+  // fields rather than switching input types.
+  const hour12 = !!store.state.prefs.hour12;
+  const startD = q('#ev-start'), endD = q('#ev-end');
+  const startT = q('#ev-start-time'), endT = q('#ev-end-time');
+  for (let i = 0; i < 48; i++) {
+    q('#ev-times').append(html`<option value="${formatTimeOfDay(new Date(2000, 0, 1, i >> 1, (i % 2) * 30), hour12)}"></option>`);
+  }
   const allDayBox = q('#ev-allday');
   function syncDateInputs() {
     const allDay = allDayBox.checked;
-    const s = q('#ev-start'), e = q('#ev-end');
-    s.type = e.type = allDay ? 'date' : 'datetime-local';
-    if (allDay) {
-      s.value = localDate(start); e.value = localDate(new Date(Math.max(+start, +end - DAY)));
-    } else {
-      s.value = localDT(start); e.value = localDT(end);
-    }
+    startT.hidden = endT.hidden = allDay;
+    startD.value = localDate(start);
+    // all-day shows the inclusive last day, not the exclusive DTEND date
+    endD.value = allDay ? localDate(new Date(Math.max(+start, +end - DAY))) : localDate(end);
+    if (!allDay) { startT.value = formatTimeOfDay(start, hour12); endT.value = formatTimeOfDay(end, hour12); }
   }
   syncDateInputs();
+
+  // readPair/setPair combine a date input and its time field into a Date.
+  // A time the parser doesn't understand reads as null (flagged .invalid).
+  const readPair = (dInp, tInp) => {
+    if (!dInp.value) return null;
+    const d = new Date(dInp.value + 'T00:00');
+    if (allDayBox.checked) return d;
+    const t = parseTimeOfDay(tInp.value);
+    if (!t) return null;
+    d.setHours(t.h, t.m);
+    return d;
+  };
+  const setPair = (dInp, tInp, d) => {
+    dInp.value = localDate(d);
+    if (!allDayBox.checked) tInp.value = formatTimeOfDay(d, hour12);
+  };
+  // Rewrite whatever the user typed ("130p", "9.15") in the canonical format
+  // once they leave the field, and mark it when it didn't parse.
+  const normalize = tInp => {
+    const t = parseTimeOfDay(tInp.value);
+    tInp.classList.toggle('invalid', !t);
+    if (t) tInp.value = formatTimeOfDay(new Date(2000, 0, 1, t.h, t.m), hour12);
+  };
 
   // Moving the start drags the end with it, keeping the duration fixed — so
   // changing a 1–2pm slot to 5pm makes it 5–6pm. We track the previous start
   // and shift the end by the same delta. Re-baseline whenever the all-day
   // toggle rewrites both inputs.
-  const startInp = q('#ev-start'), endInp = q('#ev-end');
-  // Native datetime-local pickers show 12- or 24-hour time per the element's
-  // locale, not the app's. Force it to follow the user's clock preference via
-  // `lang` (honored by Chromium): a 24-hour locale when 12-hour is off, a
-  // 12-hour one when it's on, so the editor matches the rest of the UI.
-  const timeLang = store.state.prefs.hour12 ? 'en-US' : 'en-GB';
-  startInp.setAttribute('lang', timeLang);
-  endInp.setAttribute('lang', timeLang);
-  const parseInput = inp => {
-    if (!inp.value) return null;
-    return inp.type === 'date' ? new Date(inp.value + 'T00:00') : new Date(inp.value);
-  };
-  const setInput = (inp, d) => { inp.value = inp.type === 'date' ? localDate(d) : localDT(d); };
-  let prevStart = parseInput(startInp);
-  startInp.addEventListener('input', () => {
-    const ns = parseInput(startInp);
+  let prevStart = readPair(startD, startT);
+  function startChanged() {
+    const ns = readPair(startD, startT);
     if (!ns) return;
     const delta = prevStart ? +ns - +prevStart : 0;
-    const ce = parseInput(endInp);
-    if (delta && ce) setInput(endInp, new Date(+ce + delta));
+    const ce = readPair(endD, endT);
+    if (delta && ce) setPair(endD, endT, new Date(+ce + delta));
     prevStart = ns;
-  });
-  allDayBox.addEventListener('change', () => { syncDateInputs(); prevStart = parseInput(startInp); });
+  }
+  startD.addEventListener('input', startChanged);
+  // 'change', not 'input': while typing "13:00" the partial "1" already parses
+  // (as 01:00) and would yank the end around on every keystroke.
+  startT.addEventListener('change', () => { normalize(startT); startChanged(); });
+  endT.addEventListener('change', () => normalize(endT));
+  allDayBox.addEventListener('change', () => { syncDateInputs(); prevStart = readPair(startD, startT); });
 
   // repeat controls
   const freqSel = q('#ev-freq'), endsWrap = q('#ev-ends-wrap'), endsSel = q('#ev-ends');
@@ -186,13 +218,15 @@ export async function openEventDialog(inst, defaultDay, timed) {
 
   function readTimes() {
     const allDay = allDayBox.checked;
-    const sv = q('#ev-start').value, ev = q('#ev-end').value;
+    const sv = startD.value, ev = endD.value;
     if (!sv || !ev) return {};
     if (allDay) {
       const s = new Date(sv + 'T00:00');
       return { allDay, start: s, end: new Date(+new Date(ev + 'T00:00') + DAY), sVal: sv, eVal: ev };
     }
-    return { allDay, start: new Date(sv), end: new Date(ev), sVal: sv, eVal: ev };
+    const s = readPair(startD, startT), e = readPair(endD, endT);
+    if (!s || !e) return { badTime: true };
+    return { allDay, start: s, end: e, sVal: sv, eVal: ev };
   }
 
   // guests + availability: the chips widget mutates `guests` and calls back so
@@ -214,6 +248,10 @@ export async function openEventDialog(inst, defaultDay, timed) {
   q('#ev-save').addEventListener('click', async () => {
     const t = readTimes();
     const title = q('#ev-title').value.trim() || 'Untitled event';
+    if (t.badTime) {
+      q('#ev-error').textContent = `Please enter a time like ${hour12 ? '1:30 PM' : '13:00'}.`;
+      return;
+    }
     if (!t.start || !t.end || t.end <= t.start) {
       q('#ev-error').textContent = 'Please pick an end after the start.';
       return;

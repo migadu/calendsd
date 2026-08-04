@@ -28,13 +28,16 @@ The browsers are pinned by Nix, so `@playwright/test` in package.json must match
 
 Login used by the specs: `bob` / `bob` (dev DB).
 
-## Cross-browser (the datetime-local case)
+## Cross-browser
 
-Native `<input type="datetime-local">` renders 12h/24h per engine: Chromium
-honours the element's `lang`, WebKit/Firefox follow the OS locale. The Nix
-`playwright-driver.browsers` bundle already contains webkit and firefox — just
-uncomment those projects in `playwright.config.js` to test the 24-hour
-preference across engines (no extra install needed).
+The event editor no longer uses native `<input type="datetime-local">` for
+times — every engine formats that per the browser/OS locale (Chromium ignores
+the element's `lang`), which broke the 24-hour preference. Times are now an
+app-formatted text field, so their format is engine-independent and asserted
+directly in `edit-dialog.spec.js`. The Nix `playwright-driver.browsers` bundle
+still contains webkit and firefox — uncomment those projects in
+`playwright.config.js` to check dialog behaviour across engines (no extra
+install needed).
 
 ## Layout
 

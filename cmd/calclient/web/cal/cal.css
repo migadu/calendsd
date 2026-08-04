@@ -241,6 +241,13 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .dialog .actions { display: flex; gap: .5rem; margin-top: 1rem; justify-content: flex-end; }
 .dialog .actions .danger { margin-right: auto; }
 .dialog input[type="text"], .dialog input[type="email"], .dialog input[type="url"], .dialog input[type="tel"] { width: 100%; }
+/* Starts/Ends: a native date picker beside the app-formatted time field, so
+   the time follows the 12/24-hour preference (the native datetime-local time
+   half follows the browser locale instead). */
+.dialog .dt-pair { display: flex; gap: .3rem; }
+.dialog .dt-pair input[type="date"] { flex: 1; min-width: 0; }
+.dialog .dt-pair input.time-field { width: 6.2rem; flex: none; }
+.dialog .dt-pair input.time-field.invalid { border-color: var(--danger); }
 .dialog .note { color: var(--dim); font-size: .8rem; margin: .5rem 0; }
 
 /* calendar sharing (calendar settings dialog) */

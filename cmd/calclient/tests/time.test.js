@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DAY, HOUR, startOfDay, addDays, nextDate, sameDay, startOfWeek, isoWeek,
-  localDT, localDate, tzOffsetMs, tzDayStart,
+  localDT, localDate, tzOffsetMs, tzDayStart, formatTimeOfDay, parseTimeOfDay,
 } from '../web/shared/time.js';
 
 test('constants', () => {
@@ -42,6 +42,48 @@ test('localDT / localDate format input values from local time', () => {
   const d = new Date(2026, 6, 5, 9, 7);
   assert.equal(localDT(d), '2026-07-05T09:07');
   assert.equal(localDate(d), '2026-07-05');
+});
+
+test('formatTimeOfDay follows the 12/24-hour preference', () => {
+  const t = (h, m) => new Date(2026, 6, 5, h, m);
+  // 24-hour: zero-padded, no meridiem
+  assert.equal(formatTimeOfDay(t(13, 5), false), '13:05');
+  assert.equal(formatTimeOfDay(t(0, 0), false), '00:00');
+  assert.equal(formatTimeOfDay(t(9, 30), false), '09:30');
+  // 12-hour: 12 AM midnight, 12 PM noon, no leading zero on the hour
+  assert.equal(formatTimeOfDay(t(13, 5), true), '1:05 PM');
+  assert.equal(formatTimeOfDay(t(0, 0), true), '12:00 AM');
+  assert.equal(formatTimeOfDay(t(12, 0), true), '12:00 PM');
+  assert.equal(formatTimeOfDay(t(9, 30), true), '9:30 AM');
+});
+
+test('parseTimeOfDay accepts either clock and common shorthands', () => {
+  assert.deepEqual(parseTimeOfDay('13:05'), { h: 13, m: 5 });
+  assert.deepEqual(parseTimeOfDay('00:00'), { h: 0, m: 0 });
+  assert.deepEqual(parseTimeOfDay('9'), { h: 9, m: 0 });
+  assert.deepEqual(parseTimeOfDay('930'), { h: 9, m: 30 });
+  assert.deepEqual(parseTimeOfDay('0930'), { h: 9, m: 30 });
+  assert.deepEqual(parseTimeOfDay('9.15'), { h: 9, m: 15 });
+  assert.deepEqual(parseTimeOfDay('1:05 PM'), { h: 13, m: 5 });
+  assert.deepEqual(parseTimeOfDay('1pm'), { h: 13, m: 0 });
+  assert.deepEqual(parseTimeOfDay('12 am'), { h: 0, m: 0 });
+  assert.deepEqual(parseTimeOfDay('12:30 p.m.'), { h: 12, m: 30 });
+  assert.deepEqual(parseTimeOfDay('  23:59 '), { h: 23, m: 59 });
+});
+
+test('parseTimeOfDay rejects non-times', () => {
+  for (const bad of ['', 'noon', '24:00', '13 pm', '0 am', '12:60', '1:5', '9::30', '9:30 xm']) {
+    assert.equal(parseTimeOfDay(bad), null, bad);
+  }
+});
+
+test('format/parse round-trip in both clocks', () => {
+  for (const [h, m] of [[0, 0], [9, 30], [12, 0], [13, 5], [23, 59]]) {
+    for (const hour12 of [false, true]) {
+      const s = formatTimeOfDay(new Date(2026, 0, 1, h, m), hour12);
+      assert.deepEqual(parseTimeOfDay(s), { h, m }, `${s} (${hour12 ? '12h' : '24h'})`);
+    }
+  }
 });
 
 test('tzOffsetMs is zero for UTC and DST-aware for Zurich', () => {

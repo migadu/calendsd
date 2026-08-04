@@ -49,6 +49,38 @@ export function localDate(d) {
 
 export function plusHours(h) { const d = new Date(); d.setHours(d.getHours() + h, 0, 0, 0); return d; }
 
+// ---- time-of-day text fields ---------------------------------------------
+// The event editor renders time as its own text field next to a native date
+// input, because a native datetime-local's time half is formatted per the
+// *browser* locale — Chromium ignores the element's lang attribute — so the
+// app's 12/24-hour preference could not be honored there. These two are that
+// field's display/parse pair, driven by the hour12 pref.
+
+// formatTimeOfDay renders the wall-clock time of `d`: "13:05" or "1:05 PM".
+export function formatTimeOfDay(d, hour12) {
+  const h = d.getHours(), m = d.getMinutes();
+  if (!hour12) return `${p2(h)}:${p2(m)}`;
+  return `${(h % 12) || 12}:${p2(m)} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+// parseTimeOfDay accepts what people type in either clock — "9", "9:30",
+// "09.30", "0930", "930", "1pm", "1:30 PM", "12a" — and returns {h, m} in
+// 24-hour terms, or null when the text isn't a time. Parsing is deliberately
+// clock-agnostic: an am/pm suffix always works, its absence means 24-hour.
+export function parseTimeOfDay(s) {
+  const m = String(s).trim().toLowerCase().match(/^(\d{1,2})(?:[:.h]?(\d{2}))?\s*(?:([ap])\.?m?\.?)?$/);
+  if (!m) return null;
+  let h = +m[1];
+  const min = m[2] ? +m[2] : 0;
+  if (min > 59) return null;
+  if (m[3]) {                       // am/pm given: hour must be 1–12
+    if (h < 1 || h > 12) return null;
+    if (m[3] === 'p' && h !== 12) h += 12;
+    else if (m[3] === 'a' && h === 12) h = 0;
+  } else if (h > 23) return null;
+  return { h, m: min };
+}
+
 // ---- display time zone ---------------------------------------------------
 // The apps can show a time zone other than the browser's. Event labels
 // already format in that zone via toLocale* options; vertical grid geometry
