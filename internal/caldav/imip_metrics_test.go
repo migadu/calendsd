@@ -2,6 +2,7 @@ package caldav_test
 
 import (
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -37,21 +38,22 @@ func TestIMipDeliveryOutcomes(t *testing.T) {
 		}
 	}
 
+	req := httptest.NewRequest("POST", "/", nil)
 	set := metrics.New("test")
 	sent := &caldav.IMipPlugin{SenderEmail: "s@example.org", Mailer: &spyMailer{}, Metrics: set}
-	sent.DeliverExternal(newMsg("mailto:guest@example.com", true))  // sent
-	sent.DeliverExternal(newMsg("mailto:guest@example.com", false)) // skipped
-	sent.DeliverExternal(newMsg("mailto:not an address", true))     // invalid_recipient
-	sent.DeliverExternal(newMsg("urn:uuid:1234", true))             // unsupported (non-mailto)
+	sent.DeliverExternal(req, newMsg("mailto:guest@example.com", true))  // sent
+	sent.DeliverExternal(req, newMsg("mailto:guest@example.com", false)) // skipped
+	sent.DeliverExternal(req, newMsg("mailto:not an address", true))     // invalid_recipient
+	sent.DeliverExternal(req, newMsg("urn:uuid:1234", true))             // unsupported (non-mailto)
 
 	noMailer := &caldav.IMipPlugin{SenderEmail: "s@example.org", Metrics: set}
-	noMailer.DeliverExternal(newMsg("mailto:guest@example.com", true)) // no_mailer
+	noMailer.DeliverExternal(req, newMsg("mailto:guest@example.com", true)) // no_mailer
 
 	broken := &caldav.IMipPlugin{SenderEmail: "s@example.org", Mailer: failingMailer{}, Metrics: set}
-	broken.DeliverExternal(newMsg("mailto:guest@example.com", true)) // smtp_error
+	broken.DeliverExternal(req, newMsg("mailto:guest@example.com", true)) // smtp_error
 
 	want := `
-# HELP calserver_imip_deliveries_total External iTIP deliveries by outcome; only smtp_error is alert-worthy.
+# HELP calserver_imip_deliveries_total External iTIP deliveries by outcome; smtp_error and auth_error are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes.
 # TYPE calserver_imip_deliveries_total counter
 calserver_imip_deliveries_total{outcome="invalid_recipient"} 1
 calserver_imip_deliveries_total{outcome="no_mailer"} 1

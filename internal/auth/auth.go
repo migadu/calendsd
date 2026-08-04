@@ -108,6 +108,15 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 				return false, dav.ErrForbidden("this account is scheduled for deletion")
 			}
 			dav.SetPrincipal(r.Context(), principal)
+			// Stash the Basic password (when present) request-scoped, so iMIP can
+			// submit scheduling mail as this user (send-as-logged-in-user). This is
+			// the single stash point for every Basic backend — rcptd and the local
+			// fallback. Digest and other mechanisms carry no reusable plaintext, so
+			// nothing is stashed and per-user submission fails closed per the iMIP
+			// plan. The secret lives only on the request context — never logged.
+			if _, pw, ok := r.BasicAuth(); ok {
+				dav.SetSubmissionSecret(r.Context(), pw)
+			}
 			p.logger().Debug("auth ok",
 				"principal", principal, "method", r.Method,
 				"path", r.URL.Path, "remote", remoteAddr(r))

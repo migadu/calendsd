@@ -103,12 +103,16 @@ request_dir = ""        # e.g. "/var/tmp/calserver-requests". Empty = disabled.
 
 # SCHEDULING
 # =============================================================================
-# iMIP emails invitations to attendees who are not local principals. Leave smtp
-# empty to disable outbound email (local iTIP delivery still works).
+# iMIP emails invitations to attendees who are not local principals. iMip is
+# enabled when either smtp (the shared relay) or submission (per-user) is set;
+# leave both empty to disable outbound email (local iTIP delivery still works).
+# See docs/imip.md for the two send paths and the responsibility split.
 [scheduling.imip]
-smtp = ""               # SMTP host:port, e.g. "mail.example.org:587".
+smtp = ""               # Shared-relay SMTP host:port, e.g. "mail.example.org:587".
+                        # Used for server-originated mail and resource-reply
+                        # relays. Also the sole path when submission is unset.
 sender = ""             # Envelope sender (MAIL FROM) and, by default, the From
-                        # header of invitation emails.
+                        # header of relayed invitation emails.
 send_as_organizer = false  # true: put the scheduling sender's own address in
                         # the From header instead — the organizer for invites,
                         # the attendee for replies (always a local principal);
@@ -116,6 +120,19 @@ send_as_organizer = false  # true: put the scheduling sender's own address in
                         # Only safe when your SMTP relay can DKIM-sign for those
                         # local domain(s), or recipients fail DMARC and junk the
                         # mail. A malformed sender address falls back to sender.
+
+# Per-user submission: when set, an invitation or reply whose sender is the
+# logged-in user is submitted to this server authenticated AS that user (with
+# the credentials they presented over CalDAV Basic auth). The submission server
+# then enforces allowed_from, DKIM-signs, and meters the message against that
+# user's sending limits. A message whose sender is NOT the logged-in user is
+# either relayed (an auto-schedule resource, via smtp above) or refused (a
+# delegated organizer) — it is never sent as someone else. Requires Basic auth
+# (a Digest login carries no reusable password and cannot send as itself).
+submission = ""         # SMTP submission host:port, e.g. "smtp.example.org:465".
+submission_implicit_tls = false  # true: implicit TLS (SMTPS, :465).
+                        # false: STARTTLS (:587). The connection is always TLS;
+                        # credentials are never sent on an unencrypted link.
 
 
 # CALENDAR SERVER COMPATIBILITY

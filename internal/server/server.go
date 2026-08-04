@@ -32,8 +32,9 @@ type Config struct {
 	BaseURI string
 	// Realm must match the realm baked into users.digesta1 (PLAN.md §5).
 	Realm string
-	// IMipSender and IMipSMTP enable emailing invites to external
-	// attendees; when IMipSMTP is empty, iMip is disabled.
+	// IMipSender and IMipSMTP enable emailing invites to external attendees.
+	// iMip is enabled when either IMipSMTP (the shared relay) or IMipSubmission
+	// (per-user submission) is set.
 	IMipSender string
 	IMipSMTP   string
 	// IMipSendAsOrganizer puts the scheduling sender's own address (organizer
@@ -42,6 +43,15 @@ type Config struct {
 	// safe when the relay can DKIM-sign for those local domain(s); off by
 	// default. See caldav.IMipPlugin.SendAsOrganizer.
 	IMipSendAsOrganizer bool
+	// IMipSubmission, when set, is the SMTP submission host:port used to send
+	// invitations AS the logged-in user (authenticated with their credentials),
+	// so mail is DKIM/allowed_from-checked and metered against their sending
+	// limits. Empty keeps the shared-relay behavior. IMipSMTP is still used for
+	// resource-originated replies (which have no interactive login).
+	IMipSubmission string
+	// IMipSubmissionImplicitTLS selects implicit TLS (SMTPS, :465) for the
+	// submission connection; false uses STARTTLS (:587).
+	IMipSubmissionImplicitTLS bool
 	// Browser serves HTML indexes for GET on collections (off by default:
 	// sabre without its Browser plugin answers 501, which the corpus pins).
 	Browser bool
@@ -137,8 +147,8 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
-		base, realm, c.IMipSMTP != "", c.IMipSendAsOrganizer, c.AutoProvision, c.PerUserProps,
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
+		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
 		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
@@ -330,13 +340,25 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	srv.AddPlugin(&caldav.SharingPlugin{})
 	srv.AddPlugin(&caldav.NotificationsPlugin{})
 	srv.AddPlugin(&carddav.Plugin{})
-	if cfg.IMipSMTP != "" {
-		srv.AddPlugin(&caldav.IMipPlugin{
+	if cfg.IMipSMTP != "" || cfg.IMipSubmission != "" {
+		imip := &caldav.IMipPlugin{
 			SenderEmail:     cfg.IMipSender,
 			SendAsOrganizer: cfg.IMipSendAsOrganizer,
-			Mailer:          &caldav.SMTPMailer{Addr: cfg.IMipSMTP},
 			Metrics:         cfg.Metrics,
-		})
+		}
+		if cfg.IMipSMTP != "" {
+			// The shared relay: server-originated mail and resource replies.
+			imip.Mailer = &caldav.SMTPMailer{Addr: cfg.IMipSMTP}
+		}
+		if cfg.IMipSubmission != "" {
+			// Per-user submission: send invitations as the logged-in user.
+			imip.Submission = &caldav.SubmissionMailer{
+				Addr:     cfg.IMipSubmission,
+				Implicit: cfg.IMipSubmissionImplicitTLS,
+			}
+			imip.UseScheduler(schedule)
+		}
+		srv.AddPlugin(imip)
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: &storage.PropertyStorage{DB: db}})

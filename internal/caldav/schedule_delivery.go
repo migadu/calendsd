@@ -18,9 +18,11 @@ import (
 )
 
 // ExternalDeliverer delivers to non-local recipients (iMip email). Returns
-// true if it handled the message (set a schedule status).
+// true if it handled the message (set a schedule status). r is the request
+// that triggered delivery; it carries the authenticated principal (and, once
+// stashed, the submission credential) used to send as the logged-in user.
 type ExternalDeliverer interface {
-	DeliverExternal(msg *ical.Message) bool
+	DeliverExternal(r *http.Request, msg *ical.Message) bool
 }
 
 // deliver routes one iTIP message: local delivery first, then any external
@@ -31,7 +33,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message) {
 	} else {
 		for _, plugin := range p.server.Plugins() {
 			if ext, ok := plugin.(ExternalDeliverer); ok {
-				if ext.DeliverExternal(msg) {
+				if ext.DeliverExternal(r, msg) {
 					break
 				}
 			}

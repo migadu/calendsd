@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"calserver/internal/dav"
 )
 
 // TestDigestA1SeedCompatibility pins the digesta1 convention against the
@@ -195,6 +197,50 @@ func TestFixedPrincipalBypassesBackends(t *testing.T) {
 	if got := w.Header().Get("WWW-Authenticate"); got != "" {
 		t.Errorf("unexpected challenge %q on a pre-authenticated request", got)
 	}
+}
+
+// TestSubmissionSecretStash: a successful Basic login stashes the plaintext
+// password on the request context (so iMIP can submit mail as the user), while
+// a successful Digest login — which carries no reusable plaintext — stashes
+// nothing.
+func TestSubmissionSecretStash(t *testing.T) {
+	t.Run("basic stashes the password", func(t *testing.T) {
+		p := NewPlugin(&BasicBackend{Realm: "SabreDAV",
+			Validate: func(u, pw string) bool { return u == "admin" && pw == "hunter2" }})
+		r := httptest.NewRequest("PROPFIND", "/", nil)
+		r.SetBasicAuth("admin", "hunter2")
+		r = r.WithContext(dav.ContextWithPrincipal(r.Context(), ""))
+		if proceed, err := p.BeforeMethod(httptest.NewRecorder(), r); !proceed || err != nil {
+			t.Fatalf("Basic login rejected: proceed=%v err=%v", proceed, err)
+		}
+		if got := dav.SubmissionSecret(r.Context()); got != "hunter2" {
+			t.Errorf("stashed secret = %q, want hunter2", got)
+		}
+	})
+
+	t.Run("digest stashes nothing", func(t *testing.T) {
+		const realm, user, pass = "SabreDAV", "admin", "admin"
+		const nonce, cnonce, nc, uri = "abc123", "0a4f113b", "00000001", "/"
+		b := &DigestBackend{Realm: realm, HashA1: func(rlm, u string) (string, bool) {
+			if u == user {
+				return DigestA1(user, rlm, pass), true
+			}
+			return "", false
+		}}
+		a2 := md5hex("PROPFIND:" + uri)
+		response := md5hex(DigestA1(user, realm, pass) + ":" + nonce + ":" + nc + ":" + cnonce + ":auth:" + a2)
+		r := httptest.NewRequest("PROPFIND", uri, nil)
+		r.Header.Set("Authorization", fmt.Sprintf(
+			`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
+			user, realm, nonce, uri, nc, cnonce, response))
+		r = r.WithContext(dav.ContextWithPrincipal(r.Context(), ""))
+		if proceed, err := NewPlugin(b).BeforeMethod(httptest.NewRecorder(), r); !proceed || err != nil {
+			t.Fatalf("Digest login rejected: proceed=%v err=%v", proceed, err)
+		}
+		if got := dav.SubmissionSecret(r.Context()); got != "" {
+			t.Errorf("Digest login stashed secret %q, want empty", got)
+		}
+	})
 }
 
 // TestAutoRequireLoginOff: with AutoRequireLogin disabled an unauthenticated

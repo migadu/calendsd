@@ -1,5 +1,11 @@
 # iMIP: Send Invitations As the Logged-In User
 
+> **Status: implemented.** All 8 steps landed. Key code: `internal/caldav/`
+> (`imip.go` DeliverExternal branching, `submission.go` SubmissionMailer),
+> `internal/dav/context.go` (SubmissionSecret), `internal/auth/auth.go` (stash),
+> `internal/config/` + `internal/server/server.go` (wiring), `docs/imip.md`.
+> Tests: `imip_sendasuser_test.go`, `submission_test.go`, `context_test.go`.
+
 ## Goal
 
 When a logged-in user organizes, updates, replies to, or cancels an event,
@@ -13,6 +19,33 @@ Sending through `mizu_out` submission is the *only* path that counts toward the
 user's limits (the limits live in mizu_out's `[server.rate_limit]` and the
 rspamd `migadu_counters`/`migadu_suspender`). Any internal-ingest shortcut or
 shared-relay send would bypass them.
+
+## Core rule
+
+**The logged-in user is always the sender of the invitation.** In iTIP terms
+the "sender" of a scheduling message *is* an identity in the message — the
+`ORGANIZER` for REQUEST/CANCEL, the replying `ATTENDEE` for REPLY. So this rule
+means:
+
+> **The logged-in user must be the `ORGANIZER`/replying `ATTENDEE` of any
+> message calserver sends as them, and the email `From:` equals that identity.**
+
+Enforce it by **validating** that the scheduling sender is one of the logged-in
+user's own addresses — **not** by rewriting `From:`. The `From:` header and the
+in-body `ORGANIZER` must stay the same identity, because attendee replies route
+to `ORGANIZER` (not `From`) and clients track/dedupe the meeting by `ORGANIZER`;
+a split would break reply routing.
+
+This holds automatically for all normal user-initiated scheduling:
+`logged-in user` = `calendar owner` = `ORGANIZER` = `msg.Sender`. It collapses
+the authorization to a single check —
+`msg.Sender ∈ addressesForPrincipal(dav.Principal(r))`:
+
+- **match** → send as the logged-in user (the per-user submission path);
+- **no match** → this is *not* the logged-in user sending their own invitation.
+  We never send per-user-as-someone-else. It is exactly one of two divergence
+  cases, both handled below: a **delegated-organizer PUT** (reject) or a
+  **resource auto-reply** (relay).
 
 ## Background / current state
 
@@ -42,12 +75,27 @@ shared-relay send would bypass them.
   `*ical.Message` per recipient**, and `deliver(r, msg)` runs once per message
   (`schedule.go:127-137`). Each `DeliverExternal` call therefore sees a single
   recipient — there is no point that holds all attendees of an event at once.
-- **Sender ≠ request principal for resource replies**: auto-scheduled resources
-  (rooms) generate a `REPLY` to the organizer, queued during the organizer's PUT
-  and flushed later in `AfterWrite` (`schedule.go:176`,
-  `schedule_delivery.go:203-215`). There the message *sender* is the resource,
-  but the authenticated principal on `r` — and any stashed password — belong to
-  the **organizer** who made the PUT. See the resource-reply decision below.
+- **Two ways `msg.Sender` diverges from the logged-in user** (the only cases the
+  Core rule's "no match" branch must handle):
+  - **Delegated-organizer PUT**: a delegate saves an event on a shared calendar
+    whose `ORGANIZER` is the calendar owner. `dav.Principal(r)` (the delegate)
+    ≠ `msg.Sender` (the owner). The parse already keys on the owner
+    (`addressesForPrincipal(calNode.Owner())`, `schedule.go:126`), but the only
+    credential in hand is the delegate's — which `allowed_from` must reject for
+    the owner's address. Proper support is the iTIP `ORGANIZER` + `SENT-BY`
+    model, out of v1 scope. **Reject** in v1 (see decision).
+  - **Resource auto-reply**: auto-scheduled resources (rooms) generate a `REPLY`
+    to the organizer, queued during the organizer's PUT and flushed later in
+    `AfterWrite` (`schedule.go:176`, `schedule_delivery.go:203-215`). The sender
+    is the resource; there is no interactive login and no reusable password.
+    **Relay** in v1 (see decision).
+  - **Distinguishing them matters**: both fail the `msg.Sender ∈ principal set`
+    check, but one must reject and the other must relay. Use a *positive* test
+    for a resource/non-login identity (the sender principal resolves to a
+    resource-type / login-less principal), **not** "sender ≠ request principal"
+    — otherwise a delegated *human* organizer would be silently relayed through
+    the shared sender, bypassing that user's send limits (the exact outcome this
+    design exists to prevent).
 
 ## Decisions
 
@@ -55,8 +103,9 @@ shared-relay send would bypass them.
 |---|---|---|
 | Credential model | **Reuse the user's CalDAV Basic password** | mizu_out only does plaintext verification via rcptd `/auth` (no SASL/SCRAM/CRAM), so hash-auth is impossible (a hash used to log in is just pass-the-hash). A master/service credential was rejected: it is a standing skeleton key (send-as-anyone) = far larger blast radius. Reusing the password adds no new class of secret — calserver already receives and verifies it on every Basic request. |
 | Fallback when per-user submission can't happen | **Fail with an iTIP schedule-status** | No shared-relay fallback: relaying would bypass the user's sending limits, contradicting the goal. Client sees non-delivery. |
-| Sender identity (v1) | **Any address the server already resolves for the principal** (`addressesForPrincipal`), not just the primary | Restricting to the primary would *reject* organizers who legitimately used a valid alias as `ORGANIZER` — a new restriction the old relay path never imposed. calserver's check is defense-in-depth; mizu_out's `allowed_from` CDB is the real backstop. Cross-account/shared identities still deferred. |
-| Resource-originated replies (auto-scheduled rooms) | **v1: fall back to the legacy `server` relay for these, and only these, sends** | The sender is the resource, but the only credential in hand is the organizer's — sending "as the resource" authenticated as the organizer is exactly what `allowed_from` must reject. A resource has no interactive login and thus no reusable password. Relaying resource replies through the shared sender keeps rooms able to notify remote organizers; resources are server-owned identities with no user send-limit to meter, so the "must count against limits" goal doesn't apply to them. A dedicated resource submission credential is the v2 cleanup. |
+| Sender identity | **The logged-in user must be the message sender** (Core rule): `msg.Sender ∈ addressesForPrincipal(dav.Principal(r))`, matched against **any** of the principal's resolved addresses (not just the primary) | Any of a principal's own addresses/aliases is legitimate; restricting to the primary would reject an organizer who used a valid alias as `ORGANIZER`. Validate — never rewrite `From:` — so `From:` and in-body `ORGANIZER` stay one identity. calserver's check is defense-in-depth; mizu_out's `allowed_from` CDB is the real backstop. Cross-account/shared identities still deferred. |
+| Delegated-organizer PUT (sender is another *human*, not the logged-in user) | **v1: reject with an iTIP schedule-status; do not send** | The logged-in user is not the organizer, so the Core rule forbids sending as them, and we have no credential for the real organizer. Silently relaying would bypass the organizer's send limits and mismatch `From:`/`ORGANIZER`. Proper delegation is the iTIP `ORGANIZER` + `SENT-BY` project (v2+). |
+| Resource-originated replies (auto-scheduled rooms) | **v1: relay through the legacy `server` sender for these, and only these, sends** | The sender is a login-less resource with no reusable password and no per-user send-limit to meter, so the "count against limits" goal doesn't apply. Detect it with a **positive** resource/non-login test on the sender principal (not "sender ≠ request principal", which would also catch delegated humans). Relaying keeps rooms able to notify remote organizers. A dedicated per-resource submission credential is the v2 cleanup. |
 
 ### Security constraints on the reused password
 
@@ -113,25 +162,36 @@ as `(user, password)`, `MAIL FROM` = user's address.
   out — it interacts with the synchronous-send failure mode below.
 
 ### 4. Rework `IMipPlugin.DeliverExternal(r, msg)`
+Implements the **Core rule** — the logged-in user is always the sender — as a
+single classification of `msg.Sender`, with a positive resource test to keep the
+two divergence cases apart.
+
 - Resolve the authenticated principal from `r` (`dav.Principal`).
-- **Wire a principal→addresses resolver into `IMipPlugin`.** The sender check
-  needs the principal's address *set*, but `IMipPlugin` today only holds
-  `server *dav.Server` (`imip.go:54`); `addressesForPrincipal` lives on
-  `SchedulePlugin`. Inject a resolver func (or share it) when the plugin is
-  built in `server.go`.
-- **Authorize the sender**: require `msg.Sender` ∈ the principal's resolved
-  address set; otherwise set a clean schedule-status and do not send. (mizu_out
-  `allowed_from` is the ultimate backstop.)
-- **Resource-reply branch**: if `msg.Sender` is *not* in the request principal's
-  set (the auto-scheduled-resource REPLY case), do **not** fail — route this
-  send through the legacy `server` relay path (per the resource-reply decision).
-  This is the one sanctioned relay fallback.
-- Otherwise pull the password from context; if absent → **fail with a status**
-  (no relay fallback for user sends).
-- Send via `SubmissionMailer` as the user. `From:` = `msg.Sender` (organizer for
-  REQUEST/CANCEL, replying attendee for REPLY).
-- **Map mizu_out responses**: `4xx`/`5xx` (auth failure, over-limit, rejected) →
-  the appropriate iTIP schedule-status so the client sees non-delivery.
+- **Wire a principal→addresses resolver *and* a resource/non-login test into
+  `IMipPlugin`.** The sender check needs the principal's address *set*, but
+  `IMipPlugin` today only holds `server *dav.Server` (`imip.go:54`);
+  `addressesForPrincipal` lives on `SchedulePlugin`. Inject both a resolver func
+  and an `isResourceSender(msg.Sender) bool` predicate when the plugin is built
+  in `server.go`.
+- **Classify `msg.Sender` and branch:**
+  1. **`msg.Sender` ∈ `addressesForPrincipal(dav.Principal(r))`** → the Core-rule
+     happy path. Pull the password from context; if absent (Digest / non-Basic
+     login) → **fail with a schedule-status**. Otherwise send via
+     `SubmissionMailer` **as the logged-in user**. `From:` = `msg.Sender`
+     (organizer for REQUEST/CANCEL, replying attendee for REPLY) — never a
+     rewrite; it already equals the user's identity.
+  2. **`msg.Sender` is a resource / login-less identity** (positive
+     `isResourceSender` test) → route through the legacy `server` relay path.
+     This is the one sanctioned relay fallback (metric `resource_relay`).
+  3. **otherwise** (a delegated *human* organizer — sender is a real user that
+     is not the logged-in principal) → **fail with a schedule-status**
+     (`not_authorized_sender`). Do **not** relay: that would bypass the
+     organizer's send limits and split `From:`/`ORGANIZER`.
+- **Map mizu_out responses** on path 1: `4xx`/`5xx` (auth failure, over-limit,
+  rejected) → the appropriate iTIP schedule-status so the client sees
+  non-delivery.
+- mizu_out's `allowed_from` CDB remains the ultimate backstop behind the local
+  address check.
 - Keep the existing CR/LF header-injection stripping (`stripHeaderChars`).
 
 ### 5. Config + wiring
@@ -149,12 +209,22 @@ sent via the legacy relay) so the fallback path is observable and doesn't fold
 into `not_authorized_sender`.
 
 ### 7. Tests
-- **Unit**: sender-authorization (own address vs foreign, **alias in the set is
-  accepted**), correct `From`/`MAIL FROM`/`AUTH`, TLS-required,
-  fail-when-no-password, rate-limit response mapping.
-- **Resource reply**: a REPLY whose sender is not the request principal routes
-  to the relay (asserts `resource_relay`, no auth attempt as the organizer).
-- **Digest login**: no plaintext stashed → user send fails with a status.
+One test per Core-rule branch (§4), plus mechanics:
+- **Happy path**: `msg.Sender` == the logged-in principal's own address (and a
+  second case with an **alias in the set**) → sent as the user; assert
+  `From`/`MAIL FROM`/`AUTH` all == that identity, TLS-required, `sent_as_user`.
+- **Delegated human organizer**: `msg.Sender` is another real user, not the
+  principal → **fails** with a schedule-status (`not_authorized_sender`); assert
+  **no** SMTP auth attempt and **no** relay send.
+- **Resource reply**: `msg.Sender` passes the positive `isResourceSender` test →
+  routes to the relay (`resource_relay`), no auth attempt as the organizer.
+  Cover a REPLY generated in `AfterWrite`.
+- **Digest / no credential**: no plaintext stashed → user send fails
+  (`no_credential`).
+- **Rate-limit / over-limit**: mizu_out `4xx`/`5xx` → mapped schedule-status
+  (`rate_limited` / `auth_error`).
+- **CANCEL via DELETE**: a `BeforeUnbind`-driven CANCEL (organizer == logged-in
+  user) sends as the user — same mechanism as PUT, so it must be exercised too.
 - Update `internal/caldav/imip_test.go` and `imip_metrics_test.go` to the new
   `DeliverExternal(r, msg)` signature (inject a request carrying a fake
   principal + secret).
@@ -177,9 +247,16 @@ within the user's allowed set and authenticates as the user.
   on the non-rcptd fallback branch — they can't send as themselves.
 - **Resource replies relay in v1**: auto-scheduled rooms answering a remote
   organizer go through the shared sender, not per-user submission. Acceptable
-  because resources have no user send-limit to meter, but it means the "always
-  authenticate as the sender" property has one deliberate exception. v2: a
+  because resources have no user send-limit to meter, but it is the one
+  deliberate exception to the Core rule (sender is not a logged-in user). v2: a
   dedicated per-resource submission credential removes it.
+- **Delegated organizers rejected in v1**: under the Core rule, a delegate
+  saving an event whose `ORGANIZER` is the calendar owner cannot send the
+  invitation (they aren't the organizer and we hold only their credential). The
+  scheduling message fails with a status. If delegation is needed, it is the
+  iTIP `ORGANIZER` + `SENT-BY` project — the delegate authenticates as
+  themselves but sends on the organizer's behalf, which mizu_out's `allowed_from`
+  would have to permit.
 - **Over-limit UX**: a user hitting their send limit gets a non-delivery
   schedule-status; confirm that is the desired client-facing behavior.
 

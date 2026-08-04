@@ -34,7 +34,7 @@ func TestIMipHeaderInjectionStripped(t *testing.T) {
 	}
 	spy := &spyMailer{}
 	plugin := &caldav.IMipPlugin{SenderEmail: "server@example.org", Mailer: spy}
-	if !plugin.DeliverExternal(msg) {
+	if !plugin.DeliverExternal(httptest.NewRequest("POST", "/", nil), msg) {
 		t.Fatalf("DeliverExternal returned false; status=%q", msg.ScheduleStatus)
 	}
 

@@ -67,6 +67,14 @@ type Config struct {
 			SMTP            string
 			Sender          string
 			SendAsOrganizer bool
+			// Submission, when set, is the SMTP submission host:port used to
+			// send invitations AS the logged-in user (authenticated with their
+			// own credentials), so mail is DKIM/allowed_from-checked and metered
+			// against their sending limits. Empty uses the shared relay (SMTP).
+			Submission string
+			// SubmissionImplicitTLS selects implicit TLS (SMTPS, :465) for the
+			// submission connection; false uses STARTTLS (:587).
+			SubmissionImplicitTLS bool
 		}
 	}
 	// CalendarServer holds the Calendar-Server compatibility extensions.
@@ -204,6 +212,8 @@ func Load(path string) (*Config, error) {
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
 	cfg.Scheduling.IMip.SendAsOrganizer = boolean("scheduling.imip.send_as_organizer")
+	cfg.Scheduling.IMip.Submission = str("scheduling.imip.submission")
+	cfg.Scheduling.IMip.SubmissionImplicitTLS = boolean("scheduling.imip.submission_implicit_tls")
 	cfg.CalendarServer.Browser = boolean("calendarserver.browser")
 	cfg.CalendarServer.AutoProvision = boolean("calendarserver.auto_provision")
 	cfg.CalendarServer.PerUserProps = boolean("calendarserver.per_user_props")
@@ -261,8 +271,10 @@ var known = map[string]bool{
 	"logging.request_dir":        true,
 	"logging.access_log":         true,
 	"scheduling.imip.smtp":       true, "scheduling.imip.sender": true,
-	"scheduling.imip.send_as_organizer": true,
-	"calendarserver.browser":            true, "calendarserver.auto_provision": true,
+	"scheduling.imip.send_as_organizer":       true,
+	"scheduling.imip.submission":              true,
+	"scheduling.imip.submission_implicit_tls": true,
+	"calendarserver.browser":                  true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
 	"calendarserver.principals_readable":    true,
 	"calendarserver.auto_schedule_prefixes": true,

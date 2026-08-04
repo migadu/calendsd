@@ -105,7 +105,7 @@ func New(version string) *Set {
 
 		imipDeliveries: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "calserver_imip_deliveries_total",
-			Help: "External iTIP deliveries by outcome; only smtp_error is alert-worthy.",
+			Help: "External iTIP deliveries by outcome; smtp_error and auth_error are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes.",
 		}, []string{"outcome"}),
 		imipDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "calserver_imip_delivery_duration_seconds",
@@ -253,8 +253,10 @@ func (s *Set) SyncTruncated(resource string) {
 	s.syncTruncated.WithLabelValues(resource).Inc()
 }
 
-// IMipDelivery counts one external delivery outcome: sent,
-// invalid_recipient, no_mailer, smtp_error, or skipped.
+// IMipDelivery counts one external delivery outcome. Relay path: sent,
+// smtp_error, no_mailer. Per-user submission path: sent_as_user,
+// resource_relay, not_authorized_sender, no_credential, auth_error,
+// rate_limited. Either path: invalid_recipient, unsupported, skipped.
 func (s *Set) IMipDelivery(outcome string) {
 	if s == nil {
 		return

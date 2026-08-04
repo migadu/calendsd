@@ -160,7 +160,7 @@ func TestIMipSendAsOrganizerMalformedSender(t *testing.T) {
 		SignificantChange: true,
 		Calendar:          cal,
 	}
-	if !p.DeliverExternal(msg) {
+	if !p.DeliverExternal(httptest.NewRequest("POST", "/", nil), msg) {
 		t.Fatal("DeliverExternal returned false, want true")
 	}
 	// Envelope sender is unchanged; only the From framing falls back.

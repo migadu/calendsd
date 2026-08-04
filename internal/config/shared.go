@@ -63,6 +63,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	imipSendAsOrganizer := flag.Bool("imip-send-as-organizer", false, "put the scheduling sender's own address (organizer for invitations, attendee for replies) in the From header of iMip emails (imip-sender stays the envelope sender); only safe when the relay can DKIM-sign for those local domains")
+	imipSubmission := flag.String("imip-submission", "", "SMTP submission host:port to send invitations AS the logged-in user (authenticated with their own credentials); empty uses the shared relay (imip-smtp)")
+	imipSubmissionImplicitTLS := flag.Bool("imip-submission-implicit-tls", false, "submission uses implicit TLS (SMTPS, :465); false uses STARTTLS (:587)")
 	browser := flag.Bool("browser", false, "serve HTML indexes for GET on collections (like sabre's Browser plugin; default matches sabre without it: 501)")
 	tempFileFilter := flag.Bool("temp-file-filter", false, "intercept OS junk files (._*, .DS_Store, Thumbs.db, editor swap files) into a scratch directory instead of the backend, like sabre's TemporaryFileFilterPlugin")
 	tempFileDir := flag.String("temp-file-dir", "", "scratch directory for -temp-file-filter (default: a calserver-tempfiles subdir of the system temp dir)")
@@ -115,24 +117,26 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 		}
 		m.LogLevel = m.Str("log-level", *logLevel, m.File.Logging.Level)
 		m.Server = server.Config{
-			BaseURI:              m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
-			Realm:                m.Str("realm", *realm, m.File.Server.Realm),
-			IMipSMTP:             m.Str("imip-smtp", *imipSMTP, m.File.Scheduling.IMip.SMTP),
-			IMipSender:           m.Str("imip-sender", *imipSender, m.File.Scheduling.IMip.Sender),
-			IMipSendAsOrganizer:  m.Bool("imip-send-as-organizer", *imipSendAsOrganizer, m.File.Scheduling.IMip.SendAsOrganizer),
-			Browser:              m.Bool("browser", *browser, m.File.CalendarServer.Browser),
-			TempFileFilter:       m.Bool("temp-file-filter", *tempFileFilter, m.File.Server.TempFileFilter),
-			TempFileDir:          m.Str("temp-file-dir", *tempFileDir, m.File.Server.TempFileDir),
-			AutoSchedulePrefixes: autoPrefixes,
-			PrincipalsReadable:   m.Bool("principals-readable", *principalsReadable, m.File.CalendarServer.PrincipalsReadable),
-			AutoProvision:        m.Bool("auto-provision", *autoProvision, m.File.CalendarServer.AutoProvision),
-			PerUserProps:         m.Bool("per-user-props", *perUserProps, m.File.CalendarServer.PerUserProps),
-			ExpandGroups:         m.Bool("expand-groups", *expandGroups, m.File.CalendarServer.ExpandGroups),
-			RcptdURL:             m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
-			RcptdToken:           rcptdTok,
-			RequestLogDir:        m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
-			AccessLog:            m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
-			RetentionDays:        RetentionDays(m.File.Retention.DeletedDays),
+			BaseURI:                   m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
+			Realm:                     m.Str("realm", *realm, m.File.Server.Realm),
+			IMipSMTP:                  m.Str("imip-smtp", *imipSMTP, m.File.Scheduling.IMip.SMTP),
+			IMipSender:                m.Str("imip-sender", *imipSender, m.File.Scheduling.IMip.Sender),
+			IMipSendAsOrganizer:       m.Bool("imip-send-as-organizer", *imipSendAsOrganizer, m.File.Scheduling.IMip.SendAsOrganizer),
+			IMipSubmission:            m.Str("imip-submission", *imipSubmission, m.File.Scheduling.IMip.Submission),
+			IMipSubmissionImplicitTLS: m.Bool("imip-submission-implicit-tls", *imipSubmissionImplicitTLS, m.File.Scheduling.IMip.SubmissionImplicitTLS),
+			Browser:                   m.Bool("browser", *browser, m.File.CalendarServer.Browser),
+			TempFileFilter:            m.Bool("temp-file-filter", *tempFileFilter, m.File.Server.TempFileFilter),
+			TempFileDir:               m.Str("temp-file-dir", *tempFileDir, m.File.Server.TempFileDir),
+			AutoSchedulePrefixes:      autoPrefixes,
+			PrincipalsReadable:        m.Bool("principals-readable", *principalsReadable, m.File.CalendarServer.PrincipalsReadable),
+			AutoProvision:             m.Bool("auto-provision", *autoProvision, m.File.CalendarServer.AutoProvision),
+			PerUserProps:              m.Bool("per-user-props", *perUserProps, m.File.CalendarServer.PerUserProps),
+			ExpandGroups:              m.Bool("expand-groups", *expandGroups, m.File.CalendarServer.ExpandGroups),
+			RcptdURL:                  m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
+			RcptdToken:                rcptdTok,
+			RequestLogDir:             m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
+			AccessLog:                 m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
+			RetentionDays:             RetentionDays(m.File.Retention.DeletedDays),
 			Push: server.PushConfig{
 				Enabled:         m.File.Push.Enabled,
 				VAPIDSubject:    m.File.Push.VAPIDSubject,
