@@ -6,7 +6,7 @@ import * as store from '/shared/store.js';
 import { icalUnescape } from '/shared/ical.js';
 import { $, html, frag, brJoin } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
-import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
+import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
 let filter = '';
 // Sidebar selection: {type:'all'} | {type:'book', href} | {type:'group', href}.
@@ -603,6 +603,7 @@ function contactDialog(c) {
 
   const close = () => dlg.remove();
   openOverlay(dlg, close);
+  submitOnEnter(dlg, q('#cd-save'));
   q('#cd-cancel').addEventListener('click', close);
   q('#cd-save').addEventListener('click', async () => {
     const first = q('#cd-first').value.trim(), last = q('#cd-last').value.trim();
