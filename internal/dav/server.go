@@ -324,6 +324,14 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 			if err != nil {
 				return nil, err
 			}
+			// Let plugins hide children the requester may not enumerate (e.g.
+			// domain-scoped principal listings). Runs before hrefs are emitted,
+			// so a filtered child leaves no trace in the response.
+			for _, p := range s.plugins {
+				if hook, ok := p.(ChildFilterHook); ok {
+					children = hook.FilterChildren(ctx, path, children)
+				}
+			}
 			for _, child := range children {
 				childPath := child.Name()
 				if path != "" {

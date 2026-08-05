@@ -81,13 +81,19 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 		return dav.ErrNotImplemented("The free-busy-query REPORT is only implemented on calendars")
 	}
 
-	objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
-	if err != nil {
-		return err
-	}
+	// A transparent (private) calendar contributes no busy time (RFC 6638
+	// §9.1), so it answers with an empty VFREEBUSY rather than its events'
+	// busy periods — keeping a private calendar's schedule invisible even to a
+	// direct free-busy-query.
 	var payloads [][]byte
-	for _, obj := range objects {
-		payloads = append(payloads, obj.CalendarData)
+	if !calNode.transparent() {
+		objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		if err != nil {
+			return err
+		}
+		for _, obj := range objects {
+			payloads = append(payloads, obj.CalendarData)
+		}
 	}
 	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(path), time.Now())
 	if err != nil {

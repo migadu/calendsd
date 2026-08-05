@@ -10,7 +10,7 @@ const { NS, key } = dav;
 export async function loadCalendars() {
   const r = check(await dav.propfind(state.calHome, [
     'd:resourcetype', 'd:displayname', 'a:calendar-color', 'c:calendar-description', 'cs:getctag',
-    's:read-only', 'c:supported-calendar-component-set',
+    's:read-only', 'c:supported-calendar-component-set', 'c:schedule-calendar-transp',
   ], '1'), [207]);
   const before = new Map(state.calendars.map(c => [c.href, c.ctag]));
   state.calendars = dav.msResponses(r.xml)
@@ -32,6 +32,9 @@ export async function loadCalendars() {
         // (and likewise task-capable).
         supportsEvents: comps.length === 0 || comps.includes('VEVENT'),
         supportsTasks: comps.length === 0 || comps.includes('VTODO'),
+        // A private calendar is marked schedule-calendar-transp:transparent, so
+        // its busy times are excluded from free-busy. Absent = opaque (shared).
+        private: isTransparent(x.props.get(key(NS.c, 'schedule-calendar-transp'))),
         isCalendar: dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.c, 'calendar')),
       };
     })
@@ -67,6 +70,12 @@ function truthyProp(el) {
   if (!el) return false;
   const v = el.textContent.trim();
   return v !== '' && v !== '0';
+}
+
+// isTransparent reads schedule-calendar-transp: the value is a child element
+// (<c:transparent/> or <c:opaque/>), so detect transparency by that child.
+function isTransparent(el) {
+  return !!el && el.getElementsByTagNameNS(NS.c, 'transparent').length > 0;
 }
 
 // eventCalendars returns the calendars a new event may be created on: writable
@@ -108,10 +117,15 @@ export async function createCalendar(name, displayName, color) {
   await loadCalendars();
 }
 
-export async function updateCalendar(href, { displayName, color }) {
+export async function updateCalendar(href, { displayName, color, private: priv }) {
   const set = [];
   if (displayName !== undefined) set.push({ name: 'd:displayname', value: displayName });
   if (color !== undefined) set.push({ name: 'a:calendar-color', value: color + 'ff' });
+  // schedule-calendar-transp carries an element value, not text: transparent
+  // (private, hidden from free-busy) vs opaque (shared).
+  if (priv !== undefined) {
+    set.push({ name: 'c:schedule-calendar-transp', xml: priv ? '<c:transparent/>' : '<c:opaque/>' });
+  }
   check(await dav.proppatch(href, set), [207]);
   await loadCalendars();
 }

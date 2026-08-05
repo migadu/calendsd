@@ -97,6 +97,16 @@ type LatePropFindHook interface {
 	PropFindLate(pf *PropFind, node Node) error
 }
 
+// ChildFilterHook lets a plugin drop children from a Depth:1 listing before
+// they are enumerated into the multistatus, so a collection can hide the very
+// existence of siblings the requester may not see. This has no sabre
+// equivalent; it backs domain-scoped principal and home-collection listings
+// (property-level gating alone still leaks child hrefs). Filters run in plugin
+// registration order and compose.
+type ChildFilterHook interface {
+	FilterChildren(ctx context.Context, parentPath string, children []Node) []Node
+}
+
 // AfterUnbindHook fires after a node was removed (sabre's afterUnbind).
 type AfterUnbindHook interface {
 	AfterUnbind(path string) error

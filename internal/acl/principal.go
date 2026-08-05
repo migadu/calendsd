@@ -28,6 +28,13 @@ type ACE struct {
 	Protected bool
 }
 
+// SameDomain is a calserver extension pseudo-principal (not in sabre): it
+// matches an authenticated principal whose email-address domain equals the
+// node owner's email-address domain. A principal without an email address
+// never matches (and never grants), so the ACE fails closed on principals
+// like proxy sub-principals that carry no address.
+const SameDomain = "{urn:x-calserver}same-domain"
+
 // ACLHolder is a node carrying its own ACL (sabre's IACL subset).
 type ACLHolder interface {
 	ACL() []ACE

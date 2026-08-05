@@ -171,6 +171,8 @@ function calendarMenu(cal) {
       <label>Name<input id="cm-name" value="${cal.displayName || cal.name}" ${ro ? 'disabled' : ''}></label>
       <label>Color<input id="cm-color" type="color" value="${store.calColor(cal.href)}" ${ro ? 'disabled' : ''}></label>
     </div>
+    ${!ro && frag`<label class="row cm-private"><input type="checkbox" id="cm-private" ${cal.private ? 'checked' : ''}>
+      <span>Private — hide this calendar's busy times from other people's free/busy and scheduling</span></label>`}
     ${!ro && frag`<section class="share">
       <h3>Shared with</h3>
       <div id="cm-sharees" class="sharee-list"><p class="note">Loading…</p></div>
@@ -197,6 +199,7 @@ function calendarMenu(cal) {
       await store.updateCalendar(cal.href, {
         displayName: $('#cm-name', dialog).value,
         color: $('#cm-color', dialog).value,
+        private: $('#cm-private', dialog).checked,
       });
       close();
     } catch (e) { showError(e); }

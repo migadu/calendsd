@@ -469,15 +469,40 @@ func (c *Calendar) readOnly() bool {
 	return !isString || (s != "" && s != "0")
 }
 
-// ACL mirrors sabre Calendar::getACL: owner + proxies read, authenticated
-// free-busy, and write only when the view is not read-only.
+// transparent reports the {caldav}schedule-calendar-transp:transparent marker.
+// A transparent calendar is excluded from free-busy aggregation (RFC 6638
+// §9.1) — the lever a user flips to make a calendar "private" so its busy
+// times stay invisible to others. The stored value is a raw element
+// (<cal:transparent/> or <cal:opaque/>); accept the several representations a
+// value can take across backends and PROPPATCH round-trips.
+func (c *Calendar) transparent() bool {
+	v, ok := c.Info.Props[xml.Name{Space: davxml.NSCalDAV, Local: "schedule-calendar-transp"}]
+	if !ok {
+		return false
+	}
+	switch t := v.(type) {
+	case davxml.Raw:
+		return bytes.Contains(t, []byte("transparent"))
+	case []byte:
+		return bytes.Contains(t, []byte("transparent"))
+	case string:
+		return strings.Contains(t, "transparent")
+	}
+	return false
+}
+
+// ACL mirrors sabre Calendar::getACL — owner + proxies read, and write only
+// when the view is not read-only — except for free-busy: sabre grants
+// read-free-busy to {DAV:}authenticated, while we restrict it to principals
+// in the owner's email domain so users cannot probe availability across
+// domains (both the free-busy-query REPORT and the outbox POST honor it).
 func (c *Calendar) ACL() []acl.ACE {
 	owner := c.Owner()
 	aces := []acl.ACE{
 		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-write", Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-read", Protected: true},
-		{Privilege: "{urn:ietf:params:xml:ns:caldav}read-free-busy", Principal: "{DAV:}authenticated", Protected: true},
+		{Privilege: "{urn:ietf:params:xml:ns:caldav}read-free-busy", Principal: acl.SameDomain, Protected: true},
 	}
 	if !c.readOnly() {
 		aces = append(aces,
@@ -527,20 +552,20 @@ func (o *CalendarObject) Get() (io.ReadCloser, error) {
 }
 
 // viewData is the object as served for this particular view. On a read-only
-// shared view it redacts CLASS:CONFIDENTIAL events to opaque busy blocks,
-// enforcing RFC 5545's confidential access class; the owner, the owner's
-// proxies, and read-write sharees (who can edit, so must see the real object to
-// round-trip it) get the full payload. The read-only view is identified by
-// sabre's read-only marker — the same signal the object ACL keys off, and the
-// one the storage backend actually populates (ACCESS_READ sets it; the
-// ShareAccess field is left zero). The result is memoized because Get, Data,
-// and Size each ask for it within one request.
+// shared view it redacts CLASS:CONFIDENTIAL and CLASS:PRIVATE events to opaque
+// busy blocks, enforcing RFC 5545's restricted access classes; the owner, the
+// owner's proxies, and read-write sharees (who can edit, so must see the real
+// object to round-trip it) get the full payload. The read-only view is
+// identified by sabre's read-only marker — the same signal the object ACL keys
+// off, and the one the storage backend actually populates (ACCESS_READ sets it;
+// the ShareAccess field is left zero). The result is memoized because Get,
+// Data, and Size each ask for it within one request.
 func (o *CalendarObject) viewData() []byte {
 	if !(&Calendar{Info: o.calendar}).readOnly() {
 		return o.obj.CalendarData
 	}
 	if o.view == nil {
-		o.view = ical.RedactConfidential(o.obj.CalendarData)
+		o.view = ical.RedactRestricted(o.obj.CalendarData)
 	}
 	return o.view
 }

@@ -304,6 +304,11 @@ func (p *Plugin) principalPropertySearchReport(body []byte, path string, w http.
 		if err != nil {
 			return err
 		}
+		// Scope directory results to the requester's own email domain, so the
+		// attendee-search UI cannot enumerate users of other domains by
+		// displayname/email substring (matches the domain scoping applied to
+		// PROPFIND child listings and free-busy).
+		matches = p.sameDomainPrincipals(r.Context(), matches)
 		for _, principal := range matches {
 			if seen[principal] {
 				continue

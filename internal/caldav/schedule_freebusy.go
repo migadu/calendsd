@@ -3,6 +3,7 @@
 package caldav
 
 import (
+	"context"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -118,6 +119,12 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	var b strings.Builder
 	b.WriteString(xml.Header)
 	b.WriteString(`<cal:schedule-response xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">` + "\n")
+	// The per-recipient aggregation below skips calendars the requester
+	// holds no read-free-busy on, so it needs the same checker.
+	checker, err := RequirePrivilegeChecker(p.server)
+	if err != nil {
+		return err
+	}
 	for _, att := range vfb.Props.Values("ATTENDEE") {
 		status := "2.0;Success"
 		var fbData string
@@ -126,9 +133,15 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 			status = "3.7;Could not find principal"
 		} else {
 			extra := append(append([]string{}, idProps...), "ATTENDEE:"+att.Value)
-			fb, err := p.freeBusyForPrincipal(principal, start.UTC(), end.UTC(), extra...)
+			fb, readable, err := p.freeBusyForPrincipal(r.Context(), checker, principal, start.UTC(), end.UTC(), extra...)
 			if err != nil {
 				status = "5.0;Internal error"
+			} else if !readable {
+				// No calendar of the recipient was readable (e.g. a
+				// cross-domain requester). Deliberately the same status as
+				// an unknown address, so a denied probe cannot be used to
+				// enumerate which users exist.
+				status = "3.7;Could not find principal"
 			} else {
 				fbData = string(fb)
 			}
@@ -149,26 +162,44 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	return err
 }
 
-// freeBusyForPrincipal aggregates free-busy across all of a principal's
-// calendars.
-func (p *SchedulePlugin) freeBusyForPrincipal(principalURI string, start, end time.Time, extraProps ...string) ([]byte, error) {
+// freeBusyForPrincipal aggregates free-busy across the principal's calendars
+// the requesting user holds read-free-busy on (like sabre's
+// getFreeBusyForEmail, which skips calendars that fail that check). The
+// returned readable flag is false when no calendar was readable at all, so
+// the caller can distinguish "denied" from "free".
+func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker PrivilegeChecker, principalURI string, start, end time.Time, extraProps ...string) (fb []byte, readable bool, err error) {
 	_, name := pathutil.Split(principalURI)
 	home, err := p.server.Tree.NodeForPath("calendars/" + name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	coll, ok := home.(dav.Collection)
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
 	children, err := coll.Children()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var payloads [][]byte
 	for _, child := range children {
 		calNode, isCal := child.(*Calendar)
 		if !isCal {
+			continue
+		}
+		if checker.CheckPrivileges(ctx, "calendars/"+name+"/"+calNode.Name(),
+			"{urn:ietf:params:xml:ns:caldav}read-free-busy") != nil {
+			continue
+		}
+		// The requester may read this calendar's free-busy, so the principal is
+		// schedulable — a valid (possibly empty) response follows even if every
+		// readable calendar turns out to be private. This must be set before the
+		// transparent skip so an all-private principal reads as "free", not as
+		// the "could not find principal" status used for a genuine denial.
+		readable = true
+		// A transparent (private) calendar contributes no busy time (RFC 6638
+		// §9.1): it stays hidden but does not turn the response into "not found".
+		if calNode.transparent() {
 			continue
 		}
 		objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
@@ -179,7 +210,11 @@ func (p *SchedulePlugin) freeBusyForPrincipal(principalURI string, start, end ti
 			payloads = append(payloads, obj.CalendarData)
 		}
 	}
-	return ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now(), extraProps...)
+	if !readable {
+		return nil, false, nil
+	}
+	fb, err = ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now(), extraProps...)
+	return fb, true, err
 }
 
 // formatICalProp serializes an iCalendar property to a single unfolded content

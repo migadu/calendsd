@@ -2,11 +2,13 @@ package acl
 
 import (
 	"context"
+	"encoding/xml"
 	"net/http"
 	"slices"
 	"strings"
 
 	"calserver/internal/dav"
+	davxml "calserver/internal/dav/xml"
 	"calserver/internal/pathutil"
 )
 
@@ -131,6 +133,10 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 			if !authenticated {
 				collected = append(collected, ace.Privilege)
 			}
+		case SameDomain:
+			if authenticated && p.sameDomainAsOwner(ctx, node) {
+				collected = append(collected, ace.Privilege)
+			}
 		default:
 			if isPrincipal(ace.Principal) {
 				collected = append(collected, ace.Privilege)
@@ -154,6 +160,108 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 		collected = append(collected, flat[priv]...)
 	}
 	return out, nil
+}
+
+// sameDomainAsOwner reports whether the current principal's email domain
+// equals the node owner's email domain (the SameDomain pseudo-principal).
+func (p *Plugin) sameDomainAsOwner(ctx context.Context, node dav.Node) bool {
+	owned, ok := node.(interface{ Owner() string })
+	if !ok {
+		return false
+	}
+	owner, current := owned.Owner(), dav.Principal(ctx)
+	if owner == "" || current == "" {
+		return false
+	}
+	if owner == current {
+		return true
+	}
+	ownerDomain := p.principalEmailDomain(owner)
+	return ownerDomain != "" && ownerDomain == p.principalEmailDomain(current)
+}
+
+// FilterChildren scopes the top-level principal and home-collection listings
+// (/principals, /calendars, /addressbooks) to the requester's own email
+// domain, so an authenticated user cannot enumerate the existence of users in
+// other domains via PROPFIND Depth:1. It only touches single-segment root
+// collections — one entry per principal; deeper listings (a specific home's
+// own calendars) and the tree root are left intact. Admins and same-domain
+// principals are kept; a requester with no email domain sees only itself.
+// Unauthenticated listings are unchanged (gated elsewhere), and a child that
+// exposes no owning principal is never hidden.
+func (p *Plugin) FilterChildren(ctx context.Context, parentPath string, children []dav.Node) []dav.Node {
+	// Deeper paths ("calendars/user1") list a single owner's own resources and
+	// must not be filtered; the empty root ("") lists the mount collections.
+	if parentPath == "" || strings.Contains(parentPath, "/") {
+		return children
+	}
+	current := dav.Principal(ctx)
+	if current == "" {
+		return children
+	}
+	if slices.Contains(p.AdminPrincipals, current) {
+		return children
+	}
+	myDomain := p.principalEmailDomain(current)
+	kept := make([]dav.Node, 0, len(children))
+	for _, child := range children {
+		owned, ok := child.(interface{ Owner() string })
+		if !ok {
+			kept = append(kept, child) // not principal-owned; leave it visible
+			continue
+		}
+		owner := owned.Owner()
+		if owner == current {
+			kept = append(kept, child)
+			continue
+		}
+		if myDomain != "" && p.principalEmailDomain(owner) == myDomain {
+			kept = append(kept, child)
+		}
+	}
+	return kept
+}
+
+// sameDomainPrincipals filters a list of principal paths to those the current
+// requester may see: itself, or any principal sharing its email domain. Admins
+// and unauthenticated callers get the list unchanged. Backs the principal
+// directory search (attendee autocomplete).
+func (p *Plugin) sameDomainPrincipals(ctx context.Context, principals []string) []string {
+	current := dav.Principal(ctx)
+	if current == "" || slices.Contains(p.AdminPrincipals, current) {
+		return principals
+	}
+	myDomain := p.principalEmailDomain(current)
+	out := make([]string, 0, len(principals))
+	for _, pr := range principals {
+		if pr == current || (myDomain != "" && p.principalEmailDomain(pr) == myDomain) {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// principalEmailDomain returns the lowercased domain of a principal's
+// {sabredav}email-address property, or "" when there is none.
+func (p *Plugin) principalEmailDomain(principalPath string) string {
+	node, err := p.server.Tree.NodeForPath(principalPath)
+	if err != nil {
+		return ""
+	}
+	pn, ok := node.(dav.PropNode)
+	if !ok {
+		return ""
+	}
+	emailName := xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}
+	props, err := pn.Props([]xml.Name{emailName})
+	if err != nil {
+		return ""
+	}
+	email, _ := props[emailName].(string)
+	if at := strings.LastIndex(email, "@"); at >= 0 && at < len(email)-1 {
+		return strings.ToLower(email[at+1:])
+	}
+	return ""
 }
 
 // CheckPrivileges verifies the current principal holds every listed
