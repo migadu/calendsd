@@ -450,8 +450,19 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   padding: .45rem .7rem; margin-bottom: .8rem; font-size: .85rem;
 }
 .mg-preview { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; margin: .35rem 0; }
-.mg-preview .fg-head { font-size: .8rem; color: var(--dim); font-weight: 600; margin-bottom: .3rem; }
+.mg-preview > .fg-head { font-size: .8rem; color: var(--dim); font-weight: 600; margin-bottom: .3rem; }
 .mg-conflict { max-width: 100%; font: inherit; padding: .15rem .3rem; }
+/* editable email/phone groups inside the merge preview */
+.mg-preview .mg-multi { margin: .35rem 0; }
+.mg-preview .mg-multi .mr-type { width: 6.5rem; }
+/* "Also kept" disclosure: summary reads like a detail-row, expands to values */
+.mg-kept { border-top: 1px solid var(--line); }
+.mg-kept > summary { display: flex; gap: .5rem; padding: .4rem 0; cursor: pointer; list-style: none; align-items: baseline; }
+.mg-kept > summary::-webkit-details-marker { display: none; }
+.mg-kept > summary::before { content: '▸'; color: var(--dim); font-size: .7rem; flex-shrink: 0; }
+.mg-kept[open] > summary::before { content: '▾'; }
+.mg-kept > summary .dl { width: 5.5rem; flex-shrink: 0; color: var(--dim); font-size: .82rem; }
+.mg-kept .mg-kept-row { padding-left: 1.2rem; }
 .dd-list { max-height: min(60vh, 30rem); overflow-y: auto; margin: .3rem 0; }
 .dd-row {
   display: flex; align-items: center; gap: .8rem; padding: .55rem .2rem;
