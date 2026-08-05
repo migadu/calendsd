@@ -18,6 +18,22 @@ export function openOverlay(dlg, onClose) {
   $('#dialog-host').append(dlg);
 }
 
+// submitOnEnter makes a non-<form> editor dialog submit like a form: Enter in
+// a single-line field clicks `button`. Enter keeps its native meaning where it
+// already has one — a textarea inserts a newline, a <select> opens its menu,
+// and a focused button or link activates *itself* (hijacking it would make
+// Tab + Enter on Cancel save instead). `skip` excludes fields that own Enter
+// themselves (e.g. an autocomplete input).
+export function submitOnEnter(dlg, button, skip = () => false) {
+  dlg.addEventListener('keydown', ev => {
+    const t = ev.target;
+    if (ev.key !== 'Enter' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
+      || t.tagName === 'BUTTON' || t.tagName === 'A' || skip(t)) return;
+    ev.preventDefault();
+    button.click();
+  });
+}
+
 // confirmDialog resolves true on confirm, false on any way out.
 export function confirmDialog(message, { confirmLabel = 'OK', danger = false } = {}) {
   return new Promise(resolve => {

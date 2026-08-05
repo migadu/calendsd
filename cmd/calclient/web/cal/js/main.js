@@ -5,7 +5,7 @@
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
-import { confirmDialog, promptDialog, openOverlay } from '/shared/dialogs.js';
+import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 import { renderGrid, gridNav, setGridView } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
 import { renderInvites, toggleInvites } from './invites.js';
@@ -193,6 +193,13 @@ function calendarMenu(cal) {
   </div></div>`;
   const close = () => dialog.remove();
   openOverlay(dialog, close);
+  // Enter saves — except in the share-email field, whose Enter runs the Share
+  // action it sits next to (a read-only share has no Save; Enter does nothing).
+  const saveBtn = $('#cm-save', dialog);
+  if (saveBtn) submitOnEnter(dialog, saveBtn, t => t.id === 'cm-share-email');
+  $('#cm-share-email', dialog)?.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); $('#cm-share', dialog).click(); }
+  });
   $('#cm-cancel', dialog).addEventListener('click', close);
   $('#cm-save', dialog)?.addEventListener('click', async () => {
     try {
