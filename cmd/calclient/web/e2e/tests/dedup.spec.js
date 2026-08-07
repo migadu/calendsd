@@ -65,10 +65,11 @@ test.describe('contact deduplication', () => {
     await expect(banner).toContainText('Possible duplicate');
     await banner.getByRole('button', { name: /review/i }).click();
 
-    // The preview unions both phones under one name.
+    // The preview unions both phones into editable rows under one name.
     const preview = page.locator('.mg-preview');
-    await expect(preview).toContainText('555 111 0001');
-    await expect(preview).toContainText('555 222 0002');
+    const telValues = () => preview.locator('.mr-val').evaluateAll(els => els.map(e => e.value).join('\n'));
+    await expect.poll(telValues).toContain('555 111 0001');
+    await expect.poll(telValues).toContain('555 222 0002');
 
     await page.click('#mg-merge');
     await page.locator('[data-ok]').click();               // danger confirm
@@ -103,5 +104,53 @@ test.describe('contact deduplication', () => {
 
     // Back in the sweep, this cluster is gone.
     await expect(sweep.locator('.dd-row', { hasText: name })).toHaveCount(0);
+  });
+
+  test('removing a phone in the preview drops it from the merged card', async ({ page }) => {
+    await login(page);
+    await gotoContacts(page);
+    const name = `${TAG} Lin`;
+    await createContact(page, { name, email: 'lin.dup@example.org', phone: '+1 555 555 0005' });
+    await createContact(page, { name, email: 'lin.dup@example.org', phone: '+1 555 666 0006' });
+
+    await page.locator('.contact', { hasText: name }).first().click();
+    await page.locator('.dup-banner').getByRole('button', { name: /review/i }).click();
+
+    // Remove the 0006 phone row from the editable phone group before merging.
+    const telGroup = page.locator('.mg-multi', { hasText: 'Phone' });
+    const rows = telGroup.locator('.multi-row');
+    for (let i = 0, n = await rows.count(); i < n; i++) {
+      if ((await rows.nth(i).locator('.mr-val').inputValue()).includes('0006')) {
+        await rows.nth(i).locator('.mr-del').click();
+        break;
+      }
+    }
+
+    await page.click('#mg-merge');
+    await page.locator('[data-ok]').click();
+
+    // The survivor keeps only the phone we left in place.
+    await expect(page.locator('.contact', { hasText: name })).toHaveCount(1);
+    await page.locator('.contact', { hasText: name }).click();
+    const detail = page.locator('.detail-body');
+    await expect(detail).toContainText('555 555 0005');
+    await expect(detail).not.toContainText('555 666 0006');
+  });
+
+  test('Escape closes the merge preview without merging', async ({ page }) => {
+    await login(page);
+    await gotoContacts(page);
+    const name = `${TAG} Otto`;
+    await createContact(page, { name, email: 'otto.dup@example.org', phone: '+1 555 777 0007' });
+    await createContact(page, { name, email: 'otto.dup@example.org', phone: '+1 555 888 0008' });
+
+    await page.locator('.contact', { hasText: name }).first().click();
+    await page.locator('.dup-banner').getByRole('button', { name: /review/i }).click();
+    await expect(page.locator('.mg-preview')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mg-preview')).toHaveCount(0);
+    // Nothing merged: both cards remain.
+    await expect(page.locator('.contact', { hasText: name })).toHaveCount(2);
   });
 });

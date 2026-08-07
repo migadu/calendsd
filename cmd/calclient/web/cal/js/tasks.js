@@ -7,7 +7,7 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { localDate } from '/shared/time.js';
 import { fmtDate, fmtTime, toast, showError } from './ui.js';
-import { openOverlay, confirmDialog, promptDialog } from '/shared/dialogs.js';
+import { openOverlay, confirmDialog, promptDialog, submitOnEnter } from '/shared/dialogs.js';
 
 const SECTIONS = [
   ['overdue', 'Overdue'], ['today', 'Today'],
@@ -138,6 +138,7 @@ function taskDialog(t) {
   </div></div>`;
   const close = () => dlg.remove();
   openOverlay(dlg, close);
+  submitOnEnter(dlg, $('#tk-save', dlg));
   $('#tk-cancel', dlg).addEventListener('click', close);
   $('#tk-save', dlg).addEventListener('click', async () => {
     const summary = $('#tk-title', dlg).value.trim();

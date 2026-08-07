@@ -141,39 +141,48 @@ code=$(req MKCOL /addressbooks/bob/contacts/ -H 'Content-Type: application/xml' 
 <d:displayname>Contacts</d:displayname></d:prop></d:set></d:mkcol>')
 expect "MKCOL bob contacts" "$code" 201 405
 
-put_vcf /addressbooks/bob/contacts/seed-alice.vcf \
-    'BEGIN:VCARD' 'VERSION:3.0' 'UID:seed-alice' \
-    'FN:Alice Muster' 'N:Muster;Alice;;;' \
-    'EMAIL;TYPE=INTERNET:alice@example.org' 'TEL;TYPE=VOICE:+41 44 765 43 21' \
-    'ORG:Muster AG' 'TITLE:Product Manager' \
+put_vcf /addressbooks/bob/contacts/demo-alice.vcf \
+    'BEGIN:VCARD' 'VERSION:3.0' 'UID:demo-alice' \
+    'FN:Alice Martin' 'N:Martin;Alice;;;' \
+    'ORG:Northwind Trading' 'TITLE:Product Manager' \
+    'EMAIL;TYPE=INTERNET;TYPE=WORK:alice.martin@northwind.example' \
+    'EMAIL;TYPE=INTERNET;TYPE=HOME:alice@home.example' \
+    'TEL;TYPE=CELL:+41 79 123 45 67' 'TEL;TYPE=WORK:+41 44 555 10 20' \
     'END:VCARD'
 
-put_vcf /addressbooks/bob/contacts/seed-carol.vcf \
-    'BEGIN:VCARD' 'VERSION:3.0' 'UID:seed-carol' \
-    'FN:Carol Meier' 'N:Meier;Carol;;;' \
-    'EMAIL;TYPE=INTERNET;TYPE=WORK:carol.meier@example.org' \
-    'EMAIL;TYPE=INTERNET;TYPE=HOME:carol@example.net' \
-    'TEL;TYPE=CELL:+41 79 234 56 78' 'ORG:Example GmbH' \
+put_vcf /addressbooks/bob/contacts/demo-bruno.vcf \
+    'BEGIN:VCARD' 'VERSION:3.0' 'UID:demo-bruno' \
+    'FN:Bruno Keller' 'N:Keller;Bruno;;;' 'ORG:Keller & Co' \
+    'EMAIL;TYPE=INTERNET;TYPE=WORK:bruno.keller@kellerco.example' \
+    'TEL;TYPE=WORK:+41 31 300 40 50' 'URL:https://kellerco.example' \
     'END:VCARD'
 
-put_vcf /addressbooks/bob/contacts/seed-david.vcf \
-    'BEGIN:VCARD' 'VERSION:3.0' 'UID:seed-david' \
-    'FN:David Schneider' 'N:Schneider;David;;;' \
-    'EMAIL;TYPE=INTERNET:david.schneider@example.org' \
-    'TEL;TYPE=VOICE:+41 31 987 65 43' 'ADR;TYPE=WORK:;;Bahnhofstrasse 1;Bern;;3000;Switzerland' \
+# Clara is stored the way Apple Contacts.app exports — value + custom label
+# grouped under an item prefix, no TYPE param — so the seed also exercises the
+# grouped-vCard parsing (item1.EMAIL/X-ABLabel become a typed Home email, etc.).
+put_vcf /addressbooks/bob/contacts/demo-clara.vcf \
+    'BEGIN:VCARD' 'VERSION:3.0' 'UID:demo-clara' \
+    'FN:Clara Rossi' 'N:Rossi;Clara;;;' \
+    'item1.EMAIL;type=INTERNET;type=pref:clara.rossi@example.com' \
+    'item1.X-ABLabel:_$!<Home>!$_' \
+    'item2.TEL;type=pref:+39 02 1234 5678' \
+    'item2.X-ABLabel:_$!<Mobile>!$_' \
     'END:VCARD'
 
-put_vcf /addressbooks/bob/contacts/seed-erika.vcf \
-    'BEGIN:VCARD' 'VERSION:3.0' 'UID:seed-erika' \
-    'FN:Erika Weber' 'N:Weber;Erika;;;' \
-    'EMAIL;TYPE=INTERNET:erika.weber@example.org' \
-    'TEL;TYPE=CELL:+41 76 345 67 89' 'ORG:Weber & Co' 'TITLE:Architect' \
+put_vcf /addressbooks/bob/contacts/demo-david.vcf \
+    'BEGIN:VCARD' 'VERSION:3.0' 'UID:demo-david' \
+    'FN:David Chen' 'N:Chen;David;;;' \
+    'EMAIL;TYPE=INTERNET:david.chen@example.net' \
+    'TEL;TYPE=CELL:+1 415 555 0132' 'TEL;TYPE=HOME:+1 415 555 0199' \
+    'ADR;TYPE=HOME:;;500 Market St;San Francisco;CA;94105;USA' \
     'END:VCARD'
 
-put_vcf /addressbooks/bob/contacts/seed-frank.vcf \
-    'BEGIN:VCARD' 'VERSION:3.0' 'UID:seed-frank' \
-    'FN:Frank Keller' 'N:Keller;Frank;;;' \
-    'EMAIL;TYPE=INTERNET:frank.keller@example.org' 'TEL;TYPE=VOICE:+41 44 111 22 33' \
+put_vcf /addressbooks/bob/contacts/demo-emma.vcf \
+    'BEGIN:VCARD' 'VERSION:3.0' 'UID:demo-emma' \
+    'FN:Emma Weber' 'N:Weber;Emma;;;' \
+    'EMAIL;TYPE=INTERNET;TYPE=HOME:emma.weber@example.org' \
+    'TEL;TYPE=CELL:+49 170 1234567' 'BDAY:1990-06-15' \
+    'NOTE:Met at the design conference.' \
     'END:VCARD'
 
 # One pending invitation for bob: admin sends an event with bob as ATTENDEE,
@@ -195,5 +204,5 @@ echo "done. Sign in to calweb (/cal/) as bob / bob:"
 echo "  • Work calendar    → Team meeting, Daily standup (recurring),"
 echo "                       and 'Team offsite' as a multi-day bar."
 echo "  • Private calendar → Dentist, and a Mon/Wed/Fri Gym series."
-echo "  • Contacts         → Alice, Carol, David, Erika, Frank."
+echo "  • Contacts         → Alice, Bruno, Clara (Apple-grouped), David, Emma."
 echo "  • Invitations (✉)  → 'Planning with Admin' to Accept/Maybe/Decline."

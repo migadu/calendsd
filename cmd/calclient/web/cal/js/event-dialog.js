@@ -10,7 +10,7 @@ import { DAY, localDate, formatTimeOfDay, parseTimeOfDay } from '/shared/time.js
 import { toast, showError } from './ui.js';
 import { createGuestField } from './guest-field.js';
 import { checkAvailability } from './availability.js';
-import { confirmDialog, openOverlay } from '/shared/dialogs.js';
+import { confirmDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
 // openEventDialog(null, date?, timed?) creates; openEventDialog(instance) edits.
 export async function openEventDialog(inst, defaultDay, timed) {
@@ -66,6 +66,10 @@ export async function openEventDialog(inst, defaultDay, timed) {
         <span id="ev-count-unit" hidden>times</span>
         <input id="ev-until" type="date" hidden>
       </span></label>
+      <label>Reminder<select id="ev-remind">
+        <option value="">No reminder</option>
+        ${ical.REMINDER_PRESETS.map(([val, label]) => frag`<option value="${val}">${label}</option>`)}
+      </select></label>
       <label class="full">Location<input id="ev-loc" type="text" value="${inst?.location ?? ''}" placeholder="Add a location"></label>
       <label class="full">Meeting link<input id="ev-url" type="url" value="${inst?.url ?? ''}" placeholder="e.g. https://zoom.us/j/123456789"></label>
       <label class="full row"><input type="checkbox" id="ev-private" ${inst?.confidential ? 'checked' : ''}> Private — anyone this calendar is shared with read-only sees only “Busy”, not the title or details</label>
@@ -87,16 +91,9 @@ export async function openEventDialog(inst, defaultDay, timed) {
   // Scrim click / Esc cancel the editor (unless a child, e.g. the guest
   // list's autocomplete, handled the key first).
   openOverlay(dlg, close);
-  // Enter submits from a single-line text field. Skip the Notes textarea (Enter
-  // = newline), the guest field (owns Enter for autocomplete), and <select>
-  // elements (Enter/Space open the native menu — hijacking it would make the
-  // dropdowns feel unusable by keyboard).
-  dlg.addEventListener('keydown', ev => {
-    const t = ev.target;
-    if (ev.key !== 'Enter' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.id === 'ev-guest') return;
-    ev.preventDefault();
-    q('#ev-save').click();
-  });
+  // Enter submits from a single-line text field; the guest field owns Enter
+  // for its autocomplete.
+  submitOnEnter(dlg, q('#ev-save'), t => t.id === 'ev-guest');
   q('#ev-cancel').addEventListener('click', close);
 
   // calendars — an event can only live on a writable calendar, so the picker
@@ -244,6 +241,20 @@ export async function openEventDialog(inst, defaultDay, timed) {
   q('#ev-guests').append(createGuestField(guests, syncGuestUI));
   syncGuestUI();
 
+  // reminder: read the stored master's alarm onto the dropdown. A shape we
+  // can't reproduce (an EMAIL alarm, several alarms, an absolute trigger)
+  // surfaces as "Custom" and is left untouched unless the user picks something
+  // else — the same "kept as is" contract the Custom repeat option uses.
+  const remindSel = q('#ev-remind');
+  const masterVevent = master && ical.components(ical.parse(master.text), 'VEVENT')
+    .find(v => !ical.prop(v, 'RECURRENCE-ID'));
+  const curReminder = masterVevent ? ical.alarmPreset(masterVevent) : '';
+  if (curReminder === 'CUSTOM') {
+    remindSel.append(html`<option value="CUSTOM" selected>Custom reminder (kept as is)</option>`);
+  } else {
+    remindSel.value = curReminder;
+  }
+
   // save ------------------------------------------------------------------
   q('#ev-save').addEventListener('click', async () => {
     const t = readTimes();
@@ -273,6 +284,9 @@ export async function openEventDialog(inst, defaultDay, timed) {
       attendees: guests,
       rrule,
       confidential: q('#ev-private').checked,
+      // '' = no reminder; a preset trigger writes one DISPLAY VALARM. 'CUSTOM'
+      // means the stored alarm is one we don't model, so leave it as it was.
+      alarm: remindSel.value === 'CUSTOM' ? '' : remindSel.value,
     };
     // Property lines shared by the in-place edit paths. null removes the
     // property; the attendee list is rewritten wholesale when guests change.
@@ -288,6 +302,11 @@ export async function openEventDialog(inst, defaultDay, timed) {
       // null removes CLASS, restoring the PUBLIC default.
       CLASS: fields.confidential ? 'CLASS:CONFIDENTIAL' : null,
     };
+    // applyReminder rewrites the alarm on an in-place master edit, but only once
+    // the user has picked a modeled reminder — a "Custom (kept as is)" selection
+    // leaves whatever alarms setMasterProps already preserved.
+    const applyReminder = text => remindSel.value === 'CUSTOM'
+      ? text : ical.setMasterAlarm(text, fields.alarm, fields.summary);
     try {
       if (!inst) {
         await store.putObject(store.eventHref(calSel.value, fields.uid),
@@ -312,7 +331,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
         const endDelta = +t.end - +inst.end;
         if (ds && startDelta) { const l = ical.shiftDate('DTSTART', ds, startDelta); if (l) props.DTSTART = l; }
         if (de && endDelta) { const l = ical.shiftDate('DTEND', de, endDelta); if (l) props.DTEND = l; }
-        await store.putObject(inst.href, ical.setMasterProps(master.text, props), master.etag);
+        await store.putObject(inst.href, applyReminder(ical.setMasterProps(master.text, props)), master.etag);
       } else {
         // Plain event: rewrite the master's fields in place (no series to
         // re-anchor), preserving alarms and unmodeled properties.
@@ -322,7 +341,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
           DTEND: fields.allDay ? `DTEND;VALUE=DATE:${ical.dateOnly(fields.end)}` : `DTEND:${ical.utc(fields.end)}`,
           RRULE: fields.rrule ? `RRULE:${fields.rrule}` : null,
         };
-        await store.putObject(inst.href, ical.setMasterProps(master.text, props), master.etag);
+        await store.putObject(inst.href, applyReminder(ical.setMasterProps(master.text, props)), master.etag);
       }
       // Calendar changed: relocate the object after the in-place edit. The
       // picker is locked for the single-occurrence scope, so a differing value

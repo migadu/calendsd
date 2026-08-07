@@ -20,12 +20,16 @@ async function removeTagged(request) {
   const home = '/addressbooks/bob/';
   const { hrefs: books } = await propfind(request, home);
   for (const book of books.filter(h => h.endsWith('/') && h !== home)) {
-    const { hrefs: cards, body } = await propfind(request, book);
+    const { hrefs: cards } = await propfind(request, book);
     for (const card of cards.filter(h => h.endsWith('.vcf'))) {
       const cardBody = await (await request.fetch(card, { headers: auth })).text();
       if (cardBody.includes(TAG)) await request.fetch(card, { method: 'DELETE', headers: auth });
     }
-    if (book.includes(TAG.toLowerCase()) || body.includes(TAG)) {
+    // Only delete a book this suite CREATED (its slug carries the tag). Never key
+    // off the listing body: a real book transiently holding a tagged card (e.g.
+    // the import test writes into bob's default book) would match and the whole
+    // book — plus every unrelated contact in it — would be destroyed.
+    if (book.includes(TAG.toLowerCase())) {
       await request.fetch(book, { method: 'DELETE', headers: auth });
     }
   }
@@ -39,6 +43,26 @@ async function gotoContacts(page) {
 test.describe('contacts management', () => {
   test.beforeEach(async ({ request }) => { await removeTagged(request); });
   test.afterEach(async ({ request }) => { await removeTagged(request); });
+
+  test('the contact editor saves on Enter and discards on Escape', async ({ page }) => {
+    await login(page);
+    await gotoContacts(page);
+    const name = `${TAG} EnterKey`;
+
+    // Enter in a text field saves, like a form.
+    await page.click('#ct-add');
+    await page.fill('#cd-first', name);
+    await page.locator('#cd-first').press('Enter');
+    await expect(page.locator('#cd-save')).toHaveCount(0);
+    await expect(page.locator('.contact', { hasText: name })).toBeVisible();
+
+    // Escape closes the editor without creating anything.
+    await page.click('#ct-add');
+    await page.fill('#cd-first', `${TAG} Discarded`);
+    await page.locator('#cd-first').press('Escape');
+    await expect(page.locator('#cd-save')).toHaveCount(0);
+    await expect(page.locator('.contact', { hasText: 'Discarded' })).toHaveCount(0);
+  });
 
   test('create and delete an address book from the sidebar', async ({ page }) => {
     await login(page);
@@ -140,5 +164,60 @@ test.describe('contacts management', () => {
     // Second import of the same file skips both as already present.
     await page.setInputFiles('#st-import', file);
     await expect(page.locator('#st-import-note')).toContainText('skipped 2 already present');
+  });
+
+  test('Apple item-grouped emails/phones become editable fields and normalize on save', async ({ page, request }) => {
+    // Isolate this in a dedicated tagged book so cleanup only ever removes THIS
+    // book — never one of bob's real address books. (removeTagged deletes any
+    // book whose path carries the tag.)
+    const bookHref = `/addressbooks/bob/${TAG.toLowerCase()}-apple/`;
+    const mkcol = await request.fetch(bookHref, {
+      method: 'MKCOL', headers: { ...auth, 'Content-Type': 'application/xml; charset=utf-8' },
+      data: '<?xml version="1.0" encoding="utf-8"?>' +
+        '<d:mkcol xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:set><d:prop>' +
+        '<d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>' +
+        `<d:displayname>${TAG} Apple</d:displayname></d:prop></d:set></d:mkcol>`,
+    });
+    expect([201, 405]).toContain(mkcol.status());
+
+    // A card exactly as Contacts.app exports it: value + custom label paired
+    // under an item group, no TYPE param. (The filename deliberately omits the
+    // tag; the card body carries it via FN so per-card cleanup still catches it.)
+    const card = [
+      'BEGIN:VCARD', 'VERSION:3.0', 'UID:apple-grouped', `FN:${TAG} Apple`, `N:Apple;${TAG};;;`,
+      'item1.EMAIL;type=INTERNET;type=pref:grp.home@example.org',
+      'item1.X-ABLabel:_$!<Home>!$_',
+      'item2.TEL;type=pref:+1 555 909 0009',
+      'item2.X-ABLabel:_$!<Mobile>!$_',
+      'END:VCARD',
+    ].join('\r\n') + '\r\n';
+    const cardHref = bookHref + 'apple-grouped.vcf';
+    const put = await request.fetch(cardHref, { method: 'PUT', headers: { ...auth, 'Content-Type': 'text/vcard; charset=utf-8' }, data: card });
+    expect(put.status(), `PUT ${cardHref}`).toBeLessThan(300);
+
+    await login(page);
+    await gotoContacts(page);
+    await page.locator('.contact', { hasText: `${TAG} Apple` }).click();
+
+    // The grouped values show as normal Email/Phone lines in the detail card…
+    const detail = page.locator('.detail-body');
+    await expect(detail).toContainText('grp.home@example.org');
+    await expect(detail).toContainText('555 909 0009');
+
+    // …and as editable rows with the label-derived type in the editor.
+    await page.click('#cv-edit');
+    await expect(page.locator('#cd-emails .mr-val').first()).toHaveValue('grp.home@example.org');
+    await expect(page.locator('#cd-emails .mr-type').first()).toHaveValue('HOME');
+    await expect(page.locator('#cd-tels .mr-val').first()).toHaveValue('+1 555 909 0009');
+    await expect(page.locator('#cd-tels .mr-type').first()).toHaveValue('CELL');
+
+    // Saving re-emits them as plain TYPE-tagged lines; the item-group + X-ABLABEL
+    // are gone (no double-write).
+    await page.click('#cd-save');
+    await page.locator('#cd-save').waitFor({ state: 'hidden' });
+    const saved = await (await request.fetch(cardHref, { headers: auth })).text();
+    expect(saved).toMatch(/EMAIL;TYPE=INTERNET;TYPE=HOME:grp\.home@example\.org/);
+    expect(saved).toMatch(/TEL;TYPE=CELL:\+1 555 909 0009/);
+    expect(saved).not.toMatch(/item1\.|item2\.|X-ABLABEL/i);
   });
 });

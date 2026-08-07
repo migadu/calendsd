@@ -96,8 +96,9 @@ test.describe('calendar sharing (owner side)', () => {
 
     const dialog = await newCalendarSettings(page, name);
     await dialog.locator('#cm-share-email').fill(SHAREE);
-    // leave "Can edit" unchecked → read-only share
-    await dialog.locator('#cm-share').click();
+    // leave "Can edit" unchecked → read-only share; Enter in the email field
+    // runs the Share action (not the dialog's Save)
+    await dialog.locator('#cm-share-email').press('Enter');
 
     const row = dialog.locator('.sharee', { hasText: SHAREE });
     await expect(row).toBeVisible();

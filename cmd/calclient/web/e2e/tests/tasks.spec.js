@@ -72,3 +72,27 @@ test('editing a task via the dialog updates title and notes', async ({ page }) =
   await expect(edited).toBeVisible();
   await expect(edited.locator('.task-notes')).toHaveText('some detail');
 });
+
+test('the edit dialog saves on Enter and discards on Escape', async ({ page }) => {
+  await openTasks(page);
+  const title = 'task-e2e-' + Date.now();
+  await page.fill('#tk-new', title);
+  await page.click('.task-add button[type="submit"]');
+  const row = page.locator('.task-row', { hasText: title });
+  await expect(row).toBeVisible();
+
+  // Enter in the title field saves, like a form.
+  await row.locator('.task-main').click();
+  await page.fill('#tk-title', title + ' edited');
+  await page.locator('#tk-title').press('Enter');
+  await expect(page.locator('#tk-title')).toHaveCount(0);
+  await expect(page.locator('.task-row', { hasText: title + ' edited' })).toBeVisible();
+
+  // Escape closes without saving.
+  await page.locator('.task-row', { hasText: title + ' edited' }).locator('.task-main').click();
+  await page.fill('#tk-title', title + ' discarded');
+  await page.locator('#tk-title').press('Escape');
+  await expect(page.locator('#tk-title')).toHaveCount(0);
+  await expect(page.locator('.task-row', { hasText: title + ' edited' })).toBeVisible();
+  await expect(page.locator('.task-row', { hasText: 'discarded' })).toHaveCount(0);
+});

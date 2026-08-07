@@ -14,5 +14,8 @@ dav/vendor/
 node_modules/
 /cmd/calclient/package-lock.json
 
+# V8 coverage output from ad-hoc NODE_V8_COVERAGE unit-test runs
+/cmd/calclient/.cov-unit/
+
 # local claude settings
 .claude/

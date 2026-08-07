@@ -4,3 +4,4 @@ node_modules/
 .server.log
 test-results/
 playwright-report/
+.cov/

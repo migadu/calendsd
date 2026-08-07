@@ -1,7 +1,17 @@
 const { test, expect } = require('@playwright/test');
-const { login, setPrefs } = require('./helpers');
+const { login, setPrefs, deleteEventsContaining } = require('./helpers');
+
+const TAG = 'edit-e2e-';          // distinctive: the sweep deletes by substring
 
 test.beforeEach(async ({ page }) => { await login(page); });
+
+// The Enter-submits tests save real events into today's month cell; sweep them
+// (and the untagged "Enter submits" strays older runs left behind) so pile-up
+// can't hide other specs' chips behind "+N more".
+test.afterEach(async ({ request }) => {
+  await deleteEventsContaining(request, TAG);
+  await deleteEventsContaining(request, 'Enter submits');
+});
 
 test('Escape closes the editor without saving', async ({ page }) => {
   await page.click('#new-event');
@@ -23,9 +33,29 @@ test('repeat menu is selectable, and Enter on it does not submit', async ({ page
 
 test('Enter from the title field submits the form', async ({ page }) => {
   await page.click('#new-event');
-  await page.fill('#ev-title', 'Enter submits');
+  await page.fill('#ev-title', TAG + 'enter-title');
   await page.locator('#ev-title').press('Enter');
   await expect(page.locator('#ev-title')).toHaveCount(0);   // saved + closed
+});
+
+test('Enter in the time field submits the form', async ({ page }) => {
+  await page.click('#new-event');
+  await page.fill('#ev-title', TAG + 'enter-time');
+  // 00:05 is always before the default end (the next full hour + duration).
+  await page.fill('#ev-start-time', '00:05');
+  await page.locator('#ev-start-time').press('Enter');
+  await expect(page.locator('#ev-title')).toHaveCount(0);   // saved + closed
+});
+
+test('Enter on the focused Cancel button cancels instead of saving', async ({ page }) => {
+  await page.click('#new-event');
+  const title = TAG + 'discard-' + Date.now();
+  await page.fill('#ev-title', title);
+  await page.locator('#ev-cancel').focus();
+  await page.locator('#ev-cancel').press('Enter');
+  await expect(page.locator('#ev-title')).toHaveCount(0);   // closed…
+  await page.waitForTimeout(400);
+  await expect(page.locator('.chip', { hasText: title })).toHaveCount(0); // …without saving
 });
 
 test('"repeat ends after…" shows the occurrences unit', async ({ page }) => {

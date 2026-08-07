@@ -28,7 +28,7 @@ export function dateOnly(v) { return v.replaceAll('-', ''); }
 // buildEvent and the calweb override editor. attendees: email strings or
 // {email, partstat, cn} objects.
 export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = [],
-  organizer, attendees = [], description, location, url, recurrenceId, confidential }) {
+  organizer, attendees = [], description, location, url, recurrenceId, confidential, alarm }) {
   const dt = allDay
     ? v => `;VALUE=DATE:${dateOnly(v)}`
     : v => `:${utc(v)}`;
@@ -60,7 +60,31 @@ export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = 
     const partstat = at.partstat || 'NEEDS-ACTION';
     l.push(`ATTENDEE;PARTSTAT=${partstat};RSVP=TRUE:mailto:${at.email}`);
   }
+  // alarm is an iCal trigger duration relative to the start (e.g. '-PT15M',
+  // 'PT0S' for at-start); a single DISPLAY reminder, emitted last so it nests
+  // as a sub-component after the properties.
+  if (alarm) l.push(...alarmLines(alarm, summary));
   return l;
+}
+
+// The presets the reminder control offers, newest-first by how the UI reads:
+// canonical trigger string → label. Kept here so alarmPreset can match a stored
+// trigger against the same set the editor writes. 'PT0S' fires at the start.
+export const REMINDER_PRESETS = [
+  ['PT0S', 'At time of event'],
+  ['-PT5M', '5 minutes before'],
+  ['-PT15M', '15 minutes before'],
+  ['-PT30M', '30 minutes before'],
+  ['-PT1H', '1 hour before'],
+  ['-P1D', '1 day before'],
+];
+
+// alarmLines renders one DISPLAY VALARM (RFC 5545 §3.6.6 requires ACTION,
+// TRIGGER and — for DISPLAY — DESCRIPTION).
+function alarmLines(trigger, summary) {
+  return ['BEGIN:VALARM', 'ACTION:DISPLAY',
+    `DESCRIPTION:${icalEscape(summary || 'Reminder')}`,
+    `TRIGGER;RELATED=START:${trigger}`, 'END:VALARM'];
 }
 
 // buildEvent renders a single-VEVENT VCALENDAR.
@@ -246,6 +270,54 @@ export function setMasterProps(text, props, comp = 'VEVENT') {
     body.push(line);
   }
   return fold([...lines.slice(0, b), ...body, ...lines.slice(e + 1)]);
+}
+
+// setMasterAlarm replaces the reminder on the master VEVENT: it drops every
+// existing VALARM sub-component and, when `trigger` is a non-empty duration,
+// inserts a single DISPLAY alarm before the master's END. An empty trigger just
+// clears the alarms. Only call this once the user has actually chosen a reminder
+// (or "none") in the editor — leaving alarms the editor doesn't model untouched
+// is setMasterProps's job, not this one's.
+export function setMasterAlarm(text, trigger, description = '') {
+  const lines = unfold(text);
+  const range = masterComponentRange(lines, 'VEVENT');
+  if (!range) return text;
+  const [b, e] = range;
+  const body = [];
+  let depth = 0, inAlarm = false;
+  for (let i = b; i <= e; i++) {
+    const line = lines[i];
+    if (depth === 1 && /^BEGIN:VALARM$/i.test(line)) { inAlarm = true; continue; }
+    if (inAlarm) { if (/^END:VALARM$/i.test(line)) inAlarm = false; continue; }
+    if (/^BEGIN:/i.test(line)) { depth++; body.push(line); continue; }
+    if (/^END:/i.test(line)) {
+      if (--depth === 0 && trigger) body.push(...alarmLines(trigger, description));
+      body.push(line);
+      continue;
+    }
+    body.push(line);
+  }
+  return fold([...lines.slice(0, b), ...body, ...lines.slice(e + 1)]);
+}
+
+// alarmPreset maps the master VEVENT's reminder onto a REMINDER_PRESETS trigger
+// string for the editor's dropdown: '' when there is no alarm, a preset trigger
+// when the single alarm is a plain relative-to-start DISPLAY reminder we can
+// reproduce, or 'CUSTOM' for anything richer (multiple alarms, an absolute or
+// RELATED=END trigger, a non-DISPLAY action) so the editor can keep it as is.
+export function alarmPreset(vevent) {
+  const alarms = (vevent.children || []).filter(c => c.type === 'VALARM');
+  if (!alarms.length) return '';
+  if (alarms.length > 1) return 'CUSTOM';
+  const a = alarms[0];
+  const trig = prop(a, 'TRIGGER');
+  if (propValue(a, 'ACTION').toUpperCase() !== 'DISPLAY' || !trig) return 'CUSTOM';
+  if ((trig.params.VALUE || '').toUpperCase() === 'DATE-TIME') return 'CUSTOM';
+  if ((trig.params.RELATED || 'START').toUpperCase() !== 'START') return 'CUSTOM';
+  const ms = parseDuration(trig.value);
+  if (ms == null) return 'CUSTOM';
+  const hit = REMINDER_PRESETS.find(([t]) => parseDuration(t) === ms);
+  return hit ? hit[0] : 'CUSTOM';
 }
 
 // shiftDate rewrites a DTSTART/DTEND line shifted by deltaMs, or returns null
