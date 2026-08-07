@@ -105,7 +105,7 @@ func New(version string) *Set {
 
 		imipDeliveries: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "calserver_imip_deliveries_total",
-			Help: "External iTIP deliveries by outcome; smtp_error and auth_error are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes.",
+			Help: "External iTIP deliveries by outcome; smtp_error, auth_error, and retry_exhausted are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes. A message that is queued for retry counts once as queued and once more at its terminal outcome.",
 		}, []string{"outcome"}),
 		imipDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "calserver_imip_delivery_duration_seconds",
@@ -256,7 +256,10 @@ func (s *Set) SyncTruncated(resource string) {
 // IMipDelivery counts one external delivery outcome. Relay path: sent,
 // smtp_error, no_mailer. Per-user submission path: sent_as_user,
 // resource_relay, not_authorized_sender, no_credential, auth_error,
-// rate_limited. Either path: invalid_recipient, unsupported, skipped.
+// rate_limited. Either path: invalid_recipient, unsupported, skipped; and
+// with the retry queue: queued when a transient failure is handed to it,
+// queue_full when it refuses one, then the success outcome or
+// retry_exhausted when it resolves.
 func (s *Set) IMipDelivery(outcome string) {
 	if s == nil {
 		return

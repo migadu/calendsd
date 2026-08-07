@@ -35,8 +35,9 @@ calserver deliberately does **not** sign, rewrite, or rate-limit. It:
 - **Always uses TLS** (implicit `:465` or STARTTLS `:587`); credentials are never
   sent on an unencrypted connection.
 - **Bounds the send with a tight deadline** (10s for the whole dial + SMTP
-  exchange): the send is synchronous inside the triggering CalDAV request, so a
-  hung submission server fails the scheduling send instead of stalling the PUT.
+  exchange): the first attempt is synchronous inside the triggering CalDAV
+  request, so a hung submission server fails that attempt instead of stalling
+  the PUT — and the message then falls to the retry queue below.
 
 The **submission server** (e.g. a mizu_out tier) owns everything else:
 
@@ -60,12 +61,36 @@ For every message, calserver classifies the sender:
    not send as another person, nor relay (that would bypass their limits).
    Delegated sending (iTIP `ORGANIZER` + `SENT-BY`) is not supported yet.
 
+## Retries
+
+A send that fails **transiently** — a network/TLS error, a timeout, or a 4xx
+SMTP rejection (greylisting, sending limit) — is not lost: it goes to an
+in-memory retry queue. The stored `SCHEDULE-STATUS` becomes `1.0` (pending) and
+the queue retries in the background: immediately once (a timed-out connection
+often warms the path — e.g. a negative DNS cache — so the instant retry
+frequently succeeds), then after 30s, 2m, 5m, 15m, and 30m before giving up.
+Permanent failures (5xx rejections, and authentication failures in particular)
+are never retried and keep their terminal `5.x` status.
+
+The queue is deliberately **in-memory only**: a queued per-user send carries the
+user's submission credential, which must never be persisted. A restart drops
+pending messages; every scheduled retry was already logged, so the trace is in
+the journal. Final outcomes appear in the log (`imip delivered (retry)` /
+`imip giving up`) and in the delivery metric.
+
+Attempts run on a small worker pool (4), so one stalled send does not serialize
+the rest, and the queue is **capped** (256 pending): beyond that, enqueueing is
+refused (`queue_full` outcome, logged) and the message keeps its terminal
+failure status — a long outage cannot pin unbounded credentials in RAM.
+
 ## Metrics
 
-`calserver_imip_deliveries_total{outcome}` labels each attempt. `smtp_error` and
-`auth_error` are infrastructure incidents worth alerting on; `rate_limited`,
-`not_authorized_sender`, and `no_credential` are expected client-side outcomes.
-`sent_as_user` and `resource_relay` are the two success paths in per-user mode.
+`calserver_imip_deliveries_total{outcome}` labels each attempt. `smtp_error`,
+`auth_error`, and `retry_exhausted` are infrastructure incidents worth alerting
+on; `rate_limited`, `not_authorized_sender`, and `no_credential` are expected
+client-side outcomes. `sent_as_user` and `resource_relay` are the two success
+paths in per-user mode. A message handed to the retry queue counts once as
+`queued` and once more at its terminal outcome.
 
 ## Configuration
 

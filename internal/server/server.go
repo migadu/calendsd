@@ -345,6 +345,9 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 			SenderEmail:     cfg.IMipSender,
 			SendAsOrganizer: cfg.IMipSendAsOrganizer,
 			Metrics:         cfg.Metrics,
+			// Transiently-failed sends retry in the background instead of
+			// being lost; the queue lives for the life of the process.
+			Queue: caldav.NewSendQueue(cfg.Metrics, nil),
 		}
 		if cfg.IMipSMTP != "" {
 			// The shared relay: server-originated mail and resource replies.

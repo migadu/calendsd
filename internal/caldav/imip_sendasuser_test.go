@@ -319,7 +319,7 @@ func TestIMipSendAsUserOutcomes(t *testing.T) {
 	run(&spyUserMailer{err: &textproto.Error{Code: 450}}, "mailto:alice@example.org", alice()) // rate_limited
 
 	want := `
-# HELP calserver_imip_deliveries_total External iTIP deliveries by outcome; smtp_error and auth_error are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes.
+# HELP calserver_imip_deliveries_total External iTIP deliveries by outcome; smtp_error, auth_error, and retry_exhausted are alert-worthy (delivery/auth infrastructure failures). rate_limited, not_authorized_sender, and no_credential are expected client-side outcomes. A message that is queued for retry counts once as queued and once more at its terminal outcome.
 # TYPE calserver_imip_deliveries_total counter
 calserver_imip_deliveries_total{outcome="auth_error"} 1
 calserver_imip_deliveries_total{outcome="no_credential"} 1

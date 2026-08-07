@@ -117,6 +117,11 @@ type IMipPlugin struct {
 	// the same diagnosis, but only the log survives in the journal). Nil uses
 	// slog.Default(). Never receives credentials.
 	Logger *slog.Logger
+	// Queue, when non-nil, retries sends that failed with a transient error
+	// (network trouble, 4xx rejection) in the background instead of losing the
+	// message: the stored SCHEDULE-STATUS becomes 1.0 (pending) and the final
+	// outcome lands in the log and metrics. Nil keeps single-attempt sends.
+	Queue *SendQueue
 
 	server *dav.Server
 }
@@ -148,11 +153,30 @@ func (p *IMipPlugin) logDelivery(outcome string, msg *ical.Message, err error) {
 	switch outcome {
 	case "sent", "sent_as_user", "resource_relay":
 		p.logger().Info("imip delivered", attrs...)
+	case "queued":
+		p.logger().Warn("imip queued for retry", attrs...)
 	case "skipped":
 		p.logger().Debug("imip skipped", attrs...)
 	default:
 		p.logger().Warn("imip not delivered", attrs...)
 	}
+}
+
+// enqueueRetry hands a transiently-failed send to the queue and rewrites the
+// message's status to pending. Returns false when there is no queue, the
+// error is not worth retrying, or the queue refused the message (full or
+// stopped) — leaving the terminal-failure handling to the caller.
+func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error) bool {
+	if p.Queue == nil || !retryableSend(err, 1) {
+		return false
+	}
+	if !p.Queue.Enqueue(attempt, outcome, msg.Method, msg.Sender, msg.Recipient) {
+		return false
+	}
+	msg.ScheduleStatus = "1.0;Scheduling message is queued for delivery"
+	p.Metrics.IMipDelivery("queued")
+	p.logDelivery("queued", msg, err)
+	return true
 }
 
 func (p *IMipPlugin) PluginName() string { return "imip" }
@@ -274,6 +298,13 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 	err := p.Submission.SendAs(username, password, sender, []string{recipient}, email)
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 	if err != nil {
+		// The retry closure recaptures the credential in memory only, for as
+		// long as the message stays queued.
+		if p.enqueueRetry(func() error {
+			return p.Submission.SendAs(username, password, sender, []string{recipient}, email)
+		}, "sent_as_user", msg, err) {
+			return true
+		}
 		return p.mapSubmitError(msg, err)
 	}
 	msg.ScheduleStatus = "1.1;Scheduling message is sent via iMip"
@@ -320,6 +351,11 @@ func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subje
 	// Observed on failure too — a hanging SMTP server is the interesting case.
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 	if err != nil {
+		if p.enqueueRetry(func() error {
+			return p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
+		}, successOutcome, msg, err) {
+			return true
+		}
 		msg.ScheduleStatus = "5.1;Could not deliver invite by email"
 		p.Metrics.IMipDelivery("smtp_error")
 		p.logDelivery("smtp_error", msg, err)
