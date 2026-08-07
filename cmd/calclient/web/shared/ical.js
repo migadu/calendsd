@@ -346,6 +346,9 @@ export function parse(text) {
       for (const p of paramParts) {
         const eq = p.indexOf('=');
         if (eq > 0) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"|"$/g, '');
+        // Valueless vCard 2.1 flags (e.g. PHOTO;BASE64:, TEL;HOME;VOICE:) carry
+        // meaning in the name alone; keep them as '' so they round-trip.
+        else if (eq < 0 && p) params[p.toUpperCase()] = '';
       }
       stack[stack.length - 1].props.push({ name: uname, params, value });
     }
@@ -399,7 +402,10 @@ export function vcardValue(v) {
 // vcardLine reconstructs a folded content line from a parsed property, used to
 // carry through properties the editor does not model (PHOTO, CATEGORIES, X-*).
 export function vcardLine(prop) {
-  const params = Object.entries(prop.params).map(([k, v]) => `;${k}=${v}`).join('');
+  // A '' value marks a valueless vCard 2.1 flag (BASE64, JPEG, HOME…) — re-emit
+  // it bare (`;BASE64`) rather than as an empty-valued `;BASE64=`.
+  const params = Object.entries(prop.params)
+    .map(([k, v]) => (v === '' ? `;${k}` : `;${k}=${v}`)).join('');
   return foldLong(`${prop.name}${params}:${prop.value}`);
 }
 
@@ -407,6 +413,46 @@ export function vcardLine(prop) {
 export const MANAGED_VCARD = new Set(
   ['BEGIN', 'END', 'VERSION', 'UID', 'PRODID', 'FN', 'N', 'ORG', 'TITLE',
     'EMAIL', 'TEL', 'ADR', 'URL', 'BDAY', 'NOTE']);
+
+// photoMime derives an image MIME type from a PHOTO property's params: the vCard
+// TYPE (JPEG/PNG/…), or a bare 2.1 subtype flag (PHOTO;JPEG;BASE64:), defaulting
+// to image/jpeg. A TYPE already containing '/' is treated as a full MIME.
+function photoMime(params = {}) {
+  let t = (params.TYPE || '').toLowerCase();
+  if (!t) for (const k of Object.keys(params)) if (/^(jpe?g|png|gif|webp|bmp|tiff?|heic)$/i.test(k)) { t = k.toLowerCase(); break; }
+  if (!t) return 'image/jpeg';
+  if (t.includes('/')) return t;
+  return 'image/' + (t === 'jpg' ? 'jpeg' : t);
+}
+
+// photoSrc turns a parsed PHOTO property into a value usable as an <img> src: a
+// URI photo (VALUE=uri, or an http/https/data value) is returned as-is; an
+// embedded base64 photo (3.0 ENCODING=b/BASE64, or a bare 2.1 BASE64 flag)
+// becomes a data: URL. Returns '' when there is no usable image.
+export function photoSrc(prop) {
+  if (!prop?.value) return '';
+  const v = prop.value.trim();
+  const params = prop.params || {};
+  if ((params.VALUE || '').toLowerCase() === 'uri' || /^(https?|data):/i.test(v)) return v;
+  return `data:${photoMime(params)};base64,${v.replace(/\s+/g, '')}`;
+}
+
+// buildPhotoLine renders an uploaded `data:` URL as a folded vCard 3.0 PHOTO
+// line for the store's `preserve` array. Returns '' if it isn't a data: URL.
+export function buildPhotoLine(dataUrl) {
+  const m = /^data:([^;,]*)(;base64)?,(.*)$/is.exec(dataUrl || '');
+  if (!m) return '';
+  const sub = ((m[1] || 'image/jpeg').split('/')[1] || 'jpeg').toUpperCase();
+  const b64 = m[2] ? m[3] : btoa(decodeURIComponent(m[3]));
+  return vcardLine({ name: 'PHOTO', params: { ENCODING: 'b', TYPE: sub }, value: b64 });
+}
+
+// isPhotoLine matches a (possibly Apple item-grouped) PHOTO content line, so the
+// editor can swap a contact's photo without disturbing the other preserved
+// properties.
+export function isPhotoLine(line) {
+  return /^(?:item\d+\.)?PHOTO[;:]/i.test(line);
+}
 
 // buildVCard renders a vCard 3.0 from the editor model. `preserve` is an array
 // of pre-rendered content lines (from vcardLine) for unmodeled properties.

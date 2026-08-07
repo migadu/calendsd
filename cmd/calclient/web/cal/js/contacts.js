@@ -3,7 +3,7 @@
 // notes). Fields the editor doesn't model are preserved on save by the store.
 
 import * as store from '/shared/store.js';
-import { icalUnescape } from '/shared/ical.js';
+import { icalUnescape, buildPhotoLine, isPhotoLine } from '/shared/ical.js';
 import { $, html, frag, brJoin } from '/shared/dom.js';
 import { toast, showError } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
@@ -194,11 +194,11 @@ function renderRows(box) {
   for (const c of rows) {
     const sub = [c.emails[0]?.value, c.tels[0]?.value, c.org].filter(Boolean).join(' · ');
     const row = html`<button class="contact" type="button">
-      <span class="avatar" aria-hidden="true">${initials(c.fn)}</span>
       <span class="who"><div>${c.fn}${c.title && frag` <span class="mail">— ${c.title}</span>`}</div>
         <div class="mail">${sub}</div></span>
       <span class="chev" aria-hidden="true">›</span>
     </button>`;
+    row.prepend(avatarEl(c));
     row.addEventListener('click', () => contactDetail(c));
     box.append(row);
   }
@@ -206,6 +206,16 @@ function renderRows(box) {
 
 function initials(fn) {
   return fn.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '?';
+}
+
+// avatarEl renders a contact's photo as a round <img> when one is present,
+// falling back to the initials chip. `extra` adds a modifier class (e.g.
+// avatar-lg for the detail head).
+function avatarEl(c, extra = '') {
+  const cls = `avatar${extra ? ' ' + extra : ''}`;
+  return c.photo
+    ? html`<img class="${cls} avatar-img" src="${c.photo}" alt="" aria-hidden="true">`
+    : html`<span class="${cls}" aria-hidden="true">${initials(c.fn)}</span>`;
 }
 
 // contactDetail shows a read-only card with every stored field, plus Edit and
@@ -220,7 +230,8 @@ async function contactDetail(c) {
     frag`<div class="detail-row"><span class="dl">${label}</span><span class="dv">${value}</span></div>`);
   const typeLabel = t => t && frag`<span class="type-tag">${t[0] + t.slice(1).toLowerCase()}</span>`;
 
-  if (c.org || c.title) line('', [c.title, c.org].filter(Boolean).join(', '));
+  // Organization/title already appear under the name in the detail head, so
+  // they're not repeated as a body row here.
   for (const e of c.emails) line('Email', frag`<a href="mailto:${e.value}">${e.value}</a> ${typeLabel(e.type)}`);
   for (const t of c.tels) line('Phone', frag`<a href="tel:${t.value.replace(/\s+/g, '')}">${t.value}</a> ${typeLabel(t.type)}`);
   const a = c.adr || {};
@@ -234,7 +245,6 @@ async function contactDetail(c) {
   const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Contact details">
     <button class="dialog-close" id="cv-x" aria-label="Close">×</button>
     <div class="detail-head">
-      <span class="avatar avatar-lg" aria-hidden="true">${initials(c.fn)}</span>
       <div><h2 style="margin:0">${c.fn}</h2>${(c.title || c.org)
         && frag`<div class="mail">${[c.title, c.org].filter(Boolean).join(' · ')}</div>`}</div>
     </div>
@@ -245,6 +255,7 @@ async function contactDetail(c) {
       <button class="primary" id="cv-close">Done</button>
     </div>
   </div></div>`;
+  $('.detail-head', dlg).prepend(avatarEl(c, 'avatar-lg'));
   const close = () => dlg.remove();
   openOverlay(dlg, close);
   $('#cv-x', dlg).addEventListener('click', close);
@@ -550,11 +561,47 @@ function collectMulti(container) {
     .filter(x => x.value);
 }
 
+// readPhoto reads an image File into a compact JPEG data: URL, downscaling to at
+// most `max` px on the long edge so an embedded contact photo stays small — the
+// base64 rides along in every card fetch. Falls back to the raw data URL if the
+// canvas path is unavailable (e.g. a format the browser can't draw).
+function readPhoto(file, max = 256) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const raw = reader.result;
+      const img = document.createElement('img');
+      img.onerror = () => resolve(raw);
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } catch { resolve(raw); }
+      };
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function contactDialog(c) {
   const a = c?.adr ?? {};
   const dlg = html`<div class="overlay"><div class="dialog dialog-wide" role="dialog" aria-modal="true">
     <h2>${c ? 'Edit contact' : 'New contact'}</h2>
     <div class="grid">
+      <div class="full cd-photo">
+        <div id="cd-photo-prev" class="avatar avatar-xl" aria-hidden="true"></div>
+        <div class="cd-photo-btns">
+          <button type="button" id="cd-photo-add" class="ghost">Upload photo…</button>
+          <button type="button" id="cd-photo-del" class="ghost" hidden>Remove</button>
+          <input type="file" id="cd-photo-file" accept="image/*" hidden>
+        </div>
+      </div>
       <label>First name<input id="cd-first" type="text" value="${c?.first ?? ''}"></label>
       <label>Last name<input id="cd-last" type="text" value="${c?.last ?? ''}"></label>
       <label class="full">Display name (optional)<input id="cd-fn" type="text" value="${c?.fn ?? ''}" placeholder="Defaults to first + last"></label>
@@ -601,6 +648,36 @@ function contactDialog(c) {
   q('#cd-add-email').addEventListener('click', () => multiRow(emailsBox, { value: '', type: '' }, EMAIL_TYPES, 'email').querySelector('.mr-val').focus());
   q('#cd-add-tel').addEventListener('click', () => multiRow(telsBox, { value: '', type: 'CELL' }, TEL_TYPES, 'tel').querySelector('.mr-val').focus());
 
+  // Photo: PHOTO isn't a modeled field — it rides in `preserve`. Keep the other
+  // preserved lines aside and swap just the PHOTO line as the user uploads or
+  // removes; `photoUrl` drives the live preview, `photoLine` is what's saved.
+  const otherPreserve = (c?.preserve || []).filter(l => !isPhotoLine(l));
+  let photoLine = (c?.preserve || []).find(isPhotoLine) || '';
+  let photoUrl = c?.photo || '';
+  const prev = q('#cd-photo-prev'), delBtn = q('#cd-photo-del');
+  const renderPhoto = () => {
+    prev.classList.toggle('avatar-img', !!photoUrl);
+    prev.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : '';
+    prev.textContent = photoUrl ? '' : initials(q('#cd-fn').value || `${q('#cd-first').value} ${q('#cd-last').value}`.trim());
+    delBtn.hidden = !photoUrl;
+  };
+  renderPhoto();
+  for (const id of ['#cd-first', '#cd-last', '#cd-fn']) q(id).addEventListener('input', () => { if (!photoUrl) renderPhoto(); });
+  q('#cd-photo-add').addEventListener('click', () => q('#cd-photo-file').click());
+  q('#cd-photo-file').addEventListener('change', async ev => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { q('#cd-error').textContent = 'Please choose an image file.'; return; }
+    try {
+      photoUrl = await readPhoto(file);
+      photoLine = buildPhotoLine(photoUrl);
+      q('#cd-error').textContent = '';
+      renderPhoto();
+    } catch { q('#cd-error').textContent = 'Could not read that image.'; }
+  });
+  delBtn.addEventListener('click', () => { photoUrl = ''; photoLine = ''; renderPhoto(); });
+
   const close = () => dlg.remove();
   openOverlay(dlg, close);
   submitOnEnter(dlg, q('#cd-save'));
@@ -611,7 +688,8 @@ function contactDialog(c) {
     if (!fn) { q('#cd-error').textContent = 'Please enter a name.'; return; }
     try {
       await store.saveContact({
-        href: c?.href, etag: c?.etag, uid: c?.uid, preserve: c?.preserve,
+        href: c?.href, etag: c?.etag, uid: c?.uid,
+        preserve: photoLine ? [...otherPreserve, photoLine] : otherPreserve,
         fn, first, last,
         org: q('#cd-org').value.trim(), title: q('#cd-title').value.trim(),
         emails: collectMulti(emailsBox), tels: collectMulti(telsBox),

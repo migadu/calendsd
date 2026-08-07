@@ -143,6 +143,36 @@ function contactType(prop) {
   return raw[0] || '';
 }
 
+// Apple's Contacts.app doesn't use TYPE params — it groups a value with a custom
+// label under an item prefix, e.g. `item1.EMAIL:…` paired with
+// `item1.X-ABLABEL:_$!<Home>!$_`. propGroup splits "ITEM1.EMAIL" (names are
+// upper-cased by the parser) into its group ("ITEM1") and base ("EMAIL"); an
+// ungrouped name has an empty group.
+function propGroup(name) {
+  const m = /^(item\d+)\.(.+)$/i.exec(name);
+  return m ? { group: m[1].toUpperCase(), base: m[2].toUpperCase() } : { group: '', base: name };
+}
+
+// unwrapAbLabel strips Apple's _$!<Label>!$_ wrapper from an X-ABLABEL value.
+function unwrapAbLabel(v) {
+  const m = /^_\$!<(.*)>!\$_$/.exec(String(v || ''));
+  return m ? m[1] : String(v || '');
+}
+
+// abLabelType maps an (unwrapped) Apple X-ABLABEL onto the editor's fixed
+// EMAIL/TEL type vocabulary, so a grouped value's custom label still lands as
+// Home/Work/Mobile/… Types the field doesn't model (CELL/FAX on an email)
+// collapse to OTHER.
+function abLabelType(label, isTel) {
+  const l = String(label || '').toLowerCase();
+  if (!l) return '';
+  if (/fax/.test(l)) return isTel ? 'FAX' : 'OTHER';
+  if (/mobile|cell|iphone/.test(l)) return isTel ? 'CELL' : 'OTHER';
+  if (/home/.test(l)) return 'HOME';
+  if (/work|office/.test(l)) return 'WORK';
+  return 'OTHER';
+}
+
 // parseContact turns a parsed VCARD into the editor model, keeping the emails/
 // phones/org/title/address/etc. and preserving any properties we don't model.
 function parseContact(card, href, book, etag) {
@@ -158,6 +188,28 @@ function parseContact(card, href, book, etag) {
     ? card.props.filter(p => p.name === 'X-ADDRESSBOOKSERVER-MEMBER' || p.name === 'MEMBER')
       .map(p => normalizeUID(p.value))
     : [];
+
+  // Apple item-groups: index each group's X-ABLABEL so grouped EMAIL/TEL values
+  // can be read into the editable fields with a sensible type, and record which
+  // groups we consume so their now-modeled value + label lines drop out of
+  // `preserve` (leaving them would double-write the address on save).
+  const abLabels = new Map();
+  const consumed = new Set();
+  for (const p of card.props) {
+    const { group, base } = propGroup(p.name);
+    if (!group) continue;
+    if (base === 'X-ABLABEL') abLabels.set(group, unwrapAbLabel(p.value));
+    else if (base === 'EMAIL' || base === 'TEL') consumed.add(group);
+  }
+  // Both plain EMAIL/TEL and Apple's item1.EMAIL/item1.TEL, in document order.
+  // A TYPE param wins; otherwise the group's X-ABLABEL supplies the type.
+  const multi = base => card.props
+    .filter(p => propGroup(p.name).base === base)
+    .map(p => ({
+      value: p.value,
+      type: contactType(p) || abLabelType(abLabels.get(propGroup(p.name).group), base === 'TEL'),
+    }));
+
   return {
     href, book, etag,
     kind: isGroup ? 'group' : 'individual',
@@ -168,10 +220,8 @@ function parseContact(card, href, book, etag) {
     first: ical.icalUnescape(n[1] || ''),
     org: ical.icalUnescape(ical.propValue(card, 'ORG')),
     title: ical.icalUnescape(ical.propValue(card, 'TITLE')),
-    emails: card.props.filter(p => p.name === 'EMAIL')
-      .map(p => ({ value: p.value, type: contactType(p) })),
-    tels: card.props.filter(p => p.name === 'TEL')
-      .map(p => ({ value: p.value, type: contactType(p) })),
+    emails: multi('EMAIL'),
+    tels: multi('TEL'),
     adr: {
       type: contactType(adrProp || { params: {} }) || 'HOME',
       street: ical.icalUnescape(adr[2] || ''), city: ical.icalUnescape(adr[3] || ''),
@@ -181,9 +231,21 @@ function parseContact(card, href, book, etag) {
     url: ical.propValue(card, 'URL'),
     bday: ical.propValue(card, 'BDAY'),
     note: ical.icalUnescape(ical.propValue(card, 'NOTE')),
+    // A displayable <img> src for the contact's photo, derived from PHOTO for
+    // the list/detail avatars. PHOTO itself stays in `preserve` below (so save
+    // and dedup are unchanged); the editor rewrites that line when it changes.
+    photo: ical.photoSrc(ical.prop(card, 'PHOTO')),
     // reconstruct lines for properties the editor doesn't own, so a round-trip
-    // through Save keeps PHOTO, CATEGORIES, X-*, etc.
-    preserve: card.props.filter(p => !ical.MANAGED_VCARD.has(p.name)).map(ical.vcardLine),
+    // through Save keeps PHOTO, CATEGORIES, X-*, etc. Grouped EMAIL/TEL and the
+    // X-ABLABEL that names them are now modeled above, so they're excluded here —
+    // Save re-emits them as plain EMAIL;TYPE=…/TEL;TYPE=… lines.
+    preserve: card.props.filter(p => {
+      if (ical.MANAGED_VCARD.has(p.name)) return false;
+      const { group, base } = propGroup(p.name);
+      if (base === 'EMAIL' || base === 'TEL') return false;
+      if (base === 'X-ABLABEL' && consumed.has(group)) return false;
+      return true;
+    }).map(ical.vcardLine),
   };
 }
 

@@ -308,6 +308,54 @@ func TestAddressDataMultigetIgnoresPropFilter(t *testing.T) {
 	}
 }
 
+// photoB64 is a short stand-in for an embedded contact photo blob.
+const photoB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg"
+const photoCard = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:pic\r\nFN:Pic Person\r\nEMAIL:pic@example.org\r\nPHOTO;ENCODING=b;TYPE=PNG:" + photoB64 + "\r\nEND:VCARD\r\n"
+
+// TestAddressDataPreservesPhoto documents that the CardDAV sync carries a
+// contact's embedded PHOTO through end-to-end: an unfiltered fetch returns the
+// blob untouched (convertCardData's raw passthrough), and an explicit
+// address-data prop filter can either keep or drop it. The web client's fast
+// list pass (contacts.js LIST_PROPS) deliberately omits PHOTO to skip the blob;
+// this test locks in that the server honors both requests.
+func TestAddressDataPreservesPhoto(t *testing.T) {
+	newSrv := func() *dav.Server {
+		return buildServerWithCards(map[string]*carddav.CardInfo{
+			"pic.vcf": {URI: "pic.vcf", AddressBookID: "1", CardData: []byte(photoCard)},
+		})
+	}
+	report := func(addressData string) string {
+		query := `<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+		  <d:prop><d:getetag/>` + addressData + `</d:prop>
+		  <c:filter/>
+		</c:addressbook-query>`
+		w := do(t, newSrv(), "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+		if w.Code != 207 {
+			t.Fatalf("query status = %d:\n%s", w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+
+	// Whole card: convertCardData returns the stored bytes untouched, so the
+	// PHOTO property and its exact base64 payload survive.
+	whole := report(`<c:address-data/>`)
+	if !strings.Contains(whole, "PHOTO") || !strings.Contains(whole, photoB64) {
+		t.Errorf("unfiltered fetch dropped the embedded PHOTO:\n%s", whole)
+	}
+
+	// Fast list pass (EMAIL only, PHOTO not requested): the blob is stripped.
+	light := report(`<c:address-data><c:prop name="EMAIL"/></c:address-data>`)
+	if strings.Contains(light, "PHOTO") {
+		t.Errorf("light list pass should omit the PHOTO blob:\n%s", light)
+	}
+
+	// Explicitly requesting PHOTO keeps it.
+	withPhoto := report(`<c:address-data><c:prop name="PHOTO"/></c:address-data>`)
+	if !strings.Contains(withPhoto, "PHOTO") || !strings.Contains(withPhoto, photoB64) {
+		t.Errorf("address-data prop=PHOTO should return the blob:\n%s", withPhoto)
+	}
+}
+
 // buildServerWithCards is buildServer with a custom card set in book1.
 func buildServerWithCards(cards map[string]*carddav.CardInfo) *dav.Server {
 	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/admin"}}}

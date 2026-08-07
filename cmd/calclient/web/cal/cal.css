@@ -417,9 +417,19 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
 }
 .contact:hover { background: #f1f4f7; }
-.contact .avatar {
-  width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff;
-  display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;
+/* Round chip for a contact's initials or photo, shared by the list row, the
+   detail head (avatar-lg) and the editor preview (avatar-xl). */
+.avatar {
+  border-radius: 50%; background: var(--accent); color: #fff; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-weight: 600;
+}
+.contact .avatar { width: 34px; height: 34px; }
+/* Photo avatars: an <img> (list/detail) or a background-image div (editor
+   preview). object-fit covers the img; background-size covers the div; the
+   transparent color hides any fallback text once an image is set. */
+.avatar-img {
+  object-fit: cover; background-size: cover; background-position: center;
+  background-repeat: no-repeat; color: transparent;
 }
 .contact .who { flex: 1; min-width: 0; }
 .contact .mail { color: var(--dim); font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -434,6 +444,11 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 /* contact detail view */
 .detail-head { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; padding-right: 1.6rem; }
 .avatar-lg { width: 52px; height: 52px; font-size: 1.15rem; }
+.avatar-xl { width: 72px; height: 72px; font-size: 1.5rem; }
+
+/* contact editor photo control */
+.cd-photo { display: flex; align-items: center; gap: 1rem; }
+.cd-photo-btns { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .detail-body { display: flex; flex-direction: column; gap: .1rem; }
 .detail-row { display: flex; gap: .8rem; padding: .4rem 0; border-top: 1px solid var(--line); }
 .detail-row:first-child { border-top: none; }
