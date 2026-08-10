@@ -11,6 +11,19 @@ import (
 	"calserver/internal/storage"
 )
 
+// optDur parses an optional duration config value: empty yields 0 (the caller's
+// default), a malformed value is a fatal config error naming the key.
+func optDur(key, val string) (time.Duration, error) {
+	if val == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return d, nil
+}
+
 // Merged is the result of resolving command-line flags over the optional
 // -config file. File and Set stay exposed so each binary can merge its own
 // extra flags (addr, TLS, admin auth) under the same precedence rules.
@@ -116,6 +129,33 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			m.DBPool.ConnMaxLifetime = d
 		}
 		m.LogLevel = m.Str("log-level", *logLevel, m.File.Logging.Level)
+
+		// iMIP durable-queue credential key: the file value, overridden by
+		// $CALSERVER_IMIP_CREDENTIAL_KEY (a secret, so no flag — it must not reach
+		// the process arg list). Empty leaves the per-user durable path off; a
+		// present-but-malformed key fails closed at startup rather than silently
+		// disabling metered durability.
+		imipKeyB64 := m.File.Scheduling.IMip.CredentialKey
+		if env := os.Getenv("CALSERVER_IMIP_CREDENTIAL_KEY"); env != "" {
+			imipKeyB64 = env
+		}
+		imipKey, err := DecodeIMipCredentialKey(imipKeyB64)
+		if err != nil {
+			return nil, err
+		}
+		imipReclaim, err := optDur("scheduling.imip.queue.reclaim_after", m.File.Scheduling.IMip.Queue.ReclaimAfter)
+		if err != nil {
+			return nil, err
+		}
+		imipCredTTL, err := optDur("scheduling.imip.queue.credential_ttl", m.File.Scheduling.IMip.Queue.CredentialTTL)
+		if err != nil {
+			return nil, err
+		}
+		imipRetention, err := optDur("scheduling.imip.queue.retention", m.File.Scheduling.IMip.Queue.Retention)
+		if err != nil {
+			return nil, err
+		}
+
 		m.Server = server.Config{
 			BaseURI:                   m.Str("base-uri", *baseURI, m.File.Server.BaseURI),
 			Realm:                     m.Str("realm", *realm, m.File.Server.Realm),
@@ -143,6 +183,13 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 				VAPIDPublicKey:  m.File.Push.VAPIDPublicKey,
 				VAPIDPrivateKey: m.File.Push.VAPIDPrivateKey,
 				TopicSecret:     m.File.Push.TopicSecret,
+			},
+			IMipQueue: server.IMipQueueConfig{
+				CredentialKey: imipKey,
+				ReclaimAfter:  imipReclaim,
+				CredentialTTL: imipCredTTL,
+				Retention:     imipRetention,
+				Workers:       m.File.Scheduling.IMip.Queue.Workers,
 			},
 		}
 		return m, nil

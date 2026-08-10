@@ -360,7 +360,7 @@ func cancelMessage(info *eventSummary, href, name string) *goical.Calendar {
 	setPlainProp(out.Props, "METHOD", "CANCEL")
 	ev := goical.NewComponent(goical.CompEvent)
 	setPlainProp(ev.Props, goical.PropUID, info.uid)
-	setPlainProp(ev.Props, "SEQUENCE", info.sequence)
+	setPlainProp(ev.Props, "SEQUENCE", incSequence(info.sequence))
 	setPlainProp(ev.Props, "DTSTAMP", nowStamp())
 	m := info.master
 	if s := m.Props.Get("SUMMARY"); s != nil {
@@ -664,26 +664,17 @@ func itipPayload(cal *goical.Calendar, method string) *goical.Calendar {
 	return out
 }
 
-// cancelPayload builds the minimal CANCEL message body.
-func cancelPayload(info *eventSummary) *goical.Calendar {
-	out := goical.NewCalendar()
-	out.Props.SetText(goical.PropVersion, "2.0")
-	setPlainProp(out.Props, goical.PropProductID, "-//calserver//calserver//EN")
-	setPlainProp(out.Props, "METHOD", "CANCEL")
-	ev := goical.NewComponent(goical.CompEvent)
-	setPlainProp(ev.Props, goical.PropUID, info.uid)
-	seq, _ := strconv.Atoi(info.sequence)
-	setPlainProp(ev.Props, "SEQUENCE", strconv.Itoa(seq+1))
-	setPlainProp(ev.Props, "DTSTAMP", time.Now().UTC().Format("20060102T150405Z"))
-	if dtstart := info.master.Props.Get(goical.PropDateTimeStart); dtstart != nil {
-		cp := *dtstart
-		ev.Props.Set(&cp)
-	}
-	org := goical.NewProp("ORGANIZER")
-	org.Value = info.organizer
-	ev.Props.Set(org)
-	out.Children = append(out.Children, ev)
-	return out
+// incSequence returns s+1 — the SEQUENCE a CANCEL carries so it reliably
+// supersedes the last REQUEST an attendee received. RFC 5546 treats a
+// cancellation as a significant change: bumping SEQUENCE (not just DTSTAMP)
+// keeps the CANCEL "newer" even for recipients that collate on SEQUENCE alone.
+// This is safe to bump precisely because a CANCEL has no ongoing stored event
+// to stay in sync with — unlike a REQUEST, whose SEQUENCE the organizer's own
+// client owns and the server only echoes (bumping it here would desync the
+// stored event from what attendees hold and break REPLY matching).
+func incSequence(s string) string {
+	n, _ := strconv.Atoi(s)
+	return strconv.Itoa(n + 1)
 }
 
 // ProcessMessage applies an incoming iTIP message to the recipient's

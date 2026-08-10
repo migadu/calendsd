@@ -84,6 +84,10 @@ func main() {
 		handleDoctor(subArgs)
 	case "principal", "principals":
 		handlePrincipal(subArgs)
+	case "jobs":
+		handleJobs(subArgs)
+	case "imip":
+		handleImip(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()
@@ -128,6 +132,15 @@ Commands:
   principal auth <user> (--password P | --password-stdin) [--realm R] [--json]
                                            Verify a password against the stored digesta1 (exit 0 on
                                            match; detects hashes minted under a different realm)
+  jobs list [--state S] [--worker W] [--queue Q] [--recipient R] [--failed] [--limit N] [--json]
+                                           List durable background jobs (credential shown as presence only)
+  jobs show <id> [--full-body] [--json]    Show one job in full (args pretty-printed; never the secret)
+  jobs retry <id>                          Reset a job to run now (state=available, attempt cleared)
+  jobs cancel <id>                         Stop delivery (state=discarded) and drop any retained credential
+  jobs reschedule <id> --at <ts|+dur>      Move an available job's next-run time
+  jobs delete <id> --confirm               Hard-delete the row (irreversible)
+  imip pending [--limit N] [--json]        List failed/retrying iMIP sends (cred=no needs an organizer resend)
+  imip resend <id>                         Re-queue a stuck iMIP send (metered; refuses if its credential is gone)
   version                                  Show version information
 
 Examples:
@@ -145,5 +158,9 @@ Examples:
   calctl principal delete bob --in 30 --confirm
   calctl principal restore bob
   calctl principal purge-expired --dry-run
+  calctl jobs list --failed
+  calctl jobs show 42
+  calctl imip pending
+  calctl imip resend 42
 `)
 }

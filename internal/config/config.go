@@ -5,11 +5,32 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 )
+
+// DecodeIMipCredentialKey decodes the base64 iMIP durable-queue credential key
+// and validates it is exactly 32 bytes (AES-256). Empty input returns (nil, nil):
+// the per-user durable path is simply off (D12). A present-but-malformed key is
+// an error so the server fails closed at startup rather than silently dropping
+// metered durability.
+func DecodeIMipCredentialKey(b64 string) ([]byte, error) {
+	b64 = strings.TrimSpace(b64)
+	if b64 == "" {
+		return nil, nil
+	}
+	k, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("scheduling.imip.credential_key: not valid base64: %w", err)
+	}
+	if len(k) != 32 {
+		return nil, fmt.Errorf("scheduling.imip.credential_key: must decode to 32 bytes, got %d", len(k))
+	}
+	return k, nil
+}
 
 // Config is the full calserver configuration, matching config.toml.example.
 // Zero values mean "unset" so callers can tell a real value from a default.
@@ -75,6 +96,29 @@ type Config struct {
 			// SubmissionImplicitTLS selects implicit TLS (SMTPS, :465) for the
 			// submission connection; false uses STARTTLS (:587).
 			SubmissionImplicitTLS bool
+			// CredentialKey is the base64-encoded 32-byte AEAD key that encrypts
+			// stored submission passwords for the durable, metered per-user retry
+			// (JOB-QUEUE-PLAN.md D12). Empty disables the per-user durable path —
+			// per-user sends then fall back to a synchronous send. A secret:
+			// keep it out of DB backups. $CALSERVER_IMIP_CREDENTIAL_KEY overrides
+			// this value.
+			CredentialKey string
+			// Queue tunes the durable job queue's background sweeps. Every field is
+			// optional; empty/zero means the internal/jobs default.
+			Queue struct {
+				// ReclaimAfter is how long an 'executing' job may go silent (a
+				// worker that died mid-send) before the reclaim sweep retries it;
+				// it must exceed the mailer timeout. Duration string, e.g. "5m".
+				ReclaimAfter string
+				// CredentialTTL is how long a stored credential is retained before
+				// the purge sweep clears it (≈ the retry window). Duration string.
+				CredentialTTL string
+				// Retention is how long settled (completed/discarded) job rows are
+				// kept before pruning. Duration string.
+				Retention string
+				// Workers is the number of concurrent claim loops (default 4).
+				Workers int
+			}
 		}
 	}
 	// CalendarServer holds the Calendar-Server compatibility extensions.
@@ -214,6 +258,11 @@ func Load(path string) (*Config, error) {
 	cfg.Scheduling.IMip.SendAsOrganizer = boolean("scheduling.imip.send_as_organizer")
 	cfg.Scheduling.IMip.Submission = str("scheduling.imip.submission")
 	cfg.Scheduling.IMip.SubmissionImplicitTLS = boolean("scheduling.imip.submission_implicit_tls")
+	cfg.Scheduling.IMip.CredentialKey = str("scheduling.imip.credential_key")
+	cfg.Scheduling.IMip.Queue.ReclaimAfter = str("scheduling.imip.queue.reclaim_after")
+	cfg.Scheduling.IMip.Queue.CredentialTTL = str("scheduling.imip.queue.credential_ttl")
+	cfg.Scheduling.IMip.Queue.Retention = str("scheduling.imip.queue.retention")
+	cfg.Scheduling.IMip.Queue.Workers = integer("scheduling.imip.queue.workers")
 	cfg.CalendarServer.Browser = boolean("calendarserver.browser")
 	cfg.CalendarServer.AutoProvision = boolean("calendarserver.auto_provision")
 	cfg.CalendarServer.PerUserProps = boolean("calendarserver.per_user_props")
@@ -274,6 +323,11 @@ var known = map[string]bool{
 	"scheduling.imip.send_as_organizer":       true,
 	"scheduling.imip.submission":              true,
 	"scheduling.imip.submission_implicit_tls": true,
+	"scheduling.imip.credential_key":          true,
+	"scheduling.imip.queue.reclaim_after":     true,
+	"scheduling.imip.queue.credential_ttl":    true,
+	"scheduling.imip.queue.retention":         true,
+	"scheduling.imip.queue.workers":           true,
 	"calendarserver.browser":                  true, "calendarserver.auto_provision": true,
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
 	"calendarserver.principals_readable":    true,

@@ -1,7 +1,10 @@
 package caldav
 
 import (
+	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +18,7 @@ import (
 
 	"calserver/internal/caldav/ical"
 	"calserver/internal/dav"
+	"calserver/internal/jobs"
 	"calserver/internal/metrics"
 )
 
@@ -117,13 +121,51 @@ type IMipPlugin struct {
 	// the same diagnosis, but only the log survives in the journal). Nil uses
 	// slog.Default(). Never receives credentials.
 	Logger *slog.Logger
-	// Queue, when non-nil, retries sends that failed with a transient error
-	// (network trouble, 4xx rejection) in the background instead of losing the
-	// message: the stored SCHEDULE-STATUS becomes 1.0 (pending) and the final
-	// outcome lands in the log and metrics. Nil keeps single-attempt sends.
-	Queue *SendQueue
+	// Durable, when non-nil, is the restart-surviving job queue (internal/jobs)
+	// every background send goes on (JOB-QUEUE-PLAN.md): relay-identity sends
+	// credential-free; per-user sends with the submission password encrypted at
+	// rest (D12), so the send is off the request path, metered, and survives a
+	// restart. Nil (an in-memory server with no DB) makes external sends
+	// synchronous. Enqueue happens on the request path; the send runs in a worker.
+	Durable DurableQueue
+	// WriteBack patches a stored object's SCHEDULE-STATUS once a background send
+	// settles (or a synchronous deferred send resolves inline). Wired from
+	// SchedulePlugin.patchScheduleStatus via UseScheduler; nil no-ops.
+	WriteBack func(path, method, recipient, status string)
 
 	server *dav.Server
+}
+
+// DurableQueue is the narrow view of internal/jobs.Queue the plugin needs: it
+// enqueues sends and reports whether it can encrypt a credential (so the per-
+// user durable path is only taken when a key is configured — D12). The plugin
+// stays ignorant of the backing store (D2).
+type DurableQueue interface {
+	Enqueue(ctx context.Context, worker string, args any, opts ...jobs.Opt) error
+	// EncryptsCredentials reports whether a keyring is configured; when false the
+	// per-user durable retry can't run (no key) and the caller falls back to the
+	// synchronous send / D5b rather than persisting a plaintext or bypassing metering.
+	EncryptsCredentials() bool
+}
+
+// imipWorker is the durable job's worker name (Oban-mappable — see the plan).
+const imipWorker = "imip_send"
+
+// imipJob is one durable send's args (JSONB). NO secret lives here (D8): the
+// per-user submission password travels only through jobs.WithCredential into the
+// encrypted columns. uid/recipient/method are the coalesce key; sequence/dtstamp
+// order supersedes; object_path is empty when there is no status to write back.
+type imipJob struct {
+	EnvelopeFrom string `json:"envelope_from"`      // MAIL FROM: user address (per-user) or SenderEmail (relay)
+	Username     string `json:"username,omitempty"` // SendAs login for per-user; empty for relay
+	Recipient    string `json:"recipient"`          // bare address (SendAs/Mailer recipient + coalesce key)
+	Method       string `json:"method"`
+	UID          string `json:"uid"`
+	Sequence     string `json:"sequence"`
+	DTStamp      string `json:"dtstamp"`
+	Outcome      string `json:"outcome"`               // success metric label (sent / sent_as_user / resource_relay)
+	ObjectPath   string `json:"object_path,omitempty"` // stored object to write SCHEDULE-STATUS back onto; "" = none
+	MessageB64   string `json:"message_b64"`           // fully-framed RFC822, base64 (D4)
 }
 
 // Terminal SCHEDULE-STATUS values (RFC 6638 §3.2.9). statusQueued is the
@@ -156,6 +198,26 @@ func classifySendError(err error) (status, outcome string) {
 	return statusFailed, "smtp_error"
 }
 
+// retryableSend reports whether a send that failed with err is worth retrying;
+// attempts counts the failures so far, including the one that produced err. A
+// 4xx SMTP rejection (greylisting, sending limits, transient policy) and any
+// network-level error (dial, timeout, reset) are transient. A 5xx SMTP code is
+// a permanent rejection — an auth failure in particular never gets better by
+// repeating the same credential. An error we can't classify (a refused plaintext
+// connection, a malformed address, a broken config) gets one retry in case it
+// was a blip, not the whole schedule.
+func retryableSend(err error, attempts int) bool {
+	var tperr *textproto.Error
+	if errors.As(err, &tperr) {
+		return tperr.Code >= 400 && tperr.Code < 500
+	}
+	var nerr net.Error
+	if errors.As(err, &nerr) {
+		return true
+	}
+	return attempts <= 1
+}
+
 func (p *IMipPlugin) logger() *slog.Logger {
 	if p.Logger != nil {
 		return p.Logger
@@ -164,26 +226,19 @@ func (p *IMipPlugin) logger() *slog.Logger {
 }
 
 // QueuesExternalSends reports whether async delivery will actually offload the
-// send to the background queue. When false, a caller must not defer a send (the
-// status would never leave pending): it should deliver synchronously instead.
-func (p *IMipPlugin) QueuesExternalSends() bool { return p.Queue != nil }
+// send to the durable background queue. When false, a caller must not defer a
+// send (the status would never leave pending): it delivers synchronously.
+func (p *IMipPlugin) QueuesExternalSends() bool { return p.Durable != nil }
 
-// queueDone adapts a status write-back (onFinal) to the queue's terminal
-// callback: a delivered send resolves to statusSent, a failed one to the
-// specific status its error classifies to (auth, rate-limit, or generic
-// failure). Returns nil when there is nothing to report back.
-func (p *IMipPlugin) queueDone(onFinal func(status string)) func(error) {
-	if onFinal == nil {
-		return nil
+// writeStatus patches the terminal SCHEDULE-STATUS back onto the stored object,
+// the one write-back both the durable worker and the synchronous fallback use. objectPath is empty for
+// sends whose status isn't stored (a DELETE's cancels, a resource REPLY), where
+// it no-ops. recipient is the mailto: form patchScheduleStatus matches against.
+func (p *IMipPlugin) writeStatus(objectPath string, msg *ical.Message, status string) {
+	if objectPath == "" || p.WriteBack == nil {
+		return
 	}
-	return func(err error) {
-		if err == nil {
-			onFinal(statusSent)
-			return
-		}
-		status, _ := classifySendError(err)
-		onFinal(status)
-	}
+	p.WriteBack(objectPath, msg.Method, msg.Recipient, status)
 }
 
 // logDelivery mirrors a delivery outcome (the same string the metric counts)
@@ -215,44 +270,6 @@ func (p *IMipPlugin) logDelivery(outcome string, msg *ical.Message, err error) {
 	}
 }
 
-// enqueueRetry hands a transiently-failed send to the queue and rewrites the
-// message's status to pending. Returns false when there is no queue, the
-// error is not worth retrying, or the queue refused the message (full or
-// stopped) — leaving the terminal-failure handling to the caller.
-func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error, onDone func(error)) bool {
-	if p.Queue == nil || !retryableSend(err, 1) {
-		return false
-	}
-	// syncTried: a synchronous send already failed before this retry was queued.
-	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, true, onDone) {
-		return false
-	}
-	msg.ScheduleStatus = statusQueued
-	p.Metrics.IMipDelivery("queued")
-	p.logDelivery("queued", msg, err)
-	return true
-}
-
-// enqueueFirst hands the very first send attempt to the queue, without a
-// synchronous attempt first, so the triggering request returns without waiting
-// on SMTP (used for cancels on DELETE). It returns false when there is no queue
-// or the queue refused the message (full or stopped), leaving the caller to
-// fall back to a synchronous send. On success the status is pending (1.0), and
-// the terminal outcome lands in the log and metrics — exactly like a retry.
-func (p *IMipPlugin) enqueueFirst(attempt func() error, outcome string, msg *ical.Message, onDone func(error)) bool {
-	if p.Queue == nil {
-		return false
-	}
-	// syncTried is false: the queue owns the very first attempt for this send.
-	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, false, onDone) {
-		return false
-	}
-	msg.ScheduleStatus = statusQueued
-	p.Metrics.IMipDelivery("queued")
-	p.logDelivery("queued", msg, nil)
-	return true
-}
-
 func (p *IMipPlugin) PluginName() string { return "imip" }
 
 func (p *IMipPlugin) Init(s *dav.Server) { p.server = s }
@@ -267,6 +284,11 @@ func (p *IMipPlugin) UseScheduler(s *SchedulePlugin) {
 		uri := s.principalForAddress(address)
 		return uri != "" && s.AutoSchedule != nil && s.AutoSchedule(uri)
 	}
+	// Both the durable worker and the synchronous fallback write terminal
+	// statuses back through here, so they share one read-modify-write path
+	// (serialized per object by the scheduler's in-process write-back lock — see
+	// patchScheduleStatus for the single-instance caveat).
+	p.WriteBack = s.patchScheduleStatus
 }
 
 // DeliverExternal implements ExternalDeliverer: it emails significant messages
@@ -275,37 +297,31 @@ func (p *IMipPlugin) UseScheduler(s *SchedulePlugin) {
 // Submission is configured, the message is sent as the logged-in user (see
 // deliverAsUser).
 func (p *IMipPlugin) DeliverExternal(r *http.Request, msg *ical.Message) bool {
-	return p.deliverExternal(r, msg, false, nil)
+	return p.deliverExternal(r, msg, false, "")
 }
 
 // DeliverExternalAsync implements AsyncExternalDeliverer: same delivery, but the
-// send is handed to the retry queue so the triggering request (a DELETE fanning
-// out CANCELs, or a PUT inviting many attendees) does not block on SMTP. The
-// credential and framed message are captured now; the send runs in the
-// background. onFinal, when non-nil, is called exactly once with the terminal
-// SCHEDULE-STATUS — inline for a synchronous outcome (auth failure, invalid
-// recipient, or a queue-full fallback send), or later from the queue worker
-// when the background send settles — so the caller can write it back onto the
-// stored object. Falls back to a synchronous send when no queue is configured
-// or the queue is full.
-func (p *IMipPlugin) DeliverExternalAsync(r *http.Request, msg *ical.Message, onFinal func(status string)) bool {
-	handled := p.deliverExternal(r, msg, true, p.queueDone(onFinal))
-	// A message left in the pending state was accepted by the queue, which owns
-	// the terminal callback. Anything else reached a terminal status inline —
-	// report it so a deferred send is never left stuck pending, even on a path
-	// that set no status (an undeliverable message the caller should not have
-	// deferred): a definite failure is better than a status that never resolves.
-	if onFinal != nil && msg.ScheduleStatus != statusQueued {
+// send is handed to a background queue so the triggering request (a DELETE
+// fanning out CANCELs, or a PUT inviting many attendees) does not block on SMTP.
+// objectPath is the stored object whose SCHEDULE-STATUS the terminal outcome is
+// written back onto ("" when nothing is stored — a DELETE's cancels, a resource
+// REPLY). The send settles in the background (RAM or durable tier) and patches
+// the status then; a message that instead reached a terminal status *inline*
+// (auth failure, invalid recipient, a queue-full fallback send) is written back
+// here, so a deferred send is never left stuck pending.
+func (p *IMipPlugin) DeliverExternalAsync(r *http.Request, msg *ical.Message, objectPath string) bool {
+	handled := p.deliverExternal(r, msg, true, objectPath)
+	if msg.ScheduleStatus != statusQueued {
 		status := msg.ScheduleStatus
 		if status == "" {
 			status = statusFailed
 		}
-		onFinal(status)
+		p.writeStatus(objectPath, msg, status)
 	}
 	return handled
 }
 
-func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, background bool, onDone func(error)) bool {
+func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, background bool, objectPath string) bool {
 	if !msg.SignificantChange {
 		if msg.ScheduleStatus == "" {
 			msg.ScheduleStatus = "1.0;We got the message, but it's not significant enough to warrant an email"
@@ -355,9 +371,9 @@ func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, backgro
 	// always the sender. Otherwise fall back to the legacy shared relay for
 	// every message (non-mizu deployments).
 	if p.Submission != nil {
-		return p.deliverAsUser(r, msg, sender, recipient, subject, body, background, onDone)
+		return p.deliverAsUser(r, msg, sender, recipient, subject, body, background, objectPath)
 	}
-	return p.deliverViaRelay(msg, sender, recipient, subject, body, "sent", background, onDone)
+	return p.deliverViaRelay(msg, sender, recipient, subject, body, "sent", background, objectPath)
 }
 
 // deliverAsUser routes one message under the Core rule (send-as-logged-in-user):
@@ -365,14 +381,14 @@ func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, backgro
 //   - msg.Sender is an auto-schedule resource → relay through the server;
 //   - otherwise (a delegated human organizer) → refuse, so we never send as
 //     someone who is not the logged-in user.
-func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, onDone func(error)) bool {
+func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, objectPath string) bool {
 	switch {
 	case p.senderOwnedByPrincipal(msg.Sender, dav.Principal(r.Context())):
 		// fall through to the per-user submission below.
 	case p.IsResourceSender != nil && p.IsResourceSender(msg.Sender):
 		// A resource (room) answering a remote organizer: no interactive login,
 		// so relay through the shared server sender. The one sanctioned relay.
-		return p.deliverViaRelay(msg, sender, recipient, subject, body, "resource_relay", background, onDone)
+		return p.deliverViaRelay(msg, sender, recipient, subject, body, "resource_relay", background, objectPath)
 	default:
 		// The sender is not the logged-in user and not a resource — a delegated
 		// human organizer. We hold only the logged-in user's credential and must
@@ -400,22 +416,21 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 	// in-body ORGANIZER stay one identity and no Reply-To split is needed.
 	email := framedEmail([]string{"From: " + formatAddress(msg.SenderName, sender)},
 		msg, recipient, subject, body)
-	// The attempt closure holds the credential in memory only, for as long as
-	// the message stays queued — nothing request-scoped is referenced, so it is
-	// safe to run after the triggering request returns.
-	attempt := func() error {
-		return p.Submission.SendAs(username, password, sender, []string{recipient}, email)
-	}
-	if background && p.enqueueFirst(attempt, "sent_as_user", msg, onDone) {
-		return true
-	}
-	start := time.Now()
-	err := attempt()
-	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
-	if err != nil {
-		if p.enqueueRetry(attempt, "sent_as_user", msg, err, onDone) {
+
+	// Off the request path: enqueue the send durably with the password encrypted
+	// at rest (D12), so it is metered, survives a restart, and doesn't block the
+	// PUT/DELETE on SMTP. Needs a credential key (EncryptsCredentials). Without a
+	// durable queue or a key, fall through to a synchronous attempt — the send
+	// still goes out, it just blocks the request (the pre-queue behavior).
+	if background && p.Durable != nil && p.Durable.EncryptsCredentials() {
+		if p.enqueueDurable(msg, sender, username, recipient, "sent_as_user", objectPath, email, []byte(password)) {
 			return true
 		}
+	}
+	start := time.Now()
+	err := p.Submission.SendAs(username, password, sender, []string{recipient}, email)
+	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
+	if err != nil {
 		return p.mapSubmitError(msg, err)
 	}
 	msg.ScheduleStatus = statusSent
@@ -427,7 +442,7 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 // deliverViaRelay sends through the shared server relay (Mailer): the legacy
 // path when Submission is nil, and the resource-reply path. successOutcome is
 // the metric recorded on success ("sent" or "resource_relay").
-func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string, background bool, onDone func(error)) bool {
+func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string, background bool, objectPath string) bool {
 	// The envelope sender (MAIL FROM) is always the server's own address. In
 	// SendAsOrganizer mode the visible From is the scheduling sender instead — a
 	// split sender — so Reply-To would only duplicate it. Fall back to the
@@ -457,20 +472,19 @@ func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subje
 		p.logDelivery("no_mailer", msg, nil)
 		return true
 	}
-	attempt := func() error {
-		return p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
-	}
-	if background && p.enqueueFirst(attempt, successOutcome, msg, onDone) {
-		return true
+	// Relay identity carries no credential, so the whole lifecycle lives on the
+	// durable queue — restart-surviving for free. Without a durable queue (an
+	// in-memory server), send synchronously.
+	if background {
+		if p.enqueueDurable(msg, p.SenderEmail, "", recipient, successOutcome, objectPath, email, nil) {
+			return true
+		}
 	}
 	start := time.Now()
-	err := attempt()
+	err := p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
 	// Observed on failure too — a hanging SMTP server is the interesting case.
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 	if err != nil {
-		if p.enqueueRetry(attempt, successOutcome, msg, err, onDone) {
-			return true
-		}
 		msg.ScheduleStatus = statusFailed
 		p.Metrics.IMipDelivery("smtp_error")
 		p.logDelivery("smtp_error", msg, err)
@@ -480,6 +494,113 @@ func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subje
 	p.Metrics.IMipDelivery(successOutcome)
 	p.logDelivery(successOutcome, msg, nil)
 	return true
+}
+
+// enqueueDurable persists a send on the durable queue and marks the message
+// pending (1.0), off the request path. cred is nil for a relay job or the
+// plaintext submission password for a per-user job (the queue encrypts it — D12;
+// it never enters args). envelopeFrom is the MAIL FROM the worker will use;
+// username is the SendAs login (empty for relay). Returns false when there is no
+// durable queue or the enqueue failed, so the caller can fall back to a
+// synchronous send. Runs on the request goroutine, so it owns msg.
+func (p *IMipPlugin) enqueueDurable(msg *ical.Message, envelopeFrom, username, recipient, outcome, objectPath string, email, cred []byte) bool {
+	if p.Durable == nil {
+		return false
+	}
+	args := imipJob{
+		EnvelopeFrom: envelopeFrom,
+		Username:     username,
+		Recipient:    recipient,
+		Method:       msg.Method,
+		UID:          msg.UID,
+		Sequence:     eventSequence(msg),
+		DTStamp:      eventProp(msg, "DTSTAMP"),
+		Outcome:      outcome,
+		ObjectPath:   objectPath,
+		MessageB64:   base64.StdEncoding.EncodeToString(email),
+	}
+	// A fresh, short context so the enqueue (a quick local INSERT) is bounded
+	// independent of the request's own deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var opts []jobs.Opt
+	if cred != nil {
+		opts = append(opts, jobs.WithCredential(cred))
+	}
+	if err := p.Durable.Enqueue(ctx, imipWorker, args, opts...); err != nil {
+		p.logger().Warn("imip: durable enqueue failed; leaving send unqueued",
+			"err", err, "method", msg.Method, "recipient", msg.Recipient)
+		return false
+	}
+	msg.ScheduleStatus = statusQueued
+	p.Metrics.IMipDelivery("queued")
+	p.logDelivery("queued", msg, nil)
+	return true
+}
+
+// DurableHandler is the internal/jobs handler for the "imip_send" worker: it
+// re-sends the pre-framed RFC822 body (D4) and settles the SCHEDULE-STATUS.
+// A per-user job (Credential present) submits as the user (metered); a relay
+// job goes through the shared server sender. Result handling (D13): a success
+// completes and writes statusSent; a transient failure reschedules until the
+// attempts run out; a permanent failure (or exhaustion) writes the classified
+// terminal status and discards. Registered by the server wiring.
+func (p *IMipPlugin) DurableHandler(_ context.Context, j jobs.Job) error {
+	var a imipJob
+	if err := json.Unmarshal(j.Args, &a); err != nil {
+		return jobs.Discard(fmt.Errorf("imip: unparseable job args: %w", err))
+	}
+	body, err := base64.StdEncoding.DecodeString(a.MessageB64)
+	if err != nil {
+		return jobs.Discard(fmt.Errorf("imip: bad message_b64: %w", err))
+	}
+
+	start := time.Now()
+	var sendErr error
+	if j.Credential != nil {
+		if p.Submission == nil {
+			return jobs.Discard(errors.New("imip: per-user job but no submission mailer"))
+		}
+		sendErr = p.Submission.SendAs(a.Username, string(j.Credential), a.EnvelopeFrom, []string{a.Recipient}, body)
+	} else {
+		if p.Mailer == nil {
+			return jobs.Discard(errors.New("imip: relay job but no mailer"))
+		}
+		sendErr = p.Mailer.Send(a.EnvelopeFrom, []string{a.Recipient}, body)
+	}
+	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
+
+	recipient := "mailto:" + a.Recipient
+	attrs := []any{"outcome", a.Outcome, "method", a.Method, "recipient", recipient, "attempt", j.Attempt}
+	if sendErr == nil {
+		p.Metrics.IMipDelivery(a.Outcome)
+		p.logger().Info("imip delivered (durable)", attrs...)
+		p.writeBackStatus(a, statusSent)
+		return nil
+	}
+	// Transient and attempts remain → reschedule (the queue applies backoff).
+	if retryableSend(sendErr, j.Attempt) && j.Attempt < j.MaxAttempts {
+		p.logger().Warn("imip durable retry scheduled", append(attrs, "err", sendErr)...)
+		return sendErr
+	}
+	// Terminal: a permanent rejection, or a transient one out of retries.
+	status, oc := classifySendError(sendErr)
+	if retryableSend(sendErr, j.Attempt) {
+		oc = "retry_exhausted"
+	}
+	p.Metrics.IMipDelivery(oc)
+	p.logger().Warn("imip durable giving up", append(attrs, "err", sendErr, "status", status)...)
+	p.writeBackStatus(a, status)
+	return jobs.Discard(sendErr)
+}
+
+// writeBackStatus patches a durable job's terminal status onto its stored object
+// (no-op when the job carried no object_path — a cancel or resource reply).
+func (p *IMipPlugin) writeBackStatus(a imipJob, status string) {
+	if a.ObjectPath == "" || p.WriteBack == nil {
+		return
+	}
+	p.WriteBack(a.ObjectPath, a.Method, "mailto:"+a.Recipient, status)
 }
 
 // senderOwnedByPrincipal reports whether the full msg.Sender (a "mailto:" URI)
@@ -537,15 +658,31 @@ func stripHeaderChars(s string) string {
 
 // eventSummaryText returns the SUMMARY of the message's first VEVENT.
 func eventSummaryText(msg *ical.Message) string {
+	return eventProp(msg, "SUMMARY")
+}
+
+// eventProp returns the named property of the message's first VEVENT ("" if
+// absent). Used to lift the coalescing keys (SEQUENCE, DTSTAMP) into a durable
+// job's args (D10).
+func eventProp(msg *ical.Message, name string) string {
 	if msg.Calendar == nil {
 		return ""
 	}
 	for _, comp := range msg.Calendar.Children {
 		if comp.Name == "VEVENT" {
-			if s := comp.Props.Get("SUMMARY"); s != nil {
-				return s.Value
+			if pr := comp.Props.Get(name); pr != nil {
+				return pr.Value
 			}
 		}
 	}
 	return ""
+}
+
+// eventSequence returns the first VEVENT's SEQUENCE, defaulting to "0" (the iCal
+// default) so the coalesce ordering always has a value to compare.
+func eventSequence(msg *ical.Message) string {
+	if s := eventProp(msg, "SEQUENCE"); s != "" {
+		return s
+	}
+	return "0"
 }

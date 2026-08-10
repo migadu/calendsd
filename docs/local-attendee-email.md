@@ -74,7 +74,7 @@ load-all-and-refresh) invalidated on admin writes. v1 can ship a per-domain TTL
 cache; correctness does not depend on instant propagation. The cache keeps the
 *policy lookup* cheap; the SMTP send itself still runs synchronously inside the
 organizer's PUT, once per local attendee in an opted-in domain — the same cost
-external iMIP already pays, bounded by the retry queue on failure.
+external iMIP already pays, bounded by the durable delivery queue on failure.
 
 **Errors fail open.** The cache wrapper swallows store errors into
 `inbox_only` (that is why the delivery-side interface below returns a plain
@@ -174,9 +174,9 @@ choice is a deployment property, not a per-feature one. If a domain is
 `email`/`notification` but neither is configured, the copy is skipped, logged,
 and metered as `no_mailer` while inbox delivery still succeeds.
 
-Transient send failures use the existing `SendQueue` retry path (the send core
-inherits `enqueueRetry`), but queued local-copy retries are metered under the
-`local_copy` dimension, not the external outcomes.
+Transient send failures use the same durable delivery path external iMIP uses
+(the background job queue — see `docs/imip.md`), but queued local-copy retries are
+metered under the `local_copy` dimension, not the external outcomes.
 
 ## Admin management
 

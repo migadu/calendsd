@@ -1,0 +1,426 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"calserver/internal/jobs"
+)
+
+// handleJobs dispatches the generic `calctl jobs` subcommands: read-only
+// list/show and the guarded state mutations retry/cancel/reschedule/delete. It
+// operates on the durable job table (JOB-QUEUE-PLAN.md) by id and never touches
+// the encryption key or the credential — only queue state (redacted to presence).
+func handleJobs(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: calctl jobs <list|show|retry|cancel|reschedule|delete> [options]")
+		os.Exit(1)
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "list", "ls":
+		jobsList(rest)
+	case "show":
+		jobsShow(rest)
+	case "retry":
+		jobsRetry(rest)
+	case "cancel":
+		jobsCancel(rest)
+	case "reschedule":
+		jobsReschedule(rest)
+	case "delete", "rm":
+		jobsDelete(rest)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown jobs subcommand: %s (want list, show, retry, cancel, reschedule, or delete)\n", sub)
+		os.Exit(1)
+	}
+}
+
+func jobsOps(dsnOverride string) *jobs.Ops {
+	return &jobs.Ops{DB: openAdminQueries(dsnOverride).DB}
+}
+
+func jobsList(args []string) {
+	flags := flag.NewFlagSet("jobs list", flag.ExitOnError)
+	state := flags.String("state", "", "Filter by state (available|executing|completed|discarded)")
+	worker := flags.String("worker", "", "Filter by worker (e.g. imip_send)")
+	queue := flags.String("queue", "", "Filter by queue")
+	recipient := flags.String("recipient", "", "Filter by recipient substring")
+	failed := flags.Bool("failed", false, "Only failed/retried jobs (discarded, or available with a prior attempt)")
+	limit := flags.Int("limit", 100, "Max rows")
+	jsonOut := flags.Bool("json", false, "Output as JSON")
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(args)
+
+	rows, err := jobsOps(*dsn).List(jobs.ListFilter{
+		State: *state, Worker: *worker, Queue: *queue,
+		Recipient: *recipient, Failed: *failed, Limit: *limit,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list jobs: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOut {
+		encodeJobsJSON(rows)
+		return
+	}
+	if len(rows) == 0 {
+		fmt.Println("(no jobs)")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tSTATE\tWORKER\tRECIPIENT\tATT\tDUE\tCRED\tERROR")
+	for _, r := range rows {
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d/%d\t%s\t%s\t%s\n",
+			r.ID, r.State, r.Worker, dashIfEmpty(r.Recipient), r.Attempt, r.MaxAttempts,
+			relTime(r.ScheduledAt), credCol(r.HasCred, r.KeyID), truncate(r.LastError, 40))
+	}
+	w.Flush()
+}
+
+func jobsShow(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("jobs show", flag.ExitOnError)
+	jsonOut := flags.Bool("json", false, "Output as JSON")
+	fullBody := flags.Bool("full-body", false, "Include the framed RFC822 body (attendee-visible event content)")
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	j, err := jobsOps(*dsn).Get(id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load job %d: %v\n", id, err)
+		os.Exit(1)
+	}
+	if j == nil {
+		fmt.Fprintf(os.Stderr, "No job with id %d.\n", id)
+		os.Exit(1)
+	}
+	if *jsonOut {
+		encodeJobsJSON(j)
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	row := func(k, v string) { fmt.Fprintf(w, "%s\t%s\n", k, v) }
+	row("id", fmt.Sprintf("%d", j.ID))
+	row("queue", j.Queue)
+	row("worker", j.Worker)
+	row("state", j.State)
+	row("attempt", fmt.Sprintf("%d/%d", j.Attempt, j.MaxAttempts))
+	row("scheduled_at", j.ScheduledAt.Format(time.RFC3339)+" ("+relTime(j.ScheduledAt)+")")
+	row("inserted_at", j.InsertedAt.Format(time.RFC3339))
+	if j.CompletedAt != nil {
+		row("completed_at", j.CompletedAt.Format(time.RFC3339))
+	}
+	row("credential", credDetail(j.HasCred, j.KeyID))
+	if j.LastError != "" {
+		row("last_error", j.LastError)
+	}
+	w.Flush()
+
+	// args, pretty-printed. Never holds a secret (D8); message_b64 is gated behind
+	// --full-body because it is attendee-visible content, not because it's secret.
+	fmt.Println("\nargs:")
+	printArgs(j.Args, *fullBody)
+}
+
+func jobsRetry(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("jobs retry", flag.ExitOnError)
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	if err := jobsOps(*dsn).Retry(id); err != nil {
+		reportMutationErr("retry", id, err)
+	}
+	fmt.Printf("Job %d reset to run now (state=available, attempt cleared).\n", id)
+}
+
+func jobsCancel(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("jobs cancel", flag.ExitOnError)
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	if err := jobsOps(*dsn).Cancel(id); err != nil {
+		reportMutationErr("cancel", id, err)
+	}
+	fmt.Printf("Job %d cancelled (state=discarded); any retained credential was dropped.\n", id)
+}
+
+func jobsReschedule(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("jobs reschedule", flag.ExitOnError)
+	at := flags.String("at", "", "New run time (RFC3339, e.g. 2026-08-10T15:04:05Z), or a +duration (e.g. +30m)")
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+	if *at == "" {
+		fmt.Fprintln(os.Stderr, "reschedule requires --at <RFC3339 timestamp | +duration>.")
+		os.Exit(1)
+	}
+	when := parseAt(*at)
+
+	if err := jobsOps(*dsn).Reschedule(id, when); err != nil {
+		reportMutationErr("reschedule", id, err)
+	}
+	fmt.Printf("Job %d rescheduled for %s.\n", id, when.Format(time.RFC3339))
+}
+
+func jobsDelete(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("jobs delete", flag.ExitOnError)
+	confirm := flags.Bool("confirm", false, "Actually delete the row (required — this is irreversible)")
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+	if !*confirm {
+		fmt.Fprintf(os.Stderr, "This hard-deletes job %d (and any retained credential). Re-run with --confirm.\n", id)
+		os.Exit(1)
+	}
+	if err := jobsOps(*dsn).Delete(id); err != nil {
+		reportMutationErr("delete", id, err)
+	}
+	fmt.Printf("Job %d deleted.\n", id)
+}
+
+// --- iMIP wrappers (D5b) ---------------------------------------------------
+
+// handleImip dispatches the iMIP-semantic recovery commands, which sit above the
+// generic jobs layer.
+func handleImip(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: calctl imip <pending|resend> [options]")
+		os.Exit(1)
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "pending":
+		imipPending(rest)
+	case "resend":
+		imipResend(rest)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown imip subcommand: %s (want pending or resend)\n", sub)
+		os.Exit(1)
+	}
+}
+
+// imipPending surfaces the iMIP sends an operator cares about: failed or
+// still-retrying jobs. A per-user job with no credential (cred=no) can only be
+// recovered by the organizer re-sending from their client.
+func imipPending(args []string) {
+	flags := flag.NewFlagSet("imip pending", flag.ExitOnError)
+	jsonOut := flags.Bool("json", false, "Output as JSON")
+	limit := flags.Int("limit", 100, "Max rows")
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(args)
+
+	rows, err := jobsOps(*dsn).List(jobs.ListFilter{Worker: "imip_send", Failed: true, Limit: *limit})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list pending iMIP sends: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOut {
+		encodeJobsJSON(rows)
+		return
+	}
+	if len(rows) == 0 {
+		fmt.Println("(no failed or retrying iMIP sends)")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tSTATE\tRECIPIENT\tMETHOD\tATT\tCRED\tERROR")
+	for _, r := range rows {
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d/%d\t%s\t%s\n",
+			r.ID, r.State, dashIfEmpty(r.Recipient), dashIfEmpty(r.Method),
+			r.Attempt, r.MaxAttempts, yesNo(r.HasCred), truncate(r.LastError, 40))
+	}
+	w.Flush()
+	fmt.Println("\nResend a metered send with `calctl imip resend <id>` (needs cred=yes).")
+}
+
+// imipResend is the domain wrapper over `jobs retry`: it re-runs a stuck iMIP
+// send. For a per-user send (username set) it needs a still-decryptable
+// credential — the worker would only fail-safe discard otherwise — so it refuses
+// when none survives, pointing the operator at the organizer's own client.
+func imipResend(args []string) {
+	id, rest := takeID(args)
+	flags := flag.NewFlagSet("imip resend", flag.ExitOnError)
+	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	flags.Parse(rest)
+
+	ops := jobsOps(*dsn)
+	j, err := ops.Get(id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load job %d: %v\n", id, err)
+		os.Exit(1)
+	}
+	if j == nil {
+		fmt.Fprintf(os.Stderr, "No job with id %d.\n", id)
+		os.Exit(1)
+	}
+	if j.Worker != "imip_send" {
+		fmt.Fprintf(os.Stderr, "Job %d is worker %q, not imip_send. Use `calctl jobs retry`.\n", id, j.Worker)
+		os.Exit(1)
+	}
+	// A per-user send (username set) with no credential can't be delivered as the
+	// user — the worker fail-safe discards. Metered recovery is the organizer's own
+	// client re-issuing the invite (their live request carries the password).
+	if j.Username != "" && !j.HasCred {
+		fmt.Fprintf(os.Stderr,
+			"Job %d is a per-user send whose credential is gone (purged, or the key rotated).\n"+
+				"It can't be re-sent AS the user from here without bypassing metering. Have %s\n"+
+				"re-issue the invitation from their calendar client instead.\n", id, orDash(j.Recipient))
+		os.Exit(1)
+	}
+	if err := ops.Retry(id); err != nil {
+		reportMutationErr("resend", id, err)
+	}
+	fmt.Printf("Job %d re-queued for delivery.\n", id)
+}
+
+// --- helpers ---------------------------------------------------------------
+
+// takeID pulls the leading positional job id and returns it with the remaining
+// (flag) args, matching the `calctl <verb> <id> [flags]` convention (the flag
+// package stops parsing at a positional, so the id must come off first).
+func takeID(args []string) (int64, []string) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(os.Stderr, "A job id is required as the first argument.")
+		os.Exit(1)
+	}
+	var id int64
+	if _, err := fmt.Sscan(args[0], &id); err != nil || id <= 0 {
+		fmt.Fprintf(os.Stderr, "Invalid job id %q (want a positive integer).\n", args[0])
+		os.Exit(1)
+	}
+	return id, args[1:]
+}
+
+// parseAt accepts an RFC3339 timestamp or a leading-'+' Go duration relative to now.
+func parseAt(s string) time.Time {
+	if strings.HasPrefix(s, "+") {
+		d, err := time.ParseDuration(s[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid duration %q: %v\n", s, err)
+			os.Exit(1)
+		}
+		return time.Now().Add(d)
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid --at %q (want RFC3339 or +duration): %v\n", s, err)
+		os.Exit(1)
+	}
+	return t
+}
+
+func reportMutationErr(action string, id int64, err error) {
+	switch {
+	case errors.Is(err, jobs.ErrNoJob):
+		fmt.Fprintf(os.Stderr, "No job with id %d.\n", id)
+	case errors.Is(err, jobs.ErrJobCompleted):
+		fmt.Fprintf(os.Stderr, "Job %d is already completed; %s would resend it. Delete it and re-enqueue via the app instead.\n", id, action)
+	default:
+		fmt.Fprintf(os.Stderr, "Failed to %s job %d: %v\n", action, id, err)
+	}
+	os.Exit(1)
+}
+
+func encodeJobsJSON(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(v)
+}
+
+// printArgs pretty-prints the job args, replacing the (large, non-secret) body
+// with its size unless --full-body was passed.
+func printArgs(raw json.RawMessage, fullBody bool) {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		fmt.Println("  " + string(raw))
+		return
+	}
+	if b, ok := m["message_b64"].(string); ok && !fullBody {
+		m["message_b64"] = fmt.Sprintf("<%d bytes; --full-body to show>", len(b))
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // read '<16 bytes...>' cleanly, not '<'
+	enc.SetIndent("  ", "  ")
+	enc.Encode(m)
+	fmt.Print("  " + buf.String())
+}
+
+func credCol(has bool, keyID *int16) string {
+	if !has {
+		return "no"
+	}
+	if keyID != nil {
+		return fmt.Sprintf("yes(k%d)", *keyID)
+	}
+	return "yes"
+}
+
+func credDetail(has bool, keyID *int16) string {
+	if !has {
+		return "none"
+	}
+	if keyID != nil {
+		return fmt.Sprintf("present (key_id=%d), encrypted — never shown", *keyID)
+	}
+	return "present, encrypted — never shown"
+}
+
+func relTime(t time.Time) string {
+	d := time.Until(t)
+	if d >= 0 {
+		if d < time.Minute {
+			return "now"
+		}
+		return "in " + humanDur(d)
+	}
+	return humanDur(-d) + " ago"
+}
+
+func humanDur(d time.Duration) string {
+	switch {
+	case d >= 48*time.Hour:
+		return fmt.Sprintf("%dd", d/(24*time.Hour))
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	default:
+		return fmt.Sprintf("%ds", d/time.Second)
+	}
+}
+
+func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > n {
+		return s[:n-1] + "…"
+	}
+	return s
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func orDash(s string) string { return dashIfEmpty(s) }
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}

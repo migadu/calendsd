@@ -1,6 +1,9 @@
 package server
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Canonical is compared as a string across two processes (ADMIN-PLAN.md
 // §2); equivalent configurations must render identical lines.
@@ -19,5 +22,23 @@ func TestCanonicalNormalizes(t *testing.T) {
 	}
 	if empty := (Config{}).Canonical(); empty == want {
 		t.Error("root and /dav configs must differ")
+	}
+}
+
+// TestCanonicalIMipDurable: the echo reflects whether a credential key is
+// configured (so ops can confirm the durable per-user path is on) but never
+// leaks the key bytes themselves.
+func TestCanonicalIMipDurable(t *testing.T) {
+	secret := []byte("this-is-a-32-byte-secret-key!!!!")
+	on := Config{IMipQueue: IMipQueueConfig{CredentialKey: secret}}.Canonical()
+	off := Config{}.Canonical()
+	if !strings.Contains(on, "imip-durable=true") {
+		t.Errorf("Canonical with key = %q, want imip-durable=true", on)
+	}
+	if !strings.Contains(off, "imip-durable=false") {
+		t.Errorf("Canonical without key = %q, want imip-durable=false", off)
+	}
+	if strings.Contains(on, string(secret)) {
+		t.Error("Canonical leaked the credential key bytes")
 	}
 }

@@ -185,7 +185,7 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		}
 		// Local delivery and non-significant/non-mailto messages are cheap (no
 		// network), so they deliver synchronously with an exact status.
-		p.deliver(r, msg, false, nil)
+		p.deliver(r, msg, false, "")
 	}
 	// Write SCHEDULE-STATUS back onto the stored object's attendees.
 	applyScheduleStatus(newCal, messages)
@@ -221,7 +221,7 @@ func (p *SchedulePlugin) BeforeUnbind(r *http.Request, path string) error {
 		// N × the mailer timeout. The object is being removed, so its
 		// SCHEDULE-STATUS is discarded anyway — hand the sends to the queue and
 		// let the DELETE return at once.
-		p.deliver(r, msg, true, nil)
+		p.deliver(r, msg, true, "")
 	}
 	return nil
 }
@@ -245,15 +245,12 @@ func (p *SchedulePlugin) AfterWrite(r *http.Request, path string) {
 	}
 	for _, reply := range w.replies {
 		// Async, no write-back: the reply's status is not stored anywhere.
-		p.deliver(r, reply, true, nil)
+		p.deliver(r, reply, true, "")
 	}
 	for _, ps := range w.sends {
-		method, recipient, sendPath := ps.msg.Method, ps.msg.Recipient, ps.path
-		// Async with write-back: the object now exists, so the terminal status
-		// can be patched onto it when the background send settles.
-		p.deliver(r, ps.msg, true, func(status string) {
-			p.patchScheduleStatus(sendPath, method, recipient, status)
-		})
+		// Async with write-back: the object now exists, so the deliverer patches
+		// the terminal status onto it (at ps.path) when the background send settles.
+		p.deliver(r, ps.msg, true, ps.path)
 	}
 }
 
@@ -302,6 +299,14 @@ func (p *SchedulePlugin) pendingWorkFor(r *http.Request) *pendingWork {
 // deleted, moved, or no longer names the recipient, it does nothing. The
 // per-object lock serializes the read-modify-write so concurrent per-attendee
 // write-backs don't clobber one another.
+//
+// Single-instance caveat: writeBackLocks is an in-process lock, so it serializes
+// the queue workers within one calserver process. Running multiple calserver
+// instances against one database (which the queue's FOR UPDATE SKIP LOCKED claim
+// otherwise allows) would need a database-level lock here — a per-object
+// advisory lock, or SELECT … FOR UPDATE on the calendarobjects row — to keep
+// two nodes from clobbering each other's SCHEDULE-STATUS. Today's deployment is
+// single-instance; revisit if that changes (JOB-QUEUE-PLAN.md, write-back).
 func (p *SchedulePlugin) patchScheduleStatus(path, method, recipient, status string) {
 	unlock := p.writeBackLocks.lock(path)
 	defer unlock()

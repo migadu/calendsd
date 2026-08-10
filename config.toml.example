@@ -134,6 +134,28 @@ submission_implicit_tls = false  # true: implicit TLS (SMTPS, :465).
                         # false: STARTTLS (:587). The connection is always TLS;
                         # credentials are never sent on an unencrypted link.
 
+# Durable job queue for scheduling mail (JOB-QUEUE-PLAN.md). A failed send is
+# retried in Postgres so it survives a restart instead of being lost. With a
+# credential_key, a per-user (submission) send that fails transiently is retried
+# AS the user — encrypting their password at rest so the retry stays metered —
+# so the invitation isn't stranded by a brief SMTP hiccup and a restart. Without
+# a key, per-user sends fall back to the in-memory retry tier (lost on restart);
+# relay sends are durable either way.
+credential_key = ""     # base64 of a random 32-byte key, e.g.
+                        # `head -c32 /dev/urandom | base64`. A SECRET: keep it
+                        # out of DB backups (that separation is its whole value
+                        # against a leaked dump). $CALSERVER_IMIP_CREDENTIAL_KEY
+                        # overrides this. Empty disables the per-user durable path.
+[scheduling.imip.queue]
+reclaim_after = ""      # How long an in-flight send may stall (a crashed worker)
+                        # before it is retried; must exceed the SMTP timeout.
+                        # Duration string, e.g. "5m". Empty uses the default.
+credential_ttl = ""     # How long an encrypted credential is kept before it is
+                        # purged (≈ the retry window). Duration string. Default 1h.
+retention = ""          # How long finished job rows are kept before pruning.
+                        # Duration string, e.g. "24h". Empty uses the default.
+workers = 0             # Concurrent send workers. 0 uses the default (4).
+
 
 # CALENDAR SERVER COMPATIBILITY
 # =============================================================================

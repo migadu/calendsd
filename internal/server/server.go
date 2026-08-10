@@ -22,6 +22,7 @@ import (
 	"calserver/internal/carddav"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
+	"calserver/internal/jobs"
 	"calserver/internal/metrics"
 	"calserver/internal/push"
 	"calserver/internal/storage"
@@ -113,6 +114,29 @@ type Config struct {
 	// present (fail closed). The worker that delivers notifications is started
 	// separately via NewWithBackground.
 	Push PushConfig
+	// IMipQueue holds the durable iMIP job-queue settings (JOB-QUEUE-PLAN.md).
+	// The queue is constructed and started separately (NewWithBackground); its
+	// CredentialKey gates the metered per-user durable retry.
+	IMipQueue IMipQueueConfig
+}
+
+// IMipQueueConfig carries the durable iMIP job-queue settings, resolved to
+// concrete types so callers depend only on server. Mirrors
+// config.Config.Scheduling.IMip (credential key + [queue] tunables).
+type IMipQueueConfig struct {
+	// CredentialKey is the raw 32-byte AEAD key (decoded from the base64 config
+	// value / $CALSERVER_IMIP_CREDENTIAL_KEY) that encrypts stored submission
+	// passwords (D12). Nil means no key configured: the per-user durable path is
+	// off and per-user sends fall back to a synchronous send. A secret — excluded from
+	// Canonical(), which echoes only its presence.
+	CredentialKey []byte
+	// ReclaimAfter/CredentialTTL/Retention are the background-sweep windows; zero
+	// means the internal/jobs default. ReclaimAfter must exceed the mailer
+	// timeout. Workers is the claim-loop count (zero = default).
+	ReclaimAfter  time.Duration
+	CredentialTTL time.Duration
+	Retention     time.Duration
+	Workers       int
 }
 
 // PushConfig carries the WebDAV-Push VAPID keypair and topic secret. Mirrors
@@ -147,8 +171,8 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = "SabreDAV"
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
-		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", c.AutoProvision, c.PerUserProps,
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t imip-durable=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
+		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", len(c.IMipQueue.CredentialKey) > 0, c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
 		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
@@ -178,22 +202,29 @@ func (c Config) pushConfig() push.Config {
 // New builds the storage-backed server, wrapped with the /.well-known/caldav
 // redirect real clients use for discovery (RFC 6764).
 func New(db *sql.DB, cfg Config) http.Handler {
-	h, _ := NewWithBackground(db, cfg, "")
+	h, _, _ := NewWithBackground(db, cfg, "")
 	return h
 }
 
-// NewWithBackground is New plus any long-running background service the config
+// NewWithBackground is New plus any long-running background services the config
 // enables. When [push] is on and dsn is non-empty, worker is non-nil and the
-// caller MUST run worker.Run(ctx) to deliver notifications (advertisement and
-// registration work without it; only delivery needs the worker). dsn is the
-// Postgres DSN the worker opens its dedicated LISTEN connection with.
-func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.Worker) {
+// caller MUST run worker.Run(ctx) to deliver notifications. When iMIP is
+// configured and dsn is non-empty, queue is non-nil and the caller MUST run
+// queue.Start(ctx) to process durable scheduling sends (per-user retries and
+// relay-native sends); without it those jobs never run and their objects stay
+// pending. dsn is the Postgres DSN both background services open. A dsn of ""
+// (the in-process New/tests path) leaves both nil — external iMIP sends are then synchronous.
+func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.Worker, *jobs.Queue) {
 	srv := newDAVServer(db, cfg)
 	var worker *push.Worker
 	if cfg.Push.Enabled && dsn != "" {
 		store := &push.Store{DB: db}
 		worker = push.NewWorker(cfg.pushConfig(), store,
 			push.NewWebPushSender(cfg.pushConfig()), srv, dsn, slog.Default())
+	}
+	var queue *jobs.Queue
+	if dsn != "" {
+		queue = buildIMipQueue(db, cfg, dsn, srv)
 	}
 	var h http.Handler = WrapWellKnown(srv, srv.BaseURI)
 	// Request logging wraps outside the well-known redirect so it captures the
@@ -204,7 +235,51 @@ func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.
 	h = WrapAccessLog(h, cfg.AccessLog)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
-	return WrapMetrics(h, cfg.Metrics, srv.BaseURI), worker
+	return WrapMetrics(h, cfg.Metrics, srv.BaseURI), worker, queue
+}
+
+// buildIMipQueue constructs the durable iMIP job queue, wires it into the
+// server's iMIP plugin (so per-user retries hand off with the credential
+// encrypted and relay-native sends go durable — JOB-QUEUE-PLAN.md), and
+// registers the imip_send handler. Returns nil when the server has no iMIP
+// plugin. The caller MUST run queue.Start(ctx). A configured credential key
+// enables the metered per-user durable path; without one, only relay-native
+// sends are durable and per-user sends fall back to a synchronous send (D5b
+// surfaces any that then fail).
+func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Queue {
+	var imip *caldav.IMipPlugin
+	for _, p := range srv.Plugins() {
+		if m, ok := p.(*caldav.IMipPlugin); ok {
+			imip = m
+			break
+		}
+	}
+	if imip == nil {
+		return nil
+	}
+
+	var keyring *jobs.Keyring
+	if key := cfg.IMipQueue.CredentialKey; len(key) > 0 {
+		kr, err := jobs.NewKeyring(jobs.Key{ID: 1, Key: key})
+		if err != nil {
+			// The key was validated to 32 bytes at config load, so this is a
+			// programming error, not operator input — fail loudly.
+			panic(fmt.Sprintf("server: iMIP credential key: %v", err))
+		}
+		keyring = kr
+	}
+
+	q := jobs.New(db, jobs.Config{
+		DSN:           dsn,
+		Keyring:       keyring,
+		ReclaimAfter:  cfg.IMipQueue.ReclaimAfter,
+		CredentialTTL: cfg.IMipQueue.CredentialTTL,
+		Retention:     cfg.IMipQueue.Retention,
+		Workers:       cfg.IMipQueue.Workers,
+	})
+	q.Register("imip_send", imip.DurableHandler)
+	imip.Durable = q
+	return q
 }
 
 // WrapWellKnown adds the /.well-known/caldav → base-URI redirect.
@@ -345,9 +420,6 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 			SenderEmail:     cfg.IMipSender,
 			SendAsOrganizer: cfg.IMipSendAsOrganizer,
 			Metrics:         cfg.Metrics,
-			// Transiently-failed sends retry in the background instead of
-			// being lost; the queue lives for the life of the process.
-			Queue: caldav.NewSendQueue(cfg.Metrics, nil),
 		}
 		if cfg.IMipSMTP != "" {
 			// The shared relay: server-originated mail and resource replies.
@@ -359,8 +431,12 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 				Addr:     cfg.IMipSubmission,
 				Implicit: cfg.IMipSubmissionImplicitTLS,
 			}
-			imip.UseScheduler(schedule)
 		}
+		// Wire the scheduler resolvers and — for every deployment — the
+		// SCHEDULE-STATUS write-back both the durable worker and the synchronous fallback use. The
+		// per-user resolvers are consulted only when Submission is set, but the
+		// write-back is needed whenever an async send settles (relay-only too).
+		imip.UseScheduler(schedule)
 		srv.AddPlugin(imip)
 	}
 	srv.AddPlugin(&dav.SyncPlugin{})

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,6 +29,11 @@ dsn = "postgres://localhost/calserver?sslmode=disable"
 [scheduling.imip]
 smtp = "mail.example.org:587"
 sender = "calendar@example.org"
+credential_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEE="
+
+[scheduling.imip.queue]
+reclaim_after = "6m"
+workers = 8
 
 [calendarserver]
 browser = true
@@ -64,6 +70,12 @@ deleted_days = 14
 	if cfg.Scheduling.IMip.SMTP != "mail.example.org:587" {
 		t.Errorf("IMip.SMTP = %q", cfg.Scheduling.IMip.SMTP)
 	}
+	if cfg.Scheduling.IMip.Queue.ReclaimAfter != "6m" || cfg.Scheduling.IMip.Queue.Workers != 8 {
+		t.Errorf("IMip.Queue = %+v", cfg.Scheduling.IMip.Queue)
+	}
+	if k, err := DecodeIMipCredentialKey(cfg.Scheduling.IMip.CredentialKey); err != nil || len(k) != 32 {
+		t.Errorf("DecodeIMipCredentialKey = %d bytes, %v; want 32, nil", len(k), err)
+	}
 	if !cfg.CalendarServer.Browser || cfg.CalendarServer.AutoProvision || !cfg.CalendarServer.PerUserProps {
 		t.Errorf("CalendarServer bools = %+v", cfg.CalendarServer)
 	}
@@ -72,6 +84,26 @@ deleted_days = 14
 	}
 	if cfg.Retention.DeletedDays != 14 {
 		t.Errorf("Retention.DeletedDays = %d, want 14", cfg.Retention.DeletedDays)
+	}
+}
+
+func TestDecodeIMipCredentialKey(t *testing.T) {
+	// Empty is not an error — the feature is just off.
+	if k, err := DecodeIMipCredentialKey(""); err != nil || k != nil {
+		t.Errorf("empty: got %v, %v; want nil, nil", k, err)
+	}
+	// A valid 32-byte key decodes.
+	valid := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	if k, err := DecodeIMipCredentialKey("  " + valid + "  "); err != nil || len(k) != 32 {
+		t.Errorf("valid: got %d bytes, %v; want 32, nil", len(k), err)
+	}
+	// Present-but-malformed fails closed: bad base64, and wrong length.
+	if _, err := DecodeIMipCredentialKey("not@base64"); err == nil {
+		t.Error("bad base64: want error")
+	}
+	short := base64.StdEncoding.EncodeToString(make([]byte, 16))
+	if _, err := DecodeIMipCredentialKey(short); err == nil {
+		t.Error("16-byte key: want error (must be 32)")
 	}
 }
 

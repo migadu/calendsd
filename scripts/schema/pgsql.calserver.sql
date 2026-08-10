@@ -101,6 +101,55 @@ CREATE INDEX push_subscriptions_lookup
     ON push_subscriptions (collection_kind, collection_id);
 
 
+-- Durable background-job queue (JOB-QUEUE-PLAN.md). A NEW calserver-only table;
+-- a co-resident sabre never references it. Oban-shaped so a future Elixir/Oban
+-- migration is a column mapping. iMIP send is the first (and, for now, only)
+-- worker: it survives a process restart the in-memory SendQueue could not.
+--
+-- INVARIANTS:
+--  (1) args is inspectable JSONB and MUST NOT contain a secret (D8). The
+--      submission credential lives ONLY in enc_credential, AEAD-encrypted (D12).
+--  (2) enc_credential is set only for a failing per-user (submit-as-user) send:
+--      NULLed the moment the send succeeds ('completed'); retained until the TTL
+--      purge sweep on 'discarded' so a manual `calctl imip resend` can reuse it.
+--      It is always NULL for relay-identity jobs (server mail, resource replies).
+CREATE TABLE jobs (
+    id             BIGSERIAL   PRIMARY KEY,
+    queue          TEXT        NOT NULL DEFAULT 'default',
+    worker         TEXT        NOT NULL,                     -- logical name, e.g. "imip_send"
+    args           JSONB       NOT NULL,                     -- worker payload; NO secret (D8)
+    state          TEXT        NOT NULL DEFAULT 'available', -- available|executing|completed|discarded
+    attempt        INT         NOT NULL DEFAULT 0,
+    max_attempts   INT         NOT NULL DEFAULT 6,
+    scheduled_at   TIMESTAMPTZ NOT NULL DEFAULT now(),       -- earliest next run (backoff)
+    attempted_at   TIMESTAMPTZ,                              -- current 'executing' claim start (D9 reclaim)
+    last_error     TEXT,                                     -- most recent failure, for ops
+    enc_credential BYTEA,                                    -- AEAD ciphertext (D12); NULL unless a per-user send is pending/given-up
+    enc_nonce      BYTEA,                                    -- per-row AEAD nonce
+    key_id         SMALLINT,                                 -- which config key encrypted it (rotation)
+    inserted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at   TIMESTAMPTZ                               -- when it reached a terminal state (completed|discarded)
+);
+
+-- Claim: due, available jobs for a queue, oldest first (D9 claim loop).
+CREATE INDEX jobs_claim_ix   ON jobs (queue, state, scheduled_at);
+-- Reclaim: orphaned 'executing' rows a dead worker never finished (D9 sweep).
+CREATE INDEX jobs_reclaim_ix ON jobs (state, attempted_at);
+
+-- Coalesce: at most one pending job per (uid, recipient, method). A newer
+-- revision supersedes the pending one via ON CONFLICT DO UPDATE, ordered by
+-- (SEQUENCE, DTSTAMP) from args (D10); an older/equal re-issue is a no-op. A
+-- REQUEST's SEQUENCE is client-controlled (echoed, may be non-monotonic); a
+-- server-generated CANCEL's is incremented (monotonic) — so SEQUENCE is an
+-- ordering key with DTSTAMP as tiebreaker, never the identity. Scoped to
+-- 'available' so a supersede racing an in-flight send inserts fresh. Rows
+-- without these args keys (a future non-iMIP worker) have all-NULL keys, which
+-- a unique index treats as distinct, so they never collide.
+CREATE UNIQUE INDEX jobs_coalesce_ix ON jobs (
+    (args->>'uid'), (args->>'recipient'), (args->>'method')
+) WHERE state = 'available';
+
+
 -- Drop sabre's over-strict calendarinstances_principaluri_share_href unique
 -- index. A sharee row stores the invitee's address (e.g. mailto:bob@…) in
 -- share_href and their principal in principaluri, both identical across every

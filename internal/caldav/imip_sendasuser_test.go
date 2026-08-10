@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"strings"
-	"sync"
 	"testing"
 
 	goical "github.com/emersion/go-ical"
@@ -18,6 +17,7 @@ import (
 	"calserver/internal/caldav/ical"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
+	"calserver/internal/jobs"
 	"calserver/internal/metrics"
 )
 
@@ -34,6 +34,25 @@ func (m *spyUserMailer) SendAs(user, pass, from string, to []string, msg []byte)
 	m.user, m.pass, m.from, m.to, m.msg = user, pass, from, to, msg
 	return m.err
 }
+
+// scriptedUserMailer returns its errs in order, then succeeds. Called
+// synchronously by the tests (the worker is driven by hand), so no lock needed.
+type scriptedUserMailer struct {
+	errs  []error
+	calls int
+}
+
+func (m *scriptedUserMailer) SendAs(user, pass, from string, to []string, msg []byte) error {
+	m.calls++
+	if len(m.errs) > 0 {
+		err := m.errs[0]
+		m.errs = m.errs[1:]
+		return err
+	}
+	return nil
+}
+
+func (m *scriptedUserMailer) callCount() int { return m.calls }
 
 func sendAsUserMsg(sender, recipient string) *ical.Message {
 	ev := &goical.Component{Name: "VEVENT", Props: goical.Props{}}
@@ -223,33 +242,10 @@ func submissionServer(sub caldav.UserMailer, relay caldav.Mailer) *dav.Server {
 	return srv
 }
 
-// gatedUserMailer blocks each SendAs until release is closed, so a test can
-// observe the deferred/pending state while the background send is still in
-// flight, then release it and watch the write-back land.
-type gatedUserMailer struct {
-	release chan struct{}
-	mu      sync.Mutex
-	calls   int
-}
-
-func (m *gatedUserMailer) SendAs(user, pass, from string, to []string, msg []byte) error {
-	<-m.release
-	m.mu.Lock()
-	m.calls++
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *gatedUserMailer) callCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.calls
-}
-
-// queuedSubmissionServer is submissionServer with a background send queue wired
-// into the iMip plugin, and it hands back the backend so a test can read the
-// stored object's SCHEDULE-STATUS.
-func queuedSubmissionServer(sub caldav.UserMailer, q *caldav.SendQueue) (*dav.Server, *caldav.MockSchedulingBackend) {
+// queuedSubmissionServer wires a durable send queue (a fake, so no database)
+// into the iMip plugin and hands back the backend (to read the stored object's
+// SCHEDULE-STATUS) and the plugin (to drive its DurableHandler as a worker would).
+func queuedSubmissionServer(sub caldav.UserMailer, dq caldav.DurableQueue) (*dav.Server, *caldav.MockSchedulingBackend, *caldav.IMipPlugin) {
 	principals := &acl.MemoryBackend{Principals: []acl.Principal{
 		{URI: "principals/user1", Props: map[xmlNM]any{
 			{Space: "http://sabredav.org/ns", Local: "email-address"}: "user1@example.org",
@@ -274,10 +270,10 @@ func queuedSubmissionServer(sub caldav.UserMailer, q *caldav.SendQueue) (*dav.Se
 	srv.AddPlugin(&caldav.Plugin{})
 	schedule := &caldav.SchedulePlugin{}
 	srv.AddPlugin(schedule)
-	imip := &caldav.IMipPlugin{SenderEmail: "server@example.org", Submission: sub, Queue: q}
+	imip := &caldav.IMipPlugin{SenderEmail: "server@example.org", Submission: sub, Durable: dq}
 	imip.UseScheduler(schedule)
 	srv.AddPlugin(imip)
-	return srv, backend
+	return srv, backend, imip
 }
 
 // storedScheduleStatus returns the SCHEDULE-STATUS code stamped on the stored
@@ -307,14 +303,13 @@ func storedScheduleStatus(t *testing.T, backend *caldav.MockSchedulingBackend, a
 
 // TestIMipSubmissionPutDefersInviteAndWritesBackStatus proves the PUT path:
 // inviting an external attendee does not block on SMTP (the object is stored
-// pending while the send is queued), and the terminal status is written back
-// onto the object once the background send settles.
+// pending while the send is queued durably), and the terminal status is written
+// back onto the object once the background send settles. The fake queue lets the
+// test play the worker with the credential it knows ("pw").
 func TestIMipSubmissionPutDefersInviteAndWritesBackStatus(t *testing.T) {
-	set := metrics.New("test-put-defer")
-	gate := &gatedUserMailer{release: make(chan struct{})}
-	q := caldav.NewSendQueue(set, nil)
-	defer q.Stop()
-	srv, backend := queuedSubmissionServer(gate, q)
+	sub := &spyUserMailer{}
+	fake := &fakeDurable{encrypts: true}
+	srv, backend, imip := queuedSubmissionServer(sub, fake)
 
 	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(submissionInvite))
 	put.Header.Set("Content-Type", "text/calendar")
@@ -325,33 +320,32 @@ func TestIMipSubmissionPutDefersInviteAndWritesBackStatus(t *testing.T) {
 		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
 	}
 
-	// The send is parked in the queue worker (gated), so the PUT returned without
-	// waiting on it: the stored object carries the pending status.
+	// The send was enqueued, not sent: the PUT returned with the object pending.
 	if got := storedScheduleStatus(t, backend, "guest@gmail.com"); got != "1.0" {
 		t.Fatalf("stored SCHEDULE-STATUS after PUT = %q, want 1.0 (pending)", got)
 	}
+	if fake.count() != 1 {
+		t.Fatalf("durable jobs = %d, want 1", fake.count())
+	}
 
-	// Release the send; the queue delivers and the write-back flips the stored
-	// status to sent.
-	close(gate.release)
-	waitFor(t, "status write-back to sent", func() bool {
-		return storedScheduleStatus(t, backend, "guest@gmail.com") == "1.1"
-	})
-	if got := gate.callCount(); got != 1 {
-		t.Fatalf("SendAs calls = %d, want 1", got)
+	// Play the worker: deliver the job (per-user, so it carries the credential).
+	if err := imip.DurableHandler(context.Background(), fake.first(t).asJob([]byte("pw"))); err != nil {
+		t.Fatalf("DurableHandler: %v", err)
+	}
+	if got := storedScheduleStatus(t, backend, "guest@gmail.com"); got != "1.1" {
+		t.Fatalf("stored SCHEDULE-STATUS after delivery = %q, want 1.1 (sent)", got)
+	}
+	if !sub.called {
+		t.Fatal("SendAs was not called by the worker")
 	}
 }
 
-// A deferred send that fails synchronously (here, an unsendable recipient that
-// never reaches the queue) must still resolve the stored object's status rather
-// than leave it stuck at pending — the write-back happens inline in AfterWrite.
+// A deferred send with an unsendable recipient is rejected before it ever
+// reaches the queue, and its terminal status is written back inline (in
+// AfterWrite) rather than left stuck at pending.
 func TestIMipSubmissionPutDeferredSyncFailureResolvesStatus(t *testing.T) {
-	set := metrics.New("test-put-defer-fail")
-	gate := &gatedUserMailer{release: make(chan struct{})}
-	close(gate.release) // never actually reached; the recipient is rejected first
-	q := caldav.NewSendQueue(set, nil)
-	defer q.Stop()
-	srv, backend := queuedSubmissionServer(gate, q)
+	fake := &fakeDurable{encrypts: true}
+	srv, backend, _ := queuedSubmissionServer(&spyUserMailer{}, fake)
 
 	invite := strings.Replace(submissionInvite, "mailto:guest@gmail.com", "mailto:not-an-email", 1)
 	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(invite))
@@ -363,25 +357,21 @@ func TestIMipSubmissionPutDeferredSyncFailureResolvesStatus(t *testing.T) {
 		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
 	}
 
-	// The invalid recipient is rejected before the queue, so the terminal status
-	// is written back inline in AfterWrite — no pending state survives the PUT.
 	if got := storedScheduleStatus(t, backend, "not-an-email"); got != "5.3" {
 		t.Fatalf("stored SCHEDULE-STATUS = %q, want 5.3 (not left pending)", got)
 	}
-	if got := gate.callCount(); got != 0 {
-		t.Fatalf("SendAs calls = %d, want 0 (recipient rejected before send)", got)
+	if fake.count() != 0 {
+		t.Fatalf("durable jobs = %d, want 0 (recipient rejected before enqueue)", fake.count())
 	}
 }
 
-// A deferred send that fails permanently in the queue writes back the specific
-// status its error classifies to (5.3 for an auth rejection), not a generic
-// 5.1 — the async path keeps the synchronous path's fidelity.
+// A deferred send that fails permanently at the worker writes back the specific
+// status its error classifies to (5.3 for an auth rejection), not a generic 5.1
+// — the durable path keeps the synchronous path's fidelity (D13).
 func TestIMipSubmissionPutDeferredAuthFailureWritesBackSpecificStatus(t *testing.T) {
-	set := metrics.New("test-put-defer-auth")
 	sub := &scriptedUserMailer{errs: []error{&textproto.Error{Code: 535, Msg: "bad credentials"}}}
-	q := caldav.NewSendQueue(set, nil)
-	defer q.Stop()
-	srv, backend := queuedSubmissionServer(sub, q)
+	fake := &fakeDurable{encrypts: true}
+	srv, backend, imip := queuedSubmissionServer(sub, fake)
 
 	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(submissionInvite))
 	put.Header.Set("Content-Type", "text/calendar")
@@ -391,10 +381,19 @@ func TestIMipSubmissionPutDeferredAuthFailureWritesBackSpecificStatus(t *testing
 	if w.Code != 201 {
 		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
 	}
+	if got := storedScheduleStatus(t, backend, "guest@gmail.com"); got != "1.0" {
+		t.Fatalf("stored SCHEDULE-STATUS after PUT = %q, want 1.0 (pending)", got)
+	}
 
-	waitFor(t, "auth-failure write-back", func() bool {
-		return storedScheduleStatus(t, backend, "guest@gmail.com") == "5.3"
-	})
+	// The worker gets a 535: a permanent auth failure, discarded with the 5.3
+	// status written back (not retried).
+	err := imip.DurableHandler(context.Background(), fake.first(t).asJob([]byte("pw")))
+	if !jobs.IsDiscard(err) {
+		t.Fatalf("DurableHandler returned %v, want a Discard (permanent)", err)
+	}
+	if got := storedScheduleStatus(t, backend, "guest@gmail.com"); got != "5.3" {
+		t.Fatalf("stored SCHEDULE-STATUS = %q, want 5.3 (auth failure)", got)
+	}
 	if got := sub.callCount(); got != 1 {
 		t.Fatalf("SendAs calls = %d, want 1 (auth failure is permanent, no retry)", got)
 	}

@@ -29,13 +29,14 @@ type ExternalDeliverer interface {
 // background queue and return immediately, for deliveries whose triggering
 // request must not block on SMTP (cancels on DELETE, invitations on a
 // many-attendee PUT). The credential and message are captured before the
-// request returns; the actual send runs in the background. onFinal, when
-// non-nil, is called once with the terminal SCHEDULE-STATUS so the caller can
-// write it back onto the stored object (see IMipPlugin.DeliverExternalAsync).
+// request returns; the actual send runs in the background. objectPath is the
+// stored object whose SCHEDULE-STATUS the terminal outcome is written back onto
+// ("" when nothing is stored — a DELETE's cancels, a resource REPLY); the
+// deliverer owns the write-back (see IMipPlugin.DeliverExternalAsync).
 // QueuesExternalSends reports whether async delivery will actually offload the
 // send; a caller must not defer a send when it returns false.
 type AsyncExternalDeliverer interface {
-	DeliverExternalAsync(r *http.Request, msg *ical.Message, onFinal func(status string)) bool
+	DeliverExternalAsync(r *http.Request, msg *ical.Message, objectPath string) bool
 	QueuesExternalSends() bool
 }
 
@@ -54,19 +55,19 @@ func (p *SchedulePlugin) asyncSendsOffloaded() bool {
 
 // deliver routes one iTIP message: local delivery first, then any external
 // deliverers (iMip). Port of sabre's deliver() + the schedule listeners. When
-// async is set, external sends are handed to the retry queue so the triggering
-// request does not block on SMTP, and onFinal (if non-nil) reports the terminal
-// SCHEDULE-STATUS once the background send settles; local delivery stays
-// synchronous either way (it is a fast storage write, and a local attendee
-// should see the change at once).
-func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, onFinal func(status string)) {
+// async is set, external sends are handed to a background queue so the triggering
+// request does not block on SMTP, and the deliverer writes the terminal
+// SCHEDULE-STATUS back onto the object at objectPath ("" when nothing is stored)
+// once the send settles; local delivery stays synchronous either way (it is a
+// fast storage write, and a local attendee should see the change at once).
+func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, objectPath string) {
 	if p.principalForAddress(msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
 	} else {
 		for _, plugin := range p.server.Plugins() {
 			if async {
 				if ext, ok := plugin.(AsyncExternalDeliverer); ok {
-					if ext.DeliverExternalAsync(r, msg, onFinal) {
+					if ext.DeliverExternalAsync(r, msg, objectPath) {
 						break
 					}
 					continue

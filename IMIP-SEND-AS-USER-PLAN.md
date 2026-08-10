@@ -112,6 +112,11 @@ the authorization to a single check —
 - **TLS only** to mizu_out (implicit 465 / STARTTLS 587) — never `AUTH PLAIN` in the clear.
 - **Request-scoped only** — in-memory for the lifetime of the triggering
   request; never persisted, never cached beyond the request.
+  - **Superseded** by `JOB-QUEUE-PLAN.md`: to make background sends survive a
+    restart, this "never persisted" rule was deliberately, narrowly reversed —
+    the password is now stored **AES-256-GCM-encrypted** (out-of-band key) while a
+    durable send is pending, and NULLed the moment it succeeds. See that plan's D12
+    for the threat-model rationale.
 - **Never logged** — reqlog already scrubs Basic; ensure the SMTP client path
   cannot log credentials.
 

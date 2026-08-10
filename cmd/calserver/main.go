@@ -17,6 +17,7 @@ import (
 	"calserver/internal/config"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
+	"calserver/internal/jobs"
 	"calserver/internal/logging"
 	"calserver/internal/metrics"
 	"calserver/internal/push"
@@ -69,6 +70,7 @@ func main() {
 
 	var srv http.Handler
 	var pushWorker *push.Worker
+	var jobQueue *jobs.Queue
 	if m.DSN != "" {
 		db, err := storage.OpenPool(m.DSN, m.DBPool)
 		if err != nil {
@@ -82,7 +84,7 @@ func main() {
 		set.RegisterDBStats(db)
 		// Same line calserver-admin logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
-		srv, pushWorker = server.NewWithBackground(db, m.Server, m.DSN)
+		srv, pushWorker, jobQueue = server.NewWithBackground(db, m.Server, m.DSN)
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
 		// (litmus props class) can exercise PROPPATCH.
@@ -99,6 +101,13 @@ func main() {
 	// registration already work through the plugin; this drives delivery).
 	if pushWorker != nil {
 		go pushWorker.Run(ctx)
+	}
+
+	// Process durable scheduling sends (per-user retries + relay-native sends).
+	// Start spawns its own goroutines and returns; the shared ctx stops it on
+	// shutdown. Without this, enqueued sends would never run.
+	if jobQueue != nil {
+		jobQueue.Start(ctx)
 	}
 
 	httpSrv := &http.Server{
