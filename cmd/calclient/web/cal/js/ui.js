@@ -4,7 +4,7 @@
 // (and its module-load side effects).
 
 import * as store from '/shared/store.js';
-import { $, raw, esc } from '/shared/dom.js';
+import { $, raw, esc, frag } from '/shared/dom.js';
 import { DAY, sameDay } from '/shared/time.js';
 
 let toastTimer = null;
@@ -38,6 +38,35 @@ export function showError(e) {
   console.error(e);
   toast(e?.message || 'Something went wrong.', true);
   if (e?.conflict) store.refreshEvents().catch(() => {});
+}
+
+// scheduleStatusInfo classifies an ATTENDEE SCHEDULE-STATUS value (RFC 6638
+// §3.2.9, formatted "code;message") for the organizer's view. The leading digit
+// is the class: 1.x pending/sent, 2.x delivered, 3.x recipient problem, 5.x
+// delivery failure. Returns null for an empty status or a plain 2.x success —
+// the PARTSTAT already conveys engagement, so there's no need to announce
+// "delivered". Otherwise returns {label, cls, message} where cls is one of
+// pending | bad and message is the server's human-readable detail (a tooltip).
+export function scheduleStatusInfo(value) {
+  if (!value) return null;
+  const semi = value.indexOf(';');
+  const code = (semi < 0 ? value : value.slice(0, semi)).trim();
+  const message = (semi < 0 ? '' : value.slice(semi + 1).trim()) || value;
+  switch (code[0]) {
+    case '2': return null;                                   // delivered — stay quiet
+    case '1': return { label: code === '1.1' ? 'emailed' : 'queued', cls: 'pending', message };
+    case '3': return { label: 'bad address', cls: 'bad', message };
+    case '5': return { label: 'not sent', cls: 'bad', message };
+    default:  return { label: 'unknown', cls: 'pending', message };
+  }
+}
+
+// scheduleStatusTag renders scheduleStatusInfo() as a delivery pill, or nothing
+// when there's no noteworthy status.
+export function scheduleStatusTag(value) {
+  const info = scheduleStatusInfo(value);
+  if (!info) return '';
+  return frag`<span class="type-tag ${info.cls}" title="${info.message}">${info.label}</span>`;
 }
 
 // tzOpt adds the chosen display time zone to a toLocale* options object

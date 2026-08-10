@@ -5,7 +5,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
-import { fmtRange, linkify, toast, showError } from './ui.js';
+import { fmtRange, linkify, toast, showError, scheduleStatusTag } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
 import { confirmDialog, choiceDialog, openOverlay } from '/shared/dialogs.js';
 
@@ -17,9 +17,18 @@ const PARTSTAT_LABEL = {
 export function openEventDetail(inst) {
   const cal = store.state.calendars.find(c => c.href === inst.calHref);
   const color = store.calColor(inst.calHref);
+  const me = store.myEmail().toLowerCase();
   const rows = [];
   const row = (label, value) => rows.push(
     frag`<div class="detail-row"><span class="dl">${label}</span><span class="dv">${value}</span></div>`);
+
+  // Delivery status is the organizer's concern: the server writes SCHEDULE-STATUS
+  // onto the organizer's stored copy only (an event with attendees but no
+  // ORGANIZER is one we created too), so only show delivery pills there.
+  const iAmOrganizer = !inst.organizer || inst.organizer.toLowerCase() === me;
+  const failedSends = iAmOrganizer
+    ? (inst.attendees ?? []).filter(a => /^[35]\./.test(a.scheduleStatus))
+    : [];
 
   row('When', frag`${fmtRange(inst)}${inst.recurring && frag` <span class="type-tag">repeats</span>`}`);
   row('Calendar', frag`<span class="cal-dot" style="background:${color}"></span>${cal?.displayName || cal?.name || ''}`);
@@ -32,13 +41,12 @@ export function openEventDetail(inst) {
   if (inst.organizer) row('Organizer', inst.organizer);
   if (inst.attendees?.length) {
     row('Guests', inst.attendees.map(a =>
-      frag`<div>${a.email} <span class="type-tag">${PARTSTAT_LABEL[a.partstat] || a.partstat.toLowerCase()}</span></div>`));
+      frag`<div>${a.email} <span class="type-tag">${PARTSTAT_LABEL[a.partstat] || a.partstat.toLowerCase()}</span>${iAmOrganizer ? scheduleStatusTag(a.scheduleStatus) : ''}</div>`));
   }
 
   // An invitation (someone else organizes, we are on the attendee list) gets
   // Accept / Maybe / Decline here, so answering — or changing an earlier
   // answer — doesn't require the invitations panel.
-  const me = store.myEmail().toLowerCase();
   const isInvite = !!inst.myPartstat && !!inst.organizer && inst.organizer.toLowerCase() !== me;
   const rsvpBtn = (ps, label) =>
     frag`<button data-ps="${ps}" class="${inst.myPartstat === ps ? 'active' : ''}">${label}</button>`;
@@ -49,6 +57,9 @@ export function openEventDetail(inst) {
       <span class="cal-swatch" style="background:${color}" aria-hidden="true"></span>
       <h2 style="margin:0">${inst.summary}</h2>
     </div>
+    ${failedSends.length ? frag`<p class="detail-warn">⚠ ${failedSends.length === 1
+      ? `An invitation to ${failedSends[0].email} couldn’t be delivered`
+      : `${failedSends.length} invitations couldn’t be delivered`} — see the guest list below.</p>` : ''}
     <div class="detail-body">${rows}</div>
     ${isInvite && frag`<div class="rsvp"><span class="dl">Going?</span>
       ${rsvpBtn('ACCEPTED', 'Accept')}${rsvpBtn('TENTATIVE', 'Maybe')}${rsvpBtn('DECLINED', 'Decline')}
