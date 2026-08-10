@@ -45,6 +45,9 @@ func main() {
 		slog.Error("configuring logging", "err", err)
 		os.Exit(1)
 	}
+	if m.ConfigPath != "" {
+		slog.Info("loaded config", "path", m.ConfigPath)
+	}
 	cfg := m.Server
 	if cfg.Realm == "" {
 		cfg.Realm = "SabreDAV"

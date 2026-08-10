@@ -49,6 +49,9 @@ func main() {
 		slog.Error("configuring logging", "err", err)
 		os.Exit(1)
 	}
+	if m.ConfigPath != "" {
+		slog.Info("loaded config", "path", m.ConfigPath)
+	}
 	addrV := m.Str("addr", *addr, m.File.Server.Addr)
 	metricsAddrV := m.Str("metrics-addr", *metricsAddr, m.File.Server.MetricsAddr)
 	tlsCertV := m.Str("tls-cert", *tlsCert, m.File.Server.TLS.Cert)

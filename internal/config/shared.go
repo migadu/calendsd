@@ -11,6 +11,26 @@ import (
 	"calserver/internal/storage"
 )
 
+// DefaultConfigPaths are the locations searched, in order, for a config file
+// when -config is not given explicitly. Kept in sync with calctl so every
+// binary that reads calserver's config discovers it the same way.
+var DefaultConfigPaths = []string{
+	"/etc/calserver/config.toml",
+	"/usr/local/etc/calserver/config.toml",
+	"config.toml",
+}
+
+// findDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
+// when none is present (so an unconfigured in-memory server still starts).
+func findDefaultConfig() string {
+	for _, p := range DefaultConfigPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 // optDur parses an optional duration config value: empty yields 0 (the caller's
 // default), a malformed value is a fatal config error naming the key.
 func optDur(key, val string) (time.Duration, error) {
@@ -29,6 +49,9 @@ func optDur(key, val string) (time.Duration, error) {
 // extra flags (addr, TLS, admin auth) under the same precedence rules.
 type Merged struct {
 	File Config
+	// ConfigPath is the config file that was loaded, whether given via -config
+	// or discovered among DefaultConfigPaths; empty when none was found.
+	ConfigPath string
 	// Set records which flags were given explicitly on the command line.
 	Set map[string]bool
 	// DSN is the resolved database DSN.
@@ -69,7 +92,7 @@ func (m *Merged) Bool(name string, flagVal, fileVal bool) bool {
 // server.Config — the property the Canonical() config echo depends on
 // (ADMIN-PLAN.md §2). The returned resolver must run after flag.Parse.
 func SharedServerFlags(dbUsage string) func() (*Merged, error) {
-	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values")
+	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calserver/config.toml, /usr/local/etc/calserver/config.toml, ./config.toml is used")
 	dsn := flag.String("db", "", dbUsage)
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
 	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
@@ -94,12 +117,20 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
-		if *configPath != "" {
-			c, err := Load(*configPath)
+		// An explicit -config wins; otherwise fall back to the well-known
+		// locations so `calserver`/`calserver-admin` pick up an installed
+		// config without repeating -config on every invocation.
+		path := *configPath
+		if path == "" {
+			path = findDefaultConfig()
+		}
+		if path != "" {
+			c, err := Load(path)
 			if err != nil {
 				return nil, err
 			}
 			m.File = *c
+			m.ConfigPath = path
 		}
 		flag.Visit(func(f *flag.Flag) { m.Set[f.Name] = true })
 
