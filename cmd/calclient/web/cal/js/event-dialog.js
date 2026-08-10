@@ -29,11 +29,25 @@ export async function openEventDialog(inst, defaultDay, timed) {
   const isRecurring = !!(inst && (inst.rrule || inst.rid));
   const guests = (inst?.attendees ?? []).map(a => ({ ...a }));
 
+  // The master VEVENT (no RECURRENCE-ID) carries the real RRULE — the expanded
+  // instance we were opened on had it stripped. Reused for the reminder read
+  // and the "this and following" split.
+  const masterVevent = master && ical.components(ical.parse(master.text), 'VEVENT')
+    .find(v => !ical.prop(v, 'RECURRENCE-ID'));
+  const masterRRule = masterVevent ? ical.propValue(masterVevent, 'RRULE') : '';
+  const masterDs = masterVevent && ical.prop(masterVevent, 'DTSTART');
+  const masterStart = masterDs ? ical.parseICalDate(masterDs.value, masterDs.params)?.date : null;
+  // Offer "this and following" only for a splittable rule and not on the first
+  // occurrence (there it's just "all"), so a split can never corrupt a series.
+  const canFuture = isRecurring && !!masterRRule && !!masterStart
+    && ical.canSplitSeries(masterStart, masterRRule) && +inst.start > +masterStart;
+
   const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="${inst ? 'Edit event' : 'New event'}">
     <h2>${inst ? 'Edit event' : 'New event'}</h2>
     ${isRecurring && frag`<label class="row" style="margin-bottom:.6rem">Apply to
       <select id="ev-scope">
         <option value="one">only this event</option>
+        ${canFuture && frag`<option value="future">this and all following events</option>`}
         <option value="all">all events in the series</option>
       </select></label>`}
     <div class="grid">
@@ -246,8 +260,6 @@ export async function openEventDialog(inst, defaultDay, timed) {
   // surfaces as "Custom" and is left untouched unless the user picks something
   // else — the same "kept as is" contract the Custom repeat option uses.
   const remindSel = q('#ev-remind');
-  const masterVevent = master && ical.components(ical.parse(master.text), 'VEVENT')
-    .find(v => !ical.prop(v, 'RECURRENCE-ID'));
   const curReminder = masterVevent ? ical.alarmPreset(masterVevent) : '';
   if (curReminder === 'CUSTOM') {
     remindSel.append(html`<option value="CUSTOM" selected>Custom reminder (kept as is)</option>`);
@@ -267,6 +279,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       q('#ev-error').textContent = 'Please pick an end after the start.';
       return;
     }
+    const scope = isRecurring ? q('#ev-scope').value : '';
     const rrule = freqSel.value === 'CUSTOM' ? inst.rrule : ical.buildRRule({
       freq: freqSel.value, ends: endsSel.value,
       count: q('#ev-count').value, until: q('#ev-until').value,
@@ -311,11 +324,25 @@ export async function openEventDialog(inst, defaultDay, timed) {
       if (!inst) {
         await store.putObject(store.eventHref(calSel.value, fields.uid),
           ical.buildEvent(fields), null);
-      } else if (isRecurring && q('#ev-scope').value === 'one') {
+      } else if (isRecurring && scope === 'one') {
         const text = ical.addOverride(master.text, ical.eventLines({
           ...fields, rrule: '', recurrenceId: store.ridValue(inst),
         }));
         await store.putObject(inst.href, text, master.etag);
+      } else if (isRecurring && scope === 'future') {
+        // "This and following": split the series. Truncate the original before
+        // this occurrence (dropping any now-orphaned forward overrides), then
+        // create a fresh series from here carrying the edited fields.
+        const headUntil = t.allDay
+          ? ical.dateOnly(localDate(new Date(+inst.start - DAY)))
+          : ical.utc(new Date(+inst.start - 1000).toISOString());
+        const split = ical.splitSeriesRRules(masterStart, masterRRule, inst.start, headUntil);
+        if (!split) { q('#ev-error').textContent = 'This repeat is too complex to split.'; return; }
+        const head = ical.dropForward(
+          ical.setMasterProps(master.text, { RRULE: `RRULE:${split.head}` }), inst.start);
+        await store.putObject(inst.href, head, master.etag);
+        const fwd = { ...fields, uid: crypto.randomUUID(), rrule: split.tail };
+        await store.putObject(store.eventHref(calSel.value, fwd.uid), ical.buildEvent(fwd), null);
       } else if (isRecurring) {
         // "All events": edit the master VEVENT in place so overrides, alarms,
         // EXDATEs, and unmodeled properties survive. Shift the series by the
@@ -344,9 +371,10 @@ export async function openEventDialog(inst, defaultDay, timed) {
         await store.putObject(inst.href, applyReminder(ical.setMasterProps(master.text, props)), master.etag);
       }
       // Calendar changed: relocate the object after the in-place edit. The
-      // picker is locked for the single-occurrence scope, so a differing value
-      // here always means the whole object should move.
-      if (inst && calSel.value && calSel.value !== inst.calHref) {
+      // picker is locked for the single-occurrence scope, and the "this and
+      // following" split already put the new series on the chosen calendar, so a
+      // differing value here only applies to the whole-object edit paths.
+      if (inst && scope !== 'future' && calSel.value && calSel.value !== inst.calHref) {
         await store.moveObject(inst.href, calSel.value + inst.href.slice(inst.href.lastIndexOf('/') + 1));
       }
       close();
@@ -360,12 +388,13 @@ export async function openEventDialog(inst, defaultDay, timed) {
 
   // delete ----------------------------------------------------------------
   $('#ev-delete', dlg)?.addEventListener('click', async () => {
-    const one = isRecurring && q('#ev-scope').value === 'one';
-    const msg = one ? 'Delete only this occurrence?' :
-      isRecurring ? 'Delete the whole series?' : 'Delete this event?';
+    const scope = isRecurring ? q('#ev-scope').value : 'all';
+    const msg = scope === 'one' ? 'Delete only this occurrence?'
+      : scope === 'future' ? 'Delete this and all following events?'
+      : isRecurring ? 'Delete the whole series?' : 'Delete this event?';
     if (!await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) return;
     try {
-      await store.deleteEvent(inst, one ? 'one' : 'all');
+      await store.deleteEvent(inst, scope);
       close();
       toast('Deleted.');
       await store.refreshEvents();

@@ -194,6 +194,22 @@ export function setPartstat(text, email, partstat) {
   return fold(lines);
 }
 
+// forceSendAttendees adds SCHEDULE-FORCE-SEND=REQUEST to the ATTENDEE lines
+// matching the given emails, so the server re-sends their invitation even when
+// nothing significant changed (RFC 6638 §7.1) — the way a client resends a
+// lost invitation. Idempotent: an ATTENDEE that already has the param is left
+// alone, and the server strips it after honoring it.
+export function forceSendAttendees(text, emails) {
+  const needles = emails.map(e => 'mailto:' + e.toLowerCase());
+  const lines = unfold(text).map(l => {
+    if (!/^ATTENDEE/i.test(l)) return l;
+    const low = l.toLowerCase();
+    if (!needles.some(n => low.includes(n)) || /SCHEDULE-FORCE-SEND=/i.test(l)) return l;
+    return l.replace(/^ATTENDEE/i, 'ATTENDEE;SCHEDULE-FORCE-SEND=REQUEST');
+  });
+  return fold(lines);
+}
+
 // addExdate excludes one occurrence (dtValue in the same form as DTSTART)
 // from the master VEVENT.
 export function addExdate(text, dtValue, allDay) {
@@ -372,6 +388,137 @@ export function buildRRule(d) {
   if (d.ends === 'count') r += ';COUNT=' + Math.max(1, parseInt(d.count || '1', 10));
   if (d.ends === 'until' && d.until) r += ';UNTIL=' + dateOnly(d.until) + 'T235959Z';
   return r;
+}
+
+// ---- recurrence split ("this and following") ------------------------------
+// The client splits a series into two plain VEVENTs rather than lean on
+// RANGE=THISANDFUTURE: the server's expander strips RRULE per occurrence and
+// does not reproduce that range, and a split is what other clients do and every
+// client understands. These helpers are pure so the date math is unit-tested.
+
+// rruleParts parses "FREQ=WEEKLY;INTERVAL=2;COUNT=10" into {FREQ, INTERVAL, ...}.
+export function rruleParts(rrule) {
+  const out = {};
+  for (const kv of (rrule || '').split(';')) {
+    if (!kv) continue;
+    const i = kv.indexOf('=');
+    if (i > 0) out[kv.slice(0, i).toUpperCase()] = kv.slice(i + 1);
+  }
+  return out;
+}
+
+// renderRRule renders parts back to a string, FREQ first then a stable order.
+function renderRRule(parts) {
+  const order = ['FREQ', 'INTERVAL', 'WKST', 'BYDAY', 'BYMONTHDAY', 'BYMONTH', 'BYSETPOS', 'COUNT', 'UNTIL'];
+  const keys = [...order.filter(k => k in parts), ...Object.keys(parts).filter(k => !order.includes(k))];
+  return keys.filter(k => parts[k] != null && parts[k] !== '').map(k => `${k}=${parts[k]}`).join(';');
+}
+
+// canSplitSeries reports whether a series can be split at an arbitrary
+// occurrence exactly: only plain FREQ(+INTERVAL)(+COUNT/UNTIL) rules the stepper
+// below reproduces. Anything with BY* parts, or monthly/yearly on a day past the
+// 28th (real expansion skips short months), is left un-splittable so the editor
+// hides the "this and following" option rather than corrupt the series.
+export function canSplitSeries(dtstart, rrule) {
+  const p = rruleParts(rrule);
+  if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(p.FREQ)) return false;
+  for (const k of ['BYDAY', 'BYMONTHDAY', 'BYMONTH', 'BYSETPOS', 'BYWEEKNO', 'BYYEARDAY', 'BYHOUR']) {
+    if (p[k]) return false;
+  }
+  if ((p.FREQ === 'MONTHLY' || p.FREQ === 'YEARLY') && dtstart.getDate() > 28) return false;
+  return true;
+}
+
+// stepOccurrence advances a Date by one recurrence step.
+function stepOccurrence(d, freq, interval) {
+  const n = new Date(d);
+  if (freq === 'DAILY') n.setDate(n.getDate() + interval);
+  else if (freq === 'WEEKLY') n.setDate(n.getDate() + 7 * interval);
+  else if (freq === 'MONTHLY') n.setMonth(n.getMonth() + interval);
+  else if (freq === 'YEARLY') n.setFullYear(n.getFullYear() + interval);
+  return n;
+}
+
+// occurrencesBefore counts the occurrences of a splittable series whose start is
+// strictly before `cutoff` (a Date). Returns null when the rule isn't splittable.
+export function occurrencesBefore(dtstart, rrule, cutoff) {
+  if (!canSplitSeries(dtstart, rrule)) return null;
+  const p = rruleParts(rrule);
+  const interval = Math.max(1, parseInt(p.INTERVAL || '1', 10));
+  const total = p.COUNT ? parseInt(p.COUNT, 10) : Infinity;
+  let n = 0, occ = new Date(dtstart);
+  while (occ < cutoff && n < total && n < 10000) { n++; occ = stepOccurrence(occ, p.FREQ, interval); }
+  return n;
+}
+
+// rruleWithUntil truncates a series to end before a split: drops COUNT and sets
+// UNTIL to `until` (an iCal DATE or DATE-TIME value). Backs delete "this and
+// following".
+export function rruleWithUntil(rrule, until) {
+  const p = rruleParts(rrule);
+  delete p.COUNT;
+  p.UNTIL = until;
+  return renderRRule(p);
+}
+
+// splitSeriesRRules returns {head, tail, past} for a "this and following" edit:
+// `head` truncates the original series just before the split (UNTIL=headUntil),
+// `tail` is the rule for the new forward series (its COUNT reduced by the
+// occurrences the head keeps), and `past` is that kept count. Returns null when
+// the rule can't be split exactly.
+export function splitSeriesRRules(dtstart, rrule, cutoff, headUntil) {
+  const past = occurrencesBefore(dtstart, rrule, cutoff);
+  if (past == null) return null;
+  const p = rruleParts(rrule);
+  const head = { ...p };
+  delete head.COUNT;
+  head.UNTIL = headUntil;
+  const tail = { ...p };
+  if (p.COUNT) {
+    const rem = parseInt(p.COUNT, 10) - past;
+    if (rem < 1) return null;
+    tail.COUNT = String(rem);
+  }
+  return { head: renderRRule(head), tail: renderRRule(tail), past };
+}
+
+// dropForward removes override VEVENTs and EXDATEs at or after `cutoff` (a Date)
+// from a stored object. Truncating a series with UNTIL alone would leave orphan
+// override components after the split, which the server still emits as lone
+// instances — this strips them so the removed tail truly disappears.
+export function dropForward(text, cutoff) {
+  const lines = unfold(text);
+  const atOrAfter = v => { const d = parseICalDate((v || '').split(',')[0].trim(), {}); return d && +d.date >= +cutoff; };
+  // EXDATEs live inside the master VEVENT, so filter them within a kept block
+  // rather than at the top level.
+  const filterExdate = block => block.flatMap(l => {
+    if (!/^EXDATE/i.test(l)) return [l];
+    const m = /^(EXDATE(?:;[^:]*)?):(.*)$/i.exec(l);
+    const all = m[2].split(',');
+    const keep = all.filter(v => !atOrAfter(v));
+    return !keep.length ? [] : [keep.length === all.length ? l : `${m[1]}:${keep.join(',')}`];
+  });
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^BEGIN:VEVENT$/i.test(lines[i])) {
+      let j = i, depth = 0;
+      do {
+        if (/^BEGIN:/i.test(lines[j])) depth++;
+        else if (/^END:/i.test(lines[j])) depth--;
+        j++;
+      } while (j < lines.length && depth > 0);
+      const block = lines.slice(i, j);
+      const rid = block.find(l => /^RECURRENCE-ID/i.test(l));
+      if (rid && atOrAfter(rid.replace(/^RECURRENCE-ID(;[^:]*)?:/i, ''))) { i = j; continue; } // drop forward override
+      out.push(...filterExdate(block));
+      i = j;
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return fold(out);
 }
 
 // buildFreeBusyRequest renders the METHOD:REQUEST VFREEBUSY body an outbox

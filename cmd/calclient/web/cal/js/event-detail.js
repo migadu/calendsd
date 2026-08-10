@@ -59,7 +59,8 @@ export function openEventDetail(inst) {
     </div>
     ${failedSends.length ? frag`<p class="detail-warn">⚠ ${failedSends.length === 1
       ? `An invitation to ${failedSends[0].email} couldn’t be delivered`
-      : `${failedSends.length} invitations couldn’t be delivered`} — see the guest list below.</p>` : ''}
+      : `${failedSends.length} invitations couldn’t be delivered`} — see the guest list below.
+      <button id="ed-resend" class="link-btn">Resend</button></p>` : ''}
     <div class="detail-body">${rows}</div>
     ${isInvite && frag`<div class="rsvp"><span class="dl">Going?</span>
       ${rsvpBtn('ACCEPTED', 'Accept')}${rsvpBtn('TENTATIVE', 'Maybe')}${rsvpBtn('DECLINED', 'Decline')}
@@ -87,6 +88,20 @@ export function openEventDetail(inst) {
       }
     });
   }
+  const resendBtn = $('#ed-resend', dlg);
+  if (resendBtn) {
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true;
+      try {
+        await store.resendInvitations(inst, failedSends.map(a => a.email));
+        close();
+        toast(failedSends.length === 1 ? 'Invitation resent.' : 'Invitations resent.');
+      } catch (e) {
+        showError(e);
+        resendBtn.disabled = false;
+      }
+    });
+  }
   $('#ed-x', dlg).addEventListener('click', close);
   $('#ed-close', dlg).addEventListener('click', close);
   $('#ed-edit', dlg).addEventListener('click', () => { close(); openEventDialog(inst); });
@@ -98,8 +113,11 @@ export function openEventDetail(inst) {
     // a plain event just confirms. `scope` feeds store.deleteEvent either way.
     let scope = 'all';
     if (inst.recurring) {
+      // delete "this and following" is a plain UNTIL truncation, safe for any
+      // recurrence, so it's offered here without the editor's split gate.
       scope = await choiceDialog('This event repeats. What would you like to delete?', [
         { label: 'This event', value: 'one', danger: true },
+        { label: 'This and following', value: 'future', danger: true },
         { label: 'All events', value: 'all', danger: true },
       ]);
       if (!scope) return;

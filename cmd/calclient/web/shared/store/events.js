@@ -132,6 +132,18 @@ export async function moveEvent(inst, deltaMs) {
   await refreshEvents();
 }
 
+// resendInvitations re-sends the invitation to attendees whose delivery failed
+// or is stuck, by marking them SCHEDULE-FORCE-SEND=REQUEST and re-PUTting the
+// event. A plain re-save wouldn't re-send (no significant change), so this is
+// the organizer's recovery path (JOB-QUEUE-PLAN.md D5b). The request carries the
+// organizer's own credentials, so the resend stays metered.
+export async function resendInvitations(inst, emails) {
+  if (!emails || !emails.length) return;
+  const { text, etag } = await getObject(inst.href);
+  await putObject(inst.href, ical.forceSendAttendees(text, emails), etag);
+  await refreshEvents();
+}
+
 export function eventHref(calHref, uid) {
   return calHref + encodeURIComponent(uid) + '.ics';
 }
@@ -145,6 +157,20 @@ export async function deleteEvent(inst, scope = 'all') {
   if (scope === 'one') {
     const { text, etag } = await getObject(inst.href);
     await putObject(inst.href, ical.addExdate(text, ridValue(inst), inst.allDay), etag);
+  } else if (scope === 'future') {
+    const { text, etag } = await getObject(inst.href);
+    const m0 = ical.components(ical.parse(text), 'VEVENT').find(v => !ical.prop(v, 'RECURRENCE-ID'));
+    const ds = m0 && ical.prop(m0, 'DTSTART');
+    const rrule = m0 ? ical.propValue(m0, 'RRULE') : '';
+    const masterStart = ds ? ical.parseICalDate(ds.value, ds.params)?.date : null;
+    // Splitting at (or before) the first occurrence just removes the series.
+    if (!rrule || !masterStart || +inst.start <= +masterStart) { await deleteObject(inst.href); return; }
+    const until = inst.allDay
+      ? ical.dateOnly(localDate(new Date(+inst.start - DAY)))
+      : ical.utc(new Date(+inst.start - 1000).toISOString());
+    let out = ical.setMasterProps(text, { RRULE: `RRULE:${ical.rruleWithUntil(rrule, until)}` });
+    out = ical.dropForward(out, inst.start);
+    await putObject(inst.href, out, etag);
   } else {
     await deleteObject(inst.href);
   }

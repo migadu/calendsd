@@ -353,3 +353,68 @@ test('isPhotoLine matches PHOTO lines (incl. Apple item groups), not others', ()
   assert.ok(!ical.isPhotoLine('LOGO;ENCODING=b:AAAB'));
   assert.ok(!ical.isPhotoLine('CATEGORIES:friends'));
 });
+
+// ---- recurrence split ("this and following") ------------------------------
+
+test('rruleParts parses into an uppercased map', () => {
+  assert.deepEqual(ical.rruleParts('FREQ=WEEKLY;interval=2;COUNT=10'),
+    { FREQ: 'WEEKLY', INTERVAL: '2', COUNT: '10' });
+  assert.deepEqual(ical.rruleParts(''), {});
+});
+
+test('canSplitSeries allows plain rules, rejects BY* and short-month days', () => {
+  const d10 = new Date(2026, 0, 10), d31 = new Date(2026, 0, 31);
+  assert.ok(ical.canSplitSeries(d10, 'FREQ=DAILY'));
+  assert.ok(ical.canSplitSeries(d10, 'FREQ=WEEKLY;INTERVAL=2;COUNT=10'));
+  assert.ok(ical.canSplitSeries(d10, 'FREQ=MONTHLY;COUNT=6'));       // day 10 is safe
+  assert.ok(!ical.canSplitSeries(d31, 'FREQ=MONTHLY;COUNT=6'));      // day 31 skips short months
+  assert.ok(!ical.canSplitSeries(d10, 'FREQ=MONTHLY;BYDAY=2TU'));    // BY* not steppable
+  assert.ok(!ical.canSplitSeries(d10, 'FREQ=HOURLY'));
+});
+
+test('occurrencesBefore counts occurrences strictly before the split', () => {
+  const start = new Date(2026, 0, 1, 9, 0);          // Thu Jan 1 09:00
+  // weekly: Jan 1, 8, 15, 22, ... — split at Jan 22 keeps 3 (1,8,15).
+  assert.equal(ical.occurrencesBefore(start, 'FREQ=WEEKLY;COUNT=10', new Date(2026, 0, 22, 9, 0)), 3);
+  // daily every 2 days from Jan 1: 1,3,5,7 — split at Jan 7 keeps 3.
+  assert.equal(ical.occurrencesBefore(start, 'FREQ=DAILY;INTERVAL=2', new Date(2026, 0, 7, 9, 0)), 3);
+});
+
+test('rruleWithUntil drops COUNT and sets UNTIL', () => {
+  assert.equal(ical.rruleWithUntil('FREQ=WEEKLY;COUNT=10', '20260121T090000Z'),
+    'FREQ=WEEKLY;COUNT=10'.replace(';COUNT=10', '') + ';UNTIL=20260121T090000Z');
+  assert.equal(ical.rruleWithUntil('FREQ=DAILY', '20260121'), 'FREQ=DAILY;UNTIL=20260121');
+});
+
+test('splitSeriesRRules reduces the tail COUNT by the head occurrences', () => {
+  const start = new Date(2026, 0, 1, 9, 0);
+  const s = ical.splitSeriesRRules(start, 'FREQ=WEEKLY;COUNT=10', new Date(2026, 0, 22, 9, 0), '20260121T090000Z');
+  assert.equal(s.past, 3);
+  assert.equal(s.head, 'FREQ=WEEKLY;UNTIL=20260121T090000Z');
+  assert.equal(s.tail, 'FREQ=WEEKLY;COUNT=7');       // 10 - 3
+});
+
+test('splitSeriesRRules keeps never/until tails intact', () => {
+  const start = new Date(2026, 0, 1, 9, 0);
+  const never = ical.splitSeriesRRules(start, 'FREQ=DAILY', new Date(2026, 0, 5, 9, 0), '20260104T090000Z');
+  assert.equal(never.tail, 'FREQ=DAILY');
+  const until = ical.splitSeriesRRules(start, 'FREQ=DAILY;UNTIL=20261231T000000Z', new Date(2026, 0, 5, 9, 0), '20260104T090000Z');
+  assert.equal(until.tail, 'FREQ=DAILY;UNTIL=20261231T000000Z');
+  assert.equal(ical.splitSeriesRRules(start, 'FREQ=MONTHLY;BYDAY=1MO', new Date(2026, 5, 1), 'x'), null);
+});
+
+test('dropForward strips overrides and EXDATEs at/after the cutoff, keeps earlier ones', () => {
+  const text = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:s', 'DTSTART:20260101T090000Z', 'RRULE:FREQ=WEEKLY',
+    'EXDATE:20260108T090000Z', 'EXDATE:20260122T090000Z', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:s', 'RECURRENCE-ID:20260115T090000Z', 'DTSTART:20260115T100000Z', 'SUMMARY:moved-early', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:s', 'RECURRENCE-ID:20260129T090000Z', 'DTSTART:20260129T100000Z', 'SUMMARY:moved-late', 'END:VEVENT',
+    'END:VCALENDAR', '',
+  ].join('\r\n');
+  const out = ical.dropForward(text, new Date(Date.UTC(2026, 0, 22, 9, 0)));
+  assert.ok(out.includes('SUMMARY:moved-early'));      // Jan 15 override kept (before cutoff)
+  assert.ok(!out.includes('SUMMARY:moved-late'));      // Jan 29 override dropped
+  assert.ok(out.includes('EXDATE:20260108T090000Z'));  // earlier EXDATE kept
+  assert.ok(!out.includes('20260122T090000Z'));        // cutoff-day EXDATE dropped
+});
