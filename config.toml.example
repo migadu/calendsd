@@ -181,6 +181,19 @@ principals_readable = false # Let any authenticated user read principal
 auto_schedule_prefixes = []  # e.g. ["resource", "location"]
 
 
+# ADMIN PANEL
+# =============================================================================
+# Settings read only by calserver-admin (the read-first debugging UI); the
+# calserver daemon ignores this section. The panel reuses this file's [database]
+# DSN, so running it on the server host needs only the admin credentials here.
+# Command-line flags (-admin-auth, -addr) override these values.
+[admin]
+auth_file = ""              # htpasswd file with bcrypt entries (htpasswd -B) of
+                            # admin logins. Required for the panel to start.
+addr = ""                   # Listen address (empty uses 127.0.0.1:8081). Basic
+                            # auth resends the password: loopback/LAN or TLS only.
+
+
 # ACCOUNT RETENTION
 # =============================================================================
 # Soft-delete retention. `calctl principal delete <user>` schedules an account

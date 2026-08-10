@@ -131,6 +131,16 @@ type Config struct {
 		PrincipalsReadable   bool
 		AutoSchedulePrefixes []string
 	}
+	// Admin holds calserver-admin panel settings. Only that binary reads them;
+	// calserver ignores the section. Command-line flags override these.
+	Admin struct {
+		// AuthFile is the htpasswd file (bcrypt entries, htpasswd -B) of admin
+		// logins. Required for the panel to start; -admin-auth overrides it.
+		AuthFile string
+		// Addr is the panel's listen address. Empty uses the -addr default.
+		// Basic auth resends the password: loopback/LAN or behind TLS only.
+		Addr string
+	}
 	// Retention holds account soft-delete settings.
 	Retention struct {
 		// DeletedDays is how long a soft-deleted account is kept before the
@@ -269,6 +279,8 @@ func Load(path string) (*Config, error) {
 	cfg.CalendarServer.ExpandGroups = boolean("calendarserver.expand_groups")
 	cfg.CalendarServer.PrincipalsReadable = boolean("calendarserver.principals_readable")
 	cfg.CalendarServer.AutoSchedulePrefixes = list("calendarserver.auto_schedule_prefixes")
+	cfg.Admin.AuthFile = str("admin.auth_file")
+	cfg.Admin.Addr = str("admin.addr")
 	cfg.Retention.DeletedDays = integer("retention.deleted_days")
 	cfg.Push.Enabled = boolean("push.enabled")
 	cfg.Push.VAPIDSubject = str("push.vapid_subject")
@@ -332,6 +344,8 @@ var known = map[string]bool{
 	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
 	"calendarserver.principals_readable":    true,
 	"calendarserver.auto_schedule_prefixes": true,
+	"admin.auth_file":                       true,
+	"admin.addr":                            true,
 	"retention.deleted_days":                true,
 	"push.enabled":                          true,
 	"push.vapid_subject":                    true,
