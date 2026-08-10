@@ -308,3 +308,35 @@ func TestDeliverExternalAsyncFallsBackWhenNoQueue(t *testing.T) {
 		t.Fatalf("SendAs calls = %d, want 1", got)
 	}
 }
+
+// A queue that owns the very first attempt (enqueueFirst, syncTried=false) must
+// still grant an unclassifiable error its single retry — the attempt count is
+// not inflated by a nonexistent prior synchronous send. A retry after a failed
+// inline send (Enqueue, syncTried=true) gets none.
+func TestQueueFirstAttemptRetriesUnclassifiableErrorOnce(t *testing.T) {
+	run := func(syncTried bool) int {
+		set := metrics.New("test-firsttry")
+		q := fastQueue(set)
+		defer q.Stop()
+		var mu sync.Mutex
+		var calls int
+		attempt := func() error {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			return errors.New("unclassifiable") // not textproto, not net.Error
+		}
+		q.EnqueueWithDone(attempt, "sent", "REQUEST", "a", "b", syncTried, nil)
+		// Let the schedule play out, then read the settled count.
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		return calls
+	}
+	if got := run(false); got != 2 {
+		t.Errorf("first-attempt-in-queue: attempts = %d, want 2 (one retry)", got)
+	}
+	if got := run(true); got != 1 {
+		t.Errorf("retry-after-sync: attempts = %d, want 1 (no further retry)", got)
+	}
+}

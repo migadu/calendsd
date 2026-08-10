@@ -83,11 +83,17 @@ type queuedSend struct {
 	method, sender, recipient string
 	tries                     int
 	notBefore                 time.Time
-	// onDone, when set, is called exactly once with the terminal result — true
-	// when the send was accepted, false when the schedule was exhausted — so a
-	// caller can reflect the outcome somewhere (the PUT write-back patches the
-	// stored object's SCHEDULE-STATUS). It runs on a worker goroutine.
-	onDone func(delivered bool)
+	// syncTried records whether a synchronous send was already attempted before
+	// this item was queued (true for a retry after a failed inline send, false
+	// when the queue owns the very first attempt). It only sharpens the attempt
+	// count fed to retryableSend for otherwise-unclassifiable errors.
+	syncTried bool
+	// onDone, when set, is called exactly once with the terminal result — nil
+	// when the send was accepted, else the final error — so a caller can reflect
+	// the outcome somewhere (the PUT write-back patches the stored object's
+	// SCHEDULE-STATUS, mapping the error to a specific status). It runs on a
+	// worker goroutine.
+	onDone func(err error)
 }
 
 // NewSendQueue returns a queue whose worker pool starts on first enqueue.
@@ -134,16 +140,18 @@ func (q *SendQueue) Enqueue(attempt func() error, outcome string, method, sender
 	return q.enqueue(&queuedSend{
 		attempt: attempt, outcome: outcome,
 		method: method, sender: sender, recipient: recipient,
+		syncTried: true,
 	})
 }
 
 // EnqueueWithDone is Enqueue plus a terminal callback (see queuedSend.onDone),
 // invoked once the send is accepted or the retry schedule is exhausted.
-func (q *SendQueue) EnqueueWithDone(attempt func() error, outcome, method, sender, recipient string, onDone func(delivered bool)) bool {
+// syncTried reports whether an inline send was already tried before queuing.
+func (q *SendQueue) EnqueueWithDone(attempt func() error, outcome, method, sender, recipient string, syncTried bool, onDone func(err error)) bool {
 	return q.enqueue(&queuedSend{
 		attempt: attempt, outcome: outcome,
 		method: method, sender: sender, recipient: recipient,
-		onDone: onDone,
+		syncTried: syncTried, onDone: onDone,
 	})
 }
 
@@ -249,13 +257,19 @@ func (q *SendQueue) attemptNow(item *queuedSend) {
 		q.Metrics.IMipDelivery(item.outcome)
 		q.logger().Info("imip delivered (retry)", attrs...)
 		if item.onDone != nil {
-			item.onDone(true)
+			item.onDone(nil)
 		}
 		return
 	}
 	attrs = append(attrs, "err", err)
-	// Attempts so far: the synchronous one, prior queue attempts, and this one.
-	if retryableSend(err, item.tries+2) && item.tries < len(q.delays()) {
+	// Attempts so far: this one, prior queue attempts, and an inline attempt if
+	// there was one (a retry after a failed synchronous send, but not a send the
+	// queue owned from the start).
+	attempts := item.tries + 1
+	if item.syncTried {
+		attempts++
+	}
+	if retryableSend(err, attempts) && item.tries < len(q.delays()) {
 		delay := q.delays()[item.tries]
 		item.tries++
 		item.notBefore = time.Now().Add(delay)
@@ -268,7 +282,7 @@ func (q *SendQueue) attemptNow(item *queuedSend) {
 	q.Metrics.IMipDelivery("retry_exhausted")
 	q.logger().Warn("imip giving up", attrs...)
 	if item.onDone != nil {
-		item.onDone(false)
+		item.onDone(err)
 	}
 }
 

@@ -260,12 +260,8 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 // queueReply records a REPLY to deliver once the triggering request's write
 // has been persisted.
 func (p *SchedulePlugin) queueReply(r *http.Request, reply *ical.Message) {
-	v, loaded := p.pendingReplies.LoadOrStore(r, &[]*ical.Message{})
-	if !loaded {
-		p.cleanupOnRequestEnd(r)
-	}
-	queue := v.(*[]*ical.Message)
-	*queue = append(*queue, reply)
+	w := p.pendingWorkFor(r)
+	w.replies = append(w.replies, reply)
 }
 
 // hasConflict reports whether the object's occurrence window overlaps any

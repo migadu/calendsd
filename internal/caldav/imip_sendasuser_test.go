@@ -342,6 +342,64 @@ func TestIMipSubmissionPutDefersInviteAndWritesBackStatus(t *testing.T) {
 	}
 }
 
+// A deferred send that fails synchronously (here, an unsendable recipient that
+// never reaches the queue) must still resolve the stored object's status rather
+// than leave it stuck at pending — the write-back happens inline in AfterWrite.
+func TestIMipSubmissionPutDeferredSyncFailureResolvesStatus(t *testing.T) {
+	set := metrics.New("test-put-defer-fail")
+	gate := &gatedUserMailer{release: make(chan struct{})}
+	close(gate.release) // never actually reached; the recipient is rejected first
+	q := caldav.NewSendQueue(set, nil)
+	defer q.Stop()
+	srv, backend := queuedSubmissionServer(gate, q)
+
+	invite := strings.Replace(submissionInvite, "mailto:guest@gmail.com", "mailto:not-an-email", 1)
+	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(invite))
+	put.Header.Set("Content-Type", "text/calendar")
+	put.SetBasicAuth("user1", "pw")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, put)
+	if w.Code != 201 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	// The invalid recipient is rejected before the queue, so the terminal status
+	// is written back inline in AfterWrite — no pending state survives the PUT.
+	if got := storedScheduleStatus(t, backend, "not-an-email"); got != "5.3" {
+		t.Fatalf("stored SCHEDULE-STATUS = %q, want 5.3 (not left pending)", got)
+	}
+	if got := gate.callCount(); got != 0 {
+		t.Fatalf("SendAs calls = %d, want 0 (recipient rejected before send)", got)
+	}
+}
+
+// A deferred send that fails permanently in the queue writes back the specific
+// status its error classifies to (5.3 for an auth rejection), not a generic
+// 5.1 — the async path keeps the synchronous path's fidelity.
+func TestIMipSubmissionPutDeferredAuthFailureWritesBackSpecificStatus(t *testing.T) {
+	set := metrics.New("test-put-defer-auth")
+	sub := &scriptedUserMailer{errs: []error{&textproto.Error{Code: 535, Msg: "bad credentials"}}}
+	q := caldav.NewSendQueue(set, nil)
+	defer q.Stop()
+	srv, backend := queuedSubmissionServer(sub, q)
+
+	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(submissionInvite))
+	put.Header.Set("Content-Type", "text/calendar")
+	put.SetBasicAuth("user1", "pw")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, put)
+	if w.Code != 201 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	waitFor(t, "auth-failure write-back", func() bool {
+		return storedScheduleStatus(t, backend, "guest@gmail.com") == "5.3"
+	})
+	if got := sub.callCount(); got != 1 {
+		t.Fatalf("SendAs calls = %d, want 1 (auth failure is permanent, no retry)", got)
+	}
+}
+
 const submissionInvite = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +
 	"BEGIN:VEVENT\r\nUID:sau-1\r\nDTSTAMP:20260101T000000Z\r\n" +
 	"DTSTART:20260901T100000Z\r\nDTEND:20260901T110000Z\r\nSUMMARY:Lunch\r\n" +

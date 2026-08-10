@@ -131,10 +131,30 @@ type IMipPlugin struct {
 // PUT/DELETE write-back replaces it with statusSent or statusFailed once the
 // background send settles.
 const (
-	statusQueued = "1.0;Scheduling message is queued for delivery"
-	statusSent   = "1.1;Scheduling message is sent via iMip"
-	statusFailed = "5.1;Could not deliver invite by email"
+	statusQueued      = "1.0;Scheduling message is queued for delivery"
+	statusSent        = "1.1;Scheduling message is sent via iMip"
+	statusFailed      = "5.1;Could not deliver invite by email"
+	statusAuthFailed  = "5.3;Submission authentication failed"
+	statusRateLimited = "5.3;Temporarily rejected by the submission server (sending limit or transient policy); message not sent"
 )
+
+// classifySendError maps a terminal submission failure to the SCHEDULE-STATUS
+// and metric label it should carry: an auth rejection, a 4xx (over-limit or
+// other transient policy), or any other error. Shared by the synchronous path
+// (mapSubmitError) and the queued path's write-back, so a send that fails
+// inline and one that fails after retries resolve to the same status.
+func classifySendError(err error) (status, outcome string) {
+	var tperr *textproto.Error
+	if errors.As(err, &tperr) {
+		switch {
+		case tperr.Code == 530 || tperr.Code == 534 || tperr.Code == 535:
+			return statusAuthFailed, "auth_error"
+		case tperr.Code >= 400 && tperr.Code < 500:
+			return statusRateLimited, "rate_limited"
+		}
+	}
+	return statusFailed, "smtp_error"
+}
 
 func (p *IMipPlugin) logger() *slog.Logger {
 	if p.Logger != nil {
@@ -148,19 +168,21 @@ func (p *IMipPlugin) logger() *slog.Logger {
 // status would never leave pending): it should deliver synchronously instead.
 func (p *IMipPlugin) QueuesExternalSends() bool { return p.Queue != nil }
 
-// queueDone adapts a status write-back (onFinal) to the queue's boolean
-// terminal callback: a delivered send resolves to statusSent, an exhausted one
-// to statusFailed. Returns nil when there is nothing to report back.
-func (p *IMipPlugin) queueDone(onFinal func(status string)) func(bool) {
+// queueDone adapts a status write-back (onFinal) to the queue's terminal
+// callback: a delivered send resolves to statusSent, a failed one to the
+// specific status its error classifies to (auth, rate-limit, or generic
+// failure). Returns nil when there is nothing to report back.
+func (p *IMipPlugin) queueDone(onFinal func(status string)) func(error) {
 	if onFinal == nil {
 		return nil
 	}
-	return func(delivered bool) {
-		if delivered {
+	return func(err error) {
+		if err == nil {
 			onFinal(statusSent)
-		} else {
-			onFinal(statusFailed)
+			return
 		}
+		status, _ := classifySendError(err)
+		onFinal(status)
 	}
 }
 
@@ -197,11 +219,12 @@ func (p *IMipPlugin) logDelivery(outcome string, msg *ical.Message, err error) {
 // message's status to pending. Returns false when there is no queue, the
 // error is not worth retrying, or the queue refused the message (full or
 // stopped) — leaving the terminal-failure handling to the caller.
-func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error, onDone func(bool)) bool {
+func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error, onDone func(error)) bool {
 	if p.Queue == nil || !retryableSend(err, 1) {
 		return false
 	}
-	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, onDone) {
+	// syncTried: a synchronous send already failed before this retry was queued.
+	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, true, onDone) {
 		return false
 	}
 	msg.ScheduleStatus = statusQueued
@@ -216,11 +239,12 @@ func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ica
 // or the queue refused the message (full or stopped), leaving the caller to
 // fall back to a synchronous send. On success the status is pending (1.0), and
 // the terminal outcome lands in the log and metrics — exactly like a retry.
-func (p *IMipPlugin) enqueueFirst(attempt func() error, outcome string, msg *ical.Message, onDone func(bool)) bool {
+func (p *IMipPlugin) enqueueFirst(attempt func() error, outcome string, msg *ical.Message, onDone func(error)) bool {
 	if p.Queue == nil {
 		return false
 	}
-	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, onDone) {
+	// syncTried is false: the queue owns the very first attempt for this send.
+	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, false, onDone) {
 		return false
 	}
 	msg.ScheduleStatus = statusQueued
@@ -267,14 +291,21 @@ func (p *IMipPlugin) DeliverExternal(r *http.Request, msg *ical.Message) bool {
 func (p *IMipPlugin) DeliverExternalAsync(r *http.Request, msg *ical.Message, onFinal func(status string)) bool {
 	handled := p.deliverExternal(r, msg, true, p.queueDone(onFinal))
 	// A message left in the pending state was accepted by the queue, which owns
-	// the terminal callback; anything else reached a terminal status inline.
-	if handled && onFinal != nil && msg.ScheduleStatus != statusQueued {
-		onFinal(msg.ScheduleStatus)
+	// the terminal callback. Anything else reached a terminal status inline —
+	// report it so a deferred send is never left stuck pending, even on a path
+	// that set no status (an undeliverable message the caller should not have
+	// deferred): a definite failure is better than a status that never resolves.
+	if onFinal != nil && msg.ScheduleStatus != statusQueued {
+		status := msg.ScheduleStatus
+		if status == "" {
+			status = statusFailed
+		}
+		onFinal(status)
 	}
 	return handled
 }
 
-func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, background bool, onDone func(bool)) bool {
+func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, background bool, onDone func(error)) bool {
 	if !msg.SignificantChange {
 		if msg.ScheduleStatus == "" {
 			msg.ScheduleStatus = "1.0;We got the message, but it's not significant enough to warrant an email"
@@ -334,7 +365,7 @@ func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, backgro
 //   - msg.Sender is an auto-schedule resource → relay through the server;
 //   - otherwise (a delegated human organizer) → refuse, so we never send as
 //     someone who is not the logged-in user.
-func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, onDone func(bool)) bool {
+func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, onDone func(error)) bool {
 	switch {
 	case p.senderOwnedByPrincipal(msg.Sender, dav.Principal(r.Context())):
 		// fall through to the per-user submission below.
@@ -396,7 +427,7 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 // deliverViaRelay sends through the shared server relay (Mailer): the legacy
 // path when Submission is nil, and the resource-reply path. successOutcome is
 // the metric recorded on success ("sent" or "resource_relay").
-func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string, background bool, onDone func(bool)) bool {
+func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string, background bool, onDone func(error)) bool {
 	// The envelope sender (MAIL FROM) is always the server's own address. In
 	// SendAsOrganizer mode the visible From is the scheduling sender instead — a
 	// split sender — so Reply-To would only duplicate it. Fall back to the
@@ -465,31 +496,15 @@ func (p *IMipPlugin) senderOwnedByPrincipal(sender, principal string) bool {
 	return false
 }
 
-// mapSubmitError translates a submission failure into a schedule-status and
-// metric: an auth rejection, an over-limit/temporary 4xx, or any other error.
+// mapSubmitError translates a synchronous submission failure into a schedule-
+// status and metric via the shared classifier: an auth rejection (5.3), an
+// over-limit/temporary 4xx (5.3, the expected client-side rate_limited series,
+// not alert-worthy smtp_error), or any other error (5.1).
 func (p *IMipPlugin) mapSubmitError(msg *ical.Message, err error) bool {
-	var tperr *textproto.Error
-	if errors.As(err, &tperr) {
-		switch {
-		case tperr.Code == 530 || tperr.Code == 534 || tperr.Code == 535:
-			msg.ScheduleStatus = "5.3;Submission authentication failed"
-			p.Metrics.IMipDelivery("auth_error")
-			p.logDelivery("auth_error", msg, err)
-			return true
-		case tperr.Code >= 400 && tperr.Code < 500:
-			// Any 4xx: over the sending limit, but also greylisting or another
-			// transient policy rejection — the server can't tell them apart, so
-			// the status must not claim a specific cause. All are the expected,
-			// client-side rate_limited series (not alert-worthy smtp_error).
-			msg.ScheduleStatus = "5.3;Temporarily rejected by the submission server (sending limit or transient policy); message not sent"
-			p.Metrics.IMipDelivery("rate_limited")
-			p.logDelivery("rate_limited", msg, err)
-			return true
-		}
-	}
-	msg.ScheduleStatus = statusFailed
-	p.Metrics.IMipDelivery("smtp_error")
-	p.logDelivery("smtp_error", msg, err)
+	status, outcome := classifySendError(err)
+	msg.ScheduleStatus = status
+	p.Metrics.IMipDelivery(outcome)
+	p.logDelivery(outcome, msg, err)
 	return true
 }
 
