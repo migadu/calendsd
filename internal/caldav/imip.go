@@ -566,7 +566,11 @@ func (p *IMipPlugin) DurableHandler(_ context.Context, j jobs.Job) error {
 		if p.Mailer == nil {
 			return jobs.Discard(errors.New("imip: relay job but no mailer"))
 		}
-		sendErr = p.Mailer.Send(a.EnvelopeFrom, []string{a.Recipient}, body)
+		// A relay always uses the server's own envelope (bounces + SPF align on the
+		// server). For a genuine relay job that equals the stored envelope_from; for
+		// a `calctl imip resend --relay` override of a per-user job (credential
+		// dropped), it correctly overrides the stored user address.
+		sendErr = p.Mailer.Send(p.SenderEmail, []string{a.Recipient}, body)
 	}
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 

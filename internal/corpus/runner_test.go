@@ -31,9 +31,9 @@ var unreplayable = map[string]string{
 // tests here — the port's progress metric. Tests not listed are reported as
 // pending; newly green candidates show up in the test log.
 var passing = map[string]bool{
-	`Sabre\CardDAV\VCFExportTest::testContentDisposition`:                              true,
-	`Sabre\CardDAV\VCFExportTest::testContentDispositionBadChars`:                      true,
-	`Sabre\CardDAV\VCFExportTest::testExport`:                                          true,
+	`Sabre\CardDAV\VCFExportTest::testContentDisposition`:         true,
+	`Sabre\CardDAV\VCFExportTest::testContentDispositionBadChars`: true,
+	`Sabre\CardDAV\VCFExportTest::testExport`:                     true,
 	// DAVx5 (Android) CardDAV request shapes. Two of the four are recorded but
 	// intentionally NOT listed here — they are known, tracked, semantically
 	// harmless divergences:

@@ -80,6 +80,10 @@ type attendeeState struct {
 	name      string
 	instances map[string]string // recurrence id -> PARTSTAT
 	order     []string          // recurrence ids in first-seen order
+	// forceSend is set when the organizer marked this ATTENDEE with
+	// SCHEDULE-FORCE-SEND=REQUEST (RFC 6638 §7.1): send a REQUEST even without a
+	// significant change — how a client resends a lost invitation.
+	forceSend bool
 }
 
 // sigProps are the properties whose change makes an update significant (sabre
@@ -145,6 +149,9 @@ func summarize(cal *goical.Calendar) *eventSummary {
 				st.order = append(st.order, rid)
 			}
 			st.instances[rid] = partStat
+			if strings.EqualFold(att.Params.Get("SCHEDULE-FORCE-SEND"), "REQUEST") {
+				st.forceSend = true
+			}
 			if !flatSeen[href] {
 				flatSeen[href] = true
 				out.attendees = append(out.attendees, attendeeInfo{
@@ -281,7 +288,9 @@ func parseAsOrganizer(newInfo, oldInfo *eventSummary) ([]*Message, error) {
 			msg.Calendar = cancelMessage(base, href, x.name)
 		} else {
 			msg.Method = "REQUEST"
-			msg.SignificantChange = sigChanged || instancesDiffer(x.old, x.new)
+			// SCHEDULE-FORCE-SEND=REQUEST (RFC 6638) forces a send even when nothing
+			// significant changed — the organizer resending a lost invitation.
+			msg.SignificantChange = sigChanged || instancesDiffer(x.old, x.new) || x.new.forceSend
 			msg.Calendar = requestMessage(newInfo, x.new)
 		}
 		out = append(out, msg)
@@ -622,6 +631,24 @@ func addExdate(ev, master *goical.Component, exclude []string) {
 		ex.Params.Set("TZID", tzid)
 	}
 	ev.Props["EXDATE"] = []goical.Prop{*ex}
+}
+
+// StripForceSend removes SCHEDULE-FORCE-SEND from every ATTENDEE and ORGANIZER
+// in the calendar. The server honors the parameter while generating messages
+// (a forced resend), then removes it before storing so it doesn't persist and
+// re-fire on the next write (RFC 6638 §7.1).
+func StripForceSend(cal *goical.Calendar) {
+	if cal == nil {
+		return
+	}
+	for _, comp := range cal.Children {
+		for _, p := range comp.Props["ORGANIZER"] {
+			p.Params.Del("SCHEDULE-FORCE-SEND")
+		}
+		for _, p := range comp.Props["ATTENDEE"] {
+			p.Params.Del("SCHEDULE-FORCE-SEND")
+		}
+	}
 }
 
 // stripScheduleParams removes server-only scheduling parameters from a message

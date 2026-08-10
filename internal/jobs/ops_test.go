@@ -132,6 +132,27 @@ func TestOpsRetryRefusesCompleted(t *testing.T) {
 	}
 }
 
+func TestOpsRelayOverride(t *testing.T) {
+	db := openScratchDB(t, "calserver_ops_relay")
+	q := newTestQueue(t, db)
+	ops := &Ops{DB: db}
+
+	id := enqueuePerUser(t, q, "u1", "mailto:a@x.test", "pw")
+	if _, err := db.Exec(`UPDATE jobs SET state='discarded', attempt=6 WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.RelayOverride(id); err != nil {
+		t.Fatalf("RelayOverride: %v", err)
+	}
+	r := getJob(t, db, id)
+	if r.state != "available" || r.attempt != 0 {
+		t.Errorf("after relay override: state=%q attempt=%d, want available/0", r.state, r.attempt)
+	}
+	if r.credSet {
+		t.Error("RelayOverride must drop the credential (the worker then relays, unmetered)")
+	}
+}
+
 func TestOpsCancelDropsCredential(t *testing.T) {
 	db := openScratchDB(t, "calserver_ops_cancel")
 	q := newTestQueue(t, db)

@@ -85,6 +85,7 @@ func main() {
 			os.Exit(1)
 		}
 		set.RegisterDBStats(db)
+		set.RegisterJobDepth(db)
 		// Same line calserver-admin logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
 		srv, pushWorker, jobQueue = server.NewWithBackground(db, m.Server, m.DSN)

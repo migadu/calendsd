@@ -48,7 +48,20 @@ type SchedulePlugin struct {
 
 	// writeBackLocks serializes the read-modify-write status write-backs so the
 	// concurrent per-attendee updates to one object don't clobber each other.
+	// Used when WriteBackLocker is nil (single-process / tests).
 	writeBackLocks objectLocks
+
+	// WriteBackLocker, when set, serializes the SCHEDULE-STATUS write-back per
+	// object. The default (nil → in-process writeBackLocks) only coordinates one
+	// process; wire an AdvisoryLocker for a multi-node deployment so durable
+	// workers on different nodes patching the same object still serialize.
+	WriteBackLocker WriteBackLocker
+}
+
+// WriteBackLocker serializes the per-object SCHEDULE-STATUS read-modify-write.
+// Lock returns the unlock func. path names the object being patched.
+type WriteBackLocker interface {
+	Lock(path string) (unlock func())
 }
 
 // pendingWork is one request's deferred scheduling work plus the handle that
@@ -72,7 +85,7 @@ type pendingSend struct {
 // per-path map to grow unbounded over the life of the process.
 type objectLocks [64]sync.Mutex
 
-func (l *objectLocks) lock(path string) func() {
+func (l *objectLocks) Lock(path string) (unlock func()) {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(path))
 	mu := &l[h.Sum32()%uint32(len(l))]
@@ -116,8 +129,18 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		hrefs = append(hrefs, p.server.BaseURI+ph.PrincipalURL()+"/")
 		return hrefs
 	})
-	// sabre's Schedule\Plugin reports every principal as an INDIVIDUAL.
-	pf.Handle(cal("calendar-user-type"), func() any { return "INDIVIDUAL" })
+	// sabre's Schedule\Plugin reports every principal as an INDIVIDUAL; we
+	// additionally surface auto-schedule principals (rooms/resources, matched by
+	// the same prefix callback that drives their auto-accept) as ROOM, so a
+	// client can distinguish a bookable room from a person in the attendee picker
+	// (RFC 5545 §3.2.3 CUTYPE). Nothing on the server keys off this value — the
+	// auto-processing decision is the AutoSchedule callback, not this property.
+	pf.Handle(cal("calendar-user-type"), func() any {
+		if p.AutoSchedule != nil && p.AutoSchedule(ph.PrincipalURL()) {
+			return "ROOM"
+		}
+		return "INDIVIDUAL"
+	})
 	pf.Handle(cal("schedule-default-calendar-URL"), func() any {
 		if path := p.defaultCalendarPath(ph.PrincipalURL()); path != "" {
 			return davxml.Href{p.server.BaseURI + path + "/"}
@@ -187,6 +210,9 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		// network), so they deliver synchronously with an exact status.
 		p.deliver(r, msg, false, "")
 	}
+	// SCHEDULE-FORCE-SEND has done its job (it forced the messages above); remove
+	// it so the stored copy doesn't re-fire a send on the next write (RFC 6638).
+	ical.StripForceSend(newCal)
 	// Write SCHEDULE-STATUS back onto the stored object's attendees.
 	applyScheduleStatus(newCal, messages)
 	return ical.EncodeLenient(newCal), nil
@@ -307,8 +333,17 @@ func (p *SchedulePlugin) pendingWorkFor(r *http.Request) *pendingWork {
 // advisory lock, or SELECT … FOR UPDATE on the calendarobjects row — to keep
 // two nodes from clobbering each other's SCHEDULE-STATUS. Today's deployment is
 // single-instance; revisit if that changes (JOB-QUEUE-PLAN.md, write-back).
+// writeBackLocker returns the configured cross-node locker, or the in-process
+// striped mutexes when none is wired.
+func (p *SchedulePlugin) writeBackLocker() WriteBackLocker {
+	if p.WriteBackLocker != nil {
+		return p.WriteBackLocker
+	}
+	return &p.writeBackLocks
+}
+
 func (p *SchedulePlugin) patchScheduleStatus(path, method, recipient, status string) {
-	unlock := p.writeBackLocks.lock(path)
+	unlock := p.writeBackLocker().Lock(path)
 	defer unlock()
 	node, err := p.server.Tree.NodeForPath(path)
 	if err != nil {

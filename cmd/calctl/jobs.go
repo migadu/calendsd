@@ -251,6 +251,7 @@ func imipPending(args []string) {
 func imipResend(args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("imip resend", flag.ExitOnError)
+	relay := flags.Bool("relay", false, "Override: deliver via the server relay, UNMETERED (drops the credential). For a per-user send whose credential is gone.")
 	dsn := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
 	flags.Parse(rest)
 
@@ -268,14 +269,28 @@ func imipResend(args []string) {
 		fmt.Fprintf(os.Stderr, "Job %d is worker %q, not imip_send. Use `calctl jobs retry`.\n", id, j.Worker)
 		os.Exit(1)
 	}
-	// A per-user send (username set) with no credential can't be delivered as the
-	// user — the worker fail-safe discards. Metered recovery is the organizer's own
-	// client re-issuing the invite (their live request carries the password).
+
+	if *relay {
+		// The deliberate unmetered override: relay via the server identity. Logged
+		// here and reflected in the job's outcome metric when the worker sends it.
+		if err := ops.RelayOverride(id); err != nil {
+			reportMutationErr("resend --relay", id, err)
+		}
+		fmt.Printf("Job %d re-queued to send via the server RELAY (UNMETERED — does not count against %s's limits).\n",
+			id, orDash(j.Username))
+		return
+	}
+
+	// Metered path. A per-user send (username set) with no credential can't be
+	// delivered as the user — the worker fail-safe discards. Metered recovery is the
+	// organizer's own client re-issuing the invite (their live request carries the
+	// password), or `--relay` to send it unmetered via the server.
 	if j.Username != "" && !j.HasCred {
 		fmt.Fprintf(os.Stderr,
 			"Job %d is a per-user send whose credential is gone (purged, or the key rotated).\n"+
-				"It can't be re-sent AS the user from here without bypassing metering. Have %s\n"+
-				"re-issue the invitation from their calendar client instead.\n", id, orDash(j.Recipient))
+				"It can't be re-sent AS the user from here without bypassing metering. Either have %s\n"+
+				"re-issue the invitation from their calendar client, or override with\n"+
+				"`calctl imip resend %d --relay` to send it UNMETERED via the server.\n", id, orDash(j.Recipient), id)
 		os.Exit(1)
 	}
 	if err := ops.Retry(id); err != nil {

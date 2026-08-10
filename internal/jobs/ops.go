@@ -149,6 +149,19 @@ UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=N
 	return o.mutated(id, res, err)
 }
 
+// RelayOverride drops the encrypted credential and re-queues the job so the
+// worker delivers it via the **relay** (server) identity — the deliberate,
+// unmetered `calctl imip resend --relay` fallback for a per-user send whose
+// credential is gone. Refuses a completed job. It never decrypts anything; it
+// only clears the credential columns and resets state.
+func (o *Ops) RelayOverride(id int64) error {
+	res, err := o.DB.Exec(`
+UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL,
+       enc_credential=NULL, enc_nonce=NULL, key_id=NULL
+ WHERE id=$1 AND state <> 'completed'`, id)
+	return o.mutated(id, res, err)
+}
+
 // Cancel stops delivery: marks the job discarded and NULLs any retained
 // credential (drop the secret now). Refuses a completed job.
 func (o *Ops) Cancel(id int64) error {

@@ -140,7 +140,7 @@ Commands:
   jobs reschedule <id> --at <ts|+dur>      Move an available job's next-run time
   jobs delete <id> --confirm               Hard-delete the row (irreversible)
   imip pending [--limit N] [--json]        List failed/retrying iMIP sends (cred=no needs an organizer resend)
-  imip resend <id>                         Re-queue a stuck iMIP send (metered; refuses if its credential is gone)
+  imip resend <id> [--relay]               Re-queue a stuck iMIP send (metered; --relay = unmetered via the server)
   version                                  Show version information
 
 Examples:

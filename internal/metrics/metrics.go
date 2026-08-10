@@ -10,9 +10,11 @@
 package metrics
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -162,6 +164,47 @@ func (s *Set) RegisterDBStats(db *sql.DB) {
 		return
 	}
 	s.registry.MustRegister(collectors.NewDBStatsCollector(db, "calserver"))
+}
+
+// RegisterJobDepth adds a collector reporting the durable job-queue depth by
+// state (calserver_jobs_total{state}), queried once per scrape. A rising
+// 'available' depth means the workers are falling behind; a rising 'discarded'
+// count means sends are giving up. Safe when the jobs table is absent (a
+// sabre-only database): the query fails and the collector reports nothing.
+func (s *Set) RegisterJobDepth(db *sql.DB) {
+	if s == nil {
+		return
+	}
+	s.registry.MustRegister(&jobDepthCollector{db: db})
+}
+
+type jobDepthCollector struct{ db *sql.DB }
+
+var jobDepthDesc = prometheus.NewDesc(
+	"calserver_jobs_total",
+	"Durable background jobs by state (available|executing|completed|discarded), sampled per scrape.",
+	[]string{"state"}, nil)
+
+func (c *jobDepthCollector) Describe(ch chan<- *prometheus.Desc) { ch <- jobDepthDesc }
+
+func (c *jobDepthCollector) Collect(ch chan<- prometheus.Metric) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := c.db.QueryContext(ctx, `SELECT state, count(*) FROM jobs GROUP BY state`)
+	if err != nil {
+		return // best-effort: a scrape must not fail the whole endpoint
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			state string
+			n     float64
+		)
+		if err := rows.Scan(&state, &n); err != nil {
+			return
+		}
+		ch <- prometheus.MustNewConstMetric(jobDepthDesc, prometheus.GaugeValue, n, state)
+	}
 }
 
 // ObserveHTTPRequest records one served request. method and route must come

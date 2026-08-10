@@ -56,9 +56,9 @@ func TestRequestLogCapturesBothDirections(t *testing.T) {
 		"Method:   REPORT",
 		"Path:     /calendars/user1/cal",
 		"Depth: 1",
-		"<query/>",         // request body captured
-		"Status: 207",      // response status captured
-		"<multistatus/>",   // response body captured
+		"<query/>",       // request body captured
+		"Status: 207",    // response status captured
+		"<multistatus/>", // response body captured
 	} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log missing %q\n---\n%s", want, log)

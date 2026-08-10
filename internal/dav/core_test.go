@@ -40,9 +40,9 @@ func (c *memColl) attach(n Node) {
 	c.children = append(c.children, n)
 }
 
-func (c *memColl) Name() string             { return c.name }
-func (c *memColl) SetName(n string) error   { c.name = n; return nil }
-func (c *memColl) LastModified() time.Time  { return time.Time{} }
+func (c *memColl) Name() string              { return c.name }
+func (c *memColl) SetName(n string) error    { c.name = n; return nil }
+func (c *memColl) LastModified() time.Time   { return time.Time{} }
 func (c *memColl) Children() ([]Node, error) { return c.children, nil }
 
 func (c *memColl) Delete() error {

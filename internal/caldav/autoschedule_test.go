@@ -156,3 +156,43 @@ func TestAutoScheduleDeclinesOnConflict(t *testing.T) {
 		t.Errorf("resource calendar has %d objects, want 2 (declined booking excluded)", n)
 	}
 }
+
+// TestCalendarUserTypeRoom: an auto-schedule principal reports CUTYPE=ROOM so a
+// client can flag it as a bookable room in the attendee picker; an ordinary
+// principal stays INDIVIDUAL.
+func TestCalendarUserTypeRoom(t *testing.T) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{
+			{Space: "http://sabredav.org/ns", Local: "email-address"}: "user1@example.org",
+		}},
+		{URI: "principals/resource1", Props: map[xmlNM]any{
+			{Space: "http://sabredav.org/ns", Local: "email-address"}: "resource1@example.org",
+		}},
+	}}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}, PrincipalsReadableByAuthenticated: true})
+	srv.AddPlugin(&caldav.SchedulePlugin{
+		AutoSchedule: func(uri string) bool { return strings.HasPrefix(uri, "principals/resource") },
+	})
+
+	cuType := func(path string) string {
+		body := `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-user-type/></d:prop></d:propfind>`
+		req := httptest.NewRequest("PROPFIND", path, strings.NewReader(body))
+		req.Header.Set("Depth", "0")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != 207 {
+			t.Fatalf("PROPFIND %s = %d: %s", path, rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	if out := cuType("/principals/resource1/"); !strings.Contains(out, "<cal:calendar-user-type>ROOM") && !strings.Contains(out, ">ROOM<") {
+		t.Errorf("resource principal calendar-user-type: want ROOM in\n%s", out)
+	}
+	if out := cuType("/principals/user1/"); !strings.Contains(out, "INDIVIDUAL") {
+		t.Errorf("user principal calendar-user-type: want INDIVIDUAL in\n%s", out)
+	}
+}

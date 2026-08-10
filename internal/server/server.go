@@ -398,7 +398,13 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		}
 		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), &push.Store{DB: db}))
 	}
-	schedule := &caldav.SchedulePlugin{ExpandGroups: cfg.ExpandGroups}
+	schedule := &caldav.SchedulePlugin{
+		ExpandGroups: cfg.ExpandGroups,
+		// Serialize SCHEDULE-STATUS write-backs cluster-wide (a Postgres advisory
+		// lock), so durable iMIP workers on additional nodes can't clobber one
+		// another's per-attendee patches.
+		WriteBackLocker: &caldav.AdvisoryLocker{DB: db},
+	}
 	if len(cfg.AutoSchedulePrefixes) > 0 {
 		prefixes := cfg.AutoSchedulePrefixes
 		schedule.AutoSchedule = func(principalURI string) bool {

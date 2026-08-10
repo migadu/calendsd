@@ -320,6 +320,10 @@ SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype,
 		return err
 	}
 	defer rows.Close()
+	// Objects carrying a pending iMIP SCHEDULE-STATUS (1.0), collected during the
+	// scan as {uid, subject} and cross-referenced against live delivery jobs
+	// afterwards (a fresh pending send has a job and is not stale).
+	var pending [][2]string
 	for rows.Next() {
 		if report.ObjectsScanned >= scanCap {
 			report.Truncated = true
@@ -374,8 +378,54 @@ SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype,
 				Check: "stale-denormalized-columns", Subject: subject,
 				Detail: "stored columns disagree with calendardata: " + strings.Join(stale, ", ")})
 		}
+		if bytes.Contains(data, []byte(imipPendingMarker)) {
+			pending = append(pending, [2]string{den.UID, subject})
+		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// A pending object with no live imip_send job is stale — its send was lost
+	// (a write-back that never landed, a manually removed job). Objects still
+	// awaiting a queued send have a job and are skipped.
+	if len(pending) > 0 {
+		q.flagStaleIMipPending(report, pending)
+	}
+	return nil
+}
+
+// imipPendingMarker is the human-readable half of the pending SCHEDULE-STATUS
+// (caldav.statusQueued), stable enough to grep for in stored calendar data.
+const imipPendingMarker = "Scheduling message is queued for delivery"
+
+// flagStaleIMipPending reports each pending object whose UID has no live
+// (available|executing) imip_send job. When the jobs table is absent (a
+// sabre-only or queue-less database) it skips silently — pending-at-1.0 can't be
+// reconciled against a queue that doesn't exist.
+func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) {
+	rows, err := q.DB.Query(`SELECT DISTINCT coalesce(args->>'uid','')
+	  FROM jobs WHERE worker='imip_send' AND state IN ('available','executing')`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	live := map[string]bool{}
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return
+		}
+		live[u] = true
+	}
+	for _, p := range pending {
+		if !live[p[0]] {
+			report.Findings = append(report.Findings, AdminFinding{
+				Check:   "imip-pending-stale",
+				Subject: p[1],
+				Detail:  "attendee stuck at SCHEDULE-STATUS 1.0 with no delivery job — the send was lost; resend from the organizer's client or via `calctl imip resend`",
+			})
+		}
+	}
 }
 
 // doctorCards checks every cards row: parseable vCard, correct etag/size.
