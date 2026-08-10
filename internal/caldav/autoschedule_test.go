@@ -161,14 +161,20 @@ func TestAutoScheduleDeclinesOnConflict(t *testing.T) {
 // client can flag it as a bookable room in the attendee picker; an ordinary
 // principal stays INDIVIDUAL.
 func TestCalendarUserTypeRoom(t *testing.T) {
-	principals := &acl.MemoryBackend{Principals: []acl.Principal{
-		{URI: "principals/user1", Props: map[xmlNM]any{
-			{Space: "http://sabredav.org/ns", Local: "email-address"}: "user1@example.org",
-		}},
-		{URI: "principals/resource1", Props: map[xmlNM]any{
-			{Space: "http://sabredav.org/ns", Local: "email-address"}: "resource1@example.org",
-		}},
-	}}
+	principals := &acl.MemoryBackend{
+		Principals: []acl.Principal{
+			{URI: "principals/user1", Props: map[xmlNM]any{
+				{Space: "http://sabredav.org/ns", Local: "email-address"}: "user1@example.org",
+			}},
+			{URI: "principals/resource1", Props: map[xmlNM]any{
+				{Space: "http://sabredav.org/ns", Local: "email-address"}: "resource1@example.org",
+			}},
+			{URI: "principals/team1", Props: map[xmlNM]any{
+				{Space: "http://sabredav.org/ns", Local: "email-address"}: "team1@example.org",
+			}},
+		},
+		Groups: map[string][]string{"principals/team1": {"principals/user1"}},
+	}
 	root := mock.NewCollection("root")
 	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
 	srv := dav.NewServer("/", root)
@@ -194,5 +200,8 @@ func TestCalendarUserTypeRoom(t *testing.T) {
 	}
 	if out := cuType("/principals/user1/"); !strings.Contains(out, "INDIVIDUAL") {
 		t.Errorf("user principal calendar-user-type: want INDIVIDUAL in\n%s", out)
+	}
+	if out := cuType("/principals/team1/"); !strings.Contains(out, ">GROUP<") && !strings.Contains(out, "user-type>GROUP") {
+		t.Errorf("group principal calendar-user-type: want GROUP in\n%s", out)
 	}
 }

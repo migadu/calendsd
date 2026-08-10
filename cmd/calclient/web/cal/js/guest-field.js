@@ -57,11 +57,18 @@ export function createGuestField(guests, onChange) {
     suggestTimer = setTimeout(async () => {
       const found = await store.searchDirectory(input.value);
       suggest.innerHTML = '';
-      for (const f of found.filter(f => !guests.some(g => g.email === f.email))) {
-        const b = html`<button type="button">${f.name || f.email} <span class="mail">${f.email}</span>${f.room ? frag`<span class="type-tag">room</span>` : ''}</button>`;
-        b.dataset.email = f.email;
-        b.dataset.room = f.room ? '1' : '';
-        b.addEventListener('click', () => { addGuest(f.email, '', f.room); input.focus(); });
+      // Hide an individual already invited; a group (address-book or principal)
+      // always shows since picking it adds/expands members.
+      for (const f of found.filter(f => f.emails || !guests.some(g => g.email === f.email))) {
+        // An address-book group expands into its members client-side; a person,
+        // room, or group principal is added by its single address (the server
+        // expands a group principal on save).
+        const pick = () => f.emails ? f.emails.forEach(e => addGuest(e)) : addGuest(f.email, '', f.room);
+        const tag = f.room ? 'room' : f.group ? 'group' : '';
+        const sub = f.emails ? `${f.emails.length} people` : f.email;
+        const b = html`<button type="button">${f.name || f.email} <span class="mail">${sub}</span>${tag ? frag`<span class="type-tag">${tag}</span>` : ''}</button>`;
+        b._pick = pick;
+        b.addEventListener('click', () => { pick(); input.focus(); });
         b.addEventListener('mousemove', () => highlight([...suggest.children].indexOf(b)));
         suggest.append(b);
       }
@@ -75,7 +82,7 @@ export function createGuestField(guests, onChange) {
     if (ev.key === 'ArrowUp' && open) { ev.preventDefault(); highlight(active - 1); return; }
     if (ev.key === 'Enter' || ev.key === ',') {
       ev.preventDefault();
-      if (open && active >= 0) { const b = suggest.children[active]; addGuest(b.dataset.email, '', b.dataset.room === '1'); }
+      if (open && active >= 0) suggest.children[active]._pick();
       else addGuest(input.value);
       return;
     }

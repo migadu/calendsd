@@ -139,6 +139,12 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		if p.AutoSchedule != nil && p.AutoSchedule(ph.PrincipalURL()) {
 			return "ROOM"
 		}
+		// A principal carrying a non-empty {DAV:}group-member-set is a schedulable
+		// group (the same test groupMembers uses for expansion), so report GROUP —
+		// a client can then flag it in the attendee picker.
+		if set, err := ph.GroupMemberSet(); err == nil && len(set) > 0 {
+			return "GROUP"
+		}
 		return "INDIVIDUAL"
 	})
 	pf.Handle(cal("schedule-default-calendar-URL"), func() any {

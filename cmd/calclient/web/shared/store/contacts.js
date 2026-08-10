@@ -400,13 +400,34 @@ async function rewriteGroupMembers(loserUids, survivorUid) {
   }
 }
 
-// searchDirectory merges cached contacts and a principal search for the
-// guest autocomplete. Returns [{name, email}].
+// groupEmails resolves an address-book group's members to their primary
+// emails (deduped), for client-side expansion in the attendee picker.
+function groupEmails(group) {
+  const byUid = new Map(state.contacts.map(c => [normalizeUID(c.uid), c]));
+  const emails = [];
+  for (const m of group.members || []) {
+    const e = byUid.get(normalizeUID(m))?.emails?.[0]?.value;
+    if (e) emails.push(e);
+  }
+  return [...new Set(emails)];
+}
+
+// searchDirectory feeds the guest autocomplete: the user's address-book groups
+// (expanded client-side on pick), matching cached contacts, and a principal
+// search. Result items: {name, email, room?} for people/rooms; {name, email,
+// group:true} for a schedulable group principal (the server expands it);
+// {name, group:true, emails:[…]} for an address-book group (the client expands
+// it). Returns up to 8.
 export async function searchDirectory(q) {
   q = q.trim().toLowerCase();
   if (!q) return [];
   const seen = new Set();
   const out = [];
+  for (const g of state.groups) {
+    if (!g.fn?.toLowerCase().includes(q)) continue;
+    const emails = groupEmails(g);
+    if (emails.length) out.push({ name: g.fn, group: true, emails });
+  }
   for (const c of state.contacts) {
     const primary = c.emails[0]?.value;
     if (!primary) continue;
@@ -423,10 +444,13 @@ export async function searchDirectory(q) {
       const name = resp.props.get(key(NS.d, 'displayname'))?.textContent ?? '';
       const email = dav.hrefTexts(resp.props.get(key(NS.c, 'calendar-user-address-set')))
         .find(a => a.startsWith('mailto:'))?.slice(7);
-      // ROOM/RESOURCE principals (auto-scheduling rooms) are flagged so the
-      // picker can mark them as bookable rather than a person.
+      // ROOM/RESOURCE principals are flagged as rooms; a GROUP principal is a
+      // schedulable group the server expands on save.
       const cutype = (resp.props.get(key(NS.c, 'calendar-user-type'))?.textContent || '').toUpperCase();
-      if (email && !seen.has(email)) { seen.add(email); out.push({ name, email, room: cutype === 'ROOM' || cutype === 'RESOURCE' }); }
+      if (email && !seen.has(email)) {
+        seen.add(email);
+        out.push({ name, email, room: cutype === 'ROOM' || cutype === 'RESOURCE', group: cutype === 'GROUP' });
+      }
     }
   } catch { /* directory search is best-effort */ }
   return out.slice(0, 8);
