@@ -12,7 +12,7 @@ export { haveSession, login, logout, restore, startPolling, stopPolling } from '
 export { loadCalendars, eventCalendars, isReadOnly, calColor,
   createCalendar, updateCalendar, deleteCalendar } from './store/calendars.js';
 export { setRange, refreshEvents, visibleInstances, setCalendarHidden, moveEvent,
-  eventHref, ridValue, instanceKey } from './store/events.js';
+  eventHref, ridValue, instanceKey, deleteEvent } from './store/events.js';
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
 export { shareCalendar, loadSharees, unshareCalendar,
   loadShareNotifications, replyShareInvite, dismissShareNotification } from './store/sharing.js';

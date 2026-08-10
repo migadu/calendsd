@@ -365,12 +365,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       isRecurring ? 'Delete the whole series?' : 'Delete this event?';
     if (!await confirmDialog(msg, { confirmLabel: 'Delete', danger: true })) return;
     try {
-      if (one) {
-        const text = ical.addExdate(master.text, store.ridValue(inst), inst.allDay);
-        await store.putObject(inst.href, text, master.etag);
-      } else {
-        await store.deleteObject(inst.href);
-      }
+      await store.deleteEvent(inst, one ? 'one' : 'all');
       close();
       toast('Deleted.');
       await store.refreshEvents();

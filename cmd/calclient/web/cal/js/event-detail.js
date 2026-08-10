@@ -7,7 +7,7 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { fmtRange, linkify, toast, showError } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
-import { confirmDialog, openOverlay } from '/shared/dialogs.js';
+import { confirmDialog, choiceDialog, openOverlay } from '/shared/dialogs.js';
 
 const PARTSTAT_LABEL = {
   ACCEPTED: 'accepted', DECLINED: 'declined',
@@ -80,11 +80,22 @@ export function openEventDetail(inst) {
   $('#ed-close', dlg).addEventListener('click', close);
   $('#ed-edit', dlg).addEventListener('click', () => { close(); openEventDialog(inst); });
   $('#ed-del', dlg).addEventListener('click', async () => {
-    // Recurring events have per-occurrence vs whole-series choices — defer to
-    // the editor's Delete for those; delete a plain event directly.
-    if (inst.recurring) { close(); openEventDialog(inst); return; }
-    if (!await confirmDialog('Delete this event?', { confirmLabel: 'Delete', danger: true })) return;
-    try { await store.deleteObject(inst.href); close(); toast('Deleted.'); await store.refreshEvents(); }
+    // A read-only share can't be deleted from — send it to the editor, which
+    // says so and disables its write actions, rather than let the write 403.
+    if (store.isReadOnly(inst.calHref)) { close(); openEventDialog(inst); return; }
+    // Recurring events offer a per-occurrence vs whole-series choice right here;
+    // a plain event just confirms. `scope` feeds store.deleteEvent either way.
+    let scope = 'all';
+    if (inst.recurring) {
+      scope = await choiceDialog('This event repeats. What would you like to delete?', [
+        { label: 'This event', value: 'one', danger: true },
+        { label: 'All events', value: 'all', danger: true },
+      ]);
+      if (!scope) return;
+    } else if (!await confirmDialog('Delete this event?', { confirmLabel: 'Delete', danger: true })) {
+      return;
+    }
+    try { await store.deleteEvent(inst, scope); close(); toast('Deleted.'); await store.refreshEvents(); }
     catch (e) { showError(e); }
   });
   $('#ed-close', dlg).focus();

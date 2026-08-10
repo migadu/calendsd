@@ -6,7 +6,7 @@ import * as dav from '../dav.js';
 import * as ical from '../ical.js';
 import { DAY, HOUR, localDate } from '../time.js';
 import { state, emit, myEmail } from './core.js';
-import { getObject, putObject } from './objects.js';
+import { getObject, putObject, deleteObject } from './objects.js';
 
 const { NS, key } = dav;
 
@@ -134,6 +134,20 @@ export async function moveEvent(inst, deltaMs) {
 
 export function eventHref(calHref, uid) {
   return calHref + encodeURIComponent(uid) + '.ics';
+}
+
+// deleteEvent removes an event honoring the recurrence scope: scope 'one'
+// excludes just the clicked occurrence with an EXDATE (leaving the rest of the
+// series in place), while 'all' (the default, and the only choice for a plain
+// event) deletes the whole stored object. Both the editor's Delete and the
+// detail popup's Delete share this one path.
+export async function deleteEvent(inst, scope = 'all') {
+  if (scope === 'one') {
+    const { text, etag } = await getObject(inst.href);
+    await putObject(inst.href, ical.addExdate(text, ridValue(inst), inst.allDay), etag);
+  } else {
+    await deleteObject(inst.href);
+  }
 }
 
 // instanceKey is a stable id for one rendered occurrence, used to correlate a

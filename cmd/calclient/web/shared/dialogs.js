@@ -53,6 +53,34 @@ export function confirmDialog(message, { confirmLabel = 'OK', danger = false } =
   });
 }
 
+// choiceDialog offers a message and a row of choice buttons, resolving the
+// chosen option's `value` (or null on Cancel / Escape / scrim). Each option is
+// {label, value, danger?, primary?}; a Cancel button is always appended and
+// focused so a stray Enter or click-out can't pick a destructive choice.
+export function choiceDialog(message, options) {
+  return new Promise(resolve => {
+    // Own the button row (not .actions) so the "danger sits on the left"
+    // auto-margin rule doesn't fire — every choice packs to the right; the
+    // base button.danger colour still applies for a destructive tint.
+    const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Choose">
+      <p style="margin:.2rem 0 0">${message}</p>
+      <div class="choices" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;justify-content:flex-end">
+        <button data-cancel>Cancel</button>
+      </div>
+    </div></div>`;
+    const done = v => { dlg.remove(); resolve(v); };
+    const row = $('.choices', dlg);
+    for (const o of options) {
+      const btn = html`<button class="${o.danger ? 'danger' : o.primary ? 'primary' : ''}">${o.label}</button>`;
+      btn.addEventListener('click', () => done(o.value));
+      row.append(btn);
+    }
+    openOverlay(dlg, () => done(null));
+    $('[data-cancel]', dlg).addEventListener('click', () => done(null));
+    $('[data-cancel]', dlg).focus();
+  });
+}
+
 // promptDialog resolves the entered string on submit, null on any way out.
 export function promptDialog(message, { placeholder = '', value = '', confirmLabel = 'OK' } = {}) {
   return new Promise(resolve => {
