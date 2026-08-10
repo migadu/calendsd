@@ -486,6 +486,11 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .type-tag.pending { color: var(--dim); }
 .type-tag.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
 /* event-detail banner: some invitations failed to send */
+/* delegation (settings) */
+.delegates { display: flex; flex-direction: column; gap: .3rem; margin: .4rem 0; }
+.delegate-add { display: flex; gap: .4rem; align-items: center; margin-top: .3rem; flex-wrap: wrap; }
+.delegate-add input[type="email"] { flex: 1; min-width: 12rem; }
+
 .detail-warn {
   background: color-mix(in srgb, var(--danger) 12%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--panel));

@@ -4,7 +4,7 @@
 
 import * as dav from '../dav.js';
 import { state, emit, savePrefs, check, DavError } from './core.js';
-import { loadCalendars } from './calendars.js';
+import { loadCalendars, loadDelegatedCalendars } from './calendars.js';
 import { loadInvites } from './invites.js';
 import { loadShareNotifications } from './sharing.js';
 import { initContacts } from './contacts.js';
@@ -83,6 +83,9 @@ async function bootstrap() {
   wirePrefsSync();
   await loadServerPrefs();
   await loadCalendars();
+  // Fold in calendars others delegated to me (best-effort, once — see
+  // loadDelegatedCalendars); never let it block or break the first render.
+  loadDelegatedCalendars().catch(() => {});
   loadInvites().catch(() => {});
   loadShareNotifications().catch(() => {});
   initContacts().catch(() => {});

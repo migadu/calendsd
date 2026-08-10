@@ -70,6 +70,20 @@ export function renderSettings(main) {
         : 'This browser cannot receive push (it needs a secure context — https, or localhost during development).'}</p>
     </section>
     <section>
+      <h2>Delegation</h2>
+      <p class="note">Let other people manage your calendars on your behalf. “Can edit” lets them add and change events; “read-only” lets them see them. To open a calendar shared with you this way, just sign in — it appears in your sidebar.</p>
+      <div id="st-delegates" class="delegates">Loading…</div>
+      <div class="delegate-add">
+        <input id="st-del-email" type="email" placeholder="person@example.org" autocomplete="off">
+        <select id="st-del-access">
+          <option value="write">can edit</option>
+          <option value="read">read-only</option>
+        </select>
+        <button id="st-del-add">Add</button>
+      </div>
+      <p class="error" id="st-del-error"></p>
+    </section>
+    <section>
       <h2>Account</h2>
       <p>Signed in as <strong>${store.state.displayName || store.state.user}</strong>
         ${store.myEmail() && frag`(${store.myEmail()})`}</p>
@@ -122,6 +136,47 @@ export function renderSettings(main) {
   });
 
   $('#st-dedup', el).addEventListener('click', () => contactsDedupSweep());
+
+  // Delegation: list who I've granted proxy access to, with add/remove.
+  const ACCESS_LABEL = { write: 'can edit', read: 'read-only' };
+  async function renderDelegates() {
+    const box = $('#st-delegates', el);
+    if (!box) return; // navigated away
+    let d;
+    try { d = await store.loadDelegates(); }
+    catch { box.replaceChildren(html`<p class="note">Delegation isn’t available on this server.</p>`); return; }
+    const rows = [];
+    for (const access of ['write', 'read']) {
+      for (const m of d[access]) {
+        const row = html`<div class="sharee">
+          <span>${m.name || m.email || m.href} <span class="type-tag">${ACCESS_LABEL[access]}</span></span>
+          <button class="ghost" data-remove>Remove</button></div>`;
+        $('[data-remove]', row).addEventListener('click', async () => {
+          try { await store.revokeDelegate(access, m.href); renderDelegates(); }
+          catch (e) { showError(e); }
+        });
+        rows.push(row);
+      }
+    }
+    box.replaceChildren(...(rows.length ? rows : [html`<p class="note">No one yet.</p>`]));
+  }
+  renderDelegates();
+
+  $('#st-del-add', el).addEventListener('click', async () => {
+    const email = $('#st-del-email', el).value.trim();
+    const access = $('#st-del-access', el).value;
+    const err = $('#st-del-error', el);
+    err.textContent = '';
+    if (!email) return;
+    try {
+      const who = await store.resolvePrincipal(email);
+      if (!who) { err.textContent = `No calendar user found for ${email}.`; return; }
+      await store.grantDelegate(access, who.href);
+      $('#st-del-email', el).value = '';
+      await renderDelegates();
+      toast('Delegate added.');
+    } catch (e) { showError(e); }
+  });
 
   const exp = $('#st-export', el);
   for (const c of store.state.calendars) {

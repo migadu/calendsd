@@ -150,13 +150,16 @@ function renderSidebar() {
       <label><input type="checkbox" ${store.state.hidden.has(cal.href) ? '' : 'checked'}>
         <span class="dot" style="background:${store.calColor(cal.href)}"></span>
         <span class="name">${cal.displayName || cal.name}</span>
+        ${cal.delegatedFrom && frag`<span class="type-tag" title="Delegated by ${cal.delegatedFrom}">${cal.delegatedFrom}</span>`}
         ${cal.readOnly && frag`<span class="ro-badge" title="Shared with you (read-only)">🔒</span>`}</label>
-      <button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">⚙</button>
+      ${!cal.delegatedFrom && frag`<button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">⚙</button>`}
     </li>`;
     $('input', li).addEventListener('change', ev => {
       store.setCalendarHidden(cal.href, !ev.target.checked);
     });
-    $('.gear', li).addEventListener('click', () => calendarMenu(cal));
+    // A delegated calendar has no settings gear — you can't manage someone
+    // else's calendar's properties.
+    $('.gear', li)?.addEventListener('click', () => calendarMenu(cal));
     ul.append(li);
   }
 }

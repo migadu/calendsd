@@ -14,6 +14,7 @@ export { loadCalendars, eventCalendars, isReadOnly, calColor,
 export { setRange, refreshEvents, visibleInstances, setCalendarHidden, moveEvent,
   eventHref, ridValue, instanceKey, deleteEvent, resendInvitations } from './store/events.js';
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
+export { loadDelegates, grantDelegate, revokeDelegate, resolvePrincipal } from './store/proxy.js';
 export { shareCalendar, loadSharees, unshareCalendar,
   loadShareNotifications, replyShareInvite, dismissShareNotification } from './store/sharing.js';
 export { loadInvites, answerInvite, answerEvent, dismissInvite, removeCancelled } from './store/invites.js';

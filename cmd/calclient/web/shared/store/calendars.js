@@ -4,41 +4,56 @@
 import * as dav from '../dav.js';
 import { state, emit, check } from './core.js';
 import { fetchCalendarEvents } from './events.js';
+import { loadProxyFor, calendarHomeOf } from './proxy.js';
 
 const { NS, key } = dav;
 
+// The property set every calendar listing (mine or a delegated home) asks for.
+const CAL_PROPS = [
+  'd:resourcetype', 'd:displayname', 'a:calendar-color', 'c:calendar-description', 'cs:getctag',
+  's:read-only', 'c:supported-calendar-component-set', 'c:schedule-calendar-transp',
+];
+
+// mapCalendar turns one PROPFIND response into a calendar model; `extra` layers
+// on delegation fields (delegatedFrom, a forced readOnly).
+function mapCalendar(x, extra = {}) {
+  const comps = compNames(x.props.get(key(NS.c, 'supported-calendar-component-set')));
+  return {
+    href: x.href,
+    name: decodeURIComponent(x.href.replace(/\/+$/, '').split('/').pop()),
+    displayName: x.props.get(key(NS.d, 'displayname'))?.textContent || '',
+    color: normColor(x.props.get(key(NS.a, 'calendar-color'))?.textContent),
+    description: x.props.get(key(NS.c, 'calendar-description'))?.textContent ?? '',
+    ctag: x.props.get(key(NS.cs, 'getctag'))?.textContent ?? '',
+    // Sabre marks a calendar shared to us read-only ({s}read-only = "1"); the
+    // server sends no such property on our own calendars, so absent = writable.
+    readOnly: truthyProp(x.props.get(key(NS.s, 'read-only'))),
+    // A task/journal-only collection can't hold VEVENTs; an absent set means
+    // "all component types" per RFC 4791, so treat empty as event-capable
+    // (and likewise task-capable).
+    supportsEvents: comps.length === 0 || comps.includes('VEVENT'),
+    supportsTasks: comps.length === 0 || comps.includes('VTODO'),
+    // A private calendar is marked schedule-calendar-transp:transparent, so
+    // its busy times are excluded from free-busy. Absent = opaque (shared).
+    private: isTransparent(x.props.get(key(NS.c, 'schedule-calendar-transp'))),
+    isCalendar: dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.c, 'calendar')),
+    ...extra,
+  };
+}
+
+// Calendars delegated to me (calendar-proxy-*-for), discovered once by
+// loadDelegatedCalendars and re-appended on every poll so a ctag refresh of my
+// own home doesn't drop them.
+let delegated = [];
+
 export async function loadCalendars() {
-  const r = check(await dav.propfind(state.calHome, [
-    'd:resourcetype', 'd:displayname', 'a:calendar-color', 'c:calendar-description', 'cs:getctag',
-    's:read-only', 'c:supported-calendar-component-set', 'c:schedule-calendar-transp',
-  ], '1'), [207]);
+  const r = check(await dav.propfind(state.calHome, CAL_PROPS, '1'), [207]);
   const before = new Map(state.calendars.map(c => [c.href, c.ctag]));
-  state.calendars = dav.msResponses(r.xml)
+  const mine = dav.msResponses(r.xml)
     .filter(x => x.href !== state.calHome)
-    .map(x => {
-      const comps = compNames(x.props.get(key(NS.c, 'supported-calendar-component-set')));
-      return {
-        href: x.href,
-        name: decodeURIComponent(x.href.replace(/\/+$/, '').split('/').pop()),
-        displayName: x.props.get(key(NS.d, 'displayname'))?.textContent || '',
-        color: normColor(x.props.get(key(NS.a, 'calendar-color'))?.textContent),
-        description: x.props.get(key(NS.c, 'calendar-description'))?.textContent ?? '',
-        ctag: x.props.get(key(NS.cs, 'getctag'))?.textContent ?? '',
-        // Sabre marks a calendar shared to us read-only ({s}read-only = "1"); the
-        // server sends no such property on our own calendars, so absent = writable.
-        readOnly: truthyProp(x.props.get(key(NS.s, 'read-only'))),
-        // A task/journal-only collection can't hold VEVENTs; an absent set means
-        // "all component types" per RFC 4791, so treat empty as event-capable
-        // (and likewise task-capable).
-        supportsEvents: comps.length === 0 || comps.includes('VEVENT'),
-        supportsTasks: comps.length === 0 || comps.includes('VTODO'),
-        // A private calendar is marked schedule-calendar-transp:transparent, so
-        // its busy times are excluded from free-busy. Absent = opaque (shared).
-        private: isTransparent(x.props.get(key(NS.c, 'schedule-calendar-transp'))),
-        isCalendar: dav.resourceTypes(x.props.get(key(NS.d, 'resourcetype'))).includes(key(NS.c, 'calendar')),
-      };
-    })
+    .map(x => mapCalendar(x))
     .filter(c => c.isCalendar);
+  state.calendars = [...mine, ...delegated];
   // Default to a calendar that can actually hold new events: writable and
   // VEVENT-capable, so defaultCal never points at a read-only share or a
   // task/journal collection.
@@ -54,6 +69,48 @@ export async function loadCalendars() {
       !state.instances.has(c.href) || before.get(c.href) !== c.ctag);
     await Promise.all(stale.map(fetchCalendarEvents));
     if (stale.length) emit('events');
+  }
+}
+
+// loadDelegatedCalendars discovers the calendars others have delegated to me
+// (calendar-proxy-write-for → writable, -read-for → read-only) and folds them
+// into the sidebar. Best-effort and run once at bootstrap: a delegator we can't
+// read is skipped rather than failing the whole list. Their events load on the
+// next range fetch; the ctag poll covers only my own home, so a delegated
+// calendar refreshes on reload rather than live.
+export async function loadDelegatedCalendars() {
+  const pf = await loadProxyFor();
+  // Dedupe homes across both levels (write wins) and cap the fan-out so a
+  // principal proxying many resources doesn't fire an unbounded number of
+  // PROPFINDs at login.
+  const CAP = 50;
+  const seen = new Set();
+  const targets = [];
+  for (const [access, principals] of [['write', pf.write], ['read', pf.read]]) {
+    for (const ph of principals) {
+      const { home, owner } = calendarHomeOf(ph);
+      if (!home || seen.has(home)) continue;
+      seen.add(home);
+      targets.push({ home, owner, access });
+      if (targets.length >= CAP) break;
+    }
+    if (targets.length >= CAP) break;
+  }
+  const lists = await Promise.all(targets.map(async ({ home, owner, access }) => {
+    try {
+      const r = check(await dav.propfind(home, CAL_PROPS, '1'), [207]);
+      return dav.msResponses(r.xml)
+        .filter(x => x.href !== home)
+        .map(x => mapCalendar(x, { delegatedFrom: owner, readOnly: access === 'read' }))
+        .filter(c => c.isCalendar);
+    } catch { return []; } // a delegator whose home we can't read — skip
+  }));
+  delegated = lists.flat();
+  state.calendars = [...state.calendars.filter(c => !c.delegatedFrom), ...delegated];
+  emit('calendars');
+  if (state.range) {
+    await Promise.all(delegated.map(fetchCalendarEvents));
+    emit('events');
   }
 }
 
