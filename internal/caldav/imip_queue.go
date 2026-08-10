@@ -83,6 +83,11 @@ type queuedSend struct {
 	method, sender, recipient string
 	tries                     int
 	notBefore                 time.Time
+	// onDone, when set, is called exactly once with the terminal result — true
+	// when the send was accepted, false when the schedule was exhausted — so a
+	// caller can reflect the outcome somewhere (the PUT write-back patches the
+	// stored object's SCHEDULE-STATUS). It runs on a worker goroutine.
+	onDone func(delivered bool)
 }
 
 // NewSendQueue returns a queue whose worker pool starts on first enqueue.
@@ -126,6 +131,23 @@ func (q *SendQueue) maxPending() int {
 // message was NOT accepted (queue full or stopped) so the caller can record
 // the terminal failure instead. Starts the workers on first use.
 func (q *SendQueue) Enqueue(attempt func() error, outcome string, method, sender, recipient string) bool {
+	return q.enqueue(&queuedSend{
+		attempt: attempt, outcome: outcome,
+		method: method, sender: sender, recipient: recipient,
+	})
+}
+
+// EnqueueWithDone is Enqueue plus a terminal callback (see queuedSend.onDone),
+// invoked once the send is accepted or the retry schedule is exhausted.
+func (q *SendQueue) EnqueueWithDone(attempt func() error, outcome, method, sender, recipient string, onDone func(delivered bool)) bool {
+	return q.enqueue(&queuedSend{
+		attempt: attempt, outcome: outcome,
+		method: method, sender: sender, recipient: recipient,
+		onDone: onDone,
+	})
+}
+
+func (q *SendQueue) enqueue(qs *queuedSend) bool {
 	q.mu.Lock()
 	if q.stopped {
 		q.mu.Unlock()
@@ -136,7 +158,7 @@ func (q *SendQueue) Enqueue(attempt func() error, outcome string, method, sender
 		q.mu.Unlock()
 		q.Metrics.IMipDelivery("queue_full")
 		q.logger().Warn("imip retry queue full; message not queued",
-			"method", method, "sender", sender, "recipient", recipient, "pending", depth)
+			"method", qs.method, "sender", qs.sender, "recipient", qs.recipient, "pending", depth)
 		return false
 	}
 	if !q.started {
@@ -149,11 +171,8 @@ func (q *SendQueue) Enqueue(attempt func() error, outcome string, method, sender
 			go q.run()
 		}
 	}
-	q.items = append(q.items, &queuedSend{
-		attempt: attempt, outcome: outcome,
-		method: method, sender: sender, recipient: recipient,
-		notBefore: time.Now(),
-	})
+	qs.notBefore = time.Now()
+	q.items = append(q.items, qs)
 	q.mu.Unlock()
 	select {
 	case q.wake <- struct{}{}:
@@ -229,6 +248,9 @@ func (q *SendQueue) attemptNow(item *queuedSend) {
 	if err == nil {
 		q.Metrics.IMipDelivery(item.outcome)
 		q.logger().Info("imip delivered (retry)", attrs...)
+		if item.onDone != nil {
+			item.onDone(true)
+		}
 		return
 	}
 	attrs = append(attrs, "err", err)
@@ -245,6 +267,9 @@ func (q *SendQueue) attemptNow(item *queuedSend) {
 	}
 	q.Metrics.IMipDelivery("retry_exhausted")
 	q.logger().Warn("imip giving up", attrs...)
+	if item.onDone != nil {
+		item.onDone(false)
+	}
 }
 
 // retryableSend reports whether a send that failed with err is worth retrying;

@@ -25,13 +25,53 @@ type ExternalDeliverer interface {
 	DeliverExternal(r *http.Request, msg *ical.Message) bool
 }
 
+// AsyncExternalDeliverer is an ExternalDeliverer that can hand the send to a
+// background queue and return immediately, for deliveries whose triggering
+// request must not block on SMTP (cancels on DELETE, invitations on a
+// many-attendee PUT). The credential and message are captured before the
+// request returns; the actual send runs in the background. onFinal, when
+// non-nil, is called once with the terminal SCHEDULE-STATUS so the caller can
+// write it back onto the stored object (see IMipPlugin.DeliverExternalAsync).
+// QueuesExternalSends reports whether async delivery will actually offload the
+// send; a caller must not defer a send when it returns false.
+type AsyncExternalDeliverer interface {
+	DeliverExternalAsync(r *http.Request, msg *ical.Message, onFinal func(status string)) bool
+	QueuesExternalSends() bool
+}
+
+// asyncSendsOffloaded reports whether some external deliverer will move a send
+// off the request path via a queue — the precondition for deferring a send to
+// AfterWrite. When false, deferring would leave the status stuck at pending, so
+// the caller delivers synchronously instead.
+func (p *SchedulePlugin) asyncSendsOffloaded() bool {
+	for _, plugin := range p.server.Plugins() {
+		if ext, ok := plugin.(AsyncExternalDeliverer); ok && ext.QueuesExternalSends() {
+			return true
+		}
+	}
+	return false
+}
+
 // deliver routes one iTIP message: local delivery first, then any external
-// deliverers (iMip). Port of sabre's deliver() + the schedule listeners.
-func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message) {
+// deliverers (iMip). Port of sabre's deliver() + the schedule listeners. When
+// async is set, external sends are handed to the retry queue so the triggering
+// request does not block on SMTP, and onFinal (if non-nil) reports the terminal
+// SCHEDULE-STATUS once the background send settles; local delivery stays
+// synchronous either way (it is a fast storage write, and a local attendee
+// should see the change at once).
+func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, onFinal func(status string)) {
 	if p.principalForAddress(msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
 	} else {
 		for _, plugin := range p.server.Plugins() {
+			if async {
+				if ext, ok := plugin.(AsyncExternalDeliverer); ok {
+					if ext.DeliverExternalAsync(r, msg, onFinal) {
+						break
+					}
+					continue
+				}
+			}
 			if ext, ok := plugin.(ExternalDeliverer); ok {
 				if ext.DeliverExternal(r, msg) {
 					break
@@ -220,7 +260,10 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 // queueReply records a REPLY to deliver once the triggering request's write
 // has been persisted.
 func (p *SchedulePlugin) queueReply(r *http.Request, reply *ical.Message) {
-	v, _ := p.pendingReplies.LoadOrStore(r, &[]*ical.Message{})
+	v, loaded := p.pendingReplies.LoadOrStore(r, &[]*ical.Message{})
+	if !loaded {
+		p.cleanupOnRequestEnd(r)
+	}
 	queue := v.(*[]*ical.Message)
 	*queue = append(*queue, reply)
 }

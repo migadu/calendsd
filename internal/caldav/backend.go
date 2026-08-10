@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"sort"
+	"sync"
 	"time"
 
 	"calserver/internal/dav"
@@ -105,6 +106,11 @@ type MockBackend struct {
 	Objects map[CalendarID]map[string]*ObjectInfo
 
 	nextID int
+
+	// mu guards Objects. iTIP delivery now writes back SCHEDULE-STATUS from a
+	// background goroutine (the send queue) while requests read the same object,
+	// so the map needs the same concurrency-safety the real backend has.
+	mu sync.Mutex
 }
 
 func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, error) {
@@ -129,6 +135,8 @@ func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map
 }
 
 func (m *MockBackend) DeleteCalendar(calendarID CalendarID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i, c := range m.Calendars {
 		if c.ID == calendarID {
 			m.Calendars = append(m.Calendars[:i], m.Calendars[i+1:]...)
@@ -140,6 +148,8 @@ func (m *MockBackend) DeleteCalendar(calendarID CalendarID) error {
 }
 
 func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []ObjectInfo
 	for _, o := range m.Objects[calendarID] {
 		out = append(out, *o)
@@ -150,6 +160,8 @@ func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, erro
 // CalendarQuery returns every object URI (a valid superset); the mock leaves
 // all filtering to the caller's validator.
 func (m *MockBackend) CalendarQuery(calendarID CalendarID, componentType string, start, end time.Time) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []string
 	for uri := range m.Objects[calendarID] {
 		out = append(out, uri)
@@ -159,6 +171,8 @@ func (m *MockBackend) CalendarQuery(calendarID CalendarID, componentType string,
 }
 
 func (m *MockBackend) CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	o, exists := m.Objects[calendarID][objectURI]
 	if !exists {
 		return nil, nil
@@ -168,6 +182,8 @@ func (m *MockBackend) CalendarObject(calendarID CalendarID, objectURI string) (*
 }
 
 func (m *MockBackend) CreateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Objects == nil {
 		m.Objects = map[CalendarID]map[string]*ObjectInfo{}
 	}
@@ -179,11 +195,15 @@ func (m *MockBackend) CreateCalendarObject(calendarID CalendarID, objectURI stri
 	return o.QuotedETag(), nil
 }
 
+// UpdateCalendarObject delegates to CreateCalendarObject, which takes the lock —
+// so it must not take it here (the mutex is not reentrant).
 func (m *MockBackend) UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
 	return m.CreateCalendarObject(calendarID, objectURI, data)
 }
 
 func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Objects[calendarID], objectURI)
 	return nil
 }

@@ -257,3 +257,54 @@ func TestAuthFailureIsNotQueued(t *testing.T) {
 		t.Fatalf("SendAs calls = %d, want 1", got)
 	}
 }
+
+// DeliverExternalAsync (the delete/cancel path) hands the send to the queue
+// without a synchronous attempt first, so the triggering request returns
+// immediately (status pending) even when the mailer would have succeeded — the
+// background worker then delivers it.
+func TestDeliverExternalAsyncQueuesFirstAttempt(t *testing.T) {
+	set := metrics.New("test-async-queue")
+	sub := &scriptedUserMailer{} // succeeds on the first call
+	plugin := sendAsUserPlugin(sub, nil)
+	plugin.Metrics = set
+	plugin.Queue = fastQueue(set)
+	defer plugin.Queue.Stop()
+
+	msg := sendAsUserMsg("mailto:alice@example.org", "mailto:guest@example.com")
+	if !plugin.DeliverExternalAsync(userRequest("principals/alice", "alice", "pw"), msg, nil) {
+		t.Fatalf("DeliverExternalAsync returned false; status=%q", msg.ScheduleStatus)
+	}
+	// The request does not block on SMTP: the status is pending, not sent.
+	if want := "1.0;Scheduling message is queued for delivery"; msg.ScheduleStatus != want {
+		t.Fatalf("status = %q, want %q", msg.ScheduleStatus, want)
+	}
+	if got := outcomeCount(t, set, "queued"); got != 1 {
+		t.Fatalf("queued outcome = %v, want 1", got)
+	}
+	// The background worker delivers it.
+	waitFor(t, "async send", func() bool { return outcomeCount(t, set, "sent_as_user") == 1 })
+	if got := sub.callCount(); got != 1 {
+		t.Fatalf("SendAs calls = %d, want 1", got)
+	}
+}
+
+// Without a queue configured, DeliverExternalAsync must still deliver — falling
+// back to a synchronous send — so a non-queue deployment does not silently drop
+// cancels on delete.
+func TestDeliverExternalAsyncFallsBackWhenNoQueue(t *testing.T) {
+	set := metrics.New("test-async-noqueue")
+	sub := &scriptedUserMailer{}
+	plugin := sendAsUserPlugin(sub, nil)
+	plugin.Metrics = set // no Queue
+
+	msg := sendAsUserMsg("mailto:alice@example.org", "mailto:guest@example.com")
+	if !plugin.DeliverExternalAsync(userRequest("principals/alice", "alice", "pw"), msg, nil) {
+		t.Fatalf("DeliverExternalAsync returned false; status=%q", msg.ScheduleStatus)
+	}
+	if want := "1.1;Scheduling message is sent via iMip"; msg.ScheduleStatus != want {
+		t.Fatalf("status = %q, want %q", msg.ScheduleStatus, want)
+	}
+	if got := sub.callCount(); got != 1 {
+		t.Fatalf("SendAs calls = %d, want 1", got)
+	}
+}

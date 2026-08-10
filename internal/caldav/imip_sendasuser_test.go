@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"strings"
+	"sync"
 	"testing"
 
 	goical "github.com/emersion/go-ical"
@@ -220,6 +221,125 @@ func submissionServer(sub caldav.UserMailer, relay caldav.Mailer) *dav.Server {
 	imip.UseScheduler(schedule)
 	srv.AddPlugin(imip)
 	return srv
+}
+
+// gatedUserMailer blocks each SendAs until release is closed, so a test can
+// observe the deferred/pending state while the background send is still in
+// flight, then release it and watch the write-back land.
+type gatedUserMailer struct {
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (m *gatedUserMailer) SendAs(user, pass, from string, to []string, msg []byte) error {
+	<-m.release
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *gatedUserMailer) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+// queuedSubmissionServer is submissionServer with a background send queue wired
+// into the iMip plugin, and it hands back the backend so a test can read the
+// stored object's SCHEDULE-STATUS.
+func queuedSubmissionServer(sub caldav.UserMailer, q *caldav.SendQueue) (*dav.Server, *caldav.MockSchedulingBackend) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{
+			{Space: "http://sabredav.org/ns", Local: "email-address"}: "user1@example.org",
+		}},
+	}}
+	backend := &caldav.MockSchedulingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "default", PrincipalURI: "principals/user1",
+	}}
+	backend.Objects = map[caldav.CalendarID]map[string]*caldav.ObjectInfo{}
+
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewPlugin(&auth.BasicBackend{
+		Realm:    "SabreDAV",
+		Validate: func(u, pw string) bool { return u == "user1" && pw == "pw" },
+	}))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+	schedule := &caldav.SchedulePlugin{}
+	srv.AddPlugin(schedule)
+	imip := &caldav.IMipPlugin{SenderEmail: "server@example.org", Submission: sub, Queue: q}
+	imip.UseScheduler(schedule)
+	srv.AddPlugin(imip)
+	return srv, backend
+}
+
+// storedScheduleStatus returns the SCHEDULE-STATUS code stamped on the stored
+// object's ATTENDEE for addr, or "" if absent.
+func storedScheduleStatus(t *testing.T, backend *caldav.MockSchedulingBackend, addr string) string {
+	t.Helper()
+	obj, err := backend.CalendarObject(caldav.CalendarID{Calendar: "1"}, "e1.ics")
+	if err != nil || obj == nil {
+		t.Fatalf("stored object missing: %v", err)
+	}
+	cal, err := ical.Decode(obj.CalendarData)
+	if err != nil {
+		t.Fatalf("decode stored object: %v", err)
+	}
+	for _, comp := range cal.Children {
+		if comp.Name != "VEVENT" {
+			continue
+		}
+		for _, att := range comp.Props["ATTENDEE"] {
+			if strings.EqualFold(att.Value, "mailto:"+addr) {
+				return att.Params.Get("SCHEDULE-STATUS")
+			}
+		}
+	}
+	return ""
+}
+
+// TestIMipSubmissionPutDefersInviteAndWritesBackStatus proves the PUT path:
+// inviting an external attendee does not block on SMTP (the object is stored
+// pending while the send is queued), and the terminal status is written back
+// onto the object once the background send settles.
+func TestIMipSubmissionPutDefersInviteAndWritesBackStatus(t *testing.T) {
+	set := metrics.New("test-put-defer")
+	gate := &gatedUserMailer{release: make(chan struct{})}
+	q := caldav.NewSendQueue(set, nil)
+	defer q.Stop()
+	srv, backend := queuedSubmissionServer(gate, q)
+
+	put := httptest.NewRequest("PUT", "/calendars/user1/default/e1.ics", strings.NewReader(submissionInvite))
+	put.Header.Set("Content-Type", "text/calendar")
+	put.SetBasicAuth("user1", "pw")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, put)
+	if w.Code != 201 {
+		t.Fatalf("PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	// The send is parked in the queue worker (gated), so the PUT returned without
+	// waiting on it: the stored object carries the pending status.
+	if got := storedScheduleStatus(t, backend, "guest@gmail.com"); got != "1.0" {
+		t.Fatalf("stored SCHEDULE-STATUS after PUT = %q, want 1.0 (pending)", got)
+	}
+
+	// Release the send; the queue delivers and the write-back flips the stored
+	// status to sent.
+	close(gate.release)
+	waitFor(t, "status write-back to sent", func() bool {
+		return storedScheduleStatus(t, backend, "guest@gmail.com") == "1.1"
+	})
+	if got := gate.callCount(); got != 1 {
+		t.Fatalf("SendAs calls = %d, want 1", got)
+	}
 }
 
 const submissionInvite = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +

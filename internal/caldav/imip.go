@@ -126,11 +126,42 @@ type IMipPlugin struct {
 	server *dav.Server
 }
 
+// Terminal SCHEDULE-STATUS values (RFC 6638 §3.2.9). statusQueued is the
+// pending state a message carries while it waits in the retry queue; the
+// PUT/DELETE write-back replaces it with statusSent or statusFailed once the
+// background send settles.
+const (
+	statusQueued = "1.0;Scheduling message is queued for delivery"
+	statusSent   = "1.1;Scheduling message is sent via iMip"
+	statusFailed = "5.1;Could not deliver invite by email"
+)
+
 func (p *IMipPlugin) logger() *slog.Logger {
 	if p.Logger != nil {
 		return p.Logger
 	}
 	return slog.Default()
+}
+
+// QueuesExternalSends reports whether async delivery will actually offload the
+// send to the background queue. When false, a caller must not defer a send (the
+// status would never leave pending): it should deliver synchronously instead.
+func (p *IMipPlugin) QueuesExternalSends() bool { return p.Queue != nil }
+
+// queueDone adapts a status write-back (onFinal) to the queue's boolean
+// terminal callback: a delivered send resolves to statusSent, an exhausted one
+// to statusFailed. Returns nil when there is nothing to report back.
+func (p *IMipPlugin) queueDone(onFinal func(status string)) func(bool) {
+	if onFinal == nil {
+		return nil
+	}
+	return func(delivered bool) {
+		if delivered {
+			onFinal(statusSent)
+		} else {
+			onFinal(statusFailed)
+		}
+	}
 }
 
 // logDelivery mirrors a delivery outcome (the same string the metric counts)
@@ -166,16 +197,35 @@ func (p *IMipPlugin) logDelivery(outcome string, msg *ical.Message, err error) {
 // message's status to pending. Returns false when there is no queue, the
 // error is not worth retrying, or the queue refused the message (full or
 // stopped) — leaving the terminal-failure handling to the caller.
-func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error) bool {
+func (p *IMipPlugin) enqueueRetry(attempt func() error, outcome string, msg *ical.Message, err error, onDone func(bool)) bool {
 	if p.Queue == nil || !retryableSend(err, 1) {
 		return false
 	}
-	if !p.Queue.Enqueue(attempt, outcome, msg.Method, msg.Sender, msg.Recipient) {
+	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, onDone) {
 		return false
 	}
-	msg.ScheduleStatus = "1.0;Scheduling message is queued for delivery"
+	msg.ScheduleStatus = statusQueued
 	p.Metrics.IMipDelivery("queued")
 	p.logDelivery("queued", msg, err)
+	return true
+}
+
+// enqueueFirst hands the very first send attempt to the queue, without a
+// synchronous attempt first, so the triggering request returns without waiting
+// on SMTP (used for cancels on DELETE). It returns false when there is no queue
+// or the queue refused the message (full or stopped), leaving the caller to
+// fall back to a synchronous send. On success the status is pending (1.0), and
+// the terminal outcome lands in the log and metrics — exactly like a retry.
+func (p *IMipPlugin) enqueueFirst(attempt func() error, outcome string, msg *ical.Message, onDone func(bool)) bool {
+	if p.Queue == nil {
+		return false
+	}
+	if !p.Queue.EnqueueWithDone(attempt, outcome, msg.Method, msg.Sender, msg.Recipient, onDone) {
+		return false
+	}
+	msg.ScheduleStatus = statusQueued
+	p.Metrics.IMipDelivery("queued")
+	p.logDelivery("queued", msg, nil)
 	return true
 }
 
@@ -196,10 +246,35 @@ func (p *IMipPlugin) UseScheduler(s *SchedulePlugin) {
 }
 
 // DeliverExternal implements ExternalDeliverer: it emails significant messages
-// to mailto: recipients, setting the schedule status. r carries the
-// authenticated principal and the submission credential; when Submission is
-// configured, the message is sent as the logged-in user (see deliverAsUser).
+// to mailto: recipients, sending synchronously and setting the schedule status.
+// r carries the authenticated principal and the submission credential; when
+// Submission is configured, the message is sent as the logged-in user (see
+// deliverAsUser).
 func (p *IMipPlugin) DeliverExternal(r *http.Request, msg *ical.Message) bool {
+	return p.deliverExternal(r, msg, false, nil)
+}
+
+// DeliverExternalAsync implements AsyncExternalDeliverer: same delivery, but the
+// send is handed to the retry queue so the triggering request (a DELETE fanning
+// out CANCELs, or a PUT inviting many attendees) does not block on SMTP. The
+// credential and framed message are captured now; the send runs in the
+// background. onFinal, when non-nil, is called exactly once with the terminal
+// SCHEDULE-STATUS — inline for a synchronous outcome (auth failure, invalid
+// recipient, or a queue-full fallback send), or later from the queue worker
+// when the background send settles — so the caller can write it back onto the
+// stored object. Falls back to a synchronous send when no queue is configured
+// or the queue is full.
+func (p *IMipPlugin) DeliverExternalAsync(r *http.Request, msg *ical.Message, onFinal func(status string)) bool {
+	handled := p.deliverExternal(r, msg, true, p.queueDone(onFinal))
+	// A message left in the pending state was accepted by the queue, which owns
+	// the terminal callback; anything else reached a terminal status inline.
+	if handled && onFinal != nil && msg.ScheduleStatus != statusQueued {
+		onFinal(msg.ScheduleStatus)
+	}
+	return handled
+}
+
+func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, background bool, onDone func(bool)) bool {
 	if !msg.SignificantChange {
 		if msg.ScheduleStatus == "" {
 			msg.ScheduleStatus = "1.0;We got the message, but it's not significant enough to warrant an email"
@@ -249,9 +324,9 @@ func (p *IMipPlugin) DeliverExternal(r *http.Request, msg *ical.Message) bool {
 	// always the sender. Otherwise fall back to the legacy shared relay for
 	// every message (non-mizu deployments).
 	if p.Submission != nil {
-		return p.deliverAsUser(r, msg, sender, recipient, subject, body)
+		return p.deliverAsUser(r, msg, sender, recipient, subject, body, background, onDone)
 	}
-	return p.deliverViaRelay(msg, sender, recipient, subject, body, "sent")
+	return p.deliverViaRelay(msg, sender, recipient, subject, body, "sent", background, onDone)
 }
 
 // deliverAsUser routes one message under the Core rule (send-as-logged-in-user):
@@ -259,14 +334,14 @@ func (p *IMipPlugin) DeliverExternal(r *http.Request, msg *ical.Message) bool {
 //   - msg.Sender is an auto-schedule resource → relay through the server;
 //   - otherwise (a delegated human organizer) → refuse, so we never send as
 //     someone who is not the logged-in user.
-func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte) bool {
+func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, onDone func(bool)) bool {
 	switch {
 	case p.senderOwnedByPrincipal(msg.Sender, dav.Principal(r.Context())):
 		// fall through to the per-user submission below.
 	case p.IsResourceSender != nil && p.IsResourceSender(msg.Sender):
 		// A resource (room) answering a remote organizer: no interactive login,
 		// so relay through the shared server sender. The one sanctioned relay.
-		return p.deliverViaRelay(msg, sender, recipient, subject, body, "resource_relay")
+		return p.deliverViaRelay(msg, sender, recipient, subject, body, "resource_relay", background, onDone)
 	default:
 		// The sender is not the logged-in user and not a resource — a delegated
 		// human organizer. We hold only the logged-in user's credential and must
@@ -294,20 +369,25 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 	// in-body ORGANIZER stay one identity and no Reply-To split is needed.
 	email := framedEmail([]string{"From: " + formatAddress(msg.SenderName, sender)},
 		msg, recipient, subject, body)
+	// The attempt closure holds the credential in memory only, for as long as
+	// the message stays queued — nothing request-scoped is referenced, so it is
+	// safe to run after the triggering request returns.
+	attempt := func() error {
+		return p.Submission.SendAs(username, password, sender, []string{recipient}, email)
+	}
+	if background && p.enqueueFirst(attempt, "sent_as_user", msg, onDone) {
+		return true
+	}
 	start := time.Now()
-	err := p.Submission.SendAs(username, password, sender, []string{recipient}, email)
+	err := attempt()
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 	if err != nil {
-		// The retry closure recaptures the credential in memory only, for as
-		// long as the message stays queued.
-		if p.enqueueRetry(func() error {
-			return p.Submission.SendAs(username, password, sender, []string{recipient}, email)
-		}, "sent_as_user", msg, err) {
+		if p.enqueueRetry(attempt, "sent_as_user", msg, err, onDone) {
 			return true
 		}
 		return p.mapSubmitError(msg, err)
 	}
-	msg.ScheduleStatus = "1.1;Scheduling message is sent via iMip"
+	msg.ScheduleStatus = statusSent
 	p.Metrics.IMipDelivery("sent_as_user")
 	p.logDelivery("sent_as_user", msg, nil)
 	return true
@@ -316,7 +396,7 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 // deliverViaRelay sends through the shared server relay (Mailer): the legacy
 // path when Submission is nil, and the resource-reply path. successOutcome is
 // the metric recorded on success ("sent" or "resource_relay").
-func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string) bool {
+func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subject string, body []byte, successOutcome string, background bool, onDone func(bool)) bool {
 	// The envelope sender (MAIL FROM) is always the server's own address. In
 	// SendAsOrganizer mode the visible From is the scheduling sender instead — a
 	// split sender — so Reply-To would only duplicate it. Fall back to the
@@ -346,22 +426,26 @@ func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subje
 		p.logDelivery("no_mailer", msg, nil)
 		return true
 	}
+	attempt := func() error {
+		return p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
+	}
+	if background && p.enqueueFirst(attempt, successOutcome, msg, onDone) {
+		return true
+	}
 	start := time.Now()
-	err := p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
+	err := attempt()
 	// Observed on failure too — a hanging SMTP server is the interesting case.
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 	if err != nil {
-		if p.enqueueRetry(func() error {
-			return p.Mailer.Send(p.SenderEmail, []string{recipient}, email)
-		}, successOutcome, msg, err) {
+		if p.enqueueRetry(attempt, successOutcome, msg, err, onDone) {
 			return true
 		}
-		msg.ScheduleStatus = "5.1;Could not deliver invite by email"
+		msg.ScheduleStatus = statusFailed
 		p.Metrics.IMipDelivery("smtp_error")
 		p.logDelivery("smtp_error", msg, err)
 		return true
 	}
-	msg.ScheduleStatus = "1.1;Scheduling message is sent via iMip"
+	msg.ScheduleStatus = statusSent
 	p.Metrics.IMipDelivery(successOutcome)
 	p.logDelivery(successOutcome, msg, nil)
 	return true
@@ -403,7 +487,7 @@ func (p *IMipPlugin) mapSubmitError(msg *ical.Message, err error) bool {
 			return true
 		}
 	}
-	msg.ScheduleStatus = "5.1;Could not deliver invite by email"
+	msg.ScheduleStatus = statusFailed
 	p.Metrics.IMipDelivery("smtp_error")
 	p.logDelivery("smtp_error", msg, err)
 	return true
