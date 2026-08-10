@@ -418,3 +418,13 @@ test('dropForward strips overrides and EXDATEs at/after the cutoff, keeps earlie
   assert.ok(out.includes('EXDATE:20260108T090000Z'));  // earlier EXDATE kept
   assert.ok(!out.includes('20260122T090000Z'));        // cutoff-day EXDATE dropped
 });
+
+test('eventLines marks a room attendee with CUTYPE=ROOM, people without', () => {
+  const lines = ical.eventLines({
+    uid: 'u', summary: 'S', start: '2026-08-10T09:00:00Z', end: '2026-08-10T10:00:00Z',
+    attendees: [{ email: 'alice@example.org' }, { email: 'room1@example.org', room: true }],
+  });
+  const att = lines.filter(l => l.startsWith('ATTENDEE'));
+  assert.ok(att.some(l => l.includes('room1@example.org') && l.includes('CUTYPE=ROOM')));
+  assert.ok(att.some(l => l.includes('alice@example.org') && !l.includes('CUTYPE')));
+});

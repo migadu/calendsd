@@ -310,7 +310,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       ORGANIZER: fields.organizer
         ? `ORGANIZER;CN=${ical.icalEscape(fields.organizer)}:mailto:${fields.organizer}` : null,
       ATTENDEE: guests.length
-        ? guests.map(g => `ATTENDEE;PARTSTAT=${g.partstat || 'NEEDS-ACTION'};RSVP=TRUE:mailto:${g.email}`)
+        ? guests.map(g => `ATTENDEE;PARTSTAT=${g.partstat || 'NEEDS-ACTION'}${g.room ? ';CUTYPE=ROOM' : ''};RSVP=TRUE:mailto:${g.email}`)
         : null,
       // null removes CLASS, restoring the PUBLIC default.
       CLASS: fields.confidential ? 'CLASS:CONFIDENTIAL' : null,

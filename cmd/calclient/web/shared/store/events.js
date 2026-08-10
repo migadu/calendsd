@@ -57,6 +57,7 @@ export function instanceFrom(ev, href, calHref, etag) {
     email: p.value.replace(/^mailto:/i, ''),
     partstat: p.params['PARTSTAT'] || 'NEEDS-ACTION',
     scheduleStatus: p.params['SCHEDULE-STATUS'] || '',
+    room: /^(ROOM|RESOURCE)$/i.test(p.params['CUTYPE'] || ''),
   }));
   return {
     href, calHref, etag,

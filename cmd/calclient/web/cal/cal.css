@@ -310,6 +310,8 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
    both schemes */
 .chips .guest.accepted { background: color-mix(in srgb, var(--ok) 18%, var(--panel)); }
 .chips .guest.declined { background: color-mix(in srgb, var(--danger) 15%, var(--panel)); text-decoration: line-through; }
+/* a booked room/resource, not a person */
+.chips .guest.room { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .chips .guest button { border: none; background: none; padding: 0 .25rem; color: var(--dim); }
 .chips input { border: none; flex: 1; min-width: 8rem; padding: .2rem; }
 .chips input:focus { outline: none; }

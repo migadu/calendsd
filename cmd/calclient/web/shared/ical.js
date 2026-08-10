@@ -58,7 +58,7 @@ export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = 
   for (const a of attendees) {
     const at = typeof a === 'string' ? { email: a } : a;
     const partstat = at.partstat || 'NEEDS-ACTION';
-    l.push(`ATTENDEE;PARTSTAT=${partstat};RSVP=TRUE:mailto:${at.email}`);
+    l.push(`ATTENDEE;PARTSTAT=${partstat}${at.room ? ';CUTYPE=ROOM' : ''};RSVP=TRUE:mailto:${at.email}`);
   }
   // alarm is an iCal trigger duration relative to the start (e.g. '-PT15M',
   // 'PT0S' for at-start); a single DISPLAY reminder, emitted last so it nests

@@ -3,7 +3,7 @@
 // ↑/↓/Enter, remove with the chip's × or Backspace on an empty input.
 
 import * as store from '/shared/store.js';
-import { $, html } from '/shared/dom.js';
+import { $, html, frag } from '/shared/dom.js';
 
 // createGuestField renders the control. `guests` is the caller's live array
 // of {email, partstat}, mutated in place; onChange fires after every add or
@@ -19,8 +19,9 @@ export function createGuestField(guests, onChange) {
   function renderChips() {
     for (const g of chips.querySelectorAll('.guest')) g.remove();
     for (const g of guests) {
-      const cls = g.partstat === 'ACCEPTED' ? ' accepted' : g.partstat === 'DECLINED' ? ' declined' : '';
-      const chip = html`<span class="guest${cls}" title="${g.partstat ?? ''}">${g.email}<button aria-label="Remove ${g.email}">×</button></span>`;
+      const cls = (g.partstat === 'ACCEPTED' ? ' accepted' : g.partstat === 'DECLINED' ? ' declined' : '')
+        + (g.room ? ' room' : '');
+      const chip = html`<span class="guest${cls}" title="${g.room ? 'Room' : g.partstat ?? ''}">${g.room ? '🚪 ' : ''}${g.email}<button aria-label="Remove ${g.email}">×</button></span>`;
       $('button', chip).addEventListener('click', () => {
         guests.splice(guests.indexOf(g), 1);
         renderChips();
@@ -30,10 +31,10 @@ export function createGuestField(guests, onChange) {
     }
   }
 
-  function addGuest(email, partstat) {
+  function addGuest(email, partstat, room = false) {
     email = email.trim().replace(/,$/, '');
     if (!email || !email.includes('@') || guests.some(g => g.email === email)) return;
-    guests.push({ email, partstat: partstat || '' });
+    guests.push({ email, partstat: partstat || '', room });
     renderChips();
     input.value = '';
     closeSuggest();
@@ -57,9 +58,10 @@ export function createGuestField(guests, onChange) {
       const found = await store.searchDirectory(input.value);
       suggest.innerHTML = '';
       for (const f of found.filter(f => !guests.some(g => g.email === f.email))) {
-        const b = html`<button type="button">${f.name || f.email} <span class="mail">${f.email}</span></button>`;
+        const b = html`<button type="button">${f.name || f.email} <span class="mail">${f.email}</span>${f.room ? frag`<span class="type-tag">room</span>` : ''}</button>`;
         b.dataset.email = f.email;
-        b.addEventListener('click', () => { addGuest(f.email); input.focus(); });
+        b.dataset.room = f.room ? '1' : '';
+        b.addEventListener('click', () => { addGuest(f.email, '', f.room); input.focus(); });
         b.addEventListener('mousemove', () => highlight([...suggest.children].indexOf(b)));
         suggest.append(b);
       }
@@ -73,7 +75,7 @@ export function createGuestField(guests, onChange) {
     if (ev.key === 'ArrowUp' && open) { ev.preventDefault(); highlight(active - 1); return; }
     if (ev.key === 'Enter' || ev.key === ',') {
       ev.preventDefault();
-      if (open && active >= 0) addGuest(suggest.children[active].dataset.email);
+      if (open && active >= 0) { const b = suggest.children[active]; addGuest(b.dataset.email, '', b.dataset.room === '1'); }
       else addGuest(input.value);
       return;
     }

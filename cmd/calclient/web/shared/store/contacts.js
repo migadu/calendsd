@@ -417,13 +417,16 @@ export async function searchDirectory(q) {
   try {
     const body = dav.xmlDoc('d:principal-property-search', '', dav.xml`
       <d:property-search><d:prop><d:displayname/></d:prop><d:match>${q}</d:match></d:property-search>
-      <d:prop><d:displayname/><c:calendar-user-address-set/></d:prop>`);
+      <d:prop><d:displayname/><c:calendar-user-address-set/><c:calendar-user-type/></d:prop>`);
     const r = await dav.report('/principals/', body, '0');
     for (const resp of dav.msResponses(r.xml)) {
       const name = resp.props.get(key(NS.d, 'displayname'))?.textContent ?? '';
       const email = dav.hrefTexts(resp.props.get(key(NS.c, 'calendar-user-address-set')))
         .find(a => a.startsWith('mailto:'))?.slice(7);
-      if (email && !seen.has(email)) { seen.add(email); out.push({ name, email }); }
+      // ROOM/RESOURCE principals (auto-scheduling rooms) are flagged so the
+      // picker can mark them as bookable rather than a person.
+      const cutype = (resp.props.get(key(NS.c, 'calendar-user-type'))?.textContent || '').toUpperCase();
+      if (email && !seen.has(email)) { seen.add(email); out.push({ name, email, room: cutype === 'ROOM' || cutype === 'RESOURCE' }); }
     }
   } catch { /* directory search is best-effort */ }
   return out.slice(0, 8);
