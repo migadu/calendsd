@@ -26,35 +26,49 @@ async function colorOf(request, href, auth) {
   return (await r.text()).match(/calendar-color[^>]*>([^<]+)/)?.[1] || '';
 }
 
-test('reordering persists calendar-order and re-sorts the sidebar', async ({ page, request }) => {
+// order reads a calendar's a:calendar-order (NaN when unset).
+async function order(request, href) {
+  const r = await request.fetch(href, { method: 'PROPFIND', headers: { ...bobAuth, Depth: '0', 'Content-Type': 'application/xml' },
+    data: `<?xml version="1.0"?><d:propfind ${XMLNS}><d:prop><a:calendar-order/></d:prop></d:propfind>` });
+  return parseInt((await r.text()).match(/calendar-order[^>]*>(\d+)</)?.[1] ?? '', 10);
+}
+const sidebarOrder = page => page.evaluate(() => [...document.querySelectorAll('#cal-list li')].map(li => li.dataset.href));
+
+test('dragging a calendar reorders it and persists calendar-order', async ({ page, request }) => {
   const a = await mkcal(request, `${TAG}-aaa-${Date.now()}`);
   const b = await mkcal(request, `${TAG}-zzz-${Date.now()}`);
   try {
     await login(page);
     await expect(page.locator(`#cal-list li[data-href="${a}"]`)).toBeVisible();
     await expect(page.locator(`#cal-list li[data-href="${b}"]`)).toBeVisible();
+    let idx = await sidebarOrder(page);
+    expect(idx.indexOf(a), 'aaa sorts before zzz initially').toBeLessThan(idx.indexOf(b));
 
-    // Drive the persistence path the drag handler invokes (Playwright can't fire
-    // native HTML5 drag events): put zzz before aaa.
-    await page.evaluate(async ([b, a]) => {
-      const s = await import('/shared/store.js');
-      const rest = s.state.calendars.map(c => c.href).filter(h => h !== a && h !== b);
-      await s.reorderCalendars([b, a, ...rest]);
-    }, [b, a]);
+    // Fire the real HTML5 drag sequence — dragstart/dragover/dragend — since
+    // Playwright's mouse-based dragTo doesn't trigger native drag. Drop zzz above aaa.
+    await page.evaluate(({ b, a }) => {
+      const ul = document.querySelector('#cal-list');
+      const src = ul.querySelector(`li[data-href="${b}"]`);
+      const tgt = ul.querySelector(`li[data-href="${a}"]`);
+      const dt = new DataTransfer();
+      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      const r = tgt.getBoundingClientRect();
+      ul.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: r.top + 1 }));
+      src.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }, { b, a });
 
-    // sidebar re-sorts, and the order persists across a reload
-    await expect(page.locator('#cal-list li').first()).toHaveAttribute('data-href', b);
+    // the drag moved zzz above aaa in the DOM…
+    idx = await sidebarOrder(page);
+    expect(idx.indexOf(b), 'drag moved zzz above aaa').toBeLessThan(idx.indexOf(a));
+    // …and dragend persisted calendar-order (async): zzz now sorts before aaa.
+    await expect.poll(() => order(request, b)).toBeGreaterThan(0);
+    expect(await order(request, b)).toBeLessThan(await order(request, a));
+
+    // survives a reload from the server
     await page.reload();
     await expect(page.locator(`#cal-list li[data-href="${b}"]`)).toBeVisible();
-    const idx = await page.evaluate(() => [...document.querySelectorAll('#cal-list li')].map(li => li.dataset.href));
+    idx = await sidebarOrder(page);
     expect(idx.indexOf(b)).toBeLessThan(idx.indexOf(a));
-
-    // and calendar-order is stored on the server
-    const r = await request.fetch(b, {
-      method: 'PROPFIND', headers: { ...bobAuth, Depth: '0', 'Content-Type': 'application/xml' },
-      data: `<?xml version="1.0"?><d:propfind ${XMLNS}><d:prop><a:calendar-order/></d:prop></d:propfind>`,
-    });
-    expect(await r.text()).toMatch(/calendar-order[^>]*>1</); // 1-based; zzz moved to the top
   } finally {
     await del(request, a); await del(request, b);
   }
