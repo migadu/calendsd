@@ -83,8 +83,13 @@ export async function resolvePrincipal(email) {
     <d:prop><d:displayname/></d:prop>`);
   const r = await dav.report('/principals/', body, '0');
   if (r.status !== 207) return null;
-  const resp = dav.msResponses(r.xml).find(x => /\/principals\//.test(x.href || ''));
-  if (!resp) return null;
+  // The match is a substring, and the principal's email may be unreadable
+  // (403 without -principals-readable), so we can't confirm an exact hit here.
+  // Refuse an ambiguous result rather than guess — this href is about to be
+  // granted calendar access, so resolving the wrong account must not happen.
+  const matches = dav.msResponses(r.xml).filter(x => /\/principals\/[^/]+\/?$/.test(x.href || ''));
+  if (matches.length !== 1) return null;
+  const resp = matches[0];
   return { href: resp.href, name: resp.props.get(key(NS.d, 'displayname'))?.textContent || '', email };
 }
 
