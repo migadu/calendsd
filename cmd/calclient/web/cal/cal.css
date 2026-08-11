@@ -129,6 +129,8 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 #cal-list { list-style: none; margin: 0; padding: 0; }
 #cal-list li { display: flex; align-items: center; gap: .45rem; padding: .28rem .2rem; border-radius: 6px; }
 #cal-list li:hover { background: var(--color-background-alt); }
+#cal-list li[draggable="true"] { cursor: grab; }
+#cal-list li.dragging { opacity: .45; }
 #cal-list .dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
 #cal-list label { flex: 1; display: flex; align-items: center; gap: .45rem; cursor: pointer; overflow: hidden; }
 #cal-list .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

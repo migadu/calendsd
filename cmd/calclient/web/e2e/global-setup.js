@@ -41,7 +41,7 @@ module.exports = async () => {
     // rooms (so the attendee-picker room tag can be exercised); -principals-readable
     // lets the directory search return their details. Both match the caldavtester
     // config and are inert for the other specs.
-    ['-addr', '127.0.0.1:8080', '-db', DSN, '-auto-schedule-prefixes', 'resource,location', '-principals-readable'],
+    ['-addr', '127.0.0.1:8080', '-db', DSN, '-auto-schedule-prefixes', 'resource,location', '-principals-readable', '-per-user-props'],
     { stdio: ['ignore', outLog, outLog], detached: true });
   const cli = spawn(path.join(BIN, 'calclient'),
     ['-addr', '127.0.0.1:8091', '-target', 'http://127.0.0.1:8080', '-dev-assets', path.join(ROOT, 'cmd/calclient/web')],

@@ -143,10 +143,24 @@ $('#new-calendar').addEventListener('click', async () => {
 function renderSidebar() {
   const ul = $('#cal-list');
   ul.innerHTML = '';
+  // Wire drag-reordering once (the <ul> persists across re-renders): while a
+  // calendar is dragged, slot it before whichever row the pointer is over.
+  if (!ul.__dndWired) {
+    ul.__dndWired = true;
+    ul.addEventListener('dragover', ev => {
+      const dragging = ul.querySelector('li.dragging');
+      if (!dragging) return;
+      ev.preventDefault();
+      const after = [...ul.querySelectorAll('li:not(.dragging)')]
+        .find(li => ev.clientY < li.getBoundingClientRect().top + li.offsetHeight / 2);
+      if (after) ul.insertBefore(dragging, after);
+      else ul.append(dragging);
+    });
+  }
   // calweb is an events app; a task/journal-only collection has nothing to show
   // here, so keep it out of the calendar list entirely.
   for (const cal of store.state.calendars.filter(c => c.supportsEvents)) {
-    const li = html`<li>
+    const li = html`<li data-href="${cal.href}">
       <label><input type="checkbox" ${store.state.hidden.has(cal.href) ? '' : 'checked'}>
         <span class="dot" style="background:${store.calColor(cal.href)}"></span>
         <span class="name">${cal.displayName || cal.name}</span>
@@ -157,6 +171,17 @@ function renderSidebar() {
     $('input', li).addEventListener('change', ev => {
       store.setCalendarHidden(cal.href, !ev.target.checked);
     });
+    // Drag to reorder my own calendars (calendar-order); delegated ones aren't
+    // draggable (I can't set properties on someone else's calendar).
+    if (!cal.delegatedFrom) {
+      li.draggable = true;
+      li.addEventListener('dragstart', () => li.classList.add('dragging'));
+      li.addEventListener('dragend', async () => {
+        li.classList.remove('dragging');
+        const order = [...ul.children].map(x => x.dataset.href);
+        try { await store.reorderCalendars(order); } catch (e) { showError(e); }
+      });
+    }
     // A delegated calendar has no settings gear — you can't manage someone
     // else's calendar's properties.
     $('.gear', li)?.addEventListener('click', () => calendarMenu(cal));

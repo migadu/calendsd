@@ -10,8 +10,8 @@ const { NS, key } = dav;
 
 // The property set every calendar listing (mine or a delegated home) asks for.
 const CAL_PROPS = [
-  'd:resourcetype', 'd:displayname', 'a:calendar-color', 'c:calendar-description', 'cs:getctag',
-  's:read-only', 'c:supported-calendar-component-set', 'c:schedule-calendar-transp',
+  'd:resourcetype', 'd:displayname', 'a:calendar-color', 'a:calendar-order', 'c:calendar-description',
+  'cs:getctag', 's:read-only', 'c:supported-calendar-component-set', 'c:schedule-calendar-transp',
 ];
 
 // mapCalendar turns one PROPFIND response into a calendar model; `extra` layers
@@ -23,6 +23,8 @@ function mapCalendar(x, extra = {}) {
     name: decodeURIComponent(x.href.replace(/\/+$/, '').split('/').pop()),
     displayName: x.props.get(key(NS.d, 'displayname'))?.textContent || '',
     color: normColor(x.props.get(key(NS.a, 'calendar-color'))?.textContent),
+    // calendar-order (Apple ns) sets the sidebar position; absent sorts last.
+    order: parseInt(x.props.get(key(NS.a, 'calendar-order'))?.textContent ?? '', 10),
     description: x.props.get(key(NS.c, 'calendar-description'))?.textContent ?? '',
     ctag: x.props.get(key(NS.cs, 'getctag'))?.textContent ?? '',
     // Sabre marks a calendar shared to us read-only ({s}read-only = "1"); the
@@ -52,7 +54,10 @@ export async function loadCalendars() {
   const mine = dav.msResponses(r.xml)
     .filter(x => x.href !== state.calHome)
     .map(x => mapCalendar(x))
-    .filter(c => c.isCalendar);
+    .filter(c => c.isCalendar)
+    // calendar-order first (unset sorts last), then name — a stable sidebar order.
+    .sort((a, b) => (Number.isNaN(a.order) ? Infinity : a.order) - (Number.isNaN(b.order) ? Infinity : b.order)
+      || (a.displayName || a.name).localeCompare(b.displayName || b.name));
   state.calendars = [...mine, ...delegated];
   // Default to a calendar that can actually hold new events: writable and
   // VEVENT-capable, so defaultCal never points at a read-only share or a
@@ -174,16 +179,30 @@ export async function createCalendar(name, displayName, color) {
   await loadCalendars();
 }
 
-export async function updateCalendar(href, { displayName, color, private: priv }) {
+export async function updateCalendar(href, { displayName, color, private: priv, order }) {
   const set = [];
   if (displayName !== undefined) set.push({ name: 'd:displayname', value: displayName });
   if (color !== undefined) set.push({ name: 'a:calendar-color', value: color + 'ff' });
+  if (order !== undefined) set.push({ name: 'a:calendar-order', value: String(order) });
   // schedule-calendar-transp carries an element value, not text: transparent
   // (private, hidden from free-busy) vs opaque (shared).
   if (priv !== undefined) {
     set.push({ name: 'c:schedule-calendar-transp', xml: priv ? '<c:transparent/>' : '<c:opaque/>' });
   }
   check(await dav.proppatch(href, set), [207]);
+  await loadCalendars();
+}
+
+// reorderCalendars persists a new sidebar order by writing calendar-order = the
+// new index on each of my calendars. Delegated calendars aren't reordered (I
+// can't set properties on someone else's calendar); they keep trailing.
+export async function reorderCalendars(orderedHrefs) {
+  const mine = new Set(state.calendars.filter(c => !c.delegatedFrom).map(c => c.href));
+  const list = orderedHrefs.filter(h => mine.has(h));
+  // 1-based: the storage backend treats calendar-order 0 as "unset" and omits
+  // it, which would drop the first calendar back to name-order.
+  await Promise.all(list.map(async (href, i) =>
+    check(await dav.proppatch(href, [{ name: 'a:calendar-order', value: String(i + 1) }]), [207])));
   await loadCalendars();
 }
 
