@@ -104,9 +104,22 @@ duplicate.
 
 **Stuck at pending — recovery.** If the send can't proceed as the user (no key, a
 TTL-purged credential, or a rotated-out key), the object stays at `1.0;pending`
-rather than going out unmetered. That pending state is the durable record; recover
-by resending the invitation from the organizer's client (their live request
-carries the password) — a plain re-save of an unchanged event won't resend.
+rather than going out unmetered. Recovery, in order of preference:
+
+- **The organizer resends** from their calendar client. The client marks the
+  attendee `SCHEDULE-FORCE-SEND=REQUEST` (RFC 6638 §7.1) and re-PUTs, so the
+  server sends even though nothing significant changed (a plain re-save wouldn't).
+  The request carries the organizer's own credentials, so the resend stays
+  metered. calclient's event popup shows a **Resend** button on a failed invite.
+- **An operator** inspects and drives the durable job: `calctl imip pending` lists
+  failed/retrying sends; `calctl imip resend <id>` re-queues a metered send if its
+  credential survives; `calctl imip resend <id> --relay` is the deliberate,
+  unmetered override (relays via the server) when it doesn't. `calctl doctor`'s
+  `imip-pending-stale` check surfaces objects stuck at `1.0` with no delivery job.
+
+**Multiple calserver nodes.** The per-attendee status write-back is serialized
+across processes by a Postgres advisory lock, so additional nodes' workers can't
+clobber one another's patches.
 
 ## Metrics
 

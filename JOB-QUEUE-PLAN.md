@@ -370,22 +370,26 @@ D12). Reclaim sweep:
 The terminal `SCHEDULE-STATUS` is written back by the durable worker (on delivery
 or discard) or, for a send that resolved synchronously/inline, on the request
 goroutine. Multiple workers can patch **different attendees of the same object**
-concurrently, so the read-modify-write is serialized per object — today by the
-in-process striped `objectLocks` in `patchScheduleStatus`, which is correct for a
-single-node deployment (every worker runs in the one calserver process). The RAM
-tier is gone, so there is no longer a second, uncoordinated write-back mechanism
-to reconcile.
+concurrently, so the read-modify-write is serialized per object through a
+`WriteBackLocker` interface on `SchedulePlugin`:
 
-**Multi-node follow-up (not shipped):** across processes, `objectLocks` can't
-serialize. A multi-node deployment needs `patchScheduleStatus` converted to a
-transactional `SELECT … FOR UPDATE` on the `calendarobjects` row (it currently
-goes through the DAV tree, `NodeForPath` → `obj.Put()`, with no txn). Deferred:
-it's real plumbing through the storage layer with zero benefit single-node.
+- **Single node** (no locker wired): the in-process striped `objectLocks`.
+- **Multi node** (`AdvisoryLocker`, wired in `compose`): a Postgres **session
+  advisory lock** (`pg_advisory_lock`/`_unlock`) keyed on the object path, layered
+  over the same in-process stripe. The advisory lock is the mutex — held only for
+  the brief read-modify-write — while the read/write still go through the DAV tree
+  on pooled connections, so no etag/synctoken plumbing is re-implemented.
+
+This is deliberately **not** a `SELECT … FOR UPDATE` on the `calendarobjects` row
+(which would mean bypassing the tree and re-deriving etag/synctoken): the concern
+is serializing *write-backs* across nodes, and the advisory lock does exactly that
+with far less surface. It's best-effort — a DB blip drops to the in-process lock
+(a stale status is cosmetic; the send already happened). Tested cross-instance in
+`writeback_lock_test.go`.
 
 ## Operator CLI (`calctl jobs`)
 
-**Status: implemented** (`internal/jobs/ops.go`, `cmd/calctl/jobs.go`), except the
-two items called out under *Deferred* below.
+**Status: implemented** (`internal/jobs/ops.go`, `cmd/calctl/jobs.go`).
 
 The durable table is worker-agnostic (D1), so the low-level tooling is a generic
 `calctl jobs` group that operates on rows by id; the iMIP-semantic recovery
@@ -398,18 +402,18 @@ but not the key, and no secret ever reaches a terminal or shell history — the
 `Ops` layer's SQL never selects `enc_credential`, and a test greps a marshalled
 job to prove the plaintext can't leak.
 
-**Deferred (not built):**
-- **`imip resend --relay`** — the unmetered override for a per-user job whose
-  credential is gone. It needs the body re-framed for the relay identity (the
-  persisted `message_b64` is user-framed → relaying it is a split-sender DMARC
-  hazard), which the CLI can't do without the plugin's framing. For now
-  `imip resend` *refuses* a credential-less per-user job and points the operator
-  at the organizer's client (metered recovery).
-- **Reconciliation scan** — surfacing attendees stuck at `SCHEDULE-STATUS=1.0`
-  with **no** job (a synchronous no-key send that failed, or a pruned job) plus
-  the `imip_pending_stale` metric. Needs a `calendarobjects` scan (DAV data), a
-  bigger query than the job-table view. `calctl imip pending` currently surfaces
-  stuck *jobs*, which covers the common case.
+**`imip resend --relay`** (implemented) is the unmetered override for a per-user
+job whose credential is gone: `Ops.RelayOverride` drops the credential and
+re-queues, and the worker relays the (user-framed) body via the server envelope —
+a split sender, the deliberate DMARC-risk exception the operator opts into. The
+default `imip resend` stays metered and *refuses* a credential-less per-user job.
+
+**Reconciliation scan** (implemented, on-demand) lives in `calctl doctor` rather
+than as a per-scrape metric — the `imip-pending-stale` check piggybacks on the
+existing deep object scan and flags objects stuck at `SCHEDULE-STATUS=1.0` whose
+UID has **no** live `imip_send` job (so freshly-queued sends aren't false
+positives). A per-scrape metric was rejected: it would seq-scan `calendarobjects`
+every 15s. The `calserver_jobs_total{state}` gauge covers the job-level view.
 
 **List / show (read-only):**
 
@@ -531,10 +535,10 @@ consumer.
   re-sends; bounded by `reclaim_after`, harmless via `UID`/`SEQUENCE` idempotency.
 - **Orphaned `executing` rows (D9).** Without the reclaim sweep the durability goal
   silently half-fails; sweep + test are not optional.
-- **Multi-node write-back (deferred).** `objectLocks` serializes per-object
-  write-backs only within one process. A multi-node deployment needs
-  `patchScheduleStatus` converted to a `SELECT … FOR UPDATE` row lock (real
-  storage plumbing) — correct today because every worker runs in the one process.
+- **Multi-node write-back (handled).** Per-object write-backs serialize
+  cross-node via a Postgres advisory lock (`AdvisoryLocker`), not just the
+  in-process `objectLocks` — safe to add calserver nodes. See *Write-back
+  concurrency*.
 - **Per-user off-path delivery needs the encryption key.** Without a key (or a DB)
   per-user sends are synchronous on the request path — they still deliver, but
   block on SMTP. Relay-native sends need a relay `Mailer`; a deployment with
