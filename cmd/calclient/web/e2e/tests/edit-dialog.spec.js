@@ -114,8 +114,8 @@ test('an unparseable time is flagged and blocks the save', async ({ page }) => {
   await page.fill('#ev-start-time', 'noon-ish');
   await page.locator('#ev-start-time').blur();
   await expect(page.locator('#ev-start-time')).toHaveClass(/invalid/);
-  await page.click('#ev-save');
   await expect(page.locator('#ev-error')).toContainText('Please enter a time');
+  await expect(page.locator('#ev-save')).toBeDisabled();   // the bad time blocks saving
   await expect(page.locator('#ev-title')).toBeVisible();   // still open, not saved
 });
 

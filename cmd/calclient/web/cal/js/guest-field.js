@@ -4,6 +4,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { toast } from './ui.js';
 
 // createGuestField renders the control. `guests` is the caller's live array
 // of {email, partstat}, mutated in place; onChange fires after every add or
@@ -33,12 +34,21 @@ export function createGuestField(guests, onChange) {
 
   function addGuest(email, partstat, room = false) {
     email = email.trim().replace(/,$/, '');
-    if (!email || !email.includes('@') || guests.some(g => g.email === email)) return;
+    if (!email) return false;
+    // Typed text that isn't an address gets a visible nudge instead of just
+    // vanishing — the silent clear read as "the app ate my input".
+    if (!email.includes('@')) {
+      input.classList.add('invalid');
+      toast(`“${email}” doesn’t look like an email address.`, true);
+      return false;
+    }
+    if (guests.some(g => g.email === email)) { input.value = ''; return false; }
     guests.push({ email, partstat: partstat || '', room });
     renderChips();
     input.value = '';
     closeSuggest();
     onChange();
+    return true;
   }
 
   // Autocomplete with keyboard navigation: ↑/↓ move the highlight, Enter
@@ -53,6 +63,7 @@ export function createGuestField(guests, onChange) {
   function closeSuggest() { suggest.hidden = true; suggest.innerHTML = ''; active = -1; }
 
   input.addEventListener('input', () => {
+    input.classList.remove('invalid');   // clear the bad-address flag as they retype
     clearTimeout(suggestTimer);
     suggestTimer = setTimeout(async () => {
       const found = await store.searchDirectory(input.value);
@@ -63,7 +74,17 @@ export function createGuestField(guests, onChange) {
         // An address-book group expands into its members client-side; a person,
         // room, or group principal is added by its single address (the server
         // expands a group principal on save).
-        const pick = () => f.emails ? f.emails.forEach(e => addGuest(e)) : addGuest(f.email, '', f.room);
+        // Picking an address-book group adds several people at once; say how
+        // many so a dozen silent chip additions don't go unnoticed.
+        const pick = () => {
+          if (!f.emails) { addGuest(f.email, '', f.room); return; }
+          const before = guests.length;
+          f.emails.forEach(e => addGuest(e));
+          const added = guests.length - before;
+          toast(added
+            ? `Added ${added} ${added > 1 ? 'people' : 'person'} from ${f.name || 'the group'}.`
+            : 'Everyone in that group is already invited.');
+        };
         const tag = f.room ? 'room' : f.group ? 'group' : '';
         const sub = f.emails ? `${f.emails.length} people` : f.email;
         const b = html`<button type="button">${f.name || f.email} <span class="mail">${sub}</span>${tag ? frag`<span class="type-tag">${tag}</span>` : ''}</button>`;

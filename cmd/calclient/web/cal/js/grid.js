@@ -323,7 +323,7 @@ function renderMonth(instances) {
     const MAX = 3;
     for (let d = 0; d < 7; d++) {
       const day = addDays(weekStart, d);
-      const cell = html`<div class="cell${day.getMonth() !== cursor.getMonth() ? ' other' : ''}${sameDay(day, today) ? ' today' : ''}" role="button" tabindex="0" data-date="${+day}"><span class="num">${day.getDate()}</span></div>`;
+      const cell = html`<div class="cell${day.getMonth() !== cursor.getMonth() ? ' other' : ''}${sameDay(day, today) ? ' today' : ''}" role="button" tabindex="0" aria-label="${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} — add event" data-date="${+day}"><span class="num">${day.getDate()}</span></div>`;
       // reserve vertical room so single-day chips clear the spanning bars
       if (laneCount) cell.append(html`<div class="bar-space" style="height:${laneCount * 1.25}rem"></div>`);
       const single = eventsOnDay(instances, day).filter(i => +i.end - +i.start <= DAY);
@@ -340,7 +340,9 @@ function renderMonth(instances) {
       }
       const create = () => openEventDialog(null, day);
       cell.addEventListener('click', create);
-      cell.addEventListener('keydown', ev => { if (ev.key === 'Enter') create(); });
+      // A role="button" div doesn't get native Space/Enter activation, so wire
+      // both (and stop Space from scrolling the page).
+      cell.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); create(); } });
       row.append(cell);
     }
     // spanning-bar overlay, aligned to the same 7 columns
