@@ -169,6 +169,21 @@ export function calColor(href) {
   return PALETTE[i % PALETTE.length];
 }
 
+// inkOn picks black or white text for a solid background using WCAG relative
+// luminance, so an event label stays legible on a light calendar colour (a pale
+// yellow or pink washed out the hard-coded white). The 0.179 crossover is where
+// black and white give equal contrast. Unknown colours fall back to white.
+export function inkOn(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+  if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  const lin = c => (c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return L > 0.179 ? '#111' : '#fff';
+}
+// calInk is inkOn applied to a calendar's resolved colour.
+export function calInk(href) { return inkOn(calColor(href)); }
+
 export async function createCalendar(name, displayName, color) {
   const body = dav.xmlDoc('c:mkcalendar', '', dav.xml`<d:set><d:prop>
     <d:displayname>${displayName}</d:displayname>

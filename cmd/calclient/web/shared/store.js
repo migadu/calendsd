@@ -9,7 +9,7 @@
 
 export { state, bus, savePrefs, DavError, friendly, myEmail } from './store/core.js';
 export { haveSession, login, logout, restore, startPolling, stopPolling } from './store/session.js';
-export { loadCalendars, eventCalendars, isReadOnly, calColor,
+export { loadCalendars, eventCalendars, isReadOnly, calColor, calInk, inkOn,
   createCalendar, updateCalendar, deleteCalendar, reorderCalendars } from './store/calendars.js';
 export { setRange, refreshEvents, visibleInstances, setCalendarHidden, moveEvent,
   eventHref, ridValue, instanceKey, deleteEvent, resendInvitations } from './store/events.js';

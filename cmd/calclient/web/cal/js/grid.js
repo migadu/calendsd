@@ -282,7 +282,7 @@ function chipFor(inst) {
   const tentative = unconfirmedCls(inst);
   const key = store.instanceKey(inst);
   const chip = inst.allDay
-    ? html`<button class="chip${tentative}" data-key="${key}" style="background:${color}">${inst.summary}</button>`
+    ? html`<button class="chip${tentative}" data-key="${key}" style="background:${color};color:${store.inkOn(color)}">${inst.summary}</button>`
     : html`<button class="chip timed${tentative}" data-key="${key}"><span class="dot" style="background:${color}"></span>${fmtTime(inst.start)} ${inst.summary}</button>`;
   chip.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
   return chip;
@@ -350,7 +350,7 @@ function renderMonth(instances) {
         const color = store.calColor(s.inst.calHref);
         const bar = html`<button class="span-bar${s.contLeft ? ' cl' : ''}${s.contRight ? ' cr' : ''}${unconfirmedCls(s.inst)}"
           data-key="${store.instanceKey(s.inst)}"
-          style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${color}"
+          style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${color};color:${store.inkOn(color)}"
           title="${s.inst.summary}">${s.contLeft ? '‹ ' : ''}${s.inst.summary}</button>`;
         bar.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(s.inst); });
         bars.append(bar);
@@ -406,7 +406,7 @@ function renderTimed(instances, days) {
       const s = Math.max(0, (inst.start - top) / HOUR);
       const e = Math.min(24, (inst.end - top) / HOUR);
       const w = 100 / p.cols;
-      const block = html`<button class="block${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${store.calColor(inst.calHref)}">${fmtTime(inst.start)} ${inst.summary}</button>`;
+      const block = html`<button class="block${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${store.calColor(inst.calHref)};color:${store.calInk(inst.calHref)}">${fmtTime(inst.start)} ${inst.summary}</button>`;
       block.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
       attachBlockDrag(block, inst, day);
       col.append(block);
