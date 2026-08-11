@@ -216,6 +216,10 @@ export async function openEventDialog(inst, defaultDay, timed) {
   // Weekday toggles for weekly repeats, ordered from the user's week start.
   const WEEKDAYS = [['SU', 'Sun'], ['MO', 'Mon'], ['TU', 'Tue'], ['WE', 'Wed'], ['TH', 'Thu'], ['FR', 'Fri'], ['SA', 'Sat']];
   const bydaySet = new Set(rrulePreset?.byday ?? []);
+  // A new weekly repeat defaults to (and always includes) its own start weekday,
+  // so the DTSTART is a real occurrence — otherwise a BYDAY that omits it makes
+  // the series start on a different day than the user picked.
+  if (!inst) bydaySet.add(WEEKDAYS[start.getDay()][0]);
   const startWk = store.state.prefs.weekStart === 0 ? 0 : 1;
   for (let i = 0; i < 7; i++) {
     const [code, label] = WEEKDAYS[(startWk + i) % 7];
@@ -304,7 +308,14 @@ export async function openEventDialog(inst, defaultDay, timed) {
     const scope = isRecurring ? q('#ev-scope').value : '';
     const rrule = freqSel.value === 'CUSTOM' ? inst.rrule : ical.buildRRule({
       freq: freqSel.value, ends: endsSel.value,
-      interval: q('#ev-interval').value, byday: [...bydaySet],
+      interval: q('#ev-interval').value, byday: (() => {
+        // Keep the start weekday in a weekly BYDAY so the series still occurs on
+        // its own start date even if the user changed the date after picking days.
+        const days = [...bydaySet];
+        const wd = t.start && WEEKDAYS[t.start.getDay()][0];
+        if (freqSel.value === 'WEEKLY' && days.length && wd && !days.includes(wd)) days.push(wd);
+        return days;
+      })(),
       count: q('#ev-count').value, until: q('#ev-until').value,
     });
     const fields = {

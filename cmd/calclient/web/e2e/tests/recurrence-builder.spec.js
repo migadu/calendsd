@@ -46,5 +46,10 @@ test('every-2-weeks on selected weekdays writes INTERVAL and BYDAY', async ({ pa
 
   const rrule = await storedRRule(request, title);
   expect(rrule).toContain('INTERVAL=2');
-  expect(rrule).toMatch(/BYDAY=(MO,WE|WE,MO)/);
+  // BYDAY holds the picked days (plus the event's own start weekday, kept so the
+  // series occurs on its start date — order/extra day depends on which day the
+  // test runs).
+  const byday = (rrule.match(/BYDAY=([^;]+)/)?.[1] || '').split(',');
+  expect(byday).toContain('MO');
+  expect(byday).toContain('WE');
 });

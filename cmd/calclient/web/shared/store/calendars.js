@@ -101,6 +101,8 @@ export async function loadDelegatedCalendars() {
     }
     if (targets.length >= CAP) break;
   }
+  const totalProxied = new Set([...pf.write, ...pf.read]).size;
+  if (totalProxied > CAP) console.warn(`calweb: showing ${CAP} of ${totalProxied} delegated calendars`);
   const lists = await Promise.all(targets.map(async ({ home, owner, access }) => {
     try {
       const r = check(await dav.propfind(home, CAL_PROPS, '1'), [207]);
@@ -198,8 +200,13 @@ export async function updateCalendar(href, { displayName, color, private: priv, 
 // new index on each of my calendars. Delegated calendars aren't reordered (I
 // can't set properties on someone else's calendar); they keep trailing.
 export async function reorderCalendars(orderedHrefs) {
-  const mine = new Set(state.calendars.filter(c => !c.delegatedFrom).map(c => c.href));
+  const mineHrefs = state.calendars.filter(c => !c.delegatedFrom).map(c => c.href);
+  const mine = new Set(mineHrefs);
   const list = orderedHrefs.filter(h => mine.has(h));
+  // No-op if the drag didn't actually change the order, so a click-without-move
+  // doesn't rewrite every calendar's order.
+  const current = mineHrefs.filter(h => list.includes(h));
+  if (list.length === current.length && list.every((h, i) => h === current[i])) return;
   // 1-based: the storage backend treats calendar-order 0 as "unset" and omits
   // it, which would drop the first calendar back to name-order.
   await Promise.all(list.map(async (href, i) =>
