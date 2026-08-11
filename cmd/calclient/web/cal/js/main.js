@@ -198,6 +198,7 @@ function calendarMenu(cal) {
     <div class="grid">
       <label>Name<input id="cm-name" value="${cal.displayName || cal.name}" ${ro ? 'disabled' : ''}></label>
       <label>Color<input id="cm-color" type="color" value="${store.calColor(cal.href)}" ${ro ? 'disabled' : ''}></label>
+      <label class="full">Description<textarea id="cm-desc" rows="2" placeholder="What this calendar is for (optional)" ${ro ? 'disabled' : ''}>${cal.description ?? ''}</textarea></label>
     </div>
     ${!ro && frag`<label class="row cm-private"><input type="checkbox" id="cm-private" ${cal.private ? 'checked' : ''}>
       <span>Private — hide this calendar's busy times from other people's free/busy and scheduling</span></label>`}
@@ -235,6 +236,7 @@ function calendarMenu(cal) {
         displayName: $('#cm-name', dialog).value,
         color: $('#cm-color', dialog).value,
         private: $('#cm-private', dialog).checked,
+        description: $('#cm-desc', dialog).value,
       });
       close();
     } catch (e) { showError(e); }

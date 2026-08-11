@@ -179,11 +179,12 @@ export async function createCalendar(name, displayName, color) {
   await loadCalendars();
 }
 
-export async function updateCalendar(href, { displayName, color, private: priv, order }) {
+export async function updateCalendar(href, { displayName, color, private: priv, order, description }) {
   const set = [];
   if (displayName !== undefined) set.push({ name: 'd:displayname', value: displayName });
   if (color !== undefined) set.push({ name: 'a:calendar-color', value: color + 'ff' });
   if (order !== undefined) set.push({ name: 'a:calendar-order', value: String(order) });
+  if (description !== undefined) set.push({ name: 'c:calendar-description', value: description });
   // schedule-calendar-transp carries an element value, not text: transparent
   // (private, hidden from free-busy) vs opaque (shared).
   if (priv !== undefined) {

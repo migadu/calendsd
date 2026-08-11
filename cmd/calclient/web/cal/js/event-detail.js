@@ -38,6 +38,11 @@ export function openEventDetail(inst) {
   }
   if (inst.location) row('Location', linkify(inst.location));
   if (inst.description) row('Notes', linkify(inst.description));
+  if (inst.attachments?.length) {
+    row('Attachments', inst.attachments.map(a => a.inline
+      ? frag`<div><a href="${a.url}" download="${a.name}">${a.name}</a></div>`
+      : frag`<div><a href="${a.url}" target="_blank" rel="noreferrer noopener">${a.name}</a></div>`));
+  }
   if (inst.organizer) row('Organizer', inst.organizer);
   if (inst.attendees?.length) {
     row('Guests', inst.attendees.map(a =>

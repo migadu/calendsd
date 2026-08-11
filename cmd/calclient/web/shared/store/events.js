@@ -59,6 +59,15 @@ export function instanceFrom(ev, href, calHref, etag) {
     scheduleStatus: p.params['SCHEDULE-STATUS'] || '',
     room: /^(ROOM|RESOURCE)$/i.test(p.params['CUTYPE'] || ''),
   }));
+  // ATTACH: a URI link, or inline BASE64 binary surfaced as a data: URL. Names
+  // come from a FILENAME / Apple filename param, else the URL's basename.
+  const attachments = ev.props.filter(p => p.name === 'ATTACH').map(p => {
+    const name = p.params['FILENAME'] || p.params['X-APPLE-FILENAME'] || '';
+    if ((p.params['ENCODING'] || '').toUpperCase() === 'BASE64' || (p.params['VALUE'] || '').toUpperCase() === 'BINARY') {
+      return { url: `data:${p.params['FMTTYPE'] || 'application/octet-stream'};base64,${p.value}`, name: name || 'attachment', inline: true };
+    }
+    return { url: p.value, name: name || p.value.replace(/[?#].*$/, '').replace(/^.*\//, '') || 'link', inline: false };
+  });
   return {
     href, calHref, etag,
     uid: ical.propValue(ev, 'UID'),
@@ -73,7 +82,7 @@ export function instanceFrom(ev, href, calHref, etag) {
     // Meeting link: the URL property, or a CONFERENCE (RFC 7986) URI.
     url: ical.propValue(ev, 'URL') || ical.propValue(ev, 'CONFERENCE'),
     organizer: ical.propValue(ev, 'ORGANIZER').replace(/^mailto:/i, ''),
-    attendees,
+    attendees, attachments,
     myPartstat: attendees.find(a => a.email.toLowerCase() === me)?.partstat ?? '',
     // CLASS:CONFIDENTIAL — read-only sharees see only a busy block for this event.
     confidential: (ical.propValue(ev, 'CLASS') || '').toUpperCase() === 'CONFIDENTIAL',
