@@ -6,8 +6,9 @@
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { localDate } from '/shared/time.js';
-import { fmtDate, fmtTime, toast, showError } from './ui.js';
+import { fmtDate, fmtTime, toast, showError, enableOnValid, busyWhile } from './ui.js';
 import { openOverlay, confirmDialog, promptDialog, submitOnEnter } from '/shared/dialogs.js';
+import { createReminderField } from './reminder-field.js';
 
 const SECTIONS = [
   ['overdue', 'Overdue'], ['today', 'Today'],
@@ -41,18 +42,17 @@ export function renderTasks(main) {
       </select>`}
       <button type="submit" class="primary">Add</button>
     </form>`;
-    add.addEventListener('submit', async ev => {
-      ev.preventDefault();
-      const btn = $('button', add);
-      btn.disabled = true;
+    const addBtn = $('button', add);
+    const submitAdd = busyWhile(addBtn, async () => {
       try {
         await store.createTask($('#tk-list', add)?.value ?? writable[0].href, {
           summary: $('#tk-new', add).value.trim(),
           due: $('#tk-due', add).value,
         });
         toast('Task added.');
-      } catch (e) { showError(e); btn.disabled = false; }
+      } catch (e) { showError(e); }
     });
+    add.addEventListener('submit', ev => { ev.preventDefault(); submitAdd(); });
     el.append(add);
   }
 
@@ -116,6 +116,7 @@ function taskRow(t) {
     try { await store.setTaskDone(t, ev.target.checked); }
     catch (e) { showError(e); store.loadTasks(true).catch(() => {}); }
   });
+  if (ro) $('.task-main', row).title = 'This calendar is shared with you read-only, so its tasks can’t be changed.';
   if (!ro) $('.task-main', row).addEventListener('click', () => taskDialog(t));
   return row;
 }
@@ -127,6 +128,7 @@ function taskDialog(t) {
     <div class="grid">
       <label class="full">Title<input id="tk-title" type="text" value="${t.summary}"></label>
       <label>Due<input id="tk-edit-due" type="date" value="${t.due?.allDay ? localDate(t.due.date) : ''}"></label>
+      <label class="full" id="tk-remind-field">Reminders<span class="hint" id="tk-remind-hint" hidden>Reminders fire relative to the due date — set a due date for them to work.</span></label>
       <label class="full">Notes<textarea id="tk-notes" rows="3">${t.notes}</textarea></label>
     </div>
     <p class="error" id="tk-error"></p>
@@ -140,14 +142,34 @@ function taskDialog(t) {
   openOverlay(dlg, close);
   submitOnEnter(dlg, $('#tk-save', dlg));
   $('#tk-cancel', dlg).addEventListener('click', close);
-  $('#tk-save', dlg).addEventListener('click', async () => {
+
+  // reminders (VALARMs anchored to DUE); a shape we can't model opens "kept as
+  // is". The hint nudges the user to set a due date, since the trigger is
+  // relative to it.
+  const remField = createReminderField(t.reminders?.triggers ?? [], { custom: t.reminders?.custom });
+  $('#tk-remind-field', dlg).append(remField.el);
+  const dueInput = $('#tk-edit-due', dlg);
+  const syncRemindHint = () => {
+    const has = remField.getTriggers()?.length;
+    $('#tk-remind-hint', dlg).hidden = !(has && !dueInput.value);
+  };
+  dueInput.addEventListener('change', syncRemindHint);
+  remField.el.addEventListener('change', syncRemindHint);
+  remField.el.addEventListener('click', syncRemindHint);
+  syncRemindHint();
+
+  const tkSave = $('#tk-save', dlg);
+  // Save stays disabled until there's a title (an empty task has nothing to show).
+  enableOnValid($('#tk-title', dlg), tkSave, v => !!v.trim());
+  tkSave.addEventListener('click', busyWhile(tkSave, async () => {
     const summary = $('#tk-title', dlg).value.trim();
-    if (!summary) { $('#tk-error', dlg).textContent = 'Please enter a title.'; return; }
+    if (!summary) return;   // guarded by the disabled button
     try {
       await store.updateTask(t, {
         summary,
         due: $('#tk-edit-due', dlg).value,
         notes: $('#tk-notes', dlg).value.trim(),
+        reminders: remField.getTriggers(),
       });
       close();
       toast('Task saved.');
@@ -155,7 +177,7 @@ function taskDialog(t) {
       if (e.conflict) { $('#tk-error', dlg).textContent = e.message; store.loadTasks(true).catch(() => {}); }
       else showError(e);
     }
-  });
+  }));
   $('#tk-delete', dlg).addEventListener('click', async () => {
     if (!await confirmDialog('Delete this task?', { confirmLabel: 'Delete', danger: true })) return;
     try { await store.deleteTask(t); close(); toast('Task deleted.'); }

@@ -75,6 +75,9 @@ export function taskFrom(todo, href, calHref, etag) {
     notes: ical.icalUnescape(ical.propValue(todo, 'DESCRIPTION')),
     due: dueProp ? ical.parseICalDate(dueProp.value, dueProp.params) : null,
     done: status === 'COMPLETED' || !!ical.prop(todo, 'COMPLETED'),
+    // Reminders anchor to DUE (RELATED=END); anything we can't model reads back
+    // as {custom:true} so the editor keeps it untouched.
+    reminders: ical.readReminders(todo, 'END'),
   };
 }
 
@@ -93,23 +96,27 @@ export function dueBucket(task, now = new Date()) {
 
 // createTask writes a new VTODO to the given list. due: date input value
 // (YYYY-MM-DD) or ''.
-export async function createTask(calHref, { summary, due, notes }) {
+export async function createTask(calHref, { summary, due, notes, reminders }) {
   const uid = crypto.randomUUID();
   await putObject(calHref + encodeURIComponent(uid) + '.ics',
-    ical.buildTodo({ uid, summary, due: due || null, description: notes || '' }), null);
+    ical.buildTodo({ uid, summary, due: due || null, description: notes || '', alarms: reminders || [] }), null);
   await loadTasks(true);
 }
 
 // updateTask rewrites the modeled fields on the stored VTODO in place,
-// preserving alarms and properties the editor doesn't model.
-export async function updateTask(task, { summary, due, notes }) {
+// preserving alarms and properties the editor doesn't model. reminders is a
+// list of trigger durations to write (anchored to DUE), or null/undefined to
+// leave the stored alarms untouched (the editor's "kept as is" state).
+export async function updateTask(task, { summary, due, notes, reminders }) {
   const { text, etag } = await getObject(task.href);
   const props = {
     SUMMARY: `SUMMARY:${ical.icalEscape(summary)}`,
     DUE: due ? `DUE;VALUE=DATE:${ical.dateOnly(due)}` : null,
     DESCRIPTION: notes ? `DESCRIPTION:${ical.icalEscape(notes)}` : null,
   };
-  await putObject(task.href, ical.setMasterProps(text, props, 'VTODO'), etag);
+  let out = ical.setMasterProps(text, props, 'VTODO');
+  if (reminders != null) out = ical.setMasterAlarms(out, reminders, summary, 'VTODO', 'END');
+  await putObject(task.href, out, etag);
   await loadTasks(true);
 }
 

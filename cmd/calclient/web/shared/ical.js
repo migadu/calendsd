@@ -28,7 +28,7 @@ export function dateOnly(v) { return v.replaceAll('-', ''); }
 // buildEvent and the calweb override editor. attendees: email strings or
 // {email, partstat, cn} objects.
 export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = [],
-  organizer, attendees = [], description, location, url, recurrenceId, confidential, alarm }) {
+  organizer, attendees = [], description, location, url, recurrenceId, confidential, alarms }) {
   const dt = allDay
     ? v => `;VALUE=DATE:${dateOnly(v)}`
     : v => `:${utc(v)}`;
@@ -60,16 +60,16 @@ export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = 
     const partstat = at.partstat || 'NEEDS-ACTION';
     l.push(`ATTENDEE;PARTSTAT=${partstat}${at.room ? ';CUTYPE=ROOM' : ''};RSVP=TRUE:mailto:${at.email}`);
   }
-  // alarm is an iCal trigger duration relative to the start (e.g. '-PT15M',
-  // 'PT0S' for at-start); a single DISPLAY reminder, emitted last so it nests
-  // as a sub-component after the properties.
-  if (alarm) l.push(...alarmLines(alarm, summary));
+  // alarms is a list of iCal trigger durations relative to the start (e.g.
+  // '-PT15M', 'PT0S' for at-start); each becomes one DISPLAY reminder, emitted
+  // last so they nest as sub-components after the properties.
+  for (const trg of alarms || []) l.push(...alarmLines(trg, summary));
   return l;
 }
 
-// The presets the reminder control offers, newest-first by how the UI reads:
-// canonical trigger string → label. Kept here so alarmPreset can match a stored
-// trigger against the same set the editor writes. 'PT0S' fires at the start.
+// The presets each reminder row offers: canonical trigger string → label. The
+// reminder control matches a stored trigger against this set to pick a row's
+// dropdown value, falling back to its Custom controls. 'PT0S' fires at the start.
 export const REMINDER_PRESETS = [
   ['PT0S', 'At time of event'],
   ['-PT5M', '5 minutes before'],
@@ -80,11 +80,45 @@ export const REMINDER_PRESETS = [
 ];
 
 // alarmLines renders one DISPLAY VALARM (RFC 5545 §3.6.6 requires ACTION,
-// TRIGGER and — for DISPLAY — DESCRIPTION).
-function alarmLines(trigger, summary) {
+// TRIGGER and — for DISPLAY — DESCRIPTION). related anchors the trigger to the
+// component's start ('START', events) or end ('END', a task's DUE).
+function alarmLines(trigger, summary, related = 'START') {
   return ['BEGIN:VALARM', 'ACTION:DISPLAY',
     `DESCRIPTION:${icalEscape(summary || 'Reminder')}`,
-    `TRIGGER;RELATED=START:${trigger}`, 'END:VALARM'];
+    `TRIGGER;RELATED=${related}:${trigger}`, 'END:VALARM'];
+}
+
+// The units the reminder editor offers for a custom offset, largest first so
+// triggerToOffset prefers "1 week" over "7 days". Each is [unit, milliseconds].
+const OFFSET_UNITS = [['weeks', 604800000], ['days', 86400000], ['hours', 3600000], ['minutes', 60000]];
+
+// offsetToTrigger builds an iCal trigger duration from the editor's custom
+// controls: when 'at' fires at the event's time (PT0S), 'before'/'after' offset
+// by amount of the unit. Returns a canonical duration like '-PT15M' or 'P2D'.
+export function offsetToTrigger({ when, amount, unit }) {
+  if (when === 'at') return 'PT0S';
+  const n = Math.max(1, Math.floor(Number(amount) || 0));
+  const sign = when === 'after' ? '' : '-';
+  const body = unit === 'minutes' ? `PT${n}M`
+    : unit === 'hours' ? `PT${n}H`
+    : unit === 'weeks' ? `P${n}W`
+    : `P${n}D`;
+  return sign + body;
+}
+
+// triggerToOffset maps a trigger duration back onto {when, amount, unit} for the
+// editor, choosing the largest unit that divides evenly. Returns null when the
+// value isn't a duration we can model (an absolute DATE-TIME trigger).
+export function triggerToOffset(trigger) {
+  const ms = parseDuration(trigger);
+  if (ms == null) return null;
+  if (ms === 0) return { when: 'at', amount: 0, unit: 'minutes' };
+  const when = ms < 0 ? 'before' : 'after';
+  const abs = Math.abs(ms);
+  for (const [unit, per] of OFFSET_UNITS) {
+    if (abs % per === 0) return { when, amount: abs / per, unit };
+  }
+  return { when, amount: Math.round(abs / 60000), unit: 'minutes' };
 }
 
 // buildEvent renders a single-VEVENT VCALENDAR.
@@ -97,7 +131,7 @@ export function buildEvent(fields) {
 // buildTodo renders a single-VTODO VCALENDAR for the tasks view. due is a
 // date input value (YYYY-MM-DD, written as VALUE=DATE) or a Date/ISO string
 // (written as UTC DATE-TIME); null omits DUE.
-export function buildTodo({ uid, summary, due, description }) {
+export function buildTodo({ uid, summary, due, description, alarms }) {
   const l = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//calclient//EN',
     'BEGIN:VTODO',
@@ -111,6 +145,9 @@ export function buildTodo({ uid, summary, due, description }) {
       ? `DUE;VALUE=DATE:${dateOnly(due)}` : `DUE:${utc(due)}`);
   }
   if (description) l.push(`DESCRIPTION:${icalEscape(description)}`);
+  // Task reminders anchor to DUE (RELATED=END) — a VTODO carries no DTSTART to
+  // hang a start-relative trigger on.
+  for (const trg of alarms || []) l.push(...alarmLines(trg, summary, 'END'));
   l.push('END:VTODO', 'END:VCALENDAR');
   return l.join('\r\n') + '\r\n';
 }
@@ -288,15 +325,16 @@ export function setMasterProps(text, props, comp = 'VEVENT') {
   return fold([...lines.slice(0, b), ...body, ...lines.slice(e + 1)]);
 }
 
-// setMasterAlarm replaces the reminder on the master VEVENT: it drops every
-// existing VALARM sub-component and, when `trigger` is a non-empty duration,
-// inserts a single DISPLAY alarm before the master's END. An empty trigger just
-// clears the alarms. Only call this once the user has actually chosen a reminder
-// (or "none") in the editor — leaving alarms the editor doesn't model untouched
-// is setMasterProps's job, not this one's.
-export function setMasterAlarm(text, trigger, description = '') {
+// setMasterAlarms replaces the reminders on the master component (VEVENT or
+// VTODO): it drops every existing VALARM sub-component and re-emits one DISPLAY
+// alarm per trigger in `triggers`, before the master's END. An empty list just
+// clears the alarms. related anchors the new triggers ('START' for events,
+// 'END' for a task's DUE). Only call this once the user has actually chosen the
+// reminders in the editor — leaving alarms the editor doesn't model untouched is
+// setMasterProps's job, not this one's.
+export function setMasterAlarms(text, triggers, description = '', comp = 'VEVENT', related = 'START') {
   const lines = unfold(text);
-  const range = masterComponentRange(lines, 'VEVENT');
+  const range = masterComponentRange(lines, comp);
   if (!range) return text;
   const [b, e] = range;
   const body = [];
@@ -307,7 +345,7 @@ export function setMasterAlarm(text, trigger, description = '') {
     if (inAlarm) { if (/^END:VALARM$/i.test(line)) inAlarm = false; continue; }
     if (/^BEGIN:/i.test(line)) { depth++; body.push(line); continue; }
     if (/^END:/i.test(line)) {
-      if (--depth === 0 && trigger) body.push(...alarmLines(trigger, description));
+      if (--depth === 0) for (const trg of triggers) body.push(...alarmLines(trg, description, related));
       body.push(line);
       continue;
     }
@@ -316,24 +354,24 @@ export function setMasterAlarm(text, trigger, description = '') {
   return fold([...lines.slice(0, b), ...body, ...lines.slice(e + 1)]);
 }
 
-// alarmPreset maps the master VEVENT's reminder onto a REMINDER_PRESETS trigger
-// string for the editor's dropdown: '' when there is no alarm, a preset trigger
-// when the single alarm is a plain relative-to-start DISPLAY reminder we can
-// reproduce, or 'CUSTOM' for anything richer (multiple alarms, an absolute or
-// RELATED=END trigger, a non-DISPLAY action) so the editor can keep it as is.
-export function alarmPreset(vevent) {
-  const alarms = (vevent.children || []).filter(c => c.type === 'VALARM');
-  if (!alarms.length) return '';
-  if (alarms.length > 1) return 'CUSTOM';
-  const a = alarms[0];
-  const trig = prop(a, 'TRIGGER');
-  if (propValue(a, 'ACTION').toUpperCase() !== 'DISPLAY' || !trig) return 'CUSTOM';
-  if ((trig.params.VALUE || '').toUpperCase() === 'DATE-TIME') return 'CUSTOM';
-  if ((trig.params.RELATED || 'START').toUpperCase() !== 'START') return 'CUSTOM';
-  const ms = parseDuration(trig.value);
-  if (ms == null) return 'CUSTOM';
-  const hit = REMINDER_PRESETS.find(([t]) => parseDuration(t) === ms);
-  return hit ? hit[0] : 'CUSTOM';
+// readReminders maps a component's VALARMs onto the editor's model: a list of
+// trigger strings when every alarm is a plain relative DISPLAY reminder we can
+// reproduce, or {custom:true} for anything richer (a non-DISPLAY action, an
+// absolute trigger, a RELATED that doesn't match) so the editor can keep the
+// whole set as is. related is the anchor the reminders are expected to use
+// ('START' for events, 'END' for a task's DUE). No alarms → an empty list.
+export function readReminders(component, related = 'START') {
+  const alarms = (component.children || []).filter(c => c.type === 'VALARM');
+  const triggers = [];
+  for (const a of alarms) {
+    const trig = prop(a, 'TRIGGER');
+    if (propValue(a, 'ACTION').toUpperCase() !== 'DISPLAY' || !trig) return { triggers: [], custom: true };
+    if ((trig.params.VALUE || '').toUpperCase() === 'DATE-TIME') return { triggers: [], custom: true };
+    if ((trig.params.RELATED || 'START').toUpperCase() !== related) return { triggers: [], custom: true };
+    if (parseDuration(trig.value) == null) return { triggers: [], custom: true };
+    triggers.push(trig.value);
+  }
+  return { triggers, custom: false };
 }
 
 // shiftDate rewrites a DTSTART/DTEND line shifted by deltaMs, or returns null

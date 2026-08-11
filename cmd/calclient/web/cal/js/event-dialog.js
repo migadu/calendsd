@@ -7,8 +7,9 @@ import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
 import { $, html, frag } from '/shared/dom.js';
 import { DAY, localDate, formatTimeOfDay, parseTimeOfDay } from '/shared/time.js';
-import { toast, showError } from './ui.js';
+import { toast, showError, busyWhile } from './ui.js';
 import { createGuestField } from './guest-field.js';
+import { createReminderField } from './reminder-field.js';
 import { checkAvailability } from './availability.js';
 import { confirmDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
@@ -85,10 +86,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
         <span id="ev-count-unit" hidden>times</span>
         <input id="ev-until" type="date" hidden>
       </span></label>
-      <label>Reminder<select id="ev-remind">
-        <option value="">No reminder</option>
-        ${ical.REMINDER_PRESETS.map(([val, label]) => frag`<option value="${val}">${label}</option>`)}
-      </select></label>
+      <label class="full" id="ev-remind-field">Reminders</label>
       <label class="full">Location<input id="ev-loc" type="text" value="${inst?.location ?? ''}" placeholder="Add a location"></label>
       <label class="full">Meeting link<input id="ev-url" type="url" value="${inst?.url ?? ''}" placeholder="e.g. https://zoom.us/j/123456789"></label>
       <label class="full row"><input type="checkbox" id="ev-private" ${inst?.confidential ? 'checked' : ''}> Private — anyone this calendar is shared with read-only sees only “Busy”, not the title or details</label>
@@ -281,22 +279,44 @@ export async function openEventDialog(inst, defaultDay, timed) {
   q('#ev-guests').append(createGuestField(guests, syncGuestUI));
   syncGuestUI();
 
-  // reminder: read the stored master's alarm onto the dropdown. A shape we
-  // can't reproduce (an EMAIL alarm, several alarms, an absolute trigger)
-  // surfaces as "Custom" and is left untouched unless the user picks something
-  // else — the same "kept as is" contract the Custom repeat option uses.
-  const remindSel = q('#ev-remind');
-  const curReminder = masterVevent ? ical.alarmPreset(masterVevent) : '';
-  if (curReminder === 'CUSTOM') {
-    remindSel.append(html`<option value="CUSTOM" selected>Custom reminder (kept as is)</option>`);
-  } else {
-    remindSel.value = curReminder;
+  // reminders: read the stored master's alarms onto the list control. A shape
+  // we can't reproduce (an EMAIL alarm, an absolute or end-relative trigger)
+  // surfaces as "kept as is" and is left untouched unless the user replaces it —
+  // the same contract the Custom repeat option uses.
+  const curReminders = masterVevent ? ical.readReminders(masterVevent) : { triggers: [], custom: false };
+  const remField = createReminderField(curReminders.triggers, { custom: curReminders.custom });
+  q('#ev-remind-field').append(remField.el);
+
+  // Live validation: keep Save disabled until there's a title and a sane
+  // start/end, and surface a time problem inline as the user edits rather than
+  // only after a click. A read-only share disables Save wholesale below, so
+  // skip live validation there.
+  const saveBtn = q('#ev-save');
+  function validate() {
+    const t = readTimes();
+    let msg = '';
+    if (t.badTime) msg = `Please enter a time like ${hour12 ? '1:30 PM' : '13:00'}.`;
+    else if (t.start && t.end && t.end <= t.start) msg = 'Please pick an end after the start.';
+    q('#ev-error').textContent = msg;
+    saveBtn.disabled = !q('#ev-title').value.trim() || !t.start || !t.end || !!msg;
+  }
+  if (!roCal) {
+    q('#ev-title').addEventListener('input', validate);
+    startD.addEventListener('input', validate);
+    endD.addEventListener('change', validate);
+    startT.addEventListener('change', validate);
+    endT.addEventListener('change', validate);
+    allDayBox.addEventListener('change', validate);
+    validate();
   }
 
   // save ------------------------------------------------------------------
-  q('#ev-save').addEventListener('click', async () => {
+  saveBtn.addEventListener('click', busyWhile(saveBtn, async () => {
     const t = readTimes();
-    const title = q('#ev-title').value.trim() || 'Untitled event';
+    const title = q('#ev-title').value.trim();
+    // Save is disabled while any of these hold, so these guard the rare
+    // Enter/edge path rather than the normal click.
+    if (!title) { q('#ev-title').focus(); return; }
     if (t.badTime) {
       q('#ev-error').textContent = `Please enter a time like ${hour12 ? '1:30 PM' : '13:00'}.`;
       return;
@@ -331,9 +351,10 @@ export async function openEventDialog(inst, defaultDay, timed) {
       attendees: guests,
       rrule,
       confidential: q('#ev-private').checked,
-      // '' = no reminder; a preset trigger writes one DISPLAY VALARM. 'CUSTOM'
-      // means the stored alarm is one we don't model, so leave it as it was.
-      alarm: remindSel.value === 'CUSTOM' ? '' : remindSel.value,
+      // A list of trigger durations, one DISPLAY VALARM each; [] clears reminders.
+      // null means the stored alarms are ones we don't model — leave them as they
+      // are (the control was never switched out of "kept as is").
+      alarms: remField.getTriggers(),
     };
     // Property lines shared by the in-place edit paths. null removes the
     // property; the attendee list is rewritten wholesale when guests change.
@@ -349,11 +370,11 @@ export async function openEventDialog(inst, defaultDay, timed) {
       // null removes CLASS, restoring the PUBLIC default.
       CLASS: fields.confidential ? 'CLASS:CONFIDENTIAL' : null,
     };
-    // applyReminder rewrites the alarm on an in-place master edit, but only once
-    // the user has picked a modeled reminder — a "Custom (kept as is)" selection
+    // applyReminder rewrites the alarms on an in-place master edit, but only once
+    // the user has edited the reminder list — a "kept as is" selection (null)
     // leaves whatever alarms setMasterProps already preserved.
-    const applyReminder = text => remindSel.value === 'CUSTOM'
-      ? text : ical.setMasterAlarm(text, fields.alarm, fields.summary);
+    const applyReminder = text => fields.alarms == null
+      ? text : ical.setMasterAlarms(text, fields.alarms, fields.summary);
     try {
       if (!inst) {
         await store.putObject(store.eventHref(calSel.value, fields.uid),
@@ -418,7 +439,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
       if (e.conflict) { q('#ev-error').textContent = e.message; store.refreshEvents().catch(() => {}); }
       else showError(e);
     }
-  });
+  }));
 
   // delete ----------------------------------------------------------------
   $('#ev-delete', dlg)?.addEventListener('click', async () => {

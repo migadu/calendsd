@@ -337,6 +337,17 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .suggest-list button.active { background: var(--color-background-alt); }
 .suggest-list .mail { color: var(--dim); font-size: .78rem; }
 
+/* reminders: a list of VALARM rows, each a preset or a custom offset */
+.reminders { display: flex; flex-direction: column; align-items: flex-start; gap: .35rem; margin-top: .2rem; }
+.rem-list { display: flex; flex-direction: column; gap: .35rem; width: 100%; }
+.rem-row { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.rem-row .rem-amount { width: 4rem; }
+.rem-row .rem-remove { border: none; background: none; color: var(--dim); font-size: 1.1rem; line-height: 1; padding: 0 .3rem; cursor: pointer; }
+.rem-row .rem-remove:hover { color: var(--danger); }
+.rem-custom { display: inline-flex; align-items: center; gap: .3rem; }
+.rem-add { padding: .1rem .3rem; font-size: .8rem; }
+.rem-kept { color: var(--dim); font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+
 /* a small dim explanatory line inside the dialog grid */
 .dialog .hint { color: var(--dim); font-size: .78rem; margin: -.2rem 0 .2rem; }
 
