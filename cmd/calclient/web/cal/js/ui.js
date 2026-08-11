@@ -13,8 +13,41 @@ export function toast(msg, isError = false) {
   t.textContent = msg;
   t.classList.toggle('error', isError);
   t.hidden = false;
+  // Click to dismiss — an error can outlast its 6s timer, and this lets the
+  // reader clear it early. Assigning each call is idempotent (one handler).
+  t.onclick = () => { clearTimeout(toastTimer); t.hidden = true; };
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 6000 : 3000);
+}
+
+// enableOnValid ties a submit button's enabled state to a live check of an
+// input, so an action button only lights up once its field is usable (e.g. a
+// Share button waits for an @ in the email). Runs once up front, then on every
+// keystroke. Stashes the sync on the button so busyWhile can restore validity
+// after an async run rather than blindly re-enabling.
+export function enableOnValid(input, btn, valid) {
+  const sync = () => { btn.disabled = !valid(input.value); };
+  btn._syncValid = sync;
+  input.addEventListener('input', sync);
+  sync();
+}
+
+// busyWhile wraps an async click handler so the button disables and shows the
+// shared spinner (.is-busy) for the duration of `fn`, blocking the double-click
+// that would otherwise fire a second invite or duplicate event. Afterwards it
+// restores the enabled state — re-evaluating enableOnValid if one is attached
+// (the field may have been cleared on success), else simply re-enabling.
+export function busyWhile(btn, fn) {
+  return async (...args) => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    try { return await fn(...args); }
+    finally {
+      btn.classList.remove('is-busy');
+      if (btn._syncValid) btn._syncValid(); else btn.disabled = false;
+    }
+  };
 }
 
 // linkify escapes text, turns http(s) URLs into clickable links (so a meeting
