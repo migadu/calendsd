@@ -1,0 +1,118 @@
+/* theme.css — shared design system for calclient, matching the migadu static
+   site: IBM Plex Sans/Mono, a cool-blue palette with a light/dark scheme, sharp
+   corners, and mono uppercase labels. Linked before each app's own stylesheet;
+   cal.css and app.css map their semantic vars (--bg, --panel, --accent, …) onto
+   the --color-* tokens defined here. */
+
+/* ---- Self-hosted fonts (offline; no external requests) ---- */
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 300; font-display: swap;
+  src: url("fonts/IBMPlexSans-Light.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/IBMPlexSans-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/IBMPlexMono-SemiBold.woff2") format("woff2");
+}
+
+/* ---- Design tokens (light) ---- */
+:root {
+  color-scheme: light dark;
+
+  --font-sans: "IBM Plex Sans", -apple-system, blinkmacsystemfont, "Segoe UI", roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, sfmono-regular, "SF Mono", menlo, monospace;
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --label-letter-spacing: 0.08em;
+
+  --color-text-primary: #0B1A3A;
+  --color-text-secondary: #334A7A;
+  --color-text-muted: #5A6F9C;
+  --color-text-subtle: #7F90B8;
+  --color-background-base: #EEF3FF;
+  --color-background-alt: #E3EBFF;
+  --color-background-sidebar: #D6E2FF;
+  --color-background-command: #F4F7FF;
+  --color-background-active: #FFF;
+  --color-border-subtle: #B8C8F2;
+  --color-border-active: #5B7FFF;
+  --color-button-label: #EAF0FF;
+  --color-brand-blue: #3570FF;
+  --color-canary-yellow: #F2F230;
+  --color-crimson: #F6511D;
+  --color-status-green: #388E3C;
+  --color-status-blue: #1976D2;
+  --color-status-yellow: #D4A500;
+  --color-status-red: #C62828;
+}
+
+/* ---- Design tokens (dark) ---- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary: #EAF0FF;
+    --color-text-secondary: #B6C4E6;
+    --color-text-muted: #8FA3D1;
+    --color-text-subtle: #6E84B8;
+    --color-background-base: #0E1D42;
+    --color-background-alt: #13285A;
+    --color-background-sidebar: #183372;
+    --color-background-command: #050A1A;
+    --color-background-active: #030617;
+    --color-border-subtle: #3B4F85;
+    --color-border-active: #AFC3FF;
+    --color-brand-blue: #3570FF;
+    --color-status-green: #4DAF8B;
+    --color-status-blue: #63A3E2;
+    --color-status-yellow: #FEFE7C;
+    --color-status-red: #FF7171;
+  }
+}
+
+/* ---- Base ---- */
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizelegibility;
+}
+
+/* Sharp, blueprint-like corners everywhere (migadu --layout-radius: 0). This is
+   deliberately heavy-handed; genuinely circular primitives (avatars, dots,
+   spinners) must restore their radius with !important — see cal.css. */
+*, *::before, *::after { border-radius: 0 !important; }
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-blue);
+  outline-offset: 2px;
+}
+
+/* Thin blue scrollbars. */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--color-border-active) transparent; }
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-background-alt); }
+::-webkit-scrollbar-thumb { background: var(--color-border-active); }
+
+/* Mono, uppercase, letter-spaced labels — the migadu "label" style. Opt-in
+   utilities for markup; cal.css also applies this treatment to specific
+   label-like elements via its own selectors, sharing --label-letter-spacing. */
+.u-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: var(--label-letter-spacing);
+  color: var(--color-text-subtle);
+}
+.u-mono { font-family: var(--font-mono); }
