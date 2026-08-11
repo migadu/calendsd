@@ -74,12 +74,31 @@ test('dragging a calendar reorders it and persists calendar-order', async ({ pag
   }
 });
 
-// A read-write sharee edits the calendar's color in the manage dialog (its
-// color input is enabled, like any writable calendar); with per_user_props that
-// write is stored per-sharee and doesn't disturb the owner's color. (Read-only
-// sharees can't set a color — the server denies the property write — so calweb
-// keeps that input disabled.)
-test('a read-write sharee sets their own color without changing the owner’s', async ({ request }) => {
+test('reordering to the same order writes nothing', async ({ page, request }) => {
+  const a = await mkcal(request, `${TAG}-noopA-${Date.now()}`);
+  const b = await mkcal(request, `${TAG}-noopB-${Date.now()}`);
+  try {
+    await login(page);
+    await expect(page.locator(`#cal-list li[data-href="${a}"]`)).toBeVisible();
+    // reorder with the current order — the no-op guard should skip all writes
+    await page.evaluate(async () => {
+      const s = await import('/shared/store.js');
+      await s.reorderCalendars(s.state.calendars.filter(c => !c.delegatedFrom).map(c => c.href));
+    });
+    // the fresh calendars still carry no calendar-order (nothing was PROPPATCHed)
+    expect(Number.isNaN(await order(request, a)), 'aaa order unset').toBe(true);
+    expect(Number.isNaN(await order(request, b)), 'bbb order unset').toBe(true);
+  } finally {
+    await del(request, a); await del(request, b);
+  }
+});
+
+// A read-write sharee changes the color in the manage dialog and clicks Save;
+// with per_user_props that write is stored per-sharee and doesn't disturb the
+// owner's. (user02 has no room proxies, so its sidebar loads fast enough for the
+// save's reload; a read-only sharee can't — the server denies the write — so
+// that input stays disabled.)
+test('a read-write sharee sets their own color through the manage dialog', async ({ browser, request }) => {
   const name = `${TAG}-share-${Date.now()}`;
   const cal = await mkcal(request, name);
   const user02Auth = { Authorization: 'Basic ' + Buffer.from('user02:user02').toString('base64') };
@@ -87,25 +106,28 @@ test('a read-write sharee sets their own color without changing the owner’s', 
     data: `<?xml version="1.0"?><d:propertyupdate ${XMLNS}><d:set><d:prop><a:calendar-color>#112233ff</a:calendar-color></d:prop></d:set></d:propertyupdate>` });
   await request.fetch(cal, { method: 'POST', headers: { ...bobAuth, 'Content-Type': 'application/xml' },
     data: `<?xml version="1.0"?><cs:share ${XMLNS}><cs:set><d:href>mailto:user02@example.org</d:href><cs:summary></cs:summary><cs:read-write/></cs:set></cs:share>` });
+  const ctx = await browser.newContext();
   try {
-    // The auto-accepted share has a server-assigned href in user02's home.
-    const home = await request.fetch('/calendars/user02/', {
-      method: 'PROPFIND', headers: { ...user02Auth, Depth: '1', 'Content-Type': 'application/xml' },
-      data: `<?xml version="1.0"?><d:propfind ${XMLNS}><d:prop><d:displayname/></d:prop></d:propfind>`,
-    });
-    const body = await home.text();
-    const shareHref = [...body.matchAll(/<d:response>[\s\S]*?<d:href>([^<]+)<\/d:href>[\s\S]*?<d:displayname>([^<]*)<\/d:displayname>/g)]
-      .find(m => m[2] === name)?.[1];
-    expect(shareHref, 'shared calendar in user02 home').toBeTruthy();
+    const page = await ctx.newPage();
+    await login(page, 'user02', 'user02');
+    const row = page.locator('#cal-list li', { hasText: name });
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    const shareHref = await row.getAttribute('data-href');
 
-    const patch = await request.fetch(shareHref, {
-      method: 'PROPPATCH', headers: { ...user02Auth, 'Content-Type': 'application/xml' },
-      data: `<?xml version="1.0"?><d:propertyupdate ${XMLNS}><d:set><d:prop><a:calendar-color>#aa0000ff</a:calendar-color></d:prop></d:set></d:propertyupdate>`,
-    });
-    expect(patch.status(), 'sharee color proppatch').toBe(207);
-    expect((await colorOf(request, shareHref, user02Auth)).toLowerCase()).toContain('aa0000'); // sharee's own
-    expect((await colorOf(request, cal, bobAuth)).toLowerCase()).toContain('112233');           // owner unchanged
+    await row.hover();                                   // reveal the gear (visibility:hidden until hover)
+    await row.locator('.gear').click();
+    await expect(page.locator('#cm-color')).toBeEnabled();
+    // A native type=color input can't be typed into; set its value directly, as
+    // the color picker would, then Save.
+    await page.locator('#cm-color').evaluate(el => { el.value = '#aa0000'; });
+    await page.click('#cm-save');
+    await expect(page.locator('#cm-color')).toHaveCount(0);  // dialog closed = save landed
+
+    // Stored per-sharee, and the owner's color is untouched.
+    expect((await colorOf(request, shareHref, user02Auth)).toLowerCase()).toContain('aa0000');
+    expect((await colorOf(request, cal, bobAuth)).toLowerCase()).toContain('112233');
   } finally {
+    await ctx.close();
     await del(request, cal);
   }
 });

@@ -47,6 +47,20 @@ test('grant and revoke a delegate through Settings', async ({ page, request }) =
   expect(await proxyMembers(request, 'write')).not.toContain('/principals/user01/');
 });
 
+test('an ambiguous email match is refused, not granted to a guess', async ({ page, request }) => {
+  await login(page);
+  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.locator('#st-del-email').waitFor({ state: 'visible' });
+
+  // "user0" is a substring of user01…user09; since the principal's exact email
+  // can't be confirmed, resolvePrincipal must refuse rather than pick one.
+  await page.fill('#st-del-email', 'user0');
+  await page.click('#st-del-add');
+  await expect(page.locator('#st-del-error')).toContainText('No calendar user found');
+  await expect(page.locator('#st-delegates .sharee')).toHaveCount(0);
+  expect(await proxyMembers(request, 'write')).not.toContain('/principals/user0');
+});
+
 test('a delegated calendar appears in the delegate’s sidebar', async ({ browser, request }) => {
   // Grant user01 write access to bob's calendars over CalDAV.
   const grant = `<?xml version="1.0" encoding="utf-8"?>\n<d:propertyupdate ${XMLNS}><d:set><d:prop>` +
