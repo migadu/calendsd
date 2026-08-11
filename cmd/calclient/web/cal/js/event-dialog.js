@@ -70,6 +70,11 @@ export async function openEventDialog(inst, defaultDay, timed) {
         <option value="MONTHLY">Every month</option>
         <option value="YEARLY">Every year</option>
       </select></label>
+      <label id="ev-interval-wrap" hidden>Every<span style="display:flex;gap:.3rem;align-items:center">
+        <input id="ev-interval" type="number" min="1" max="365" value="1" style="width:4.5rem" ${isRecurring ? 'disabled' : ''}>
+        <span id="ev-interval-unit"></span>
+      </span></label>
+      <label id="ev-byday-wrap" class="full" hidden>On<span id="ev-byday" class="byday"></span></label>
       <label id="ev-ends-wrap" hidden>Repeat ends<span style="display:flex;gap:.3rem;align-items:center">
         <select id="ev-ends">
           <option value="never">never</option>
@@ -207,17 +212,34 @@ export async function openEventDialog(inst, defaultDay, timed) {
 
   // repeat controls
   const freqSel = q('#ev-freq'), endsWrap = q('#ev-ends-wrap'), endsSel = q('#ev-ends');
+  const intervalWrap = q('#ev-interval-wrap'), bydayWrap = q('#ev-byday-wrap'), bydayBox = q('#ev-byday');
+  // Weekday toggles for weekly repeats, ordered from the user's week start.
+  const WEEKDAYS = [['SU', 'Sun'], ['MO', 'Mon'], ['TU', 'Tue'], ['WE', 'Wed'], ['TH', 'Thu'], ['FR', 'Fri'], ['SA', 'Sat']];
+  const bydaySet = new Set(rrulePreset?.byday ?? []);
+  const startWk = store.state.prefs.weekStart === 0 ? 0 : 1;
+  for (let i = 0; i < 7; i++) {
+    const [code, label] = WEEKDAYS[(startWk + i) % 7];
+    const b = html`<button type="button" class="wd ${bydaySet.has(code) ? 'on' : ''}" data-wd="${code}" ${isRecurring ? 'disabled' : ''}>${label}</button>`;
+    b.addEventListener('click', () => { b.classList.toggle('on') ? bydaySet.add(code) : bydaySet.delete(code); });
+    bydayBox.append(b);
+  }
   if (rrulePreset) {
     freqSel.value = rrulePreset.freq;
     endsSel.value = rrulePreset.ends;
+    q('#ev-interval').value = rrulePreset.interval ?? 1;
     q('#ev-count').value = rrulePreset.count ?? '10';
     q('#ev-until').value = rrulePreset.until ?? '';
   } else {
     // complex RRULE: keep it verbatim, disable the preset UI
     freqSel.append(html`<option value="CUSTOM" selected>Custom repeat (kept as is)</option>`);
   }
+  const FREQ_UNIT = { DAILY: 'days', WEEKLY: 'weeks', MONTHLY: 'months', YEARLY: 'years' };
   function syncRepeat() {
-    endsWrap.hidden = !freqSel.value || freqSel.value === 'CUSTOM';
+    const on = !!freqSel.value && freqSel.value !== 'CUSTOM';
+    intervalWrap.hidden = !on;
+    q('#ev-interval-unit').textContent = FREQ_UNIT[freqSel.value] || '';
+    bydayWrap.hidden = freqSel.value !== 'WEEKLY';
+    endsWrap.hidden = !on;
     const byCount = endsSel.value === 'count';
     q('#ev-count').hidden = !byCount;
     q('#ev-count-unit').hidden = !byCount;
@@ -282,6 +304,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
     const scope = isRecurring ? q('#ev-scope').value : '';
     const rrule = freqSel.value === 'CUSTOM' ? inst.rrule : ical.buildRRule({
       freq: freqSel.value, ends: endsSel.value,
+      interval: q('#ev-interval').value, byday: [...bydaySet],
       count: q('#ev-count').value, until: q('#ev-until').value,
     });
     const fields = {

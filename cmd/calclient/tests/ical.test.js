@@ -218,13 +218,13 @@ test('buildEvent renders CRLF iCal with DATE values for all-day', () => {
 });
 
 test('parseRRulePreset maps simple rules and rejects complex ones', () => {
-  assert.deepEqual(ical.parseRRulePreset(''), { freq: '', ends: 'never' });
+  assert.deepEqual(ical.parseRRulePreset(''), { freq: '', interval: 1, byday: [], ends: 'never' });
   assert.deepEqual(ical.parseRRulePreset('FREQ=WEEKLY;COUNT=5'),
-    { freq: 'WEEKLY', ends: 'count', count: '5', until: '' });
+    { freq: 'WEEKLY', interval: 1, byday: [], ends: 'count', count: '5', until: '' });
   assert.deepEqual(ical.parseRRulePreset('FREQ=DAILY;UNTIL=20260801T235959Z'),
-    { freq: 'DAILY', ends: 'until', count: '10', until: '2026-08-01' });
-  assert.equal(ical.parseRRulePreset('FREQ=WEEKLY;BYDAY=MO,WE'), null);
-  assert.equal(ical.parseRRulePreset('FREQ=WEEKLY;INTERVAL=2'), null);
+    { freq: 'DAILY', interval: 1, byday: [], ends: 'until', count: '10', until: '2026-08-01' });
+  assert.equal(ical.parseRRulePreset('FREQ=MONTHLY;BYSETPOS=2'), null); // still a complex rule
+  assert.equal(ical.parseRRulePreset('FREQ=WEEKLY;BYMONTH=3'), null);
 });
 
 test('buildRRule renders the preset back', () => {
@@ -427,4 +427,20 @@ test('eventLines marks a room attendee with CUTYPE=ROOM, people without', () => 
   const att = lines.filter(l => l.startsWith('ATTENDEE'));
   assert.ok(att.some(l => l.includes('room1@example.org') && l.includes('CUTYPE=ROOM')));
   assert.ok(att.some(l => l.includes('alice@example.org') && !l.includes('CUTYPE')));
+});
+
+test('buildRRule emits INTERVAL (>1) and weekly BYDAY', () => {
+  assert.equal(ical.buildRRule({ freq: 'DAILY', interval: 1, ends: 'never' }), 'FREQ=DAILY');
+  assert.equal(ical.buildRRule({ freq: 'WEEKLY', interval: 2, byday: ['MO', 'WE'], ends: 'never' }),
+    'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE');
+  assert.equal(ical.buildRRule({ freq: 'WEEKLY', interval: 1, byday: ['FR'], ends: 'count', count: '5' }),
+    'FREQ=WEEKLY;BYDAY=FR;COUNT=5');
+});
+
+test('parseRRulePreset reads INTERVAL and weekly BYDAY, rejects positional', () => {
+  assert.deepEqual(ical.parseRRulePreset('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE'),
+    { freq: 'WEEKLY', interval: 2, byday: ['MO', 'WE'], ends: 'never', count: '10', until: '' });
+  assert.equal(ical.parseRRulePreset('FREQ=MONTHLY;BYDAY=2MO'), null); // positional → custom
+  assert.equal(ical.parseRRulePreset('FREQ=DAILY;BYDAY=MO'), null);    // BYDAY only for weekly
+  assert.equal(ical.parseRRulePreset('FREQ=DAILY;INTERVAL=3').interval, 3);
 });

@@ -368,13 +368,19 @@ export function icalUnescape(v) {
 // {freq, ends, count, until}; returns null if the rule is too complex to
 // represent, so the editor can preserve it untouched.
 export function parseRRulePreset(rrule) {
-  if (!rrule) return { freq: '', ends: 'never' };
+  if (!rrule) return { freq: '', interval: 1, byday: [], ends: 'never' };
   const parts = Object.fromEntries(rrule.split(';').map(kv => kv.split('=')));
-  const known = ['FREQ', 'COUNT', 'UNTIL', 'INTERVAL'];
-  if (Object.keys(parts).some(k => !known.includes(k)) || (parts.INTERVAL && parts.INTERVAL !== '1')) return null;
+  const known = ['FREQ', 'COUNT', 'UNTIL', 'INTERVAL', 'BYDAY'];
+  if (Object.keys(parts).some(k => !known.includes(k))) return null;
   if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(parts.FREQ)) return null;
+  // BYDAY is offered only for weekly repeats, and only as plain weekday codes —
+  // positional forms like "2MO" stay a "custom" rule the UI leaves untouched.
+  const byday = parts.BYDAY ? parts.BYDAY.split(',') : [];
+  if (byday.length && (parts.FREQ !== 'WEEKLY' || byday.some(d => !/^(SU|MO|TU|WE|TH|FR|SA)$/.test(d)))) return null;
   return {
     freq: parts.FREQ,
+    interval: Math.max(1, parseInt(parts.INTERVAL || '1', 10)),
+    byday,
     ends: parts.COUNT ? 'count' : parts.UNTIL ? 'until' : 'never',
     count: parts.COUNT || '10',
     until: parts.UNTIL ? `${parts.UNTIL.slice(0, 4)}-${parts.UNTIL.slice(4, 6)}-${parts.UNTIL.slice(6, 8)}` : '',
@@ -385,6 +391,9 @@ export function parseRRulePreset(rrule) {
 export function buildRRule(d) {
   if (!d.freq) return '';
   let r = 'FREQ=' + d.freq;
+  const interval = Math.max(1, parseInt(d.interval || '1', 10));
+  if (interval > 1) r += ';INTERVAL=' + interval;
+  if (d.freq === 'WEEKLY' && d.byday?.length) r += ';BYDAY=' + d.byday.join(',');
   if (d.ends === 'count') r += ';COUNT=' + Math.max(1, parseInt(d.count || '1', 10));
   if (d.ends === 'until' && d.until) r += ';UNTIL=' + dateOnly(d.until) + 'T235959Z';
   return r;

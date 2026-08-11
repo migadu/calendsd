@@ -274,6 +274,10 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .dialog .dt-pair input[type="date"] { flex: 1; min-width: 0; }
 .dialog .dt-pair input.time-field { width: 6.2rem; flex: none; }
 .dialog .dt-pair input.time-field.invalid { border-color: var(--danger); }
+/* weekday toggles for a weekly repeat */
+.byday { display: inline-flex; flex-wrap: wrap; gap: .25rem; margin-left: .4rem; }
+.byday .wd { padding: .2rem .45rem; font-size: .8rem; }
+.byday .wd.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .dialog .note { color: var(--dim); font-size: .8rem; margin: .5rem 0; }
 
 /* calendar sharing (calendar settings dialog) */
