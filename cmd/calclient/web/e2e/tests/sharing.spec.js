@@ -84,6 +84,7 @@ test.describe('calendar sharing (owner side)', () => {
 
     // Revoke, and the roster returns to empty…
     await row.locator('[data-remove]').click();
+    await page.locator('.dialog [data-ok]').click();   // confirm stop-sharing
     await expect(dialog.locator('.sharee', { hasText: SHAREE })).toHaveCount(0);
     await expect(dialog.locator('#cm-sharees')).toContainText('Not shared with anyone yet');
     // …and the calendar is gone from user01's home again.

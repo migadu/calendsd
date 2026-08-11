@@ -3,7 +3,8 @@
 import * as store from '/shared/store.js';
 import * as pushSync from './push-sync.js';
 import { $, html, frag } from '/shared/dom.js';
-import { toast, showError } from './ui.js';
+import { toast, showError, enableOnValid, busyWhile } from './ui.js';
+import { confirmDialog } from '/shared/dialogs.js';
 import { contactsDedupSweep } from './contacts.js';
 
 export function renderSettings(main) {
@@ -76,12 +77,12 @@ export function renderSettings(main) {
       <div class="delegate-add">
         <input id="st-del-email" type="email" placeholder="person@example.org" autocomplete="off">
         <select id="st-del-access">
-          <option value="write">can edit</option>
           <option value="read">read-only</option>
+          <option value="write">can edit</option>
         </select>
-        <button id="st-del-add">Add</button>
+        <button id="st-del-add">Add delegate</button>
       </div>
-      <p class="error" id="st-del-error"></p>
+      <p class="error" id="st-del-error" role="alert" aria-live="assertive"></p>
     </section>
     <section>
       <h2>Account</h2>
@@ -151,10 +152,14 @@ export function renderSettings(main) {
         const row = html`<div class="sharee">
           <span>${m.name || m.email || m.href} <span class="type-tag">${ACCESS_LABEL[access]}</span></span>
           <button class="ghost" data-remove>Remove</button></div>`;
-        $('[data-remove]', row).addEventListener('click', async () => {
+        const rm = $('[data-remove]', row);
+        rm.addEventListener('click', busyWhile(rm, async () => {
+          const who = m.name || m.email || 'this person';
+          if (!await confirmDialog(`Remove ${who}'s access to your calendars?`,
+            { confirmLabel: 'Remove', danger: true })) return;
           try { await store.revokeDelegate(access, m.href); renderDelegates(); }
           catch (e) { showError(e); }
-        });
+        }));
         rows.push(row);
       }
     }
@@ -162,12 +167,16 @@ export function renderSettings(main) {
   }
   renderDelegates();
 
-  $('#st-del-add', el).addEventListener('click', async () => {
+  const delAdd = $('#st-del-add', el);
+  // Enable Add once the field is non-empty. Delegation resolves a principal by
+  // bare username or email, so we can't require an @ here — the server tells us
+  // if no such user exists.
+  enableOnValid($('#st-del-email', el), delAdd, v => !!v.trim());
+  delAdd.addEventListener('click', busyWhile(delAdd, async () => {
     const email = $('#st-del-email', el).value.trim();
     const access = $('#st-del-access', el).value;
     const err = $('#st-del-error', el);
     err.textContent = '';
-    if (!email) return;
     try {
       const who = await store.resolvePrincipal(email);
       if (!who) { err.textContent = `No calendar user found for ${email}.`; return; }
@@ -176,7 +185,7 @@ export function renderSettings(main) {
       await renderDelegates();
       toast('Delegate added.');
     } catch (e) { showError(e); }
-  });
+  }));
 
   const exp = $('#st-export', el);
   for (const c of store.state.calendars) {

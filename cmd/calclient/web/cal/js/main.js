@@ -4,7 +4,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
-import { toast, showError } from './ui.js';
+import { toast, showError, enableOnValid, busyWhile } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 import { renderGrid, gridNav, setGridView } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
@@ -230,7 +230,7 @@ function calendarMenu(cal) {
     if (ev.key === 'Enter') { ev.preventDefault(); $('#cm-share', dialog).click(); }
   });
   $('#cm-cancel', dialog).addEventListener('click', close);
-  $('#cm-save', dialog)?.addEventListener('click', async () => {
+  saveBtn?.addEventListener('click', busyWhile(saveBtn, async () => {
     try {
       await store.updateCalendar(cal.href, {
         displayName: $('#cm-name', dialog).value,
@@ -240,7 +240,7 @@ function calendarMenu(cal) {
       });
       close();
     } catch (e) { showError(e); }
-  });
+  }));
 
   // Sharing (owned calendars only): the live roster plus an invite form.
   const shareEmail = () => $('#cm-share-email', dialog).value.trim();
@@ -260,9 +260,12 @@ function calendarMenu(cal) {
           <button class="ghost" data-remove aria-label="Remove ${s.email}">Remove</button>
         </div>`;
         $('[data-remove]', row).addEventListener('click', async ev => {
+          if (!await confirmDialog(`Stop sharing “${cal.displayName || cal.name}” with ${s.email}? They lose access immediately.`,
+            { confirmLabel: 'Remove', danger: true })) return;
           ev.target.disabled = true;
+          ev.target.classList.add('is-busy');
           try { await store.unshareCalendar(cal.href, s.email); toast(`Removed ${s.email}.`); await refreshSharees(); }
-          catch (e) { showError(e); ev.target.disabled = false; }
+          catch (e) { showError(e); ev.target.disabled = false; ev.target.classList.remove('is-busy'); }
         });
         box.append(row);
       }
@@ -271,17 +274,23 @@ function calendarMenu(cal) {
       box.append(html`<p class="note">Couldn’t load the sharing list.</p>`);
     }
   }
-  $('#cm-share', dialog)?.addEventListener('click', async () => {
-    const email = shareEmail();
-    if (!email || !email.includes('@')) { toast('Enter an email address to share with.', true); return; }
-    try {
-      await store.shareCalendar(cal.href, { email, readWrite: $('#cm-share-rw', dialog).checked });
-      toast(`Shared with ${email}.`);
-      $('#cm-share-email', dialog).value = '';
-      $('#cm-share-rw', dialog).checked = false;
-      await refreshSharees();
-    } catch (e) { showError(e); }
-  });
+  const shareBtn = $('#cm-share', dialog);
+  const shareInput = $('#cm-share-email', dialog);
+  if (shareBtn && shareInput) {
+    // The button only lights up once the field holds a plausible address, so an
+    // empty or half-typed value can't be submitted (and Enter no-ops too).
+    enableOnValid(shareInput, shareBtn, v => /.+@.+/.test(v.trim()));
+    shareBtn.addEventListener('click', busyWhile(shareBtn, async () => {
+      const email = shareEmail();
+      try {
+        await store.shareCalendar(cal.href, { email, readWrite: $('#cm-share-rw', dialog).checked });
+        toast(`Shared with ${email}.`);
+        shareInput.value = '';
+        $('#cm-share-rw', dialog).checked = false;
+        await refreshSharees();
+      } catch (e) { showError(e); }
+    }));
+  }
   if (!ro) refreshSharees();
 
   $('#cm-delete', dialog).addEventListener('click', async () => {

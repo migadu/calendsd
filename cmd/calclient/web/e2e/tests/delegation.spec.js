@@ -43,6 +43,7 @@ test('grant and revoke a delegate through Settings', async ({ page, request }) =
   expect(await proxyMembers(request, 'write')).toContain('/principals/user01/');
 
   await row.locator('[data-remove]').click();
+  await page.locator('.dialog [data-ok]').click();   // confirm the revoke
   await expect(page.locator('#st-delegates')).toContainText('No one yet');
   expect(await proxyMembers(request, 'write')).not.toContain('/principals/user01/');
 });
