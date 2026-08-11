@@ -62,6 +62,19 @@ test('an ambiguous email match is refused, not granted to a guess', async ({ pag
   expect(await proxyMembers(request, 'write')).not.toContain('/principals/user0');
 });
 
+test('the Add-delegate button is disabled until the field is filled', async ({ page }) => {
+  await login(page);
+  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.locator('#st-del-email').waitFor({ state: 'visible' });
+
+  const add = page.locator('#st-del-add');
+  await expect(add).toBeDisabled();               // empty → can't submit
+  await page.fill('#st-del-email', 'user01');     // a bare username is valid here
+  await expect(add).toBeEnabled();
+  await page.fill('#st-del-email', '');
+  await expect(add).toBeDisabled();               // cleared → disabled again
+});
+
 test('a delegated calendar appears in the delegate’s sidebar', async ({ browser, request }) => {
   // Grant user01 write access to bob's calendars over CalDAV.
   const grant = `<?xml version="1.0" encoding="utf-8"?>\n<d:propertyupdate ${XMLNS}><d:set><d:prop>` +

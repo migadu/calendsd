@@ -38,6 +38,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover { background: transparent; color: var(--accent); }
 button.ghost { border: none; background: none; color: var(--accent); }
 button.danger { color: var(--danger); }
+/* A disabled action button must read as disabled — dim it, show not-allowed,
+   and neutralise the hover flip so an inactive Share/Save can't look clickable. */
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:disabled:hover { background: var(--panel); }
+button.primary:disabled, button.primary:disabled:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.ghost:disabled, button.ghost:disabled:hover { background: none; }
 input, select, textarea {
   font: inherit; color: var(--ink); border: 1px solid var(--line);
   padding: .4rem .55rem; background: var(--panel);

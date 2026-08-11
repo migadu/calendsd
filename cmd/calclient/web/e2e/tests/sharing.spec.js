@@ -105,4 +105,18 @@ test.describe('calendar sharing (owner side)', () => {
     await expect(row).toBeVisible();
     await expect(row.locator('.lvl')).toContainText('read-only');
   });
+
+  test('the Share button is disabled until a valid address is entered', async ({ page }) => {
+    await login(page);
+    const dialog = await newCalendarSettings(page, `${TAG} Gate`);
+    const share = dialog.locator('#cm-share');
+    const email = dialog.locator('#cm-share-email');
+    await expect(share).toBeDisabled();          // empty field → can't submit
+    await email.fill('not-an-email');
+    await expect(share).toBeDisabled();          // no @ → still blocked
+    await email.fill(SHAREE);
+    await expect(share).toBeEnabled();           // valid address → enabled
+    await email.fill('');
+    await expect(share).toBeDisabled();          // cleared → disabled again
+  });
 });
