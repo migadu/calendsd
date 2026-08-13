@@ -7,9 +7,7 @@ import { lastSegment } from '/shared/dav.js';
 import { $, html, frag } from '/shared/dom.js';
 import { DAY, startOfDay, sameDay } from '/shared/time.js';
 import { fmtRange, fmtTime, toast, showError } from './ui.js';
-import { showCalendarView } from './main.js';
-import { setGridView } from './grid.js';
-import { openEventDetail } from './event-detail.js';
+import * as router from './router.js';
 
 const PARTSTAT_LABEL = {
   ACCEPTED: 'accepted', DECLINED: 'declined', TENTATIVE: 'might come',
@@ -273,12 +271,11 @@ function emptyState(list) {
     const go = html`<button class="goto-event">Awaiting your reply: ${next.summary}</button>`;
     go.addEventListener('click', () => {
       toggleInvites(false);
-      // The panel can be opened from any view; switch back to the calendar
-      // before scrolling the grid to the event, or it stays hidden behind the
-      // contacts/settings view.
-      showCalendarView();
-      setGridView('day', next.start);
-      openEventDetail(next);
+      // Point the calendar at the event's day (behind the overlay) first, so
+      // closing the event lands there rather than on wherever the grid was; then
+      // open the event itself. Works from whichever section the panel was in.
+      router.navigate(router.calendarPath({ view: 'day', date: next.start }), { replace: true });
+      router.navigate(router.eventPath(next.uid, { occ: next.recurring ? next.start : null }));
     });
     list.append(go);
   }

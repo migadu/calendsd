@@ -36,7 +36,7 @@ async function removeTagged(request) {
 }
 
 async function gotoContacts(page) {
-  await page.evaluate(() => { location.hash = 'contacts'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/contacts'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#ct-add').waitFor({ state: 'visible' });
 }
 
@@ -148,7 +148,7 @@ test.describe('contacts management', () => {
 
   test('re-importing the same .vcf skips existing contacts', async ({ page }) => {
     await login(page);
-    await page.evaluate(() => { location.hash = 'settings'; });
+    await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
     await page.locator('#st-import').waitFor();
 
     const vcf = [

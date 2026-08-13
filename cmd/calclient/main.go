@@ -15,6 +15,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"time"
 
 	"calserver/internal/logging"
@@ -90,7 +91,11 @@ func main() {
 	// JS from a previous build after a rebuild + restart — old client code
 	// against a new server, the "still broken after the fix" trap.
 	static := noCacheAssets(http.FileServer(assets))
-	mux.Handle("GET /cal/", static)
+	// The end-user app owns real URL paths (/cal/calendar/week/…, /cal/event/…),
+	// so any /cal/ path that isn't an actual asset file must serve the SPA shell
+	// index.html and let the client router take over. /app/ and /shared/ have no
+	// client routing, so they stay plain file servers.
+	mux.Handle("GET /cal/", noCacheAssets(spaFallback(assets, http.FileServer(assets))))
 	mux.Handle("GET /app/", static)
 	mux.Handle("GET /shared/", static)
 	mux.Handle("GET /{$}", http.RedirectHandler("/cal/", http.StatusFound))
@@ -103,6 +108,44 @@ func main() {
 		slog.Error("listen", "err", err)
 		os.Exit(1)
 	}
+}
+
+// spaFallback serves real asset files as-is and rewrites every other /cal/ path
+// to /cal/index.html, so the client's pushState router owns URLs like
+// /cal/calendar/week/2026-08-13 and /cal/event/<uid>/edit without the file
+// server 404ing on them. A request whose path names an existing (non-directory)
+// file goes straight to the file server; anything else — a router path, or a
+// bare directory — is served the SPA shell. Existence is checked through the
+// http.FileSystem so it works identically for the embedded assets and the
+// -dev-assets directory.
+func spaFallback(assets http.FileSystem, fileServer http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f, err := assets.Open(path.Clean(r.URL.Path)); err == nil {
+			info, statErr := f.Stat()
+			f.Close()
+			if statErr == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// Serve the shell directly with ServeContent rather than rewriting to
+		// /cal/index.html through the FileServer: the FileServer 301-redirects any
+		// */index.html to its directory, which would bounce straight back here and
+		// loop. ServeContent just writes the bytes (and sets text/html from the
+		// name), so router paths and the bare /cal/ directory both get the shell.
+		idx, err := assets.Open("/cal/index.html")
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		defer idx.Close()
+		info, err := idx.Stat()
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		http.ServeContent(w, r, "index.html", info.ModTime(), idx)
+	})
 }
 
 // noCacheAssets forces revalidation of the static client assets on every use

@@ -36,12 +36,12 @@ async function deleteEventsContaining(request, needle, user = 'bob', pass = 'bob
 // setPrefs flips settings via the real Settings UI and waits out the debounced
 // server save, then returns to the calendar.
 async function setPrefs(page, { hour12, tz } = {}) {
-  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#st-hour12').waitFor({ state: 'visible' });
   if (hour12 !== undefined) await page.selectOption('#st-hour12', hour12 ? '1' : '0');
   if (tz !== undefined) await page.selectOption('#st-tz', tz);
   await page.waitForTimeout(1100); // debounced prefs PROPPATCH
-  await page.evaluate(() => { location.hash = 'calendar'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/calendar'); dispatchEvent(new PopStateEvent('popstate')); });
 }
 
 module.exports = { login, setPrefs, deleteEventsContaining };

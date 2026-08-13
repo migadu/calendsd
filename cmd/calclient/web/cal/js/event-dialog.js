@@ -14,7 +14,11 @@ import { checkAvailability } from './availability.js';
 import { confirmDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
 // openEventDialog(null, date?, timed?) creates; openEventDialog(instance) edits.
-export async function openEventDialog(inst, defaultDay, timed) {
+// onClose (the router's, when editing via a /cal/event/<uid>/edit route) replaces
+// the bare dlg.remove() so closing/saving navigates back to the calendar URL;
+// the create paths pass none and keep the plain overlay behavior. Returns the
+// overlay element (or undefined if the stored object failed to load).
+export async function openEventDialog(inst, defaultDay, timed, onClose) {
   let master = null; // {text, etag} of the stored object when editing
   if (inst) {
     try { master = await store.getObject(inst.href); }
@@ -104,7 +108,7 @@ export async function openEventDialog(inst, defaultDay, timed) {
   </div></div>`;
 
   const q = sel => $(sel, dlg);
-  const close = () => dlg.remove();
+  const close = onClose || (() => dlg.remove());
   // Scrim click / Esc cancel the editor (unless a child, e.g. the guest
   // list's autocomplete, handled the key first).
   openOverlay(dlg, close);
@@ -466,4 +470,5 @@ export async function openEventDialog(inst, defaultDay, timed) {
   }
 
   q('#ev-title').focus();
+  return dlg;
 }

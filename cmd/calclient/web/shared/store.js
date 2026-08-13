@@ -11,7 +11,7 @@ export { state, bus, savePrefs, DavError, friendly, myEmail } from './store/core
 export { haveSession, login, logout, restore, startPolling, stopPolling } from './store/session.js';
 export { loadCalendars, eventCalendars, isReadOnly, calColor, calInk, inkOn,
   createCalendar, updateCalendar, deleteCalendar, reorderCalendars } from './store/calendars.js';
-export { setRange, refreshEvents, visibleInstances, setCalendarHidden, moveEvent,
+export { setRange, refreshEvents, visibleInstances, searchEvents, resolveEvent, setCalendarHidden, moveEvent,
   eventHref, ridValue, instanceKey, deleteEvent, resendInvitations } from './store/events.js';
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
 export { loadDelegates, grantDelegate, revokeDelegate, resolvePrincipal } from './store/proxy.js';

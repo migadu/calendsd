@@ -498,6 +498,26 @@ export function occurrencesBefore(dtstart, rrule, cutoff) {
   return n;
 }
 
+// nextOccurrence returns the first occurrence of a series at or after `from` (a
+// Date), respecting COUNT and UNTIL. Returns null when the rule isn't a plain
+// steppable FREQ(+INTERVAL) rule (canSplitSeries) — callers fall back to the
+// master's start. If the series ends before `from`, its last real occurrence is
+// returned (still in the past, which is correct). Bounded so a rule can't spin.
+export function nextOccurrence(dtstart, rrule, from) {
+  if (!canSplitSeries(dtstart, rrule)) return null;
+  const p = rruleParts(rrule);
+  const interval = Math.max(1, parseInt(p.INTERVAL || '1', 10));
+  const total = p.COUNT ? parseInt(p.COUNT, 10) : Infinity;
+  const until = p.UNTIL ? parseICalDate(p.UNTIL)?.date : null;
+  let occ = new Date(dtstart);
+  for (let n = 1; occ < from && n < total && n < 10000; n++) {
+    const next = stepOccurrence(occ, p.FREQ, interval);
+    if (until && next > until) break;   // series ended before `from`
+    occ = next;
+  }
+  return occ;
+}
+
 // rruleWithUntil truncates a series to end before a split: drops COUNT and sets
 // UNTIL to `until` (an iCal DATE or DATE-TIME value). Backs delete "this and
 // following".

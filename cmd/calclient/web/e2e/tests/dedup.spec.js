@@ -28,7 +28,7 @@ async function removeTagged(request) {
 }
 
 async function gotoContacts(page) {
-  await page.evaluate(() => { location.hash = 'contacts'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/contacts'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#ct-add').waitFor({ state: 'visible' });
   // Pin one book so both new contacts share it (index 0 is "All Contacts").
   await page.locator('.ct-side .ct-book').nth(1).click();
@@ -90,7 +90,7 @@ test.describe('contact deduplication', () => {
     await createContact(page, { name, email: 'grace.dup@example.org', phone: '+1 555 444 0004' });
 
     // Open the sweep from Settings.
-    await page.evaluate(() => { location.hash = 'settings'; });
+    await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
     await page.locator('#st-dedup').waitFor({ state: 'visible' });
     await page.click('#st-dedup');
 

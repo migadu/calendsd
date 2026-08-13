@@ -238,6 +238,8 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 
 /* ---- agenda ---- */
 .agenda { max-width: 46rem; margin: 0 auto; }
+.agenda-search { margin: .3rem 0 .6rem; }
+.agenda-search input { width: 100%; border-radius: 8px; padding: .5rem .8rem; }
 .agenda h3 { margin: 1rem 0 .3rem; font-size: .85rem; color: var(--dim); }
 .agenda h3.today { color: var(--accent); }
 .agenda .item {

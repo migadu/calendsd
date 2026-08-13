@@ -6,7 +6,7 @@
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { fmtRange, linkify, toast, showError, scheduleStatusTag } from './ui.js';
-import { openEventDialog } from './event-dialog.js';
+import * as router from './router.js';
 import { confirmDialog, choiceDialog, openOverlay } from '/shared/dialogs.js';
 
 const PARTSTAT_LABEL = {
@@ -14,8 +14,14 @@ const PARTSTAT_LABEL = {
   TENTATIVE: 'maybe', 'NEEDS-ACTION': 'no reply',
 };
 
-export function openEventDetail(inst) {
+// onClose, when given (the router owns the overlay's lifecycle), replaces the
+// bare dlg.remove() so closing navigates back to the calendar URL. Returns the
+// overlay element so the caller can later remove it on a route change.
+export function openEventDetail(inst, onClose) {
   const cal = store.state.calendars.find(c => c.href === inst.calHref);
+  // Editing this event = navigating to its /edit route; the router swaps this
+  // detail overlay for the editor. A recurring occurrence carries its start.
+  const goEdit = () => router.navigate(router.eventPath(inst.uid, { edit: true, occ: inst.recurring ? inst.start : null }));
   const color = store.calColor(inst.calHref);
   const me = store.myEmail().toLowerCase();
   const rows = [];
@@ -76,7 +82,7 @@ export function openEventDetail(inst) {
       <button class="primary" id="ed-close">Done</button>
     </div>
   </div></div>`;
-  const close = () => dlg.remove();
+  const close = onClose || (() => dlg.remove());
   openOverlay(dlg, close);
   for (const b of dlg.querySelectorAll('.rsvp button[data-ps]')) {
     b.addEventListener('click', async () => {
@@ -109,11 +115,11 @@ export function openEventDetail(inst) {
   }
   $('#ed-x', dlg).addEventListener('click', close);
   $('#ed-close', dlg).addEventListener('click', close);
-  $('#ed-edit', dlg).addEventListener('click', () => { close(); openEventDialog(inst); });
+  $('#ed-edit', dlg).addEventListener('click', goEdit);
   $('#ed-del', dlg).addEventListener('click', async () => {
     // A read-only share can't be deleted from — send it to the editor, which
     // says so and disables its write actions, rather than let the write 403.
-    if (store.isReadOnly(inst.calHref)) { close(); openEventDialog(inst); return; }
+    if (store.isReadOnly(inst.calHref)) { goEdit(); return; }
     // Recurring events offer a per-occurrence vs whole-series choice right here;
     // a plain event just confirms. `scope` feeds store.deleteEvent either way.
     let scope = 'all';
@@ -133,4 +139,5 @@ export function openEventDetail(inst) {
     catch (e) { showError(e); }
   });
   $('#ed-close', dlg).focus();
+  return dlg;
 }

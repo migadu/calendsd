@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Calendar</title>
 <link rel="stylesheet" href="/shared/theme.css">
-<link rel="stylesheet" href="cal.css">
+<link rel="stylesheet" href="/cal/cal.css">
 </head>
 <body>
 <div id="login" hidden>
@@ -24,9 +24,9 @@
   <button id="menu-toggle" aria-label="Show calendars" aria-expanded="false">☰</button>
   <span id="brand">Calendar</span>
   <nav id="mainnav">
-    <a href="#calendar" data-nav="calendar" class="active">Calendar</a>
-    <a href="#tasks" data-nav="tasks">Tasks</a>
-    <a href="#contacts" data-nav="contacts">Contacts</a>
+    <a href="/cal/calendar" data-nav="calendar" class="active">Calendar</a>
+    <a href="/cal/tasks" data-nav="tasks">Tasks</a>
+    <a href="/cal/contacts" data-nav="contacts">Contacts</a>
   </nav>
   <div id="cal-controls">
     <button id="nav-today" title="Go to today">Today</button>
@@ -46,7 +46,7 @@
       <span id="whoami"></span><span class="caret" aria-hidden="true">▾</span>
     </button>
     <div id="user-pop" role="menu" hidden>
-      <a href="#settings" data-nav="settings" role="menuitem">Settings</a>
+      <a href="/cal/settings" data-nav="settings" role="menuitem">Settings</a>
       <button id="signout" role="menuitem">Sign out</button>
     </div>
   </div>
@@ -72,6 +72,6 @@
 <div id="dialog-host"></div>
 <div id="toast" hidden></div>
 
-<script type="module" src="js/main.js"></script>
+<script type="module" src="/cal/js/main.js"></script>
 </body>
 </html>

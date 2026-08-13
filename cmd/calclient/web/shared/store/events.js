@@ -119,6 +119,118 @@ export async function refreshEvents() {
   emit('events');
 }
 
+// searchEvents runs a whole-calendar title search that ignores the loaded
+// agenda window: a calendar-query REPORT per visible calendar with a SUMMARY
+// text-match and no time-range, so it spans every event past and future. With
+// no time-range there is no server-side <expand>, so a recurring series comes
+// back as its stored object; we surface it once, anchored to its next
+// occurrence (see atNextOccurrence) rather than its original master start.
+// Results are flattened and date-sorted like visibleInstances (declined events
+// and hidden calendars dropped). This does not touch state.instances — it is a
+// transient query, not the render cache. Being unbounded (no time-range), this
+// is the heaviest request in the app, so it only runs on the debounced,
+// non-empty agenda search path (see grid.js).
+export async function searchEvents(query) {
+  const q = query.trim();
+  if (!q) return [];
+  const now = Date.now();
+  const cals = state.calendars.filter(c => !state.hidden.has(c.href));
+  const lists = await Promise.all(cals.map(cal => searchCalendar(cal, q)));
+  const out = [];
+  for (const list of lists) for (const i of list) {
+    if (i.myPartstat === 'DECLINED') continue;
+    out.push(atNextOccurrence(i, now));
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+// atNextOccurrence anchors a recurring series (returned as its stored master,
+// since the search runs no <expand>) to its next occurrence at or after `now`,
+// so an old weekly meeting sorts and groups by when it next happens instead of
+// its original start years ago. Only plainly steppable rules shift (see
+// ical.nextOccurrence); complex rules and non-recurring events pass through
+// unchanged. The shifted start keeps the master's time-of-day and duration.
+function atNextOccurrence(inst, now) {
+  if (!inst.rrule || +inst.start >= now) return inst;
+  const next = ical.nextOccurrence(inst.start, inst.rrule, new Date(now));
+  if (!next || +next === +inst.start) return inst;
+  const dur = +inst.end - +inst.start;
+  return { ...inst, start: next, end: new Date(+next + dur) };
+}
+
+// searchCalendar: whole-calendar SUMMARY search over one calendar.
+function searchCalendar(cal, q) {
+  return reportEvents(cal, dav.xml`
+    <c:prop-filter name="SUMMARY"><c:text-match collation="i;unicode-casemap">${q}</c:text-match></c:prop-filter>`);
+}
+
+// resolveEvent locates a single instance for a URL like /cal/event/<uid>?occ=…,
+// so an event overlay can be opened from a cold load or the Back button. It
+// tries the render cache first — the common case, since the calendar URL also
+// carries the view+date, so a reload reloads the same window and the occurrence
+// is already expanded there. Only on a miss does it fetch the stored object by
+// UID. Returns null when nothing matches.
+export async function resolveEvent(uid, occ) {
+  if (!uid) return null;
+  const at = occ ? +new Date(occ) : null;
+  for (const list of state.instances.values()) {
+    for (const i of list) {
+      if (i.uid !== uid) continue;
+      if (at != null) { if (+i.start === at) return i; }
+      else if (!i.rid) return i;   // no occurrence asked for → the master
+    }
+  }
+  // Not loaded: fetch the stored object by UID (no <expand>, so a recurring
+  // series comes back as its master). The per-calendar lookups are independent,
+  // so fire them in parallel and keep the first hit in calendar order. If an
+  // occurrence was requested, shift the master onto that start so the overlay
+  // shows the right time. A far-off occurrence therefore opens from the master
+  // rather than a server-expanded instance — acceptable given the cache covers
+  // the on-screen window.
+  const cals = state.calendars.filter(c => !state.hidden.has(c.href));
+  const found = (await Promise.all(cals.map(cal => fetchByUid(cal, uid)))).find(Boolean);
+  if (!found) return null;
+  if (at != null && found.recurring && +found.start !== at) {
+    const dur = +found.end - +found.start;
+    const start = new Date(at);
+    return { ...found, start, end: new Date(at + dur) };
+  }
+  return found;
+}
+
+async function fetchByUid(cal, uid) {
+  const rows = await reportEvents(cal, dav.xml`
+    <c:prop-filter name="UID"><c:text-match collation="i;octet">${uid}</c:text-match></c:prop-filter>`);
+  return rows.find(i => i.uid === uid) || null;   // text-match is substring; confirm exact UID
+}
+
+// reportEvents runs a calendar-query REPORT over one calendar with the given
+// VEVENT prop-filter (a dav.xml fragment) and no <time-range>, so recurring
+// series come back as their stored object. It returns one instance per matching
+// object, preferring the master component (no RECURRENCE-ID) so a series shows
+// once at its start; a lone override still surfaces itself. Shared by the title
+// search and the UID lookup.
+async function reportEvents(cal, propFilter) {
+  const body = dav.xmlDoc('c:calendar-query', '', dav.xml`
+    <d:prop><d:getetag/><c:calendar-data/></d:prop>
+    <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">
+      ${propFilter}
+    </c:comp-filter></c:comp-filter></c:filter>`);
+  const r = await dav.report(cal.href, body, '1');
+  if (r.status !== 207) return [];
+  const out = [];
+  for (const resp of dav.msResponses(r.xml)) {
+    const data = resp.props.get(key(NS.c, 'calendar-data'))?.textContent;
+    if (!data) continue;
+    const etag = resp.props.get(key(NS.d, 'getetag'))?.textContent ?? '';
+    const evs = ical.components(ical.parse(data), 'VEVENT');
+    const ev = evs.find(v => !ical.prop(v, 'RECURRENCE-ID')) || evs[0];
+    const inst = ev && instanceFrom(ev, resp.href, cal.href, etag);
+    if (inst) out.push(inst);
+  }
+  return out;
+}
+
 // moveEvent shifts a (non-recurring) event by deltaMs — the drag & drop path.
 // DTSTART/DTEND are rewritten in place so alarms, overrides, and unmodeled
 // properties survive; callers guard against recurring events (moving an

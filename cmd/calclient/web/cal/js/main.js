@@ -6,8 +6,10 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { toast, showError, enableOnValid, busyWhile } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
-import { renderGrid, gridNav, setGridView } from './grid.js';
+import { renderGrid, gridNav, setGridView, applyCalendarRoute, currentCalendarRoute } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
+import { openEventDetail } from './event-detail.js';
+import * as router from './router.js';
 import { renderInvites, toggleInvites } from './invites.js';
 import { renderTasks } from './tasks.js';
 import { renderContacts } from './contacts.js';
@@ -15,20 +17,75 @@ import { renderSettings, updateImportProgress } from './settings.js';
 import * as pushSync from './push-sync.js';
 
 // ---- routing -------------------------------------------------------------
+//
+// The URL is the source of truth (see router.js): a section path picks the
+// chrome, /cal/calendar/… feeds the grid its view+date+filter, and /cal/event/…
+// mounts a detail or editor overlay over the calendar. route() runs for every
+// navigation (link click, popstate, or programmatic router.navigate).
 
-let currentView = 'calendar';
+let currentView = 'calendar';   // the section behind any overlay
+let eventOverlay = null;        // the mounted event overlay element, if any
+let overlayKey = null;          // identifies which event route it represents
 
-function route() {
-  const target = (location.hash.replace('#', '') || 'calendar').split('/')[0];
-  currentView = ['calendar', 'tasks', 'contacts', 'settings'].includes(target) ? target : 'calendar';
-  // Drives which chrome is relevant: the CSS hides the calendar sidebar and
-  // the date/view controls on any non-calendar view.
-  document.body.dataset.view = currentView;
+function route(r = router.parseRoute()) {
+  // Bus events (prefs/calendars) can fire during login, before the chrome is up.
+  if ($('#topbar').hidden) return;
+  if (r.name === 'event') { routeEvent(r); return; }
+
+  closeEventOverlay();
+  setSection(r.name);
+  if (r.name === 'calendar') {
+    applyCalendarRoute({ view: r.view, date: r.date, q: r.q });
+    // Canonicalize when the path is bare (/cal, /cal/calendar) or the shown view
+    // differs from what the URL asked — e.g. a narrow screen coerced week→day —
+    // so the address bar stays shareable and matches the grid (replace only, no
+    // re-render).
+    const cur = currentCalendarRoute();
+    if (!r.view || cur.view !== r.view) router.replaceUrl(router.calendarPath(cur));
+  } else {
+    render();
+  }
+}
+
+// setSection switches the top-level chrome. The CSS keys off body.dataset.view
+// to hide the calendar sidebar and date/view controls on non-calendar sections.
+function setSection(name) {
+  currentView = name;
+  document.body.dataset.view = name;
   for (const a of document.querySelectorAll('#mainnav a')) {
-    a.classList.toggle('active', a.dataset.nav === currentView);
+    a.classList.toggle('active', a.dataset.nav === name);
   }
   closeMenus();
-  render();
+}
+
+// routeEvent draws the calendar behind, then mounts the detail or editor overlay
+// for the event the URL names. Closing the overlay navigates back to the
+// calendar path, which re-enters route() as a section route and removes it.
+async function routeEvent(r) {
+  setSection('calendar');
+  render();   // calendar behind the overlay (also kicks a range load on cold open)
+  const kkey = `${r.uid}|${r.edit ? 'edit' : 'view'}|${r.occ || ''}`;
+  if (overlayKey === kkey && eventOverlay && document.body.contains(eventOverlay)) return;
+  closeEventOverlay();
+  overlayKey = kkey;
+  const back = () => router.navigate(router.calendarPath(currentCalendarRoute()), { replace: true });
+  let inst;
+  try { inst = await store.resolveEvent(r.uid, r.occ); }
+  catch (e) { showError(e); overlayKey = null; back(); return; }
+  if (overlayKey !== kkey) return;   // a newer navigation superseded this one
+  if (!inst) { toast('That event could no longer be found.'); overlayKey = null; back(); return; }
+  const overlay = r.edit ? await openEventDialog(inst, null, null, back) : openEventDetail(inst, back);
+  // openEventDialog awaits the stored object; a navigation during that load may
+  // have superseded us (openOverlay already mounted the element). Don't adopt an
+  // overlay for a route that's no longer current — tear the stray one down.
+  if (overlayKey !== kkey) { if (overlay) overlay.remove(); return; }
+  eventOverlay = overlay;
+  if (!eventOverlay) { overlayKey = null; back(); }   // editor bailed (e.g. load failed)
+}
+
+function closeEventOverlay() {
+  if (eventOverlay) { eventOverlay.remove(); eventOverlay = null; }
+  overlayKey = null;
 }
 
 // closeMenus collapses the transient top-bar affordances (identity dropdown
@@ -40,13 +97,6 @@ function closeMenus() {
   $('#user-btn').setAttribute('aria-expanded', 'false');
 }
 
-// showCalendarView switches to the calendar view programmatically — used by
-// the invitations panel's "jump to event" button, which can fire from the
-// contacts or settings view. Routing keys off the hash, so setting it drives
-// currentView, the chrome, and the re-render.
-export function showCalendarView() {
-  if (currentView !== 'calendar') location.hash = 'calendar';
-}
 
 export function render() {
   // Don't render (and don't let the grid kick off a range fetch) until the
@@ -94,15 +144,13 @@ $('#signout').addEventListener('click', () => {
 
 // ---- top bar / sidebar wiring -------------------------------------------
 
-window.addEventListener('hashchange', route);
+router.onRoute(route);
+router.interceptLinks();
 $('#nav-today').addEventListener('click', () => gridNav(0));
 $('#nav-prev').addEventListener('click', () => gridNav(-1));
 $('#nav-next').addEventListener('click', () => gridNav(1));
 for (const b of document.querySelectorAll('#view-seg button')) {
-  b.addEventListener('click', () => {
-    for (const x of document.querySelectorAll('#view-seg button')) x.classList.toggle('active', x === b);
-    setGridView(b.dataset.view);
-  });
+  b.addEventListener('click', () => setGridView(b.dataset.view));
 }
 $('#bell').addEventListener('click', () => toggleInvites());
 $('#invites-close').addEventListener('click', () => toggleInvites(false));

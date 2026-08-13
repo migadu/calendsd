@@ -10,7 +10,7 @@ const { login } = require('./helpers');
 const PREF = 'calclient.push.enabled';
 
 async function gotoSettings(page) {
-  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#st-push').waitFor({ state: 'visible' });
 }
 
@@ -33,7 +33,7 @@ test.describe('instant updates (push) preference', () => {
     expect(await page.evaluate(k => localStorage.getItem(k), PREF)).toBe('1');
 
     // Re-entering Settings re-reads the pref: the toggle stays on.
-    await page.evaluate(() => { location.hash = 'calendar'; });
+    await page.evaluate(() => { history.pushState({}, '', '/cal/calendar'); dispatchEvent(new PopStateEvent('popstate')); });
     await gotoSettings(page);
     await expect(page.locator('#st-push')).toBeChecked();
   });

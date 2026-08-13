@@ -42,7 +42,7 @@ const inDays = n => {
 };
 
 async function gotoTasks(page) {
-  await page.evaluate(() => { location.hash = 'tasks'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/tasks'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('.task-add, .tasks .empty').first().waitFor({ state: 'visible' });
 }
 

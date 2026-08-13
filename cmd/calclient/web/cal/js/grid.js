@@ -10,17 +10,58 @@ import { DAY, HOUR, startOfDay, addDays, sameDay, nextDate, isoWeek,
 import { layoutColumns, spans } from './layout.js';
 import { fmtTime, fmtDate, toast, showError } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
-import { openEventDetail } from './event-detail.js';
+import * as router from './router.js';
 
+// The grid view (day/week/month/agenda), the navigated date, and the agenda's
+// search filter all live in the URL — the router is the source of truth. These
+// module vars mirror the current route; applyCalendarRoute() writes them from a
+// parsed route, and setGridView/gridNav/the search box push updates back out.
+const VIEWS = ['day', 'week', 'month', 'agenda'];
+let agendaQuery = '';
 let view = store.state.prefs.defaultView || 'month';
 let cursor = startOfDay(new Date());
+
+function parseLocalDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : startOfDay(new Date());
+}
+
+// applyCalendarRoute sets the view/date/filter from a /cal/calendar/… route and
+// redraws. Called by main.js's router handler, so it runs on every intentional
+// calendar navigation (not on background refreshes, which reuse these vars).
+export function applyCalendarRoute({ view: v, date, q } = {}) {
+  let nextView = VIEWS.includes(v) ? v : (store.state.prefs.defaultView || 'month');
+  if (narrowMQ.matches && nextView === 'week') nextView = 'day';
+  const nextCursor = date ? parseLocalDate(date) : startOfDay(new Date());
+  // Jump a timed view to the now-line only when the view or day actually
+  // changed. Re-entering the same route — e.g. closing an event overlay, which
+  // navigates back to the current calendar path — must keep the user's scroll.
+  if (nextView !== view || +nextCursor !== +cursor) centerNextRender = true;
+  view = nextView;
+  cursor = nextCursor;
+  agendaQuery = q || '';
+  reload();
+}
+
+// currentCalendarRoute is the state main.js needs to rebuild the calendar path
+// (e.g. when closing an event overlay back to where the grid was).
+export function currentCalendarRoute() { return { view, date: cursor, q: agendaQuery }; }
+
+// Opening an event is a navigation now (/cal/event/<uid>), so it lands in the
+// URL and the Back button closes it. A recurring occurrence carries its start so
+// the exact instance reopens on reload.
+function openEvent(inst) {
+  router.navigate(router.eventPath(inst.uid, { occ: inst.recurring ? inst.start : null }));
+}
 
 // On a phone the 7-column week is unusable; fall back to the single-day view
 // on load and whenever the viewport crosses into the narrow range.
 const narrowMQ = window.matchMedia('(max-width: 760px)');
 if (narrowMQ.matches && view === 'week') view = 'day';
 narrowMQ.addEventListener('change', e => {
-  if (e.matches && view === 'week' && !$('#topbar').hidden) setGridView('day');
+  // replace, not push: a viewport crossing (window drag, tablet rotate) isn't a
+  // user view-switch, so it must not stack history entries.
+  if (e.matches && view === 'week' && !$('#topbar').hidden) setGridView('day', null, { replace: true });
 });
 
 // Preference-aware wrappers over the pure helpers in /shared/time.js.
@@ -45,24 +86,27 @@ function range() {
   return { start: startOfDay(cursor), end: addDays(startOfDay(cursor), 30) };
 }
 
+// Date navigation (prev/next/Today) writes the new date into the URL — replace,
+// not push, so holding next doesn't flood the history. The router handler calls
+// applyCalendarRoute, which recomputes the cursor and redraws.
 export function gridNav(delta) {
-  if (delta === 0) cursor = startOfDay(new Date());
-  else if (view === 'month') cursor = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
-  else if (view === 'week') cursor = addDays(cursor, 7 * delta);
-  else if (view === 'day') cursor = addDays(cursor, delta);
-  else cursor = addDays(cursor, 30 * delta);
-  centerNextRender = true;
-  reload();
+  let c;
+  if (delta === 0) c = startOfDay(new Date());
+  else if (view === 'month') c = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
+  else if (view === 'week') c = addDays(cursor, 7 * delta);
+  else if (view === 'day') c = addDays(cursor, delta);
+  else c = addDays(cursor, 30 * delta);
+  router.navigate(router.calendarPath({ view, date: c, q: agendaQuery }), { replace: true });
 }
 
-export function setGridView(v, anchor) {
-  view = v;
-  centerNextRender = true;
-  if (anchor) cursor = startOfDay(anchor);
-  for (const b of document.querySelectorAll('#view-seg button')) {
-    b.classList.toggle('active', b.dataset.view === v);
-  }
-  reload();
+// Switching view pushes a new history entry (so Back returns to the prior view).
+// Leaving the agenda drops the filter from the path; entering it keeps whatever
+// term is set. `anchor` (from month's "+more") sets the date being expanded.
+// `replace` swaps the entry instead of pushing — for non-user switches like the
+// narrow-screen week→day coercion that shouldn't grow the history.
+export function setGridView(v, anchor, { replace = false } = {}) {
+  const date = anchor ? startOfDay(anchor) : cursor;
+  router.navigate(router.calendarPath({ view: v, date, q: v === 'agenda' ? agendaQuery : '' }), { replace });
 }
 
 function reload() {
@@ -103,11 +147,20 @@ export function renderGrid(main) {
   if (!store.state.range) { reload(); return; }
   const instances = store.visibleInstances();
   const prevScroll = main.scrollTop;
+  // Keep the agenda search focused (and its caret) across background re-renders
+  // — e.g. the 30 s poll firing while the user is mid-search.
+  const search = main.querySelector('#agenda-q');
+  const searchFocus = search && document.activeElement === search
+    ? { start: search.selectionStart, end: search.selectionEnd } : null;
   main.innerHTML = '';
   if (view === 'month') main.append(renderMonth(instances));
   else if (view === 'week') main.append(renderTimed(instances, 7));
   else if (view === 'day') main.append(renderTimed(instances, 1));
   else main.append(renderAgenda(instances));
+  if (searchFocus) {
+    const q = main.querySelector('#agenda-q');
+    if (q) { q.focus(); try { q.setSelectionRange(searchFocus.start, searchFocus.end); } catch { /* unsupported */ } }
+  }
   // Timed views scroll; keep the viewport where it was across a re-render,
   // except right after navigation, when we jump to the current-time line.
   if (view === 'week' || view === 'day') {
@@ -284,7 +337,7 @@ function chipFor(inst) {
   const chip = inst.allDay
     ? html`<button class="chip${tentative}" data-key="${key}" style="background:${color};color:${store.inkOn(color)}">${inst.summary}</button>`
     : html`<button class="chip timed${tentative}" data-key="${key}"><span class="dot" style="background:${color}"></span>${fmtTime(inst.start)} ${inst.summary}</button>`;
-  chip.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
+  chip.addEventListener('click', ev => { ev.stopPropagation(); openEvent(inst); });
   return chip;
 }
 
@@ -354,7 +407,7 @@ function renderMonth(instances) {
           data-key="${store.instanceKey(s.inst)}"
           style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${color};color:${store.inkOn(color)}"
           title="${s.inst.summary}">${s.contLeft ? '‹ ' : ''}${s.inst.summary}</button>`;
-        bar.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(s.inst); });
+        bar.addEventListener('click', ev => { ev.stopPropagation(); openEvent(s.inst); });
         bars.append(bar);
       }
       row.append(bars);
@@ -409,7 +462,7 @@ function renderTimed(instances, days) {
       const e = Math.min(24, (inst.end - top) / HOUR);
       const w = 100 / p.cols;
       const block = html`<button class="block${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}" style="top:${s * HOUR_REM}rem;height:${Math.max(.6, (e - s) * HOUR_REM)}rem;left:calc(${p.col * w}% + 2px);width:calc(${w}% - 4px);right:auto;background:${store.calColor(inst.calHref)};color:${store.calInk(inst.calHref)}">${fmtTime(inst.start)} ${inst.summary}</button>`;
-      block.addEventListener('click', ev => { ev.stopPropagation(); openEventDetail(inst); });
+      block.addEventListener('click', ev => { ev.stopPropagation(); openEvent(inst); });
       attachBlockDrag(block, inst, day);
       col.append(block);
     }
@@ -430,27 +483,106 @@ function renderTimed(instances, days) {
 
 // ---- agenda --------------------------------------------------------------
 
+// A search runs against the whole calendar server-side, so results outlive the
+// loaded window and each keystroke would otherwise fire a REPORT: debounce, and
+// drop any run whose list was replaced or whose term has moved on (see runSearch).
+let searchTimer = null;
+
 function renderAgenda(instances) {
+  const el = html`<div class="agenda"></div>`;
+  const input = html`<input id="agenda-q" type="search" placeholder="Search all events…" aria-label="Search all events" value="${agendaQuery}">`;
+  const search = html`<div class="agenda-search"></div>`;
+  search.append(input);
+  const list = html`<div class="agenda-list"></div>`;
+  el.append(search, list);
+  // Mirror the term into the URL (so a reload restores the search) but only via
+  // replaceUrl — a full navigate would re-render the grid and steal focus from
+  // the field mid-keystroke. scheduleSearch refreshes just the results list.
+  input.addEventListener('input', () => {
+    agendaQuery = input.value;
+    router.replaceUrl(router.calendarPath({ view: 'agenda', date: cursor, q: agendaQuery.trim() }));
+    scheduleSearch(list);
+  });
+  renderAgendaBody(list, instances);
+  return el;
+}
+
+// With no term, the agenda is the plain windowed list; with one, it is the
+// whole-calendar search. Called on (re)render — a background refresh re-runs the
+// search silently rather than blanking to a spinner (see runSearch).
+function renderAgendaBody(list, windowInstances) {
+  if (agendaQuery.trim()) runSearch(list);
+  else fillWindowAgenda(list, windowInstances);
+}
+
+function scheduleSearch(list) {
+  clearTimeout(searchTimer);
+  if (!agendaQuery.trim()) { fillWindowAgenda(list, store.visibleInstances()); return; }
+  searchTimer = setTimeout(() => runSearch(list), 220);
+}
+
+async function runSearch(list) {
+  const q = agendaQuery.trim();
+  // Only show the spinner on a first/empty search; a re-run keeps prior results
+  // visible until the new ones land, so the 30 s poll doesn't cause a flicker.
+  if (!list.querySelector('.item')) setEmpty(list, 'Searching…');
+  let results;
+  try { results = await store.searchEvents(q); }
+  catch { if (list.isConnected && q === agendaQuery.trim()) setEmpty(list, 'Search failed. Please try again.'); return; }
+  // Drop a stale run: the list was replaced by a re-render (isConnected false),
+  // or the term moved on while this was in flight. Guarding on the live list and
+  // current term — rather than a global token — means a background re-render's
+  // own fresh search isn't invalidated by an older keystroke's pending one.
+  if (!list.isConnected || q !== agendaQuery.trim()) return;
+  fillSearchResults(list, results, q);
+}
+
+function setEmpty(list, msg) {
+  list.innerHTML = '';
+  list.append(html`<p class="empty">${msg}</p>`);
+}
+
+// One agenda row. Shared by the windowed list and the search results.
+function agendaItem(inst) {
+  const item = html`<button class="item${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}">
+    <span class="dot" style="background:${store.calColor(inst.calHref)}"></span>
+    <span class="time">${inst.allDay ? 'all day' : fmtTime(inst.start) + ' – ' + fmtTime(inst.end)}</span>
+    <span class="what">${inst.summary}</span>
+    ${inst.location && frag`<span class="where">📍 ${inst.location}</span>`}
+  </button>`;
+  item.addEventListener('click', () => openEvent(inst));
+  return item;
+}
+
+function fillWindowAgenda(list, instances) {
   const { start, end } = range();
   const today = startOfDay(new Date());
-  const el = html`<div class="agenda"></div>`;
+  list.innerHTML = '';
   let any = false;
   for (let day = new Date(start); day < end; day = addDays(day, 1)) {
     const evs = eventsOnDay(instances, day);
     if (!evs.length) continue;
     any = true;
-    el.append(html`<h3 class="${sameDay(day, today) ? 'today' : ''}">${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>`);
-    for (const inst of evs) {
-      const item = html`<button class="item${unconfirmedCls(inst)}" data-key="${store.instanceKey(inst)}">
-        <span class="dot" style="background:${store.calColor(inst.calHref)}"></span>
-        <span class="time">${inst.allDay ? 'all day' : fmtTime(inst.start) + ' – ' + fmtTime(inst.end)}</span>
-        <span class="what">${inst.summary}</span>
-        ${inst.location && frag`<span class="where">📍 ${inst.location}</span>`}
-      </button>`;
-      item.addEventListener('click', () => openEventDetail(inst));
-      el.append(item);
-    }
+    list.append(html`<h3 class="${sameDay(day, today) ? 'today' : ''}">${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>`);
+    for (const inst of evs) list.append(agendaItem(inst));
   }
-  if (!any) el.append(html`<p class="empty">Nothing planned in this period. Click “＋ New event” to add something.</p>`);
-  return el;
+  if (!any) setEmpty(list, 'Nothing planned in this period. Click “＋ New event” to add something.');
+}
+
+// Search results span arbitrary dates, so headers carry the year and events are
+// grouped by their own start day (already sorted by searchEvents).
+function fillSearchResults(list, results, q) {
+  const today = startOfDay(new Date());
+  list.innerHTML = '';
+  if (!results.length) { setEmpty(list, `No events match “${q}”.`); return; }
+  let dayKey = null;
+  for (const inst of results) {
+    const k = +tzDayStart(inst.start);
+    if (k !== dayKey) {
+      dayKey = k;
+      const day = new Date(k);
+      list.append(html`<h3 class="${sameDay(day, today) ? 'today' : ''}">${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h3>`);
+    }
+    list.append(agendaItem(inst));
+  }
 }

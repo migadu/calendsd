@@ -31,7 +31,7 @@ test.afterEach(async ({ request }) => { await clearProxy(request); });
 
 test('grant and revoke a delegate through Settings', async ({ page, request }) => {
   await login(page);
-  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#st-del-email').waitFor({ state: 'visible' });
 
   await page.fill('#st-del-email', 'user01@example.org');
@@ -50,7 +50,7 @@ test('grant and revoke a delegate through Settings', async ({ page, request }) =
 
 test('an ambiguous email match is refused, not granted to a guess', async ({ page, request }) => {
   await login(page);
-  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#st-del-email').waitFor({ state: 'visible' });
 
   // "user0" is a substring of user01…user09; since the principal's exact email
@@ -64,7 +64,7 @@ test('an ambiguous email match is refused, not granted to a guess', async ({ pag
 
 test('the Add-delegate button is disabled until the field is filled', async ({ page }) => {
   await login(page);
-  await page.evaluate(() => { location.hash = 'settings'; });
+  await page.evaluate(() => { history.pushState({}, '', '/cal/settings'); dispatchEvent(new PopStateEvent('popstate')); });
   await page.locator('#st-del-email').waitFor({ state: 'visible' });
 
   const add = page.locator('#st-del-add');
