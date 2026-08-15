@@ -10,6 +10,10 @@ import { DAY, sameDay } from '/shared/time.js';
 let toastTimer = null;
 export function toast(msg, isError = false) {
   const t = $('#toast');
+  // Errors announce assertively, everything else politely; set the role
+  // before the text so screen readers pick the live region up in the right
+  // mode for this announcement.
+  t.setAttribute('role', isError ? 'alert' : 'status');
   t.textContent = msg;
   t.classList.toggle('error', isError);
   t.hidden = false;

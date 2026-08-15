@@ -85,7 +85,13 @@ async function routeEvent(r) {
 }
 
 function closeEventOverlay() {
-  if (eventOverlay) { eventOverlay.remove(); eventOverlay = null; }
+  if (eventOverlay) {
+    eventOverlay.remove();
+    // Return focus to whatever opened the overlay (see openOverlay) — a
+    // direct remove() skips the close() path the router normally takes.
+    eventOverlay._restoreFocus?.();
+    eventOverlay = null;
+  }
   overlayKey = null;
 }
 

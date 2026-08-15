@@ -6,15 +6,40 @@
 
 import { $, html } from './dom.js';
 
-// openOverlay is the one place dialog dismissal is wired: scrim click and
-// Escape route to onClose, and onClose is stored on the element so the
-// app-global Escape handler (which acts on the topmost overlay without
-// knowing what it is) can invoke the same path instead of removing a node
-// whose caller may be awaiting a promise.
+// trapTabIn keeps Tab cycling inside `el` while it is open — the keyboard
+// half of a modal. Used by openOverlay for every dialog and by the invites
+// panel (which isn't an overlay but is modal over the content beneath).
+export function trapTabIn(el) {
+  el.addEventListener('keydown', ev => {
+    if (ev.key !== 'Tab') return;
+    const focusable = [...el.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])')]
+      .filter(x => !x.disabled && x.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (ev.shiftKey && (document.activeElement === first || document.activeElement === el)) {
+      ev.preventDefault(); last.focus();
+    } else if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault(); first.focus();
+    }
+  });
+}
+
+// openOverlay is the one place dialog dismissal and keyboard modality are
+// wired: scrim click and Escape route to onClose, Tab stays inside, and the
+// element that had focus when the dialog opened gets it back when the dialog
+// closes — so closing an event returns focus to the chip that opened it, not
+// to the top of the page. `close` (and dlg._restoreFocus for callers that
+// remove the element directly, e.g. a superseding route) expose that path.
 export function openOverlay(dlg, onClose) {
-  dlg.close = onClose;
-  dlg.addEventListener('click', ev => { if (ev.target === dlg) onClose(); });
-  dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); onClose(); } });
+  dlg._opener = document.activeElement;
+  dlg._restoreFocus = () => {
+    if (dlg._opener && dlg._opener.isConnected && !document.body.contains(dlg)) dlg._opener.focus();
+  };
+  const wrapped = () => { onClose(); dlg._restoreFocus(); };
+  dlg.close = wrapped;
+  dlg.addEventListener('click', ev => { if (ev.target === dlg) wrapped(); });
+  dlg.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); wrapped(); } });
+  trapTabIn(dlg);
   $('#dialog-host').append(dlg);
 }
 
@@ -34,34 +59,44 @@ export function submitOnEnter(dlg, button, skip = () => false) {
   });
 }
 
-// confirmDialog resolves true on confirm, false on any way out.
+// confirmDialog resolves true on confirm, false on any way out. Button order
+// follows the app-wide convention: the action sits on the left (a destructive
+// one gets the danger tint and the .actions auto-margin), Cancel on the right
+// and focused — a stray Enter can't confirm a destructive ask.
 export function confirmDialog(message, { confirmLabel = 'OK', danger = false } = {}) {
   return new Promise(resolve => {
     const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Confirm">
       <p style="margin:.2rem 0 0">${message}</p>
-      <div class="actions">
-        <button data-cancel>Cancel</button>
-        <button class="${danger ? 'danger' : 'primary'}" data-ok>${confirmLabel}</button>
-      </div>
+      <div class="actions"></div>
     </div></div>`;
+    const row = $('.actions', dlg);
+    // danger puts the action on the left (the app-wide "scary button lives
+    // left" convention, with the .actions auto-margin rule); otherwise the
+    // action is the primary on the right.
+    if (danger) {
+      const ok = html`<button class="danger" data-ok>${confirmLabel}</button>`;
+      const cancel = html`<button data-cancel>Cancel</button>`;
+      row.append(ok, cancel);
+    } else {
+      const cancel = html`<button data-cancel>Cancel</button>`;
+      const ok = html`<button class="primary" data-ok>${confirmLabel}</button>`;
+      row.append(cancel, ok);
+    }
     const done = v => { dlg.remove(); resolve(v); };
     openOverlay(dlg, () => done(false));
     $('[data-cancel]', dlg).addEventListener('click', () => done(false));
     $('[data-ok]', dlg).addEventListener('click', () => done(true));
-    // Focus Cancel for a destructive ask so a stray Enter can't destroy data.
-    $(danger ? '[data-cancel]' : '[data-ok]', dlg).focus();
+    $('[data-cancel]', dlg).focus();
   });
 }
 
 // choiceDialog offers a message and a row of choice buttons, resolving the
 // chosen option's `value` (or null on Cancel / Escape / scrim). Each option is
-// {label, value, danger?, primary?}; a Cancel button is always appended and
-// focused so a stray Enter or click-out can't pick a destructive choice.
+// {label, value, danger?, primary?}. The choices pack to the left (danger ones
+// tinted, mirroring confirmDialog) and Cancel sits at the far right, focused,
+// so a stray Enter or click-out can't pick a destructive choice.
 export function choiceDialog(message, options) {
   return new Promise(resolve => {
-    // Own the button row (not .actions) so the "danger sits on the left"
-    // auto-margin rule doesn't fire — every choice packs to the right; the
-    // base button.danger colour still applies for a destructive tint.
     const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Choose">
       <p style="margin:.2rem 0 0">${message}</p>
       <div class="choices" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;justify-content:flex-end">
@@ -70,14 +105,15 @@ export function choiceDialog(message, options) {
     </div></div>`;
     const done = v => { dlg.remove(); resolve(v); };
     const row = $('.choices', dlg);
+    const cancel = $('[data-cancel]', dlg);
     for (const o of options) {
       const btn = html`<button class="${o.danger ? 'danger' : o.primary ? 'primary' : ''}">${o.label}</button>`;
       btn.addEventListener('click', () => done(o.value));
-      row.append(btn);
+      row.insertBefore(btn, cancel);
     }
     openOverlay(dlg, () => done(null));
-    $('[data-cancel]', dlg).addEventListener('click', () => done(null));
-    $('[data-cancel]', dlg).focus();
+    cancel.addEventListener('click', () => done(null));
+    cancel.focus();
   });
 }
 

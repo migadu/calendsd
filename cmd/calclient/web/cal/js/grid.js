@@ -143,7 +143,11 @@ function eventsOnDay(instances, day) {
 let centerNextRender = true;
 
 export function renderGrid(main) {
-  for (const b of document.querySelectorAll('#view-seg button')) b.classList.toggle('active', b.dataset.view === view);
+  for (const b of document.querySelectorAll('#view-seg button')) {
+    const on = b.dataset.view === view;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
   $('#cal-title').textContent = title();
   if (!store.state.range) { reload(); return; }
   const instances = store.visibleInstances();

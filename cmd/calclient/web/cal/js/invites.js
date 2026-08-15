@@ -6,6 +6,7 @@ import * as store from '/shared/store.js';
 import { lastSegment } from '/shared/dav.js';
 import { $, html, frag } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
+import { trapTabIn } from '/shared/dialogs.js';
 import { DAY, startOfDay, sameDay } from '/shared/time.js';
 import { fmtRange, fmtTime, toast, showError } from './ui.js';
 import * as router from './router.js';
@@ -20,24 +21,14 @@ let trapWired = false;
 // fillConflicts. Bounded by the number of invitations, so never cleared.
 const fbCache = new Map();
 
-// The panel overlays content, so keep Tab cycling inside it while open.
-// (Wired on first open, not at module load: this module and main.js import
-// each other, so main's helpers aren't initialized yet at our top level.)
+// The panel overlays content, so keep Tab cycling inside it while open — the
+// same trap every dialog gets (shared/dialogs.js), wired on first open rather
+// than at module load: this module and main.js import each other, so main's
+// helpers aren't initialized yet at our top level.
 function wireFocusTrap(panel) {
   if (trapWired) return;
   trapWired = true;
-  panel.addEventListener('keydown', e => {
-    if (e.key !== 'Tab') return;
-    const focusable = [...panel.querySelectorAll('button, select, a[href]')]
-      .filter(x => !x.disabled && x.offsetParent !== null);
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
-      e.preventDefault(); last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault(); first.focus();
-    }
-  });
+  trapTabIn(panel);
 }
 
 export function toggleInvites(force) {
@@ -45,6 +36,8 @@ export function toggleInvites(force) {
   const open = force === undefined ? panel.hidden : force;
   if (open === !panel.hidden) return;
   panel.hidden = !open;
+  const bell = $('#bell');
+  bell.setAttribute('aria-expanded', String(open));
   if (open) {
     wireFocusTrap(panel);
     opener = document.activeElement;

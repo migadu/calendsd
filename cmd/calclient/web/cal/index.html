@@ -40,7 +40,7 @@
       <button data-view="agenda">Agenda</button>
     </span>
   </div>
-  <button id="bell" title="Invitations" aria-label="Invitations"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 4.2 1.5 5.5 2 6H4c.5-.5 2-1.8 2-6Z"/><path d="M10.3 18.5a1.8 1.8 0 0 0 3.4 0"/></svg><span id="bell-badge" hidden></span></button>
+  <button id="bell" class="icon-btn" title="Invitations" aria-label="Invitations" aria-haspopup="dialog" aria-expanded="false"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 4.2 1.5 5.5 2 6H4c.5-.5 2-1.8 2-6Z"/><path d="M10.3 18.5a1.8 1.8 0 0 0 3.4 0"/></svg><span id="bell-badge" hidden></span></button>
   <div id="usermenu">
     <button id="user-btn" aria-haspopup="true" aria-expanded="false">
       <span id="whoami"></span><span class="caret" aria-hidden="true"><svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
@@ -70,7 +70,7 @@
 </aside>
 
 <div id="dialog-host"></div>
-<div id="toast" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
 
 <script type="module" src="/cal/js/main.js"></script>
 </body>
