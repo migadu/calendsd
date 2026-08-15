@@ -8,8 +8,9 @@ import { $, html, frag } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
 import { localDate } from '/shared/time.js';
 import { fmtDate, fmtTime, toast, showError, enableOnValid, busyWhile } from './ui.js';
-import { openOverlay, confirmDialog, promptDialog, submitOnEnter } from '/shared/dialogs.js';
+import { openOverlay, confirmDialog, submitOnEnter } from '/shared/dialogs.js';
 import { createReminderField } from './reminder-field.js';
+import { newCollectionDialog } from './new-collection.js';
 
 const SECTIONS = [
   ['overdue', 'Overdue'], ['today', 'Today'],
@@ -188,13 +189,13 @@ function taskDialog(t) {
 }
 
 function newListButton() {
-  const b = html`<button class="ghost task-new-list">＋ New task list</button>`;
+  const b = html`<button class="ghost task-new-list">${icon('plus', 14)} New task list</button>`;
   b.addEventListener('click', async () => {
-    const name = await promptDialog('Name for the new task list', { confirmLabel: 'Create' });
-    if (!name) return;
+    const r = await newCollectionDialog({ title: 'New task list' });
+    if (!r?.name) return;
     try {
-      await store.createTaskList(name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), name);
-      toast(`Task list “${name}” created.`);
+      await store.createTaskList(r.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), r.name, r.color);
+      toast(`Task list “${r.name}” created.`);
     } catch (e) { showError(e); }
   });
   return b;

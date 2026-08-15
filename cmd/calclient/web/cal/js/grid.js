@@ -22,6 +22,12 @@ let agendaQuery = '';
 let view = store.state.prefs.defaultView || 'month';
 let cursor = startOfDay(new Date());
 
+// Views that need to mirror the cursor (the sidebar mini-month) subscribe
+// here; applyCalendarRoute notifies after every intentional navigation.
+const cursorListeners = new Set();
+export function onCursorChange(fn) { cursorListeners.add(fn); }
+function notifyCursor() { for (const fn of cursorListeners) fn(); }
+
 function parseLocalDate(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
   return m ? new Date(+m[1], +m[2] - 1, +m[3]) : startOfDay(new Date());
@@ -42,11 +48,16 @@ export function applyCalendarRoute({ view: v, date, q } = {}) {
   cursor = nextCursor;
   agendaQuery = q || '';
   reload();
+  notifyCursor();
 }
 
 // currentCalendarRoute is the state main.js needs to rebuild the calendar path
 // (e.g. when closing an event overlay back to where the grid was).
 export function currentCalendarRoute() { return { view, date: cursor, q: agendaQuery }; }
+
+// currentRange exposes the loaded window (start inclusive, end exclusive) so
+// the mini-month can tint the days the main view is showing.
+export function currentRange() { return range(); }
 
 // Opening an event is a navigation now (/cal/event/<uid>), so it lands in the
 // URL and the Back button closes it. A recurring occurrence carries its start so
@@ -69,12 +80,22 @@ narrowMQ.addEventListener('change', e => {
 function tzDayStart(day) { return tzDayStartIn(day, store.state.prefs.tz); }
 function startOfWeek(d) { return weekStartOf(d, store.state.prefs.weekStart ?? 1); }
 
+// monthWeeks is how many week-rows the month view needs: five when the month
+// fits (e.g. 28-day February starting on the week's first day), six otherwise.
+// A fixed six rows used to leave a dead strip at the bottom of those months.
+function monthWeeks() {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const lead = (first.getDay() - (store.state.prefs.weekStart === 0 ? 0 : 1) + 7) % 7;
+  const dim = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+  return Math.ceil((lead + dim) / 7);
+}
+
 // visible range for the current view (used for data loading)
 function range() {
   if (view === 'month') {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
     const start = startOfWeek(first);
-    return { start, end: addDays(start, 42) };
+    return { start, end: addDays(start, monthWeeks() * 7) };
   }
   if (view === 'week') {
     const start = startOfWeek(cursor);
@@ -149,14 +170,38 @@ export function renderGrid(main) {
     b.setAttribute('aria-pressed', String(on));
   }
   $('#cal-title').textContent = title();
+  // First paint: the calendar list (and with it the range fetch) hasn't
+  // landed yet — say so instead of drawing a confidently empty grid. An
+  // account with no event-capable calendars gets an explicit empty state
+  // pointing at the creation flow (the sidebar is off-canvas on phones).
+  if (!store.state.calendarsLoaded) {
+    main.replaceChildren(html`<div class="ct-loading"><span class="spinner" aria-hidden="true"></span>Loading your calendar…</div>`);
+    // Only kick the initial range load when there isn't one yet — reload()
+    // re-enters renderGrid synchronously (setRange assigns state.range before
+    // its first await), so an unconditional call here would recurse until
+    // the calendar list lands.
+    if (!store.state.range) reload();
+    return;
+  }
+  if (!store.state.calendars.some(c => c.supportsEvents)) {
+    main.replaceChildren(html`<div class="empty">
+      <p>No calendars yet.</p>
+      <p>Create one to start scheduling.</p>
+      <button class="primary" id="grid-new-calendar">${icon('plus', 14)} New calendar</button>
+    </div>`);
+    $('#grid-new-calendar', main).addEventListener('click', () => $('#new-calendar').click());
+    return;
+  }
   if (!store.state.range) { reload(); return; }
   const instances = store.visibleInstances();
   const prevScroll = main.scrollTop;
-  // Keep the agenda search focused (and its caret) across background re-renders
-  // — e.g. the 30 s poll firing while the user is mid-search.
+  // Keep keyboard focus stable across a re-render (e.g. the 30 s poll
+  // redrawing mid-tab / mid-search): the agenda search keeps its focus and
+  // caret, and a focused event chip/block is re-focused by its data-key.
   const search = main.querySelector('#agenda-q');
   const searchFocus = search && document.activeElement === search
     ? { start: search.selectionStart, end: search.selectionEnd } : null;
+  const focusKey = document.activeElement?.closest?.('#content [data-key]')?.dataset.key ?? null;
   main.innerHTML = '';
   if (view === 'month') main.append(renderMonth(instances));
   else if (view === 'week') main.append(renderTimed(instances, 7));
@@ -165,6 +210,10 @@ export function renderGrid(main) {
   if (searchFocus) {
     const q = main.querySelector('#agenda-q');
     if (q) { q.focus(); try { q.setSelectionRange(searchFocus.start, searchFocus.end); } catch { /* unsupported */ } }
+  }
+  if (focusKey) {
+    main.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)
+      ?.focus({ preventScroll: true });
   }
   // Timed views scroll; keep the viewport where it was across a re-render,
   // except right after navigation, when we jump to the current-time line.
@@ -199,10 +248,12 @@ setInterval(() => {
 }, 60_000);
 
 // ---- drag to move --------------------------------------------------------
-// Pointer-based drag: month chips move between day cells, week/day blocks
-// move in 15-minute steps and across day columns. Recurring events need the
-// editor's per-occurrence/series choice and attendees can't move someone
-// else's meeting, so those show a hint toast instead of dragging.
+// Pointer-based drag (mouse and pen). Touch is deliberately excluded: a
+// finger-drag must scroll the grid, and receiving pointermove reliably would
+// need touch-action:none on every chip, which would break scrolling. Touch
+// users move events through Edit instead; a tap still opens the detail.
+// Recurring events need the editor's per-occurrence/series choice and
+// attendees can't move someone else's meeting, so those show a hint toast.
 
 const DRAG_MIN_PX = 5;
 
@@ -230,7 +281,7 @@ async function commitMove(inst, deltaMs) {
 // month view: drag a chip onto another day cell (keeps the time of day)
 function attachChipDrag(chip, inst) {
   chip.addEventListener('pointerdown', ev => {
-    if (ev.button !== 0) return;
+    if (ev.button !== 0 || ev.pointerType === 'touch') return;
     const sx = ev.clientX, sy = ev.clientY;
     let ghost = null, target = null;
     const setTarget = cell => {
@@ -279,7 +330,7 @@ function attachChipDrag(chip, inst) {
 // week/day view: drag a block vertically (15-min snap) and across day columns
 function attachBlockDrag(block, inst, day) {
   block.addEventListener('pointerdown', ev => {
-    if (ev.button !== 0) return;
+    if (ev.button !== 0 || ev.pointerType === 'touch') return;
     const sx = ev.clientX, sy = ev.clientY;
     const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     let dragging = false, deltaMs = 0;
@@ -374,7 +425,8 @@ function renderMonth(instances) {
   }
   el.append(dow);
   const weeks = html`<div class="weeks"></div>`;
-  for (let w = 0; w < 6; w++) {
+  const ROWS = monthWeeks();   // 5 when the month fits, else 6
+  for (let w = 0; w < ROWS; w++) {
     const weekStart = addDays(start, w * 7);
     const { multi, laneCount } = spans(instances, weekStart);
     const row = html`<div class="weeks-row"></div>`;
@@ -412,6 +464,8 @@ function renderMonth(instances) {
           data-key="${store.instanceKey(s.inst)}"
           style="grid-column:${s.colStart + 1}/${s.colEnd + 2};grid-row:${s.lane + 1};background:${color};color:${store.inkOn(color)}"
           title="${s.inst.summary}">${s.contLeft ? '‹ ' : ''}${s.inst.summary}</button>`;
+        // (the ‹ continuation marker is text, not an icon: it prefixes a
+        // truncated title inside the bar and must flow with the text)
         bar.addEventListener('click', ev => { ev.stopPropagation(); openEvent(s.inst); });
         bars.append(bar);
       }
@@ -445,8 +499,15 @@ function renderTimed(instances, days) {
   el.append(html`<div class="allday"></div>`);
   for (let d = 0; d < days; d++) {
     const day = addDays(start, d);
-    const lane = html`<div class="allday"></div>`;
+    // The all-day lane: chips share the day's width side-by-side (they all
+    // overlap by definition — they cover the whole day), and the empty lane
+    // is clickable to create an all-day event, like every other empty region.
+    const lane = html`<div class="allday" role="button" tabindex="0"
+      aria-label="${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} — add all-day event"></div>`;
     for (const inst of eventsOnDay(instances, day).filter(i => i.allDay)) lane.append(chipFor(inst));
+    const create = () => openEventDialog(null, day, { allDay: true });
+    lane.addEventListener('click', ev => { if (ev.target === lane) create(); });
+    lane.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); create(); } });
     el.append(lane);
   }
 
@@ -479,7 +540,7 @@ function renderTimed(instances, days) {
       const hr = Math.floor((ev.clientY - rect.top) / (HOUR_REM * remPx));
       const when = new Date(day);
       when.setHours(Math.min(23, Math.max(0, hr)));
-      openEventDialog(null, when, true);
+      openEventDialog(null, when, { timed: true });
     });
     el.append(col);
   }
@@ -571,7 +632,7 @@ function fillWindowAgenda(list, instances) {
     list.append(html`<h3 class="${sameDay(day, today) ? 'today' : ''}">${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>`);
     for (const inst of evs) list.append(agendaItem(inst));
   }
-  if (!any) setEmpty(list, 'Nothing planned in this period. Click “＋ New event” to add something.');
+  if (!any) setEmpty(list, 'Nothing planned in this period. Click “New event” to add something.');
 }
 
 // Search results span arbitrary dates, so headers carry the year and events are

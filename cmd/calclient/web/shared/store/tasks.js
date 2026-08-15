@@ -8,7 +8,7 @@ import * as ical from '../ical.js';
 import { DAY, startOfDay } from '../time.js';
 import { state, emit, check } from './core.js';
 import { getObject, putObject, deleteObject } from './objects.js';
-import { loadCalendars } from './calendars.js';
+import { loadCalendars, updateCalendar } from './calendars.js';
 
 const { NS, key } = dav;
 
@@ -142,15 +142,18 @@ export async function deleteTask(task) {
   await loadTasks(true);
 }
 
-// createTaskList makes a VTODO-only calendar and refreshes the calendar list
+// createTaskList makes a VTODO-only calendar (with an optional colour, set
+// the same way as an event calendar's) and refreshes the calendar list
 // (which the tasks view watches).
-export async function createTaskList(name, displayName) {
+export async function createTaskList(name, displayName, color = '') {
   const body = dav.xmlDoc('c:mkcalendar', '', dav.xml`<d:set><d:prop>
     <d:displayname>${displayName}</d:displayname>
     <c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>
   </d:prop></d:set>`);
-  check(await dav.req('MKCALENDAR', state.calHome + encodeURIComponent(name) + '/', {
+  const href = state.calHome + encodeURIComponent(name) + '/';
+  check(await dav.req('MKCALENDAR', href, {
     headers: { 'Content-Type': 'application/xml; charset=utf-8' }, body,
   }), [201]);
+  if (color) await updateCalendar(href, { color });
   await loadCalendars();
 }

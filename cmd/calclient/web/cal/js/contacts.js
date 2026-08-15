@@ -8,6 +8,7 @@ import { $, html, frag, brJoin } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
 import { toast, showError } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
+import { newCollectionDialog } from './new-collection.js';
 
 let filter = '';
 // Sidebar selection: {type:'all'} | {type:'book', href} | {type:'group', href}.
@@ -104,9 +105,9 @@ function buildSidebar(side, books, groups) {
 }
 
 async function addBookFlow() {
-  const name = await promptDialog('Name for the new address book', { confirmLabel: 'Create' });
-  if (!name?.trim()) return;
-  try { await store.createBook(name.trim()); toast(`Address book “${name.trim()}” created.`); }
+  const r = await newCollectionDialog({ title: 'New address book', withColor: false });
+  if (!r?.name) return;
+  try { await store.createBook(r.name); toast(`Address book “${r.name}” created.`); }
   catch (e) { showError(e); }
 }
 
@@ -129,11 +130,11 @@ async function deleteBookFlow(book, count) {
 }
 
 async function addGroupFlow() {
-  const name = await promptDialog('Name for the new group', { confirmLabel: 'Create' });
-  if (!name?.trim()) return;
+  const r = await newCollectionDialog({ title: 'New group', withColor: false });
+  if (!r?.name) return;
   try {
-    await store.createGroup(name.trim(), selection.type === 'book' ? selection.href : undefined);
-    toast(`Group “${name.trim()}” created.`);
+    await store.createGroup(r.name, selection.type === 'book' ? selection.href : undefined);
+    toast(`Group “${r.name}” created.`);
   } catch (e) { showError(e); }
 }
 

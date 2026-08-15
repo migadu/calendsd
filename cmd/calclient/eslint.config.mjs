@@ -9,7 +9,7 @@ const browserGlobals = Object.fromEntries([
   'sessionStorage', 'localStorage', 'crypto', 'atob', 'btoa',
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask',
   'DOMParser', 'XMLSerializer', 'Event', 'EventTarget', 'CustomEvent',
-  'Intl', 'confirm', 'prompt', 'alert', 'getComputedStyle', 'requestAnimationFrame',
+  'Intl', 'confirm', 'prompt', 'alert', 'getComputedStyle', 'requestAnimationFrame', 'CSS',
   'Notification', 'PushManager', 'ServiceWorkerRegistration', 'TextDecoder', 'TextEncoder',
   'FileReader', 'Blob', 'File', 'FormData', 'MutationObserver', 'ResizeObserver',
 ].map(g => [g, 'readonly']));

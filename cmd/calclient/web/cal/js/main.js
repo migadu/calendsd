@@ -6,8 +6,8 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
 import { toast, showError, enableOnValid, busyWhile } from './ui.js';
-import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
-import { renderGrid, gridNav, setGridView, applyCalendarRoute, currentCalendarRoute } from './grid.js';
+import { confirmDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
+import { renderGrid, gridNav, setGridView, applyCalendarRoute, currentCalendarRoute, onCursorChange } from './grid.js';
 import { openEventDialog } from './event-dialog.js';
 import { openEventDetail } from './event-detail.js';
 import * as router from './router.js';
@@ -16,6 +16,8 @@ import { renderTasks } from './tasks.js';
 import { renderContacts } from './contacts.js';
 import { renderSettings, updateImportProgress } from './settings.js';
 import * as pushSync from './push-sync.js';
+import { createMiniMonth, wireTitlePopover } from './mini-month.js';
+import { newCollectionDialog } from './new-collection.js';
 
 // ---- routing -------------------------------------------------------------
 //
@@ -153,6 +155,17 @@ $('#signout').addEventListener('click', () => {
 
 router.onRoute(route);
 router.interceptLinks();
+
+// The sidebar mini-month follows the grid's cursor; the title doubles as a
+// date-picker trigger (its popover carries a second mini-month — the only
+// jump-to-date affordance on narrow screens, where the sidebar is hidden).
+const miniMonth = createMiniMonth();
+$('#mini-month').append(miniMonth.el);
+miniMonth.refresh();
+onCursorChange(() => miniMonth.refresh());
+store.bus.addEventListener('prefs', () => miniMonth.refresh());
+wireTitlePopover();
+
 $('#nav-today').addEventListener('click', () => gridNav(0));
 $('#nav-prev').addEventListener('click', () => gridNav(-1));
 $('#nav-next').addEventListener('click', () => gridNav(1));
@@ -187,11 +200,11 @@ $('#scrim').addEventListener('click', closeMenus);
 
 $('#new-calendar').addEventListener('click', async () => {
   closeMenus();
-  const name = await promptDialog('Name for the new calendar', { confirmLabel: 'Create' });
-  if (!name) return;
+  const r = await newCollectionDialog({ title: 'New calendar' });
+  if (!r?.name) return;
   try {
-    await store.createCalendar(name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), name, '');
-    toast(`Calendar “${name}” created.`);
+    await store.createCalendar(r.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), r.name, r.color);
+    toast(`Calendar “${r.name}” created.`);
   } catch (e) { showError(e); }
 });
 
@@ -413,6 +426,59 @@ document.addEventListener('keydown', e => {
     }
     else if (!$('#user-pop').hidden || document.body.classList.contains('sidebar-open')) closeMenus();
     else toggleInvites(false);
+  }
+});
+
+// ---- keyboard shortcuts --------------------------------------------------
+// Single-letter shortcuts (Google-calendar style): views, navigation, create,
+// search, help. Skipped while typing, while a modal dialog is open (Escape is
+// theirs), and before login. '?' opens the cheat sheet.
+function focusSearch() {
+  if (currentView === 'contacts') { $('#ct-search')?.focus(); return; }
+  if (currentView === 'calendar' && currentCalendarRoute().view === 'agenda') {
+    $('#agenda-q')?.focus();
+    return;
+  }
+  setGridView('agenda');   // render is synchronous; the input exists now
+  $('#agenda-q')?.focus();
+}
+
+function shortcutsDialog() {
+  const row = (k, what) => frag`<div class="sc-row"><kbd>${k}</kbd><span>${what}</span></div>`;
+  const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <button class="dialog-close icon-btn" id="sc-x" aria-label="Close">${icon('x', 16)}</button>
+    <h2>Keyboard shortcuts</h2>
+    <div class="sc-list">
+      ${row('t', 'Today')}
+      ${row('d / w / m / a', 'Day, Week, Month, Agenda view')}
+      ${row('← / →', 'Previous or next period')}
+      ${row('c', 'New event')}
+      ${row('/', 'Search events (or contacts)')}
+      ${row('Esc', 'Close dialogs and panels')}
+      ${row('?', 'This list')}
+    </div>
+  </div></div>`;
+  openOverlay(dlg, () => dlg.remove());
+  $('#sc-x', dlg).addEventListener('click', () => dlg.remove());
+}
+
+document.addEventListener('keydown', e => {
+  if ($('#topbar').hidden) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t?.closest?.('input, textarea, select, [contenteditable]')) return;
+  if (document.querySelector('#dialog-host .overlay')) return;
+  switch (e.key) {
+    case 't': gridNav(0); break;
+    case 'd': setGridView('day'); break;
+    case 'w': setGridView('week'); break;
+    case 'm': setGridView('month'); break;
+    case 'a': setGridView('agenda'); break;
+    case 'ArrowLeft': gridNav(-1); break;
+    case 'ArrowRight': gridNav(1); break;
+    case 'c': if (currentView === 'calendar') openEventDialog(null); break;
+    case '/': e.preventDefault(); focusSearch(); break;
+    case '?': shortcutsDialog(); break;
   }
 });
 

@@ -699,3 +699,65 @@ a.join-btn:hover { filter: brightness(1.08); }
 /* tighter tracking than a full label — it sits inline next to a name */
 .type-tag { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
 
+/* ---- mini-month (sidebar date picker + title popover) ---- */
+.mm { margin: 0 0 1rem; }
+.mm-head { display: flex; align-items: center; gap: .2rem; margin-bottom: .25rem; }
+.mm-head .icon-btn { border: none; background: none; color: var(--dim); padding: .15rem .3rem; }
+.mm-head .icon-btn:hover { background: var(--color-background-alt); color: var(--ink); }
+.mm-title { flex: 1; text-align: center; font-size: .82rem; font-weight: 600; }
+.mm-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mm-dow { display: contents; }
+.mm-dow span {
+  font-size: .62rem; color: var(--dim); text-align: center; padding: .15rem 0;
+  font-family: var(--font-mono); text-transform: uppercase;
+}
+.mm-day {
+  border: none; background: none; padding: 0; margin: 1px;
+  height: 1.55rem; font: inherit; font-size: .78rem; color: var(--ink); cursor: pointer;
+}
+.mm-day:hover { background: var(--color-background-alt); }
+.mm-day.other { color: var(--color-text-subtle); }
+.mm-day.in-range { background: var(--color-background-alt); }
+.mm-day.in-range.other { background: color-mix(in srgb, var(--color-background-alt) 55%, transparent); }
+.mm-day.today { color: var(--accent); font-weight: 600; }
+.mm-day.sel { background: var(--accent); color: var(--accent-ink); }
+.mm-day:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* the title-bar date popover */
+#cal-popover {
+  position: fixed; z-index: 46; width: 15.5rem; max-width: calc(100vw - 1rem);
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+  padding: .7rem .8rem .8rem;
+}
+#cal-popover .mm { margin: 0 0 .5rem; }
+.mm-today { width: 100%; padding: .4rem; }
+/* the title reads as clickable: a subtle affordance on hover/focus */
+#cal-title { cursor: pointer; }
+#cal-title:hover, #cal-title:focus-visible { color: var(--accent); }
+
+/* ---- new-collection dialog swatches ---- */
+.swatches { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.swatch {
+  width: 1.5rem; height: 1.5rem; border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  cursor: pointer; padding: 0;
+}
+.swatch:hover { filter: brightness(1.1); }
+
+/* ---- keyboard-shortcut cheat sheet ---- */
+.sc-list { display: flex; flex-direction: column; gap: .35rem; }
+.sc-row { display: flex; align-items: baseline; gap: .7rem; }
+.sc-row kbd {
+  font-family: var(--font-mono); font-size: .75rem; color: var(--ink);
+  background: var(--color-background-alt); border: 1px solid var(--line);
+  border-bottom-width: 2px; padding: .05rem .4rem; min-width: 4.5rem; text-align: center;
+}
+.sc-row span { color: var(--dim); }
+
+/* ---- week-view all-day lane ----
+   Chips share the day's width side-by-side (they all cover the whole day, so
+   any set of them overlaps); the lane itself is a create target. */
+.week .allday { display: flex; gap: 2px; align-items: stretch; padding: .1rem; }
+.week .allday .chip { flex: 1; min-width: 0; }
+.week .allday:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.week .allday .chip:focus-visible { outline-offset: -1px; }
+

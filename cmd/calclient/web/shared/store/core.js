@@ -7,6 +7,7 @@ export const state = {
   user: '', principal: '', displayName: '',
   calHome: '', abHome: '', inbox: '', outbox: '', addresses: [],
   calendars: [],           // {href,name,displayName,color,ctag,description}
+  calendarsLoaded: false,  // first calendar-list fetch finished (drives the grid's loading state)
   hidden: new Set(),       // calendar hrefs toggled off in the sidebar
   range: null,             // {start: Date, end: Date} currently loaded
   instances: new Map(),    // calHref -> [instance]

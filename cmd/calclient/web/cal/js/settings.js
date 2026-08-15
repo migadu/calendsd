@@ -27,8 +27,9 @@ export function renderSettings(main) {
         <select id="st-tz"></select></label>
       <label>Default view
         <select id="st-defview">
-          <option value="month" ${p.defaultView === 'month' ? 'selected' : ''}>Month</option>
+          <option value="day" ${p.defaultView === 'day' ? 'selected' : ''}>Day</option>
           <option value="week" ${p.defaultView === 'week' ? 'selected' : ''}>Week</option>
+          <option value="month" ${p.defaultView === 'month' ? 'selected' : ''}>Month</option>
           <option value="agenda" ${p.defaultView === 'agenda' ? 'selected' : ''}>Agenda</option>
         </select></label>
       <label>Default event length

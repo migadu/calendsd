@@ -59,6 +59,7 @@ export async function loadCalendars() {
     .sort((a, b) => (Number.isNaN(a.order) ? Infinity : a.order) - (Number.isNaN(b.order) ? Infinity : b.order)
       || (a.displayName || a.name).localeCompare(b.displayName || b.name));
   state.calendars = [...mine, ...delegated];
+  state.calendarsLoaded = true;
   // Default to a calendar that can actually hold new events: writable and
   // VEVENT-capable, so defaultCal never points at a read-only share or a
   // task/journal collection.

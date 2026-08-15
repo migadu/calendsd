@@ -6,19 +6,22 @@
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
 import { $, html, frag } from '/shared/dom.js';
-import { DAY, localDate, formatTimeOfDay, parseTimeOfDay } from '/shared/time.js';
+import { DAY, localDate, formatTimeOfDay, parseTimeOfDay, startOfDay, addDays } from '/shared/time.js';
 import { toast, showError, busyWhile } from './ui.js';
 import { createGuestField } from './guest-field.js';
 import { createReminderField } from './reminder-field.js';
 import { checkAvailability } from './availability.js';
 import { confirmDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
-// openEventDialog(null, date?, timed?) creates; openEventDialog(instance) edits.
+// openEventDialog(null, date?, opts?, onClose?) creates; openEventDialog(instance) edits.
+// opts: { timed?: true } keeps the clicked hour instead of rounding to the
+// next; { allDay: true } pre-checks All day (the all-day lane's create path).
 // onClose (the router's, when editing via a /cal/event/<uid>/edit route) replaces
 // the bare dlg.remove() so closing/saving navigates back to the calendar URL;
 // the create paths pass none and keep the plain overlay behavior. Returns the
 // overlay element (or undefined if the stored object failed to load).
-export async function openEventDialog(inst, defaultDay, timed, onClose) {
+export async function openEventDialog(inst, defaultDay, opts, onClose) {
+  const o = opts || {};
   let master = null; // {text, etag} of the stored object when editing
   if (inst) {
     try { master = await store.getObject(inst.href); }
@@ -27,9 +30,10 @@ export async function openEventDialog(inst, defaultDay, timed, onClose) {
 
   const now = new Date();
   const base = defaultDay ? new Date(defaultDay) : now;
-  if (!timed) base.setHours(now.getHours() + 1, 0, 0, 0);
-  const start = inst ? inst.start : base;
-  const end = inst ? inst.end : new Date(+base + (store.state.prefs.defaultDuration || 60) * 60000);
+  if (!o.timed) base.setHours(now.getHours() + 1, 0, 0, 0);
+  let start = inst ? inst.start : base;
+  let end = inst ? inst.end : new Date(+base + (store.state.prefs.defaultDuration || 60) * 60000);
+  if (!inst && o.allDay) { start = startOfDay(base); end = addDays(startOfDay(base), 1); }
   const rrulePreset = inst ? ical.parseRRulePreset(inst.rrule) : { freq: '', ends: 'never' };
   const isRecurring = !!(inst && (inst.rrule || inst.rid));
   const guests = (inst?.attendees ?? []).map(a => ({ ...a }));
@@ -58,7 +62,7 @@ export async function openEventDialog(inst, defaultDay, timed, onClose) {
     <div class="grid">
       <label class="full">Title<input id="ev-title" type="text" value="${inst?.summary === '(no title)' ? '' : inst?.summary ?? ''}" placeholder="Add a title"></label>
       <label>Calendar<select id="ev-cal"></select></label>
-      <label class="row" style="align-self:end"><input type="checkbox" id="ev-allday" ${inst?.allDay ? 'checked' : ''}> All day</label>
+      <label class="row" style="align-self:end"><input type="checkbox" id="ev-allday" ${(inst?.allDay || o.allDay) ? 'checked' : ''}> All day</label>
       <label>Starts<span class="dt-pair">
         <input id="ev-start" type="date">
         <input id="ev-start-time" type="text" class="time-field" list="ev-times" autocomplete="off" spellcheck="false">
