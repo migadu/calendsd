@@ -5,6 +5,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { localDate } from '/shared/time.js';
 import { fmtDate, fmtTime, toast, showError, enableOnValid, busyWhile } from './ui.js';
 import { openOverlay, confirmDialog, promptDialog, submitOnEnter } from '/shared/dialogs.js';
@@ -78,7 +79,7 @@ export function renderTasks(main) {
   const done = buckets.get('done');
   if (done.length) {
     const toggle = html`<button class="ghost task-done-toggle">${showDone
-      ? '▾ Hide completed' : `▸ Show completed (${done.length})`}</button>`;
+      ? frag`${icon('chevDown', 12)} Hide completed` : frag`${icon('chevRight', 12)} Show completed (${done.length})`}</button>`;
     toggle.addEventListener('click', () => { showDone = !showDone; renderTasks(main); });
     el.append(toggle);
     if (showDone) {

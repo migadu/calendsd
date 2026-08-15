@@ -4,6 +4,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { toast, showError, enableOnValid, busyWhile } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 import { renderGrid, gridNav, setGridView, applyCalendarRoute, currentCalendarRoute } from './grid.js';
@@ -213,8 +214,8 @@ function renderSidebar() {
         <span class="dot" style="background:${store.calColor(cal.href)}"></span>
         <span class="name">${cal.displayName || cal.name}</span>
         ${cal.delegatedFrom && frag`<span class="type-tag" title="Delegated by ${cal.delegatedFrom}">${cal.delegatedFrom}</span>`}
-        ${cal.readOnly && frag`<span class="ro-badge" title="Shared with you (read-only)">🔒</span>`}</label>
-      ${!cal.delegatedFrom && frag`<button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">⚙</button>`}
+        ${cal.readOnly && frag`<span class="ro-badge" title="Shared with you (read-only)">${icon('lock', 12)}</span>`}</label>
+      ${!cal.delegatedFrom && frag`<button class="gear" title="${cal.readOnly ? 'Shared calendar' : 'Calendar settings'}">${icon('gear', 14)}</button>`}
     </li>`;
     $('input', li).addEventListener('change', ev => {
       store.setCalendarHidden(cal.href, !ev.target.checked);
@@ -242,7 +243,7 @@ function calendarMenu(cal) {
   const ro = cal.readOnly;
   const dialog = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true">
     <h2>${cal.displayName || cal.name}</h2>
-    ${ro && frag`<p class="note">🔒 This calendar is shared with you, read-only. You can hide it or remove it from your list, but not edit its events or settings.</p>`}
+    ${ro && frag`<p class="note">${icon('lock', 14)} This calendar is shared with you, read-only. You can hide it or remove it from your list, but not edit its events or settings.</p>`}
     <div class="grid">
       <label>Name<input id="cm-name" value="${cal.displayName || cal.name}" ${ro ? 'disabled' : ''}></label>
       <label>Color<input id="cm-color" type="color" value="${store.calColor(cal.href)}" ${ro ? 'disabled' : ''}></label>

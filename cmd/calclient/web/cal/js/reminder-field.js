@@ -12,6 +12,7 @@
 
 import * as ical from '/shared/ical.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 
 const UNITS = ['minutes', 'hours', 'days', 'weeks'];
 
@@ -24,7 +25,7 @@ export function createReminderField(triggers = [], opts = {}) {
   let custom = !!opts.custom;
   const el = html`<span class="reminders"></span>`;
   const list = html`<span class="rem-list"></span>`;
-  const addBtn = html`<button type="button" class="ghost rem-add">＋ Add reminder</button>`;
+  const addBtn = html`<button type="button" class="ghost rem-add">${icon('plus', 13)} Add reminder</button>`;
   addBtn.addEventListener('click', () => list.append(makeRow('-PT15M')));
 
   // makeRow renders one reminder: a preset dropdown with a "Custom…" escape
@@ -44,7 +45,7 @@ export function createReminderField(triggers = [], opts = {}) {
           <option value="after">after</option>
         </select>
       </span>
-      <button type="button" class="rem-remove" aria-label="Remove reminder">×</button>
+      <button type="button" class="rem-remove icon-btn" aria-label="Remove reminder">${icon('x', 12)}</button>
     </span>`;
     const preset = $('.rem-preset', row), custBox = $('.rem-custom', row);
     const amount = $('.rem-amount', row), unit = $('.rem-unit', row), when = $('.rem-when', row);

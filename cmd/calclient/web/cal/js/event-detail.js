@@ -5,6 +5,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { fmtRange, linkify, toast, showError, scheduleStatusTag } from './ui.js';
 import * as router from './router.js';
 import { confirmDialog, choiceDialog, openOverlay } from '/shared/dialogs.js';
@@ -63,12 +64,12 @@ export function openEventDetail(inst, onClose) {
     frag`<button data-ps="${ps}" class="${inst.myPartstat === ps ? 'active' : ''}">${label}</button>`;
 
   const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Event details">
-    <button class="dialog-close" id="ed-x" aria-label="Close">×</button>
+    <button class="dialog-close icon-btn" id="ed-x" aria-label="Close">${icon('x', 16)}</button>
     <div class="detail-head">
       <span class="cal-swatch" style="background:${color}" aria-hidden="true"></span>
       <h2 style="margin:0">${inst.summary}</h2>
     </div>
-    ${failedSends.length ? frag`<p class="detail-warn">⚠ ${failedSends.length === 1
+    ${failedSends.length ? frag`<p class="detail-warn">${icon('warn', 15)} ${failedSends.length === 1
       ? `An invitation to ${failedSends[0].email} couldn’t be delivered`
       : `${failedSends.length} invitations couldn’t be delivered`} — see the guest list below.
       <button id="ed-resend" class="link-btn">Resend</button></p>` : ''}

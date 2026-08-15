@@ -5,6 +5,7 @@
 import * as store from '/shared/store.js';
 import { icalUnescape, buildPhotoLine, isPhotoLine } from '/shared/ical.js';
 import { $, html, frag, brJoin } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { toast, showError } from './ui.js';
 import { confirmDialog, promptDialog, openOverlay, submitOnEnter } from '/shared/dialogs.js';
 
@@ -31,7 +32,7 @@ export function renderContacts(main) {
     <div class="ct-main">
       <div class="bar">
         <input id="ct-search" type="search" placeholder="Search contacts…" value="${filter}">
-        <button class="primary" id="ct-add">＋ New contact</button>
+        <button class="primary" id="ct-add">${icon('plus', 14)} New contact</button>
       </div>
       <div id="ct-rows"></div>
     </div>
@@ -48,13 +49,13 @@ export function renderContacts(main) {
 }
 
 // buildSidebar renders the address-book list (with an "All Contacts" entry) and,
-// below it, any contact groups. Each heading carries a ＋ to create one; each
+// below it, any contact groups. Each heading carries an add (+) control; each
 // book/group (not "All Contacts") reveals a × to delete it.
 function buildSidebar(side, books, groups) {
   side.innerHTML = '';
   const heading = (title, onAdd) => {
     const h = html`<div class="ct-side-h"><span>${title}</span></div>`;
-    const add = html`<button type="button" class="ct-side-add" aria-label="Add ${title}" title="Add ${title}">＋</button>`;
+    const add = html`<button type="button" class="ct-side-add icon-btn" aria-label="Add ${title}" title="Add ${title}">${icon('plus', 14)}</button>`;
     add.addEventListener('click', onAdd);
     h.append(add);
     side.append(h);
@@ -70,12 +71,12 @@ function buildSidebar(side, books, groups) {
     const row = html`<div class="ct-nav-row"></div>`;
     row.append(btn);
     if (onRename) {
-      const ren = html`<button type="button" class="ct-nav-act" aria-label="Rename ${label}" title="Rename">✎</button>`;
+      const ren = html`<button type="button" class="ct-nav-act icon-btn" aria-label="Rename ${label}" title="Rename">${icon('pencil', 13)}</button>`;
       ren.addEventListener('click', ev => { ev.stopPropagation(); onRename(); });
       row.append(ren);
     }
     if (onDelete) {
-      const del = html`<button type="button" class="ct-nav-act ct-nav-del" aria-label="Delete ${label}" title="Delete">×</button>`;
+      const del = html`<button type="button" class="ct-nav-act ct-nav-del icon-btn" aria-label="Delete ${label}" title="Delete">${icon('x', 13)}</button>`;
       del.addEventListener('click', ev => { ev.stopPropagation(); onDelete(); });
       row.append(del);
     }
@@ -196,7 +197,7 @@ function renderRows(box) {
     const row = html`<button class="contact" type="button">
       <span class="who"><div>${c.fn}${c.title && frag` <span class="mail">— ${c.title}</span>`}</div>
         <div class="mail">${sub}</div></span>
-      <span class="chev" aria-hidden="true">›</span>
+      <span class="chev" aria-hidden="true">${icon('chevRight', 14)}</span>
     </button>`;
     row.prepend(avatarEl(c));
     row.addEventListener('click', () => contactDetail(c));
@@ -378,7 +379,7 @@ function preservedDetails(lines) {
 // visible and changeable. Returns the rows container for collectMulti().
 function mergeMultiGroup(parent, label, items, types, inputType, addType) {
   const group = html`<div class="field-group mg-multi">
-    <div class="fg-head"><span>${label}</span><button type="button" class="ghost">＋ Add ${label.toLowerCase()}</button></div>
+    <div class="fg-head"><span>${label}</span><button type="button" class="ghost">${icon('plus', 13)} Add ${label.toLowerCase()}</button></div>
     <div class="mg-rows"></div>
   </div>`;
   const box = group.querySelector('.mg-rows');
@@ -609,11 +610,11 @@ function contactDialog(c) {
       <label>Job title<input id="cd-title" type="text" value="${c?.title ?? ''}"></label>
 
       <div class="full field-group">
-        <div class="fg-head"><span>Email</span><button type="button" id="cd-add-email" class="ghost">＋ Add email</button></div>
+        <div class="fg-head"><span>Email</span><button type="button" id="cd-add-email" class="ghost">${icon('plus', 13)} Add email</button></div>
         <div id="cd-emails"></div>
       </div>
       <div class="full field-group">
-        <div class="fg-head"><span>Phone</span><button type="button" id="cd-add-tel" class="ghost">＋ Add phone</button></div>
+        <div class="fg-head"><span>Phone</span><button type="button" id="cd-add-tel" class="ghost">${icon('plus', 13)} Add phone</button></div>
         <div id="cd-tels"></div>
       </div>
 

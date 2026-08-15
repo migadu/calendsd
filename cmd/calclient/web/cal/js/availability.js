@@ -5,6 +5,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { DAY, HOUR, startOfDay } from '/shared/time.js';
 import { fmtTime, fmtDate, showError } from './ui.js';
 
@@ -80,12 +81,12 @@ export async function checkAvailability(box, guests, readTimes, self) {
         if (+b.start < +ee && +b.end > +es) clash = true;
       }
       const v = $('.verdict', lane);
-      v.textContent = clash ? '● busy' : '○ free';
+      v.replaceChildren(frag`${clash ? icon('circleDot', 11) : icon('circle', 11)} ${clash ? 'busy' : 'free'}`);
       v.className = 'verdict ' + (clash ? 'bad' : 'ok');
       if (clash) allFree = false;
       box.append(lane);
     }
-    box.append(html`<div class="avail-sum ${allFree ? 'ok' : 'bad'}">${allFree ? '✓ Everyone is free at the proposed time' : '⚠ Someone is busy at the proposed time'}</div>`);
+    box.append(html`<div class="avail-sum ${allFree ? 'ok' : 'bad'}">${allFree ? frag`${icon('check', 15)} Everyone is free at the proposed time` : frag`${icon('warn', 15)} Someone is busy at the proposed time`}</div>`);
     box.append(html`<div class="avail-legend"><span><i class="k-slot"></i> proposed time</span><span><i class="k-busy"></i> busy</span></div>`);
   } catch (e) {
     box.innerHTML = '';

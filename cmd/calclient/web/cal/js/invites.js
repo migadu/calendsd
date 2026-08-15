@@ -5,6 +5,7 @@
 import * as store from '/shared/store.js';
 import { lastSegment } from '/shared/dav.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { DAY, startOfDay, sameDay } from '/shared/time.js';
 import { fmtRange, fmtTime, toast, showError } from './ui.js';
 import * as router from './router.js';
@@ -137,7 +138,7 @@ function renderShareInvites(list) {
     const calName = principalName(n.hostHref);
     const pending = n.status === 'noresponse';
     const card = html`<div class="invite">
-      <div class="title">📅 ${calName}</div>
+      <div class="title">${icon('calendar', 15)} ${calName}</div>
       <div class="meta">
         ${who} shared a calendar with you · ${n.readWrite ? 'can edit' : 'read-only'}
         ${n.summary && frag`<br>${n.summary}`}
@@ -183,7 +184,7 @@ function requestCard(inv) {
     <div class="title">${inv.updated && frag`<span class="type-tag">updated</span> `}${inv.summary ?? '(no title)'}</div>
     <div class="meta">
       ${inv.start && frag`<div class="when">${fmtWhen(inv)}</div>`}
-      ${inv.location && frag`<div>📍 ${inv.location}</div>`}
+      ${inv.location && frag`<div>${icon('pin', 13)} ${inv.location}</div>`}
       <div>${inv.organizer && frag`From ${inv.organizer}`}${guests > 1 ? ` · ${guests} guests` : ''}</div>
       <div class="conflict">Checking your availability…</div>
     </div>

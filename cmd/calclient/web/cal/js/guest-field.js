@@ -4,6 +4,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { toast } from './ui.js';
 
 // createGuestField renders the control. `guests` is the caller's live array
@@ -22,7 +23,7 @@ export function createGuestField(guests, onChange) {
     for (const g of guests) {
       const cls = (g.partstat === 'ACCEPTED' ? ' accepted' : g.partstat === 'DECLINED' ? ' declined' : '')
         + (g.room ? ' room' : '');
-      const chip = html`<span class="guest${cls}" title="${g.room ? 'Room' : g.partstat ?? ''}">${g.room ? '🚪 ' : ''}${g.email}<button aria-label="Remove ${g.email}">×</button></span>`;
+      const chip = html`<span class="guest${cls}" title="${g.room ? 'Room' : g.partstat ?? ''}">${g.room ? frag`${icon('door', 13)} ` : ''}${g.email}<button class="icon-btn" aria-label="Remove ${g.email}">${icon('x', 12)}</button></span>`;
       $('button', chip).addEventListener('click', () => {
         guests.splice(guests.indexOf(g), 1);
         renderChips();

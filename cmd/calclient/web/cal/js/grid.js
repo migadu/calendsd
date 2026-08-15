@@ -5,6 +5,7 @@
 
 import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
+import { icon } from '/shared/icons.js';
 import { DAY, HOUR, startOfDay, addDays, sameDay, nextDate, isoWeek,
   startOfWeek as weekStartOf, tzDayStart as tzDayStartIn } from '/shared/time.js';
 import { layoutColumns, spans } from './layout.js';
@@ -548,7 +549,7 @@ function agendaItem(inst) {
     <span class="dot" style="background:${store.calColor(inst.calHref)}"></span>
     <span class="time">${inst.allDay ? 'all day' : fmtTime(inst.start) + ' – ' + fmtTime(inst.end)}</span>
     <span class="what">${inst.summary}</span>
-    ${inst.location && frag`<span class="where">📍 ${inst.location}</span>`}
+    ${inst.location && frag`<span class="where">${icon('pin', 12)} ${inst.location}</span>`}
   </button>`;
   item.addEventListener('click', () => openEvent(inst));
   return item;
