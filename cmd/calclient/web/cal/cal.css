@@ -13,10 +13,14 @@
   --today: var(--color-background-sidebar); --shadow: 0 6px 24px rgba(11, 26, 58, .22);
 }
 /* theme.css squares every corner (`border-radius: 0 !important`) for the sharp
-   blueprint look. That's what we want for boxes, pills, badges and the small
-   status dots. Only avatars and spinners look broken as squares, so restore
-   just those. Must out-!important the global rule (pseudo-element spinner too). */
-.avatar, .spinner, button.is-busy::before {
+   blueprint look. That is the intended look for every box, card, pill, badge
+   and button — so cal.css deliberately writes *no* border-radius of its own.
+   The only genuinely circular primitives are avatars, spinners, and the
+   small round status markers (calendar/event colour dots, the now-line dot):
+   those restore their radius here, and the list must out-!important the
+   global rule (pseudo-element spinner included). */
+.avatar, .spinner, button.is-busy::before,
+.dot, .cal-dot, .cal-swatch, .week .now-line::before {
   border-radius: 50% !important;
 }
 html, body { height: 100%; }
@@ -44,6 +48,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button:disabled:hover { background: var(--panel); }
 button.primary:disabled, button.primary:disabled:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 button.ghost:disabled, button.ghost:disabled:hover { background: none; }
+/* The sign-in button behaves like every other primary: inverts on hover.
+   (A former ID-pinned colour set used to silently beat button:hover, leaving
+   the app's most important CTA without any hover feedback.) */
+#login button:hover { background: transparent; color: var(--accent); }
 input, select, textarea {
   font: inherit; color: var(--ink); border: 1px solid var(--line);
   padding: .4rem .55rem; background: var(--panel);
@@ -59,7 +67,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   background: linear-gradient(160deg, var(--color-background-sidebar), var(--color-brand-blue)); z-index: 50;
 }
 #login form {
-  background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
+  background: var(--panel); box-shadow: var(--shadow);
   padding: 2rem 2.4rem; width: 21rem; display: flex; flex-direction: column; gap: .8rem;
 }
 #login h1 { margin: 0; font-size: 1.4rem; }
@@ -74,12 +82,12 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap;
 }
 #brand { font-family: var(--font-mono); font-weight: 600; font-size: 1.05rem; margin-right: .4rem; }
-#mainnav a { text-decoration: none; color: var(--dim); padding: .3rem .6rem; border-radius: 6px; }
+#mainnav a { text-decoration: none; color: var(--dim); padding: .3rem .6rem; }
 #mainnav a.active { color: var(--accent); background: var(--color-background-alt); font-weight: 600; }
 #cal-controls { display: flex; align-items: center; gap: .4rem; margin-left: .6rem; }
 #cal-title { font-weight: 600; min-width: 11rem; text-align: center; }
-#view-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-#view-seg button { border: none; border-radius: 0; padding: .35rem .7rem; }
+#view-seg { display: inline-flex; border: 1px solid var(--line); overflow: hidden; }
+#view-seg button { border: none; padding: .35rem .7rem; }
 #view-seg button.active { background: var(--accent); color: var(--accent-ink); }
 /* ---- icons (see shared/icons.js) ----
    An icon that leads a label gets breathing room; a trailing or lone one
@@ -115,12 +123,12 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 #user-btn .caret { color: var(--dim); font-size: .7rem; }
 #user-pop {
   position: absolute; right: 0; top: 100%; margin-top: .35rem; min-width: 10rem; z-index: 40;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line);
   box-shadow: var(--shadow); padding: .3rem; display: flex; flex-direction: column;
 }
 #user-pop a, #user-pop button {
   text-align: left; text-decoration: none; color: var(--ink); background: none; border: none;
-  border-radius: 6px; padding: .4rem .6rem; font: inherit; cursor: pointer;
+  padding: .4rem .6rem; font: inherit; cursor: pointer;
 }
 #user-pop a:hover, #user-pop button:hover { background: var(--color-background-alt); }
 
@@ -141,11 +149,11 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 #sidebar h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 1.2rem 0 .4rem; }
 #new-event { width: 100%; padding: .55rem; }
 #cal-list { list-style: none; margin: 0; padding: 0; }
-#cal-list li { display: flex; align-items: center; gap: .45rem; padding: .28rem .2rem; border-radius: 6px; }
+#cal-list li { display: flex; align-items: center; gap: .45rem; padding: .28rem .2rem; }
 #cal-list li:hover { background: var(--color-background-alt); }
 #cal-list li[draggable="true"] { cursor: grab; }
 #cal-list li.dragging { opacity: .45; }
-#cal-list .dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+#cal-list .dot { width: 12px; height: 12px; flex-shrink: 0; }
 #cal-list label { flex: 1; display: flex; align-items: center; gap: .45rem; cursor: pointer; overflow: hidden; }
 #cal-list .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cal-list .gear { border: none; background: none; color: var(--dim); padding: .1rem .3rem; visibility: hidden; }
@@ -176,7 +184,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 }
 .month .span-bar {
   pointer-events: auto; align-self: start; margin: 0 2px; height: 1.1rem;
-  border: none; border-radius: 4px; color: #fff; cursor: pointer;
+  border: none; color: #fff; cursor: pointer;
   font-size: .74rem; line-height: 1.1rem; padding: 0 .4rem; text-align: left;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -189,15 +197,15 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .month .cell:hover { box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--ink) 5%, transparent); }
 /* The cell is a role="button" div; give keyboard focus the same ring buttons get. */
 .month .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.month .cell .num { font-size: .78rem; padding: .05rem .3rem; display: inline-block; border-radius: 999px; }
+.month .cell .num { font-size: .78rem; padding: .05rem .3rem; display: inline-block; }
 .month .cell.today .num { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .chip {
-  display: block; width: 100%; text-align: left; border: none; border-radius: 4px;
+  display: block; width: 100%; text-align: left; border: none;
   padding: .1rem .35rem; margin: .12rem 0; font-size: .74rem; color: #fff;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
 .chip.timed { background: none !important; color: var(--ink); padding-left: .2rem; }
-.chip.timed .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: .3rem; }
+.chip.timed .dot { display: inline-block; width: 7px; height: 7px; margin-right: .3rem; }
 /* unconfirmed invitations (no reply yet, or "maybe") in any view */
 .chip.tentative, .month .span-bar.tentative, .week .block.tentative,
 .agenda .item.tentative { opacity: .6; font-style: italic; }
@@ -213,7 +221,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   25%, 60% { outline-color: var(--accent); }
 }
 .flash-change {
-  outline: 2.5px solid transparent; outline-offset: 1px; border-radius: 6px;
+  outline: 2.5px solid transparent; outline-offset: 1px;
   position: relative; z-index: 4;
   animation: flash-change 1.2s ease-in-out 2;
 }
@@ -230,7 +238,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .week .col.today { background: var(--today); }
 .week .hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
 .week .block {
-  position: absolute; left: 2px; right: 4px; border-radius: 5px; color: #fff;
+  position: absolute; left: 2px; right: 4px; color: #fff;
   font-size: .72rem; padding: .15rem .3rem; overflow: hidden; cursor: pointer; text-align: left;
   border: 1px solid rgba(255, 255, 255, .5);   /* separates adjacent overlap columns */
 }
@@ -241,23 +249,23 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 }
 .week .now-line::before {
   content: ""; position: absolute; left: -3px; top: -4px;
-  width: 7px; height: 7px; border-radius: 50%; background: var(--color-crimson);
+  width: 7px; height: 7px; background: var(--color-crimson);
 }
 
 /* ---- agenda ---- */
 .agenda { max-width: 46rem; margin: 0 auto; }
 .agenda-search { margin: .3rem 0 .6rem; }
-.agenda-search input { width: 100%; border-radius: 8px; padding: .5rem .8rem; }
+.agenda-search input { width: 100%; padding: .5rem .8rem; }
 .agenda h3 { margin: 1rem 0 .3rem; font-size: .85rem; color: var(--dim); }
 .agenda h3.today { color: var(--accent); }
 .agenda .item {
   display: flex; gap: .8rem; align-items: baseline; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px; padding: .5rem .8rem; margin: .3rem 0;
+  border: 1px solid var(--line); padding: .5rem .8rem; margin: .3rem 0;
   cursor: pointer; width: 100%; text-align: left;
 }
 .agenda .item:hover { background: var(--color-background-alt); border-color: var(--line); }
 .agenda .time { color: var(--dim); font-size: .8rem; min-width: 7.5rem; }
-.agenda .dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; align-self: center; }
+.agenda .dot { width: 10px; height: 10px; flex-shrink: 0; align-self: center; }
 .agenda .where { color: var(--dim); font-size: .8rem; margin-left: auto; }
 .empty { color: var(--dim); text-align: center; margin: 3rem 0; }
 
@@ -267,7 +275,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   display: flex; align-items: flex-start; justify-content: center; z-index: 40; overflow-y: auto; padding: 3rem 1rem;
 }
 .dialog {
-  background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
+  background: var(--panel); box-shadow: var(--shadow);
   width: 34rem; max-width: 100%; padding: 1.2rem 1.4rem; position: relative;
 }
 /* corner dismiss for read-only detail popovers (editors use an explicit Cancel) */
@@ -317,7 +325,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 #cal-list .ro-badge { font-size: .7rem; flex-shrink: 0; opacity: .7; }
 
 /* repeatable field groups (emails, phones, address) */
-.field-group { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; }
+.field-group { border: 1px solid var(--line); padding: .5rem .6rem; }
 .field-group .fg-head { display: flex; align-items: center; justify-content: space-between; font-size: .8rem; color: var(--dim); margin-bottom: .3rem; }
 .field-group .fg-head span { font-weight: 600; }
 .field-group .ghost { padding: .1rem .3rem; font-size: .8rem; }
@@ -328,9 +336,9 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .multi-row .mr-del:hover { color: var(--danger); }
 
 /* guests */
-.chips { display: flex; flex-wrap: wrap; gap: .3rem; border: 1px solid var(--line); border-radius: 6px; padding: .3rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; border: 1px solid var(--line); padding: .3rem; }
 .chips .guest {
-  background: var(--color-background-alt); border-radius: 999px; padding: .1rem .3rem .1rem .6rem;
+  background: var(--color-background-alt); padding: .1rem .3rem .1rem .6rem;
   font-size: .8rem; display: inline-flex; align-items: center; gap: .2rem;
 }
 /* status tints mixed from the panel color so inherited text stays readable in
@@ -347,9 +355,9 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .suggest { position: relative; }
 .suggest-list {
   position: absolute; left: 0; right: 0; top: 100%; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); z-index: 5;
+  border: 1px solid var(--line); box-shadow: var(--shadow); z-index: 5;
 }
-.suggest-list button { display: block; width: 100%; border: none; border-radius: 0; text-align: left; }
+.suggest-list button { display: block; width: 100%; border: none; text-align: left; }
 .suggest-list button.active { background: var(--color-background-alt); }
 .suggest-list .mail { color: var(--dim); font-size: .78rem; }
 
@@ -374,11 +382,11 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .avail-cap b { color: var(--ink); }
 .avail .lane { display: grid; grid-template-columns: 8.5rem 1fr 4rem; align-items: center; gap: .5rem; margin: .18rem 0; }
 .avail .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.avail .track { position: relative; height: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.avail .track { position: relative; height: 20px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
 .avail .lane.axis .track { height: 1rem; background: none; border: none; overflow: visible; }
 .avail .tick { position: absolute; transform: translateX(-50%); color: var(--dim); font-size: .68rem; white-space: nowrap; }
 .avail .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
-.avail .busy { position: absolute; top: 2px; bottom: 2px; background: var(--color-status-yellow); border-radius: 3px; z-index: 1; }
+.avail .busy { position: absolute; top: 2px; bottom: 2px; background: var(--color-status-yellow); z-index: 1; }
 /* the proposed slot sits above busy blocks (translucent, so busy shows through)
    so the chosen time is always visible even when a guest is busy across it */
 .avail .slot { position: absolute; top: -1px; bottom: -1px; z-index: 2; background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -390,7 +398,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .avail-sum.ok { color: var(--accent); }
 .avail-sum.bad { color: var(--danger); }
 .avail-legend { display: flex; gap: 1.1rem; margin-top: .3rem; color: var(--dim); font-size: .72rem; }
-.avail-legend i { display: inline-block; width: 12px; height: 10px; vertical-align: middle; border-radius: 2px; margin-right: .25rem; }
+.avail-legend i { display: inline-block; width: 12px; height: 10px; vertical-align: middle; margin-right: .25rem; }
 .avail-legend .k-busy { background: var(--color-status-yellow); }
 .avail-legend .k-slot { background: color-mix(in srgb, var(--accent) 16%, transparent); border: 1px solid var(--accent); }
 
@@ -403,12 +411,19 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 }
 #invites-panel:focus { outline: none; }
 @keyframes invites-in { from { transform: translateX(35%); opacity: 0; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { #invites-panel { animation: none; } }
+/* Everything animated lives behind this one reduce switch: the invites
+   slide-in, the two spinners, the push-change flash, the mini-month / drawer
+   transitions. */
+@media (prefers-reduced-motion: reduce) {
+  #invites-panel, .spinner, button.is-busy::before { animation: none; }
+  .flash-change { animation: none; }
+  body[data-view="calendar"] #sidebar, #cal-popover .mm { transition: none; }
+}
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: .8rem 1rem; border-bottom: 1px solid var(--line); }
 .panel-head h2 { margin: 0; font-size: 1rem; }
 #invites-list { overflow-y: auto; padding: .8rem; }
 .invite {
-  border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; margin-bottom: .7rem;
+  border: 1px solid var(--line); padding: .7rem .8rem; margin-bottom: .7rem;
 }
 .invite .title { font-weight: 600; }
 .invite .meta { color: var(--dim); font-size: .8rem; margin: .15rem 0 .5rem; display: flex; flex-direction: column; gap: .15rem; }
@@ -432,7 +447,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .needs-action::before {
   content: "?"; display: inline-block; box-sizing: border-box; flex: none;
   width: 1.15em; height: 1.15em; line-height: 1.05em; margin-right: .3rem;
-  border-radius: 50%; background: var(--accent); color: #fff;
+  background: var(--accent); color: #fff;
   font-weight: 600; font-size: .78em; font-style: normal; text-align: center;
   vertical-align: baseline;
 }
@@ -454,18 +469,18 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   justify-content: space-between; gap: .4rem; }
 .ct-side-h:first-child { margin-top: 0; }
 .ct-side-add { border: none; background: none; color: var(--dim); cursor: pointer;
-  font-size: 1rem; line-height: 1; padding: 0 .25rem; border-radius: 5px; }
+  font-size: 1rem; line-height: 1; padding: 0 .25rem; }
 .ct-side-add:hover { background: var(--color-background-alt); color: var(--accent); }
 /* a book/group row: the selectable nav button plus hover-revealed actions */
 .ct-nav-row { display: flex; align-items: center; }
 .ct-nav-row .ct-nav { flex: 1; min-width: 0; }
 .ct-nav-act { border: none; background: none; color: var(--dim); cursor: pointer;
-  font-size: 1rem; line-height: 1; padding: .1rem .3rem; border-radius: 5px; visibility: hidden; }
+  font-size: 1rem; line-height: 1; padding: .1rem .3rem; visibility: hidden; }
 .ct-nav-row:hover .ct-nav-act { visibility: visible; }
 .ct-nav-act:hover { color: var(--accent); background: var(--color-background-alt); }
 .ct-nav-del:hover { color: var(--danger); }
 .ct-nav { display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
-  padding: .4rem .55rem; border: 0; border-radius: 7px; background: none; color: inherit;
+  padding: .4rem .55rem; border: 0; background: none; color: inherit;
   font: inherit; cursor: pointer; }
 .ct-nav:hover { background: var(--color-background-alt); }
 .ct-nav.active { background: var(--accent); color: var(--accent-ink); }
@@ -479,7 +494,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 }
 .contact {
   display: flex; align-items: center; gap: .8rem; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px; padding: .55rem .8rem; margin: .35rem 0;
+  border: 1px solid var(--line); padding: .55rem .8rem; margin: .35rem 0;
   width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
 }
 .contact:hover { background: var(--color-background-alt); }
@@ -504,9 +519,8 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .ct-loading { display: flex; align-items: center; justify-content: center; gap: .5rem; color: var(--dim); margin: 3rem 0; }
 .spinner {
   display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor;
-  border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite;
+  border-right-color: transparent; animation: spin .6s linear infinite;
 }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 /* contact detail view */
 .detail-head { display: flex; align-items: center; gap: .8rem; margin-bottom: 1rem; padding-right: 1.6rem; }
@@ -523,7 +537,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .detail-row .dv { flex: 1; min-width: 0; word-break: break-word; }
 .detail-row .dv a { color: var(--accent); text-decoration: none; }
 .detail-row .dv a:hover { text-decoration: underline; }
-.type-tag { font-size: .7rem; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 .4rem; margin-left: .2rem; }
+.type-tag { font-size: .7rem; color: var(--dim); border: 1px solid var(--line); padding: 0 .4rem; margin-left: .2rem; }
 /* delivery pills on an organizer's guest list (SCHEDULE-STATUS) */
 .type-tag.pending { color: var(--dim); }
 .type-tag.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
@@ -536,7 +550,6 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 .detail-warn {
   background: color-mix(in srgb, var(--danger) 12%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--panel));
-  border-radius: 8px;
   padding: .45rem .7rem; margin: 0 0 .6rem; font-size: .85rem; color: var(--danger);
 }
 /* Inline text button (e.g. Resend inside the delivery-failure banner). */
@@ -552,10 +565,9 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
   display: flex; align-items: center; justify-content: space-between; gap: .6rem;
   background: color-mix(in srgb, var(--color-status-yellow) 14%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--color-status-yellow) 45%, var(--panel));
-  border-radius: 8px;
   padding: .45rem .7rem; margin-bottom: .8rem; font-size: .85rem;
 }
-.mg-preview { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; margin: .35rem 0; }
+.mg-preview { border: 1px solid var(--line); padding: .5rem .6rem; margin: .35rem 0; }
 .mg-preview > .fg-head { font-size: .8rem; color: var(--dim); font-weight: 600; margin-bottom: .3rem; }
 .mg-conflict { max-width: 100%; font: inherit; padding: .15rem .3rem; }
 /* editable email/phone groups inside the merge preview */
@@ -592,7 +604,7 @@ body:not([data-view="calendar"]) #sidebar { display: none; }
 button.is-busy::before {
   content: ''; display: inline-block; width: .8em; height: .8em; margin-right: .45em;
   vertical-align: -.1em; border: 2px solid currentColor; border-right-color: transparent;
-  border-radius: 50%; animation: spin .6s linear infinite;
+  animation: spin .6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .dd-row .who { flex: 1; min-width: 0; }
@@ -600,11 +612,11 @@ button.is-busy::before {
 .dd-row .mail { color: var(--dim); font-size: .82rem; }
 
 /* event detail view */
-.detail-head .cal-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
-.detail-row .cal-dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: .4rem; vertical-align: -1px; }
+.detail-head .cal-swatch { width: 14px; height: 14px; flex-shrink: 0; }
+.detail-row .cal-dot { display: inline-block; width: 11px; height: 11px; margin-right: .4rem; vertical-align: -1px; }
 a.join-btn {
   display: inline-block; background: var(--accent); color: var(--accent-ink) !important; text-decoration: none !important;
-  border-radius: 6px; padding: .2rem .7rem; font-weight: 600; font-size: .85rem; margin-right: .5rem;
+  padding: .2rem .7rem; font-weight: 600; font-size: .85rem; margin-right: .5rem;
 }
 a.join-btn:hover { filter: brightness(1.08); }
 .join-url { font-size: .8rem; word-break: break-all; }
@@ -614,7 +626,7 @@ a.join-btn:hover { filter: brightness(1.08); }
 
 /* ---- settings ---- */
 .settings { max-width: 34rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
-.settings section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1.1rem; }
+.settings section { background: var(--panel); border: 1px solid var(--line); padding: .9rem 1.1rem; }
 .settings h2 { margin: 0 0 .6rem; font-size: .95rem; }
 .settings label { display: flex; align-items: center; gap: .5rem; margin: .35rem 0; }
 .settings .note { color: var(--dim); font-size: .8rem; }
@@ -628,7 +640,7 @@ a.join-btn:hover { filter: brightness(1.08); }
 /* ---- toast ---- */
 #toast {
   position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
-  background: var(--ink); color: var(--bg); border-radius: 8px; padding: .6rem 1rem;
+  background: var(--ink); color: var(--bg); padding: .6rem 1rem;
   box-shadow: var(--shadow); z-index: 60; max-width: 90vw; cursor: pointer;   /* click to dismiss */
 }
 #toast.error { background: var(--danger); }
@@ -660,7 +672,7 @@ a.join-btn:hover { filter: brightness(1.08); }
 .task-section.overdue h3 { color: var(--danger); }
 .task-row {
   display: flex; align-items: center; gap: .6rem; padding: .35rem .5rem;
-  border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
+  background: var(--panel); border: 1px solid var(--line);
   margin-bottom: .3rem;
 }
 .task-row .task-check { width: 1.05rem; height: 1.05rem; flex-shrink: 0; }
@@ -676,7 +688,7 @@ a.join-btn:hover { filter: brightness(1.08); }
   color: var(--dim); font-size: .8rem; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; flex-shrink: 3;
 }
-.task-row .dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.task-row .dot { width: 10px; height: 10px; flex-shrink: 0; }
 .task-row.done .task-title { text-decoration: line-through; color: var(--dim); }
 .task-done-toggle, .task-new-list { display: block; margin: .6rem 0; }
 
@@ -686,3 +698,4 @@ a.join-btn:hover { filter: brightness(1.08); }
 }
 /* tighter tracking than a full label — it sits inline next to a name */
 .type-tag { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+

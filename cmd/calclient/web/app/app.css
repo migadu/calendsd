@@ -1,4 +1,5 @@
-/* calclient — minimal hand-written styles, no CDN. */
+/* calclient — minimal hand-written styles, no CDN. Corners stay square
+   (theme.css's global radius:0); no border-radius is written here. */
 * { box-sizing: border-box; }
 /* Semantic vars mapped onto the shared migadu palette (see /shared/theme.css). */
 :root {
@@ -17,7 +18,7 @@ header {
 }
 header h1 { font-size: 1.1rem; margin: 0 1rem 0 0; }
 header form { display: flex; gap: .4rem; }
-header input { border: none; border-radius: 3px; padding: .3rem .5rem; }
+header input { border: none; padding: .3rem .5rem; }
 #session-status { margin-left: auto; font-size: .85rem; opacity: .9; }
 
 #layout {
@@ -47,13 +48,13 @@ aside#drawer h2 { margin: 0 0 .5rem; font-size: .95rem; }
 #exchange details { margin: .4rem 0; }
 #exchange summary { cursor: pointer; color: var(--dim); }
 #exchange pre {
-  background: var(--color-background-alt); border: 1px solid var(--line); border-radius: 3px;
+  background: var(--color-background-alt); border: 1px solid var(--line);
   padding: .5rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
   font: .75rem/1.4 var(--font-mono); margin: .2rem 0;
 }
 
 fieldset {
-  border: 1px solid var(--line); border-radius: 4px; background: var(--panel);
+  border: 1px solid var(--line); background: var(--panel);
   margin: 0 0 1rem; padding: .7rem .9rem;
 }
 legend { font-weight: 600; padding: 0 .3rem; }
