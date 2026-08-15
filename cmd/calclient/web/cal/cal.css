@@ -761,3 +761,24 @@ a.join-btn:hover { filter: brightness(1.08); }
 .week .allday:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .week .allday .chip:focus-visible { outline-offset: -1px; }
 
+/* ---- print ----
+   A month or agenda printout: chrome (top bar, sidebar, panels, toasts) is
+   dropped, the grid fills the page, and event colours are forced through
+   (browsers omit backgrounds otherwise — the printout would be colourless). */
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  #topbar, #sidebar, #invites-panel, #scrim, #toast, #menu-toggle { display: none !important; }
+  body { display: block; background: #fff; }
+  #layout { display: block; }
+  #content { overflow: visible; padding: 0; }
+  .month { min-height: 0; height: auto; }
+  .month .weeks { grid-auto-rows: minmax(4.5rem, auto); }
+  .month .cell { min-height: 0; }
+  .agenda { max-width: none; }
+  .agenda .item, .month .cell, .week .col { break-inside: avoid; }
+  .chip, .span-bar, .block, .month .cell.today, .month .cell.other,
+  .agenda .dot, .week .col.today, #cal-list .dot {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .week .now-line, .drag-ghost { display: none !important; }
+}
