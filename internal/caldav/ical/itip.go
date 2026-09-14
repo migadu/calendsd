@@ -57,10 +57,13 @@ type eventSummary struct {
 	uid       string
 	organizer string
 	orgName   string
-	sequence  string
-	status    string
-	exdate    []string // sorted EXDATE values across all components
-	master    *goical.Component
+	// orgScheduleAgent is the ORGANIZER's SCHEDULE-AGENT (RFC 6638 §7.1),
+	// uppercased; SERVER when absent. CLIENT suppresses server-side REPLYs.
+	orgScheduleAgent string
+	sequence         string
+	status           string
+	exdate           []string // sorted EXDATE values across all components
+	master           *goical.Component
 	// instances maps a recurrence id ("master" or the RECURRENCE-ID value)
 	// to its VEVENT; instOrder preserves calendar order.
 	instances map[string]*goical.Component
@@ -90,12 +93,18 @@ type attendeeState struct {
 // Broker::$significantChangeProperties).
 var sigProps = []string{"DTSTART", "DTEND", "DURATION", "DUE", "RRULE", "RDATE", "EXDATE", "STATUS"}
 
-func summarize(cal *goical.Calendar) *eventSummary {
+// summarize builds the scheduling view of cal. skipClientAgents applies
+// sabre's scheduleAgentServerRules: ATTENDEEs marked SCHEDULE-AGENT=CLIENT are
+// left out of the matrix. That is right when generating messages
+// (Broker::parseEventInfo) but not when applying an incoming REPLY — sabre's
+// processMessageReply reads the ATTENDEE regardless of its SCHEDULE-AGENT, so
+// ProcessMessage summarizes unfiltered.
+func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 	if cal == nil {
 		return nil
 	}
 	out := &eventSummary{
-		cal: cal, sequence: "0",
+		cal: cal, sequence: "0", orgScheduleAgent: "SERVER",
 		instances: map[string]*goical.Component{},
 		perAtt:    map[string]*attendeeState{},
 	}
@@ -117,6 +126,9 @@ func summarize(cal *goical.Calendar) *eventSummary {
 		if p := comp.Props.Get("ORGANIZER"); p != nil && out.organizer == "" {
 			out.organizer = strings.ToLower(p.Value)
 			out.orgName = p.Params.Get("CN")
+			if agent := p.Params.Get("SCHEDULE-AGENT"); agent != "" {
+				out.orgScheduleAgent = strings.ToUpper(agent)
+			}
 		}
 		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == "0" {
 			out.sequence = p.Value
@@ -129,6 +141,12 @@ func summarize(cal *goical.Calendar) *eventSummary {
 		}
 		// Per-instance attendee participation.
 		for _, att := range comp.Props.Values("ATTENDEE") {
+			// SCHEDULE-AGENT=CLIENT: the client does the scheduling with this
+			// attendee itself, so leave them out of the matrix and the server
+			// sends them nothing (RFC 6638 §7.1; sabre Broker::parseEventInfo).
+			if skipClientAgents && strings.EqualFold(att.Params.Get("SCHEDULE-AGENT"), "CLIENT") {
+				continue
+			}
 			// Expanded Calendar-Server group placeholders are display-only:
 			// no iTIP messages, and their SCHEDULE-STATUS=2.7 stays put.
 			if att.Params.Get("CUTYPE") == "X-SERVER-GROUP" {
@@ -207,7 +225,7 @@ func splitList(v string) []string {
 // nil for deletions, oldCal nil for creations; addresses are the acting
 // user's calendar-user addresses. Port of Broker::parseEvent.
 func ParseEvent(newCal *goical.Calendar, addresses []string, oldCal *goical.Calendar) ([]*Message, error) {
-	newInfo, oldInfo := summarize(newCal), summarize(oldCal)
+	newInfo, oldInfo := summarize(newCal, true), summarize(oldCal, true)
 	base := newInfo
 	if base == nil {
 		base = oldInfo
@@ -411,8 +429,18 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 	if base == nil || base.status == "CANCELLED" {
 		return nil, nil
 	}
+	// SCHEDULE-AGENT=CLIENT on the ORGANIZER: the client communicates with the
+	// organizer itself, so the server generates no REPLY (RFC 6638 §7.1; sabre
+	// Broker::parseEventForAttendee).
+	if base.orgScheduleAgent == "CLIENT" {
+		return nil, nil
+	}
+	// The old-copy fallback serves the delete flow only: when a new copy
+	// exists, an acting attendee absent from it (removed, or now marked
+	// SCHEDULE-AGENT=CLIENT) gets no server REPLY — sabre keys attendee
+	// membership off the new summary alone.
 	href := actingAttendee(newInfo, addresses)
-	if href == "" {
+	if href == "" && newInfo == nil {
 		href = actingAttendee(oldInfo, addresses)
 	}
 	if href == "" {
@@ -726,7 +754,7 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 		if existing == nil {
 			return nil, nil
 		}
-		replyInfo := summarize(msg.Calendar)
+		replyInfo := summarize(msg.Calendar, false)
 		if replyInfo == nil || len(replyInfo.attendees) == 0 {
 			return nil, nil
 		}
