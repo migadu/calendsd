@@ -163,3 +163,27 @@ CREATE UNIQUE INDEX jobs_coalesce_ix ON jobs (
 -- instance path); nothing in calserver or sabre depends on this index, so
 -- dropping it is safe for a co-resident sabre and fixes the same bug for it.
 DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
+
+
+-- Widen the columns that hold a principal's email address. sabre's stock schema
+-- sizes users.username at VARCHAR(50) and principals.uri/email/displayname at
+-- 200/80/80, which predates using the address itself as the username. With
+-- rcptd authentication the provisioner writes the full email into users.username
+-- and into both principals columns, and builds principals.uri as
+-- 'principals/' || email (plus a '/calendar-proxy-write' suffix on the sub-
+-- principals, so 11 + 254 + 21 = 286 characters at the RFC 5321 limit).
+--
+-- Any mailbox with a longer address therefore failed its INSERT, and because
+-- provisioning is fail-closed (a provision error is reported as an auth
+-- failure, see auth.RcptdBackend.Check) those accounts could not use CalDAV or
+-- CardDAV at all. 770 of them on the production host. Nothing had to be cleaned
+-- up afterwards: CreateUser runs inside a transaction, so each failed attempt
+-- rolled back whole and the account provisions normally on its next login.
+--
+-- Widening a varchar is metadata-only in Postgres (no table rewrite, no index
+-- rebuild), and the values are faithful to sabre's own PDO backend, so a
+-- co-resident sabre sharing this database is unaffected and gets the same fix.
+ALTER TABLE users      ALTER COLUMN username    TYPE VARCHAR(255);
+ALTER TABLE principals ALTER COLUMN uri         TYPE VARCHAR(320);
+ALTER TABLE principals ALTER COLUMN email       TYPE VARCHAR(255);
+ALTER TABLE principals ALTER COLUMN displayname TYPE VARCHAR(255);
