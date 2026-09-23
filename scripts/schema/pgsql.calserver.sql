@@ -187,3 +187,23 @@ ALTER TABLE users      ALTER COLUMN username    TYPE VARCHAR(255);
 ALTER TABLE principals ALTER COLUMN uri         TYPE VARCHAR(320);
 ALTER TABLE principals ALTER COLUMN email       TYPE VARCHAR(255);
 ALTER TABLE principals ALTER COLUMN displayname TYPE VARCHAR(255);
+
+
+-- The same widening, one level out: the columns that hold a principaluri or a
+-- username on collections and tombstones rather than on the principal itself.
+--
+-- addressbooks.principaluri is sabre's stock VARCHAR(255), but a principaluri
+-- is 'principals/' || email = 11 + 254 = 265 characters at the RFC 5321 limit.
+-- Nothing hit it while address books were only ever created lazily for users
+-- who did CardDAV discovery, because those users could not provision at all
+-- until the block above was applied. A bulk import that creates a book per
+-- principal hits it directly.
+--
+-- deleted_principals was added by calserver (SOFT-DELETE-PLAN.md) with column
+-- widths copied from the pre-widening sabre schema, so it would refuse the
+-- soft-delete of exactly the long-address accounts the block above unblocked.
+--
+-- Metadata-only, same as above.
+ALTER TABLE addressbooks       ALTER COLUMN principaluri TYPE VARCHAR(320);
+ALTER TABLE deleted_principals ALTER COLUMN principal    TYPE VARCHAR(320);
+ALTER TABLE deleted_principals ALTER COLUMN username     TYPE VARCHAR(255);
