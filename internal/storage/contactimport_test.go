@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"calserver/internal/storage"
@@ -127,6 +128,11 @@ func TestContactImportFreshThenIdempotent(t *testing.T) {
 	cards := []storage.ImportCard{card("c1", "Alice One"), card("c2", "Bob Two")}
 	req := baseRequest("alice@example.org", cards)
 	req.Frecency = []storage.SeedFrecency{
+		// Over the column widths: the name is stored truncated to 255
+		// characters, the "address" over 320 is dropped. Both came out of run
+		// 1's real data, where junk FULLNAME rows reach 64 KB.
+		{Email: "long@example.org", Name: strings.Repeat("ü", 300), Count: 1},
+		{Email: strings.Repeat("x", 330) + "@example.org", Name: "Nobody", Count: 1},
 		{Email: "Bob@Example.org", Name: "Bob", Count: 5},
 		{Email: "bob@example.org", Name: "", Count: 3}, // same address, other case
 	}
@@ -175,12 +181,27 @@ func TestContactImportFreshThenIdempotent(t *testing.T) {
 	var email, name string
 	var seed int
 	if err := db.QueryRow(
-		`SELECT email, name, seed_frec FROM contact_frecency WHERE principal = $1`,
+		`SELECT email, name, seed_frec FROM contact_frecency WHERE principal = $1 AND email = 'bob@example.org'`,
 		"principals/alice@example.org").Scan(&email, &name, &seed); err != nil {
 		t.Fatal(err)
 	}
 	if email != "bob@example.org" || name != "Bob" || seed != 8 {
 		t.Errorf("frecency row = (%q, %q, %d), want (bob@example.org, Bob, 8)", email, name, seed)
+	}
+	// The over-long name landed truncated to the column width, in characters
+	// not bytes; the over-long "address" was dropped, so two rows in all.
+	var rows, nameLen int
+	if err := db.QueryRow(
+		`SELECT count(*), coalesce(max(length(name)) FILTER (WHERE email = 'long@example.org'), 0)
+		   FROM contact_frecency WHERE principal = $1`,
+		"principals/alice@example.org").Scan(&rows, &nameLen); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || nameLen != 255 {
+		t.Errorf("frecency rows = %d (want 2), long name stored as %d chars (want 255)", rows, nameLen)
+	}
+	if first.FrecencyRows != 2 {
+		t.Errorf("FrecencyRows = %d, want 2 (the over-long address is dropped, not stored)", first.FrecencyRows)
 	}
 
 	// Re-run, unchanged bundle.

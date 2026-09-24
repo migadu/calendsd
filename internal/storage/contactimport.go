@@ -30,6 +30,17 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+)
+
+// Column widths of contact_frecency, which the seed must respect itself: the
+// exporter clamps the values on the CARD, but the frecency rows take the name
+// straight from the FULLNAME property row and the address from the email row,
+// so a 64 KB junk name or an "address" over 500 characters reaches the seed
+// untouched. Run 1's dry run refused ten principals this way.
+const (
+	frecencyEmailMax = 320 // contact_frecency.email VARCHAR(320)
+	frecencyNameMax  = 255 // contact_frecency.name  VARCHAR(255)
 )
 
 // DefaultMaxCardBytes bounds a single card. The largest real card in the
@@ -656,6 +667,13 @@ func seedFrecency(ctx context.Context, tx *sql.Tx, principalURI string, seeds []
 		if email == "" || s.Count <= 0 {
 			continue
 		}
+		if utf8.RuneCountInString(email) > frecencyEmailMax {
+			// Nothing over 320 characters is an address anyone will type into
+			// a To: field; a truncated form would not match one either. Drop
+			// it rather than store a suggestion that can never fire.
+			continue
+		}
+		s.Name = truncateRunes(strings.TrimSpace(s.Name), frecencyNameMax)
 		a := merged[email]
 		if a == nil {
 			a = &agg{}
@@ -699,6 +717,22 @@ func seedFrecency(ctx context.Context, tx *sql.Tx, principalURI string, seeds []
 		}
 	}
 	return len(merged), nil
+}
+
+// truncateRunes cuts s to at most n characters (not bytes — VARCHAR(n) counts
+// characters), never splitting a multi-byte sequence.
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	i := 0
+	for pos := range s {
+		if i == n {
+			return s[:pos]
+		}
+		i++
+	}
+	return s
 }
 
 func writeLedger(ctx context.Context, tx *sql.Tx, principalURI string, req ImportRequest, res ImportResult) error {
