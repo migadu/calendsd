@@ -94,7 +94,7 @@ func main() {
 		built := server.Build(db, m.Server, m.DSN)
 		srv, pushWorker, jobQueue = built.Handler, built.Worker, built.Queue
 		if apiAddrV != "" {
-			contactsAPI = built.ContactsAPI(db, m.Server)
+			contactsAPI = built.ContactsAPI(db)
 		}
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites

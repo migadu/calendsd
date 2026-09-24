@@ -2,6 +2,8 @@ package contactsapi
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"strings"
 
 	vcard "github.com/emersion/go-vcard"
@@ -27,6 +29,29 @@ func parseCard(data []byte) (parsedCard, bool) {
 	if err != nil {
 		return parsedCard{}, false
 	}
+	return fromCard(card), true
+}
+
+// errTrailingCard is parseSingleCard refusing a body with more than one card.
+var errTrailingCard = errors.New("body contains more than one vCard")
+
+// parseSingleCard is parseCard for a body a client submits: it must hold
+// exactly one card. go-vcard's decoder stops at the first END:VCARD, so
+// anything after it would otherwise be stored as part of the card and served
+// raw to every other client, unparsed by any of them.
+func parseSingleCard(data []byte) (parsedCard, error) {
+	dec := vcard.NewDecoder(bytes.NewReader(data))
+	card, err := dec.Decode()
+	if err != nil {
+		return parsedCard{}, err
+	}
+	if _, err := dec.Decode(); !errors.Is(err, io.EOF) {
+		return parsedCard{}, errTrailingCard
+	}
+	return fromCard(card), nil
+}
+
+func fromCard(card vcard.Card) parsedCard {
 	p := parsedCard{
 		UID:    strings.TrimSpace(card.Value("UID")),
 		FN:     strings.TrimSpace(card.Value("FN")),
@@ -49,7 +74,7 @@ func parseCard(data []byte) (parsedCard, bool) {
 	h = append(h, card.Values("ORG")...)
 	h = append(h, p.Emails...)
 	p.haystack = strings.ToLower(strings.Join(cleanValues(h), "\n"))
-	return p, true
+	return p
 }
 
 func cleanValues(in []string) []string {

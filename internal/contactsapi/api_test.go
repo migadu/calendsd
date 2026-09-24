@@ -349,6 +349,77 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	if created.Book != "webmail" {
 		t.Errorf("created in %q, want webmail", created.Book)
 	}
+	// A sole book named like one of the API's routes cannot be addressed as
+	// "<book>/<uri>", so it is not a create target either.
+	e.principal("frank@example.org")
+	if _, err := cardDAV.CreateAddressBook("principals/frank@example.org", "by-uid", nil); err != nil {
+		t.Fatal(err)
+	}
+	e.want(e.do("frank@example.org", "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("f1", "Gus")}), 201).json(t, &created)
+	if created.Book != "webmail" {
+		t.Errorf("created in reserved book %q, want webmail", created.Book)
+	}
+}
+
+func TestUpdateEdgeCases(t *testing.T) {
+	e := newEnv(t, "calserver_capi_update", contactsapi.Options{})
+	e.principal("alice@example.org")
+	const alice = "alice@example.org"
+	cardDAV := &storage.CardDAV{DB: e.db}
+	bookID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A card a phone named without regard to its UID is listed under its real
+	// file name and must stay editable; only a CHANGE of UID is refused.
+	phone := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:0e1\r\nFN:Phone Named\r\nEND:VCARD\r\n"
+	if _, err := cardDAV.CreateCard(bookID, "ABC123.vcf", []byte(phone)); err != nil {
+		t.Fatal(err)
+	}
+	var got contactJSON
+	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
+	if got.UID != "urn:uuid:0e1" {
+		t.Errorf("uid = %q", got.UID)
+	}
+	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Phone Renamed", 1)},
+		"If-Match", got.ETag), 200)
+	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+		map[string]string{"vcard": vcf("some-other-uid", "Phone")}), http.StatusBadRequest)
+
+	// Exactly one card per body: a second one would be stored inside the
+	// first and served raw to every other client.
+	e.want(e.do(alice, "POST", "/api/v1/contacts",
+		map[string]string{"vcard": vcf("t1", "One") + vcf("t2", "Two")}), http.StatusBadRequest)
+	e.want(e.do(alice, "GET", "/api/v1/contacts/by-uid/t1", nil), 404)
+
+	// A present-but-empty If-Match is a precondition that cannot hold, not an
+	// unconditional write.
+	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Clobber", 1)},
+		"If-Match", ""), http.StatusPreconditionFailed)
+	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
+	if !strings.Contains(got.VCard, "Phone Renamed") {
+		t.Errorf("an empty If-Match wrote the card: %s", got.VCard)
+	}
+
+	// A legacy row with a NULL etag still hands the client a usable etag (the
+	// md5 of its data) and a conditional update against it still works.
+	if _, err := e.db.Exec(`UPDATE cards SET etag = NULL WHERE uri = 'ABC123.vcf'`); err != nil {
+		t.Fatal(err)
+	}
+	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
+	if len(got.ETag) != 32 {
+		t.Fatalf("etag for a NULL-etag row = %q, want an md5", got.ETag)
+	}
+	var updated contactJSON
+	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Phone Final", 1)},
+		"If-Match", `"`+got.ETag+`"`), 200).json(t, &updated)
+	if updated.ETag == got.ETag || len(updated.ETag) != 32 {
+		t.Errorf("etag after update = %q (was %q)", updated.ETag, got.ETag)
+	}
 }
 
 func TestListSearchAndPaging(t *testing.T) {
@@ -468,8 +539,18 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 	}
 	// With "personal" the sole book, a create would land there — so make the
 	// webmail book explicitly first, as the migration does.
-	if _, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil); err != nil {
+	webmailID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	counters := func() (changes int, token int64) {
+		t.Helper()
+		if err := e.db.QueryRow(`SELECT
+			(SELECT count(*) FROM addressbookchanges WHERE addressbookid = $1),
+			(SELECT synctoken FROM addressbooks WHERE id = $1)`, webmailID).Scan(&changes, &token); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("w1", "One")}), 201)
 	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("w2", "Two")}), 201)
@@ -486,9 +567,22 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 		Deleted int    `json:"deleted"`
 		Book    string `json:"book"`
 	}
+	changesBefore, tokenBefore := counters()
 	e.want(e.do(alice, "DELETE", "/api/v1/contacts?all=1", nil), 200).json(t, &res)
 	if res.Deleted != 2 || res.Book != "webmail" {
 		t.Errorf("delete all = %+v, want 2 from webmail", res)
+	}
+	// One change row per deleted card, so a synced client learns of each, and
+	// the token moved — once, in four statements, not two per card.
+	changesAfter, tokenAfter := counters()
+	if changesAfter-changesBefore != 2 || tokenAfter != tokenBefore+1 {
+		t.Errorf("delete-all: change rows +%d (want 2), synctoken %d → %d (want +1)",
+			changesAfter-changesBefore, tokenBefore, tokenAfter)
+	}
+	// An empty book: nothing deleted, nothing logged, token untouched.
+	e.want(e.do(alice, "DELETE", "/api/v1/contacts?all=1", nil), 200).json(t, &res)
+	if c, tok := counters(); res.Deleted != 0 || c != changesAfter || tok != tokenAfter {
+		t.Errorf("delete-all on an empty book changed something: %+v, rows %d, token %d", res, c, tok)
 	}
 	e.want(e.do(alice, "GET", "/api/v1/contacts", nil), 200).json(t, &list)
 	if list.Total != 1 || list.Contacts[0].ID != "personal/p1.vcf" {

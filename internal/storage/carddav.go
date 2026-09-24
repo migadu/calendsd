@@ -227,18 +227,23 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 
 // UpdateCardIfMatch is UpdateCard with the precondition in the UPDATE itself:
 // the row is rewritten only if its stored etag still equals expected (the bare
-// md5, as the column holds it), so a write that lost a race with a DAV client
-// is refused atomically rather than by a read-compare-write that is not. It
-// returns the new quoted etag and matched=true on success; matched=false with
-// no write and no change row when the card is missing or its etag moved.
+// md5, as the column holds it — or, for a legacy row with a NULL etag, the md5
+// of its data, the same value the API's reads surface), so a write that lost a
+// race with a DAV client is refused atomically rather than by a
+// read-compare-write that is not. It returns the new quoted etag and
+// matched=true on success; matched=false with no write and no change row when
+// the card is missing or its etag moved. An empty expected never matches.
 // Backs the API's If-Match (docs/snappymail-calserver-contacts.md § Endpoints).
 func (b *CardDAV) UpdateCardIfMatch(addressBookID, uri string, data []byte, expected string) (string, bool, error) {
+	if expected == "" {
+		return "", false, nil
+	}
 	etag := cardETag(data)
 	matched := false
 	err := withTx(b.DB, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`
 UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
- WHERE addressbookid = $4 AND uri = $5 AND etag = $6`,
+ WHERE addressbookid = $4 AND uri = $5 AND coalesce(etag, md5(carddata)) = $6`,
 			data, etag, len(data), addressBookID, uri, expected)
 		if err != nil {
 			return err
@@ -261,37 +266,42 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 
 // DeleteAllCards removes every card in one address book, with a change-log
 // row per card so a synced client learns of each deletion, in one
-// transaction. Returns how many were removed. The book itself stays.
+// transaction of four statements regardless of how many cards there are —
+// not two per card, which for the 20,782-card book would be 40k round trips
+// under the book's row lock. All the change rows share one synctoken and the
+// token moves once, which is what abAddChange does per card, batched; a
+// client syncing from an older token sees every uri as deleted either way.
+// Returns how many were removed. The book itself stays.
 func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
 	n := 0
 	err := withTx(b.DB, func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT uri FROM cards WHERE addressbookid = $1 ORDER BY uri`, addressBookID)
+		var token int64
+		if err := tx.QueryRow(
+			`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, addressBookID).Scan(&token); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+INSERT INTO addressbookchanges (uri, synctoken, addressbookid, operation)
+SELECT uri, $2, $1, 3 FROM cards WHERE addressbookid = $1`, addressBookID, token); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`DELETE FROM cards WHERE addressbookid = $1`, addressBookID)
 		if err != nil {
 			return err
 		}
-		var uris []string
-		for rows.Next() {
-			var uri string
-			if err := rows.Scan(&uri); err != nil {
-				rows.Close()
-				return err
-			}
-			uris = append(uris, uri)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		deleted, err := res.RowsAffected()
+		if err != nil {
 			return err
 		}
-		for _, uri := range uris {
-			if _, err := tx.Exec(`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri); err != nil {
-				return err
-			}
-			if err := abAddChange(tx, addressBookID, uri, 3); err != nil {
-				return err
-			}
-			n++
+		n = int(deleted)
+		if n == 0 {
+			return nil // nothing changed: leave the token and the listeners alone
 		}
-		return nil
+		if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+1, addressBookID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
+		return err
 	})
 	if err != nil {
 		return 0, err

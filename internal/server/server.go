@@ -239,7 +239,7 @@ type Built struct {
 // ContactsAPI builds the webmail contacts API over the same database and the
 // same credential backend as the DAV server this Built holds. Serve it on its
 // own loopback listener ([server] api_addr); never mount it on the DAV one.
-func (b *Built) ContactsAPI(db *sql.DB, cfg Config) http.Handler {
+func (b *Built) ContactsAPI(db *sql.DB) http.Handler {
 	return contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
 		MaxBodyBytes: dav.DefaultMaxRequestBodySize,
 		Logger:       slog.Default(),

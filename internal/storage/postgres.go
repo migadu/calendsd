@@ -8,12 +8,14 @@ package storage
 import (
 	"database/sql"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	// Registers the pgx database/sql driver.
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -330,4 +332,13 @@ func deleteCalendarRows(tx *sql.Tx, calendarID string) error {
 		}
 	}
 	return nil
+}
+
+// IsUniqueViolation reports whether err is Postgres refusing a duplicate key
+// (SQLSTATE 23505). Callers that check-then-insert use it to turn the race
+// they cannot close — two requests for the same card or book arriving
+// together — into the same answer the check would have given.
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

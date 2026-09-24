@@ -2,6 +2,7 @@ package contactsapi
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -210,9 +211,13 @@ func (h *Handler) readCard(w http.ResponseWriter, r *http.Request) ([]byte, pars
 		writeError(w, http.StatusBadRequest, "vcard must start with BEGIN:VCARD")
 		return nil, parsedCard{}, false
 	}
-	p, ok := parseCard(data)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "vcard does not parse")
+	p, err := parseSingleCard(data)
+	if errors.Is(err, errTrailingCard) {
+		writeError(w, http.StatusBadRequest, "vcard must contain exactly one card")
+		return nil, parsedCard{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "vcard does not parse: "+err.Error())
 		return nil, parsedCard{}, false
 	}
 	if p.UID == "" {
@@ -246,7 +251,9 @@ func (h *Handler) createTarget(r *http.Request, create bool) (storage.AddressBoo
 			return b, true, nil
 		}
 	}
-	if len(books) == 1 {
+	// A sole book whose name is one of the API's own routes cannot be
+	// addressed as "<book>/<uri>", so it is not a target either.
+	if len(books) == 1 && !storage.ReservedAddressBookURIs[books[0].URI] {
 		return books[0], true, nil
 	}
 	if !create {
@@ -255,6 +262,20 @@ func (h *Handler) createTarget(r *http.Request, create bool) (storage.AddressBoo
 	id, err := h.cards.CreateAddressBook(principal, h.opts.DefaultBookURI, map[xml.Name]any{
 		{Space: "DAV:", Local: "displayname"}: h.opts.DefaultBookName,
 	})
+	if storage.IsUniqueViolation(err) {
+		// Two first-ever creates for the same user arrived together and the
+		// other one made the book a moment ago; use it.
+		books, err := h.contacts.Books(r.Context(), principal)
+		if err != nil {
+			return storage.AddressBook{}, false, err
+		}
+		for _, b := range books {
+			if b.URI == h.opts.DefaultBookURI {
+				return b, true, nil
+			}
+		}
+		return storage.AddressBook{}, false, errors.New("address book vanished after a create conflict")
+	}
 	if err != nil {
 		return storage.AddressBook{}, false, err
 	}
@@ -273,6 +294,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	// The conflict check is on "<uid>.vcf" in the target book, which is the
+	// name this API and the migration give a card. A card with the same UID
+	// under a different file name, or in another of the user's books, is not
+	// caught: the API never invents such a card, and refusing a create because
+	// a phone once named one differently would be a surprising failure for
+	// the user. Duplicate UIDs across books are the dedup work's problem.
 	uri := p.UID + ".vcf"
 	existing, err := h.contacts.Card(r.Context(), principalOf(r), book.URI, uri)
 	if err != nil {
@@ -284,6 +311,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.cards.CreateCard(book.ID, uri, data); err != nil {
+		if storage.IsUniqueViolation(err) {
+			// The check above and this insert are not atomic; a double-click or
+			// a plugin retry lands here, and it is the same conflict.
+			writeError(w, http.StatusConflict, "a contact with that UID already exists; update it instead")
+			return
+		}
 		h.fail(w, r, err)
 		return
 	}
@@ -310,12 +343,6 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if p.UID+".vcf" != uri {
-		// A card whose UID disagrees with its own href is a sync bug on every
-		// device that reads it.
-		writeError(w, http.StatusBadRequest, "the vcard's UID must match the card uri")
-		return
-	}
 	principal := principalOf(r)
 	current, err := h.contacts.Card(r.Context(), principal, book, uri)
 	if err != nil {
@@ -326,9 +353,22 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such contact")
 		return
 	}
+	// The file name is fixed once a card exists, and another client may have
+	// named it without regard to the UID (a phone writing ABC123.vcf holding
+	// UID:urn:uuid:…). Such a card must stay editable, so the rule here is
+	// only that the UID does not CHANGE: a card whose UID moves under its href
+	// is a sync bug on every device that reads it.
+	if stored, ok := parseCard(current.Data); ok && stored.UID != "" && stored.UID != p.UID {
+		writeError(w, http.StatusBadRequest, "the vcard's UID must not change on update")
+		return
+	}
+	// A present-but-empty If-Match is a precondition that can never hold, not
+	// an unconditional write: the only way a client gets an empty etag is a
+	// bug, and the 412 guarantee must not quietly disappear exactly there.
+	_, hasIfMatch := r.Header["If-Match"]
 	ifMatch := unquoteETag(r.Header.Get("If-Match"))
-	switch ifMatch {
-	case "", "*":
+	switch {
+	case !hasIfMatch, ifMatch == "*":
 		if _, err := h.cards.UpdateCard(current.BookID, uri, data); err != nil {
 			h.fail(w, r, err)
 			return

@@ -22,6 +22,19 @@ type Contacts struct {
 	DB *sql.DB
 }
 
+// ReservedAddressBookURIs are book names that would collide with the contacts
+// API's own routes: an id is "<book uri>/<card uri>" under /api/v1/contacts/,
+// and these first segments are routes of their own. A sole book with one of
+// these names is never used as a create target and the importer refuses it as
+// --book-uri.
+var ReservedAddressBookURIs = map[string]bool{"by-uid": true, "by-email": true, "batch-delete": true}
+
+// cardETagExpr is how every read here surfaces an etag: the stored one, or the
+// md5 of the data for a legacy row whose etag column is NULL — so a client
+// never sees an empty etag and a conditional update against such a row can
+// still succeed (UpdateCardIfMatch compares the same expression).
+const cardETagExpr = `coalesce(c.etag, md5(c.carddata))`
+
 // ContactCard is one stored card with the book it lives in. ETag is the bare
 // md5 as the column stores it — not the quoted form CardInfo carries — because
 // the API compares it against If-Match after unquoting and hands it to the
@@ -71,7 +84,7 @@ func (c *Contacts) Books(ctx context.Context, principalURI string) ([]AddressBoo
 // cards, and nothing here is worse than what the DAV REPORT path already does).
 func (c *Contacts) Cards(ctx context.Context, principalURI string) ([]ContactCard, error) {
 	rows, err := c.DB.QueryContext(ctx, `
-SELECT a.id, a.uri, c.uri, c.carddata, coalesce(c.etag, ''), coalesce(c.lastmodified, 0)
+SELECT a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1
  ORDER BY a.uri, c.uri`, principalURI)
@@ -111,7 +124,7 @@ func (c *Contacts) Card(ctx context.Context, principalURI, bookURI, uri string) 
 	var bookID int64
 	card := ContactCard{BookURI: bookURI, URI: uri}
 	err := c.DB.QueryRowContext(ctx, `
-SELECT a.id, c.carddata, coalesce(c.etag, ''), coalesce(c.lastmodified, 0)
+SELECT a.id, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1 AND a.uri = $2 AND c.uri = $3`,
 		principalURI, bookURI, uri).Scan(&bookID, &card.Data, &card.ETag, &card.LastModified)
@@ -132,7 +145,7 @@ func (c *Contacts) CardByURI(ctx context.Context, principalURI, uri string) (*Co
 	var bookID int64
 	card := ContactCard{URI: uri}
 	err := c.DB.QueryRowContext(ctx, `
-SELECT a.id, a.uri, c.carddata, coalesce(c.etag, ''), coalesce(c.lastmodified, 0)
+SELECT a.id, a.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1 AND c.uri = $2
  ORDER BY a.uri LIMIT 1`,
