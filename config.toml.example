@@ -21,6 +21,13 @@ metrics_addr = ""       # Second listener serving Prometheus /metrics and Go
                         # /debug/pprof, e.g. "127.0.0.1:9464". Plain HTTP, no
                         # auth: bind loopback or a firewalled interface, never
                         # the public one. Empty = disabled.
+api_addr = ""           # Third listener serving the webmail contacts JSON API
+                        # (docs/snappymail-calserver-contacts.md), e.g.
+                        # "127.0.0.1:8081". Plain HTTP; Basic auth with the
+                        # user's own mailbox credentials through the same
+                        # backend as DAV. Loopback only — it must never be
+                        # reachable through the public DAV hostname. Needs
+                        # [database] dsn. Empty = disabled.
 base_uri = "/"          # URI prefix the server is mounted at (e.g. "/dav/").
 realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
                         # users.digesta1 in the shared database, forever, for

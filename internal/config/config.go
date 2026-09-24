@@ -41,9 +41,15 @@ type Config struct {
 		// /debug/pprof on a second plain-HTTP listener. Bind loopback or a
 		// firewalled interface; it has no TLS and no auth.
 		MetricsAddr string
-		BaseURI     string
-		Realm       string
-		TLS         struct {
+		// APIAddr, when set, serves the webmail contacts JSON API
+		// (docs/snappymail-calserver-contacts.md) on a third plain-HTTP
+		// listener, authenticated with the user's own mailbox credentials via
+		// the same backend as DAV. Loopback only: it is never meant to be
+		// reachable through the public DAV hostname.
+		APIAddr string
+		BaseURI string
+		Realm   string
+		TLS     struct {
 			Cert string
 			Key  string
 		}
@@ -248,6 +254,7 @@ func Load(path string) (*Config, error) {
 
 	cfg.Server.Addr = str("server.addr")
 	cfg.Server.MetricsAddr = str("server.metrics_addr")
+	cfg.Server.APIAddr = str("server.api_addr")
 	cfg.Server.BaseURI = str("server.base_uri")
 	cfg.Server.Realm = str("server.realm")
 	cfg.Server.TLS.Cert = str("server.tls.cert")
@@ -319,7 +326,7 @@ func describeValue(v any) string {
 // known is the set of recognised "section.key" paths; anything else is a typo
 // worth reporting rather than silently ignoring.
 var known = map[string]bool{
-	"server.addr": true, "server.metrics_addr": true,
+	"server.addr": true, "server.metrics_addr": true, "server.api_addr": true,
 	"server.base_uri": true, "server.realm": true,
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,

@@ -20,6 +20,7 @@ import (
 	"calserver/internal/auth"
 	"calserver/internal/caldav"
 	"calserver/internal/carddav"
+	"calserver/internal/contactsapi"
 	"calserver/internal/dav"
 	"calserver/internal/dav/mock"
 	"calserver/internal/jobs"
@@ -215,7 +216,39 @@ func New(db *sql.DB, cfg Config) http.Handler {
 // pending. dsn is the Postgres DSN both background services open. A dsn of ""
 // (the in-process New/tests path) leaves both nil — external iMIP sends are then synchronous.
 func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.Worker, *jobs.Queue) {
-	srv := newDAVServer(db, cfg)
+	b := Build(db, cfg, dsn)
+	return b.Handler, b.Worker, b.Queue
+}
+
+// Built is everything Build assembles: the DAV handler to serve, the
+// background services to run, and the two pieces the webmail contacts API
+// (internal/contactsapi) must share with the DAV server rather than
+// re-create — the credential backend, whose rcptd cache and first-login
+// provisioning are per instance, and the soft-delete gate.
+type Built struct {
+	Handler http.Handler
+	Worker  *push.Worker
+	Queue   *jobs.Queue
+	// Auth is the backend DAV authenticates with: the rcptd backend when
+	// [server.rcptd] is configured, else the users-table Basic backend.
+	Auth auth.Backend
+	// Tombstoned mirrors the DAV auth gate's soft-delete check.
+	Tombstoned func(principal string) bool
+}
+
+// ContactsAPI builds the webmail contacts API over the same database and the
+// same credential backend as the DAV server this Built holds. Serve it on its
+// own loopback listener ([server] api_addr); never mount it on the DAV one.
+func (b *Built) ContactsAPI(db *sql.DB, cfg Config) http.Handler {
+	return contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
+		MaxBodyBytes: dav.DefaultMaxRequestBodySize,
+		Logger:       slog.Default(),
+	})
+}
+
+// Build is NewWithBackground returning everything it assembled; see Built.
+func Build(db *sql.DB, cfg Config, dsn string) *Built {
+	srv, backend, tombstoned := newDAVServer(db, cfg)
 	var worker *push.Worker
 	if cfg.Push.Enabled && dsn != "" {
 		store := &push.Store{DB: db}
@@ -235,7 +268,13 @@ func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.
 	h = WrapAccessLog(h, cfg.AccessLog)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
-	return WrapMetrics(h, cfg.Metrics, srv.BaseURI), worker, queue
+	return &Built{
+		Handler:    WrapMetrics(h, cfg.Metrics, srv.BaseURI),
+		Worker:     worker,
+		Queue:      queue,
+		Auth:       backend,
+		Tombstoned: tombstoned,
+	}
 }
 
 // buildIMipQueue constructs the durable iMIP job queue, wires it into the
@@ -296,16 +335,19 @@ func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 // The admin privilege simulator uses it to answer "what would user X see on
 // path Y" through the identical composition (ADMIN-PLAN.md §3.5).
 func NewLoggedIn(db *sql.DB, cfg Config, principal string) *dav.Server {
-	return compose(db, cfg, auth.NewLoggedInPlugin(principal))
+	srv, _, _ := compose(db, cfg, auth.NewLoggedInPlugin(principal))
+	return srv
 }
 
-func newDAVServer(db *sql.DB, cfg Config) *dav.Server {
+func newDAVServer(db *sql.DB, cfg Config) (*dav.Server, auth.Backend, func(string) bool) {
 	return compose(db, cfg, nil)
 }
 
 // compose builds the full server; authOverride nil means real Digest/Basic
-// authentication against the users table.
-func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
+// authentication against the users table. It also returns the credential
+// backend it wired (nil under authOverride) and the soft-delete gate, for the
+// contacts API to share.
+func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, auth.Backend, func(string) bool) {
 	if cfg.Realm == "" {
 		cfg.Realm = "SabreDAV"
 	}
@@ -335,6 +377,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	// not lock everyone out; the purge job is the backstop (SOFT-DELETE-PLAN
 	// §5, §12).
 	tombstoned := func(principal string) bool { ok, _ := users.IsDeleted(principal); return ok }
+	var backend auth.Backend
 	switch {
 	case authOverride != nil:
 		// The injected-plugin/test path (NewLoggedIn) is left ungated on
@@ -358,20 +401,23 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 		ap.Metrics = cfg.Metrics
 		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
+		backend = rb
 	default:
+		basic := &auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(username, password string) bool {
+			// Basic verifies against the same digesta1 hash, compared in
+			// constant time so verification does not leak the stored hash.
+			hash, ok := users.HashA1(cfg.Realm, username)
+			return ok && subtle.ConstantTimeCompare(
+				[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
+		}}
 		ap := auth.NewPlugin(
 			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1, Metrics: cfg.Metrics},
-			&auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(username, password string) bool {
-				// Basic verifies against the same digesta1 hash, compared in
-				// constant time so verification does not leak the stored hash.
-				hash, ok := users.HashA1(cfg.Realm, username)
-				return ok && subtle.ConstantTimeCompare(
-					[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
-			}},
+			basic,
 		)
 		ap.Metrics = cfg.Metrics
 		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
+		backend = basic
 	}
 	if cfg.TempFileFilter {
 		// After auth (temp requests stay authenticated), before ACL and the
@@ -472,5 +518,5 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) *dav.Server {
 	if _, err := caldav.RequirePrivilegeChecker(srv); err != nil {
 		panic(fmt.Sprintf("server: no ACL privilege checker registered: %v", err))
 	}
-	return srv
+	return srv, backend, tombstoned
 }

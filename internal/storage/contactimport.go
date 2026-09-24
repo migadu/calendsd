@@ -435,6 +435,12 @@ func validateRequest(req *ImportRequest, maxCard int) string {
 	return ""
 }
 
+// SafePathSegment reports whether s can stand as one segment of a DAV path:
+// no separators, no whitespace or control characters, not dot-led. Shared by
+// the importer's bundle validation and the contacts API's create path, so a
+// card uri that would be unreachable over DAV is refused at both doors.
+func SafePathSegment(s string) bool { return safePathSegment(s) }
+
 // safePathSegment reports whether s can stand as one segment of a DAV path:
 // no separators, no whitespace or control characters, not dot-led.
 func safePathSegment(s string) bool {

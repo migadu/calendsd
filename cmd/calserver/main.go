@@ -30,6 +30,7 @@ func main() {
 	resolve := config.SharedServerFlags("Postgres DSN of the shared sabre database (e.g. postgres://localhost/calserver); empty runs an in-memory server")
 	addr := flag.String("addr", ":8080", "listen address")
 	metricsAddr := flag.String("metrics-addr", "", "listen address for Prometheus /metrics and /debug/pprof (plain HTTP, no auth — bind loopback or a firewalled interface, e.g. 127.0.0.1:9464); empty disables")
+	apiAddr := flag.String("api-addr", "", "listen address for the webmail contacts JSON API (plain HTTP, Basic auth with mailbox credentials via the same backend as DAV; loopback only, e.g. 127.0.0.1:8081); empty disables. Needs -db")
 	tlsCert := flag.String("tls-cert", "", "path to a TLS certificate; enables HTTPS (Basic/Digest send credentials, so terminate TLS here or in front)")
 	tlsKey := flag.String("tls-key", "", "path to the TLS private key (required with -tls-cert)")
 	showVersion := version.Flags()
@@ -54,6 +55,7 @@ func main() {
 	}
 	addrV := m.Str("addr", *addr, m.File.Server.Addr)
 	metricsAddrV := m.Str("metrics-addr", *metricsAddr, m.File.Server.MetricsAddr)
+	apiAddrV := m.Str("api-addr", *apiAddr, m.File.Server.APIAddr)
 	tlsCertV := m.Str("tls-cert", *tlsCert, m.File.Server.TLS.Cert)
 	tlsKeyV := m.Str("tls-key", *tlsKey, m.File.Server.TLS.Key)
 
@@ -74,6 +76,7 @@ func main() {
 	var srv http.Handler
 	var pushWorker *push.Worker
 	var jobQueue *jobs.Queue
+	var contactsAPI http.Handler
 	if m.DSN != "" {
 		db, err := storage.OpenPool(m.DSN, m.DBPool)
 		if err != nil {
@@ -88,7 +91,11 @@ func main() {
 		set.RegisterJobDepth(db)
 		// Same line calserver-admin logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
-		srv, pushWorker, jobQueue = server.NewWithBackground(db, m.Server, m.DSN)
+		built := server.Build(db, m.Server, m.DSN)
+		srv, pushWorker, jobQueue = built.Handler, built.Worker, built.Queue
+		if apiAddrV != "" {
+			contactsAPI = built.ContactsAPI(db, m.Server)
+		}
 	} else {
 		// Dead-property capable in-memory root, so WebDAV suites
 		// (litmus props class) can exercise PROPPATCH.
@@ -99,6 +106,16 @@ func main() {
 
 	if metricsAddrV != "" {
 		go serveMetrics(metricsAddrV, set)
+	}
+
+	// The webmail contacts API: its own loopback listener, sharing the DAV
+	// server's database and credential backend, never mounted on the DAV
+	// port. Needs the database — there is nothing to serve in-memory.
+	switch {
+	case apiAddrV != "" && contactsAPI == nil:
+		slog.Warn("api-addr set but no database configured; the contacts API is not started", "addr", apiAddrV)
+	case contactsAPI != nil:
+		go serveContactsAPI(ctx, apiAddrV, contactsAPI)
 	}
 
 	// Deliver WebDAV-Push notifications in the background (advertisement and
@@ -154,6 +171,35 @@ func main() {
 	// expected exit on SIGINT/SIGTERM, not a failure.
 	if err != nil && err != http.ErrServerClosed {
 		slog.Error("server exited", "err", err)
+		os.Exit(1)
+	}
+}
+
+// serveContactsAPI runs the contacts API listener until ctx is cancelled,
+// then shuts it down gracefully. It exits the process on a bind failure, the
+// same posture as the metrics listener: a configured listener that silently
+// is not there is worse than a crash at startup.
+func serveContactsAPI(ctx context.Context, addr string, h http.Handler) {
+	asrv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := asrv.Shutdown(shutCtx); err != nil {
+			slog.Warn("contacts api shutdown", "err", err)
+		}
+	}()
+	slog.Info("contacts api listening", "addr", addr)
+	if err := asrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("contacts api server exited", "err", err)
 		os.Exit(1)
 	}
 }

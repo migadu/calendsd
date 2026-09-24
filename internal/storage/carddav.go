@@ -225,6 +225,80 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 	return `"` + etag + `"`, nil
 }
 
+// UpdateCardIfMatch is UpdateCard with the precondition in the UPDATE itself:
+// the row is rewritten only if its stored etag still equals expected (the bare
+// md5, as the column holds it), so a write that lost a race with a DAV client
+// is refused atomically rather than by a read-compare-write that is not. It
+// returns the new quoted etag and matched=true on success; matched=false with
+// no write and no change row when the card is missing or its etag moved.
+// Backs the API's If-Match (docs/snappymail-calserver-contacts.md § Endpoints).
+func (b *CardDAV) UpdateCardIfMatch(addressBookID, uri string, data []byte, expected string) (string, bool, error) {
+	etag := cardETag(data)
+	matched := false
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`
+UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
+ WHERE addressbookid = $4 AND uri = $5 AND etag = $6`,
+			data, etag, len(data), addressBookID, uri, expected)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		matched = true
+		return abAddChange(tx, addressBookID, uri, 2)
+	})
+	if err != nil || !matched {
+		return "", false, err
+	}
+	return `"` + etag + `"`, true, nil
+}
+
+// DeleteAllCards removes every card in one address book, with a change-log
+// row per card so a synced client learns of each deletion, in one
+// transaction. Returns how many were removed. The book itself stays.
+func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
+	n := 0
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT uri FROM cards WHERE addressbookid = $1 ORDER BY uri`, addressBookID)
+		if err != nil {
+			return err
+		}
+		var uris []string
+		for rows.Next() {
+			var uri string
+			if err := rows.Scan(&uri); err != nil {
+				rows.Close()
+				return err
+			}
+			uris = append(uris, uri)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, uri := range uris {
+			if _, err := tx.Exec(`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri); err != nil {
+				return err
+			}
+			if err := abAddChange(tx, addressBookID, uri, 3); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
 	return withTx(b.DB, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(
