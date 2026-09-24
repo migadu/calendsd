@@ -387,12 +387,29 @@ func TestUpdateEdgeCases(t *testing.T) {
 		"If-Match", got.ETag), 200)
 	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
 		map[string]string{"vcard": vcf("some-other-uid", "Phone")}), http.StatusBadRequest)
+	// A UID that could never be a file name (a space, 300 characters) is no
+	// obstacle to editing a card that already has one.
+	odd := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:" + strings.Repeat("x", 300) + " y\r\nFN:Odd UID\r\nEND:VCARD\r\n"
+	if _, err := cardDAV.CreateCard(bookID, "odd.vcf", []byte(odd)); err != nil {
+		t.Fatal(err)
+	}
+	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/odd.vcf",
+		map[string]string{"vcard": strings.Replace(odd, "Odd UID", "Odd Edited", 1)}), 200)
+	// ...while a create with such a UID is still refused, since there the UID
+	// becomes the file name.
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": odd}), http.StatusBadRequest)
 
 	// Exactly one card per body: a second one would be stored inside the
 	// first and served raw to every other client.
 	e.want(e.do(alice, "POST", "/api/v1/contacts",
 		map[string]string{"vcard": vcf("t1", "One") + vcf("t2", "Two")}), http.StatusBadRequest)
 	e.want(e.do(alice, "GET", "/api/v1/contacts/by-uid/t1", nil), 404)
+	// Nor anything else after END:VCARD, which the decoder would skip and
+	// the store would keep.
+	e.want(e.do(alice, "POST", "/api/v1/contacts",
+		map[string]string{"vcard": vcf("t3", "Three") + "garbage\r\n"}), http.StatusBadRequest)
+	e.want(e.do(alice, "POST", "/api/v1/contacts",
+		map[string]string{"vcard": vcf("t4", "Four") + "\r\n\r\n"}), 201) // trailing blank lines are fine
 
 	// A present-but-empty If-Match is a precondition that cannot hold, not an
 	// unconditional write.

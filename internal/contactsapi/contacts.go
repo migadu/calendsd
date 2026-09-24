@@ -199,8 +199,11 @@ type cardBody struct {
 }
 
 // readCard takes the vCard out of a request body, normalizes its line endings
-// and parses it far enough to know its UID — which the uri is derived from and
-// which must therefore be present and safe as a path segment.
+// and parses it far enough to know its UID, which must be present. Whether
+// the UID is usable as a file name is create's question alone: on update the
+// file name already exists, and a phone may have given a card a UID with a
+// space in it or one 300 characters long (some Exchange ones are) that the
+// user must still be able to edit.
 func (h *Handler) readCard(w http.ResponseWriter, r *http.Request) ([]byte, parsedCard, bool) {
 	var body cardBody
 	if !readJSON(w, r, &body) {
@@ -222,12 +225,6 @@ func (h *Handler) readCard(w http.ResponseWriter, r *http.Request) ([]byte, pars
 	}
 	if p.UID == "" {
 		writeError(w, http.StatusBadRequest, "vcard has no UID")
-		return nil, parsedCard{}, false
-	}
-	if !storage.SafePathSegment(p.UID) || len(p.UID) > 190 {
-		// The uid becomes the card's DAV path segment; a slash or whitespace
-		// in it makes the card unreachable from every other client.
-		writeError(w, http.StatusBadRequest, "UID is not usable as a path segment (no slashes, whitespace or control characters, at most 190 characters)")
 		return nil, parsedCard{}, false
 	}
 	return data, p, true
@@ -287,6 +284,12 @@ func (h *Handler) createTarget(r *http.Request, create bool) (storage.AddressBoo
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	data, p, ok := h.readCard(w, r)
 	if !ok {
+		return
+	}
+	if !storage.SafePathSegment(p.UID) || len(p.UID) > 190 {
+		// The uid becomes the card's DAV path segment; a slash or whitespace
+		// in it makes the card unreachable from every other client.
+		writeError(w, http.StatusBadRequest, "UID is not usable as a path segment (no slashes, whitespace or control characters, at most 190 characters)")
 		return
 	}
 	book, _, err := h.createTarget(r, true)

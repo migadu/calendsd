@@ -36,9 +36,12 @@ func parseCard(data []byte) (parsedCard, bool) {
 var errTrailingCard = errors.New("body contains more than one vCard")
 
 // parseSingleCard is parseCard for a body a client submits: it must hold
-// exactly one card. go-vcard's decoder stops at the first END:VCARD, so
-// anything after it would otherwise be stored as part of the card and served
-// raw to every other client, unparsed by any of them.
+// exactly one card and nothing else. go-vcard's decoder stops at the first
+// END:VCARD, so anything after it would otherwise be stored as part of the
+// card and served raw to every other client, unparsed by any of them. Two
+// checks close that: a second Decode must find nothing (a second card fails
+// it), and the body must end with END:VCARD (stray text that is not a card
+// fails it — the decoder skips lines it cannot parse and reports EOF).
 func parseSingleCard(data []byte) (parsedCard, error) {
 	dec := vcard.NewDecoder(bytes.NewReader(data))
 	card, err := dec.Decode()
@@ -46,6 +49,10 @@ func parseSingleCard(data []byte) (parsedCard, error) {
 		return parsedCard{}, err
 	}
 	if _, err := dec.Decode(); !errors.Is(err, io.EOF) {
+		return parsedCard{}, errTrailingCard
+	}
+	tail := strings.ToUpper(strings.TrimRight(string(data), "\r\n"))
+	if !strings.HasSuffix(tail, "END:VCARD") {
 		return parsedCard{}, errTrailingCard
 	}
 	return fromCard(card), nil
