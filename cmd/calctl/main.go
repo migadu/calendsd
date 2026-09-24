@@ -88,6 +88,8 @@ func main() {
 		handleJobs(subArgs)
 	case "imip":
 		handleImip(subArgs)
+	case "contacts":
+		handleContacts(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()
@@ -141,6 +143,16 @@ Commands:
   jobs delete <id> --confirm               Hard-delete the row (irreversible)
   imip pending [--limit N] [--json]        List failed/retrying iMIP sends (cred=no needs an organizer resend)
   imip resend <id> [--relay]               Re-queue a stuck iMIP send (metered; --relay = unmetered via the server)
+  contacts import --bundle DIR [--only ADDR] [--shard NNN] [--workers N] [--dry-run]
+                  [--resume=false] [--force-overwrite] [--force-version] [--report FILE]
+                                           Import a webmail contacts export bundle (see
+                                           docs/snappymail-calserver-contacts.md); re-runnable,
+                                           never deletes, --dry-run decides without writing.
+                                           Exit 1 on errors or unreadable shards, 2 when
+                                           principals were refused or an --only address was
+                                           not in the bundle
+  contacts summary [--run-id UUID] [--json] Totals from the import ledger, plus the orphaned
+                                           address book check (exit 1 on findings)
   version                                  Show version information
 
 Examples:
@@ -162,5 +174,8 @@ Examples:
   calctl jobs show 42
   calctl imip pending
   calctl imip resend 42
+  calctl contacts import --bundle /var/tmp/contacts-bundle --dry-run
+  calctl contacts import --bundle /var/tmp/contacts-bundle --only alice@example.org
+  calctl contacts summary
 `)
 }

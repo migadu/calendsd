@@ -7,7 +7,9 @@
 package storage
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,22 +36,48 @@ func (w *AdminWrites) CreateUser(username, digestA1, email, displayName string) 
 		return fmt.Errorf("invalid username %q", username)
 	}
 	return withTx(w.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(
-			`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
-			username, digestA1); err != nil {
-			return fmt.Errorf("creating users row (already exists?): %w", err)
-		}
-		principal := "principals/" + username
-		if _, err := tx.Exec(`
+		return createUserRows(tx, username, digestA1, email, displayName)
+	})
+}
+
+// createUserRows writes the users row and the principal triple inside a caller-
+// owned transaction. Factored out of CreateUser because the contacts import
+// creates a principal as one step of a larger per-principal transaction
+// (ContactImport.ImportPrincipal) and must not open a nested one — and because
+// two hand-written copies of this INSERT pair would eventually disagree about
+// the proxy sub-principals, which fails silently as broken delegation.
+//
+// It inserts blind: callers that may meet an existing principal check first.
+func createUserRows(tx *sql.Tx, username, digestA1, email, displayName string) error {
+	if _, err := tx.Exec(
+		`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
+		username, digestA1); err != nil {
+		return fmt.Errorf("creating users row (already exists?): %w", err)
+	}
+	principal := "principals/" + username
+	if _, err := tx.Exec(`
 INSERT INTO principals (uri, email, displayname) VALUES
 	($1, nullif($2, ''), nullif($3, '')),
 	($1 || '/calendar-proxy-read', NULL, NULL),
 	($1 || '/calendar-proxy-write', NULL, NULL)`,
-			principal, email, displayName); err != nil {
-			return fmt.Errorf("creating principal rows (already exist?): %w", err)
-		}
-		return nil
-	})
+		principal, email, displayName); err != nil {
+		return fmt.Errorf("creating principal rows (already exist?): %w", err)
+	}
+	return nil
+}
+
+// BlockedDigestA1 returns a random 32-hex string shaped like a digesta1 hash
+// but corresponding to no password, for accounts whose password lives entirely
+// in an external identity source (rcptd). users.digesta1 is NOT NULL and unused
+// on that path, so storing an unguessable value means Digest auth simply never
+// matches — where a real md5(user:realm:pass) would be a latent credential if
+// rcptd were ever switched off.
+func BlockedDigestA1() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("storage: reading CSPRNG for blocked digesta1: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // UpdatePrincipal updates a principal's email and/or displayname. A nil
@@ -157,6 +185,17 @@ func (w *AdminWrites) DeleteUserCascade(username string) error {
 			if err := deleteAddressBookRows(tx, id); err != nil {
 				return err
 			}
+		}
+
+		// Webmail's address suggestions. Not reachable through any collection
+		// above and not protected by a foreign key, so the purge has to name it:
+		// the rows hold correspondents' names and addresses, which must not
+		// outlive the deleted account. The contact_import ledger is deliberately
+		// NOT purged here — it is evidence about a migration run and is meant to
+		// survive the principal (see scripts/schema/pgsql.calserver.sql).
+		if _, err := tx.Exec(
+			`DELETE FROM contact_frecency WHERE principal = $1`, principal); err != nil {
+			return err
 		}
 
 		return deletePrincipalRows(tx, principal, username)

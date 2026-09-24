@@ -1,8 +1,6 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"strings"
 	"sync"
 
@@ -50,7 +48,7 @@ func (p *provisioner) ensure(principal, email string) error {
 	// The users.digesta1 column is unused for rcptd logins (rcptd owns the
 	// password), but it's NOT NULL, so store an unguessable random value that
 	// no md5(user:realm:pass) can equal — Digest auth simply never matches.
-	if err := p.writes.CreateUser(username, blockedDigestA1(), email, email); err != nil {
+	if err := p.writes.CreateUser(username, storage.BlockedDigestA1(), email, email); err != nil {
 		// A racing request may have created it between our check and insert;
 		// treat "now exists" as success rather than a hard error.
 		if again, e2 := p.principals.PrincipalByPath(principal); e2 == nil && again != nil {
@@ -61,14 +59,4 @@ func (p *provisioner) ensure(principal, email string) error {
 	}
 	p.seen[principal] = true
 	return nil
-}
-
-// blockedDigestA1 returns a random 32-hex string shaped like a digesta1 hash
-// but corresponding to no password.
-func blockedDigestA1() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("server: reading CSPRNG for blocked digesta1: " + err.Error())
-	}
-	return hex.EncodeToString(b[:])
 }
