@@ -11,13 +11,16 @@ import (
 	"calserver/internal/storage"
 )
 
-// contact is the wire form of one card. id is "<book uri>/<card uri>", each
-// half already a URL-safe path segment in sabre, and stays debuggable in a
-// log line. etag is the bare md5 the column stores; the client sends it back
-// in If-Match on update.
+// contact is the wire form of one card. id is the cards row's serial — a
+// number, because SnappyMail's own action layer runs contact ids through
+// intval() before any driver sees them (Actions\Contacts::DoContactsDelete
+// filters a non-numeric id away silently). book and uri say where the row
+// lives, which stays debuggable in a log line. etag is the bare md5 the column
+// stores; the client sends it back in If-Match on update.
 type contact struct {
-	ID      string `json:"id"`
+	ID      int64  `json:"id"`
 	Book    string `json:"book"`
+	URI     string `json:"uri"`
 	UID     string `json:"uid"`
 	ETag    string `json:"etag"`
 	Changed int64  `json:"changed"`
@@ -30,8 +33,9 @@ func toContact(c storage.ContactCard) contact {
 		uid = p.UID
 	}
 	return contact{
-		ID:      c.BookURI + "/" + c.URI,
+		ID:      c.ID,
 		Book:    c.BookURI,
+		URI:     c.URI,
 		UID:     uid,
 		ETag:    c.ETag,
 		Changed: c.LastModified,
@@ -39,14 +43,12 @@ func toContact(c storage.ContactCard) contact {
 	}
 }
 
-// splitID takes "<book uri>/<card uri>" apart. Both halves are single path
-// segments, so the first slash is the only one.
-func splitID(id string) (book, uri string, ok bool) {
-	book, uri, ok = strings.Cut(strings.Trim(id, "/"), "/")
-	if !ok || book == "" || uri == "" || strings.Contains(uri, "/") {
-		return "", "", false
-	}
-	return book, uri, true
+// parseID reads a contact id off the path. Anything that is not a positive
+// integer is a 400, not a 404: it is a malformed request, and the distinction
+// matters to a plugin author debugging what they sent.
+func parseID(s string) (int64, bool) {
+	id, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	return id, err == nil && id > 0
 }
 
 // --- reads -------------------------------------------------------------------
@@ -114,14 +116,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"total": total, "contacts": out})
 }
 
-// get is GetContactByID for a "<book>/<uri>" id.
+// get is GetContactByID for a numeric id.
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	book, uri, ok := splitID(r.PathValue("id"))
+	id, ok := parseID(r.PathValue("id"))
 	if !ok {
-		writeError(w, http.StatusBadRequest, "id must be <address book uri>/<card uri>")
+		writeError(w, http.StatusBadRequest, "id must be a positive integer")
 		return
 	}
-	c, err := h.contacts.Card(r.Context(), principalOf(r), book, uri)
+	c, err := h.contacts.CardByID(r.Context(), principalOf(r), id)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -304,7 +306,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// a phone once named one differently would be a surprising failure for
 	// the user. Duplicate UIDs across books are the dedup work's problem.
 	uri := p.UID + ".vcf"
-	existing, err := h.contacts.Card(r.Context(), principalOf(r), book.URI, uri)
+	existing, err := h.contacts.CardByPath(r.Context(), principalOf(r), book.URI, uri)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -323,7 +325,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	stored, err := h.contacts.Card(r.Context(), principalOf(r), book.URI, uri)
+	stored, err := h.contacts.CardByPath(r.Context(), principalOf(r), book.URI, uri)
 	if err != nil || stored == nil {
 		h.fail(w, r, err)
 		return
@@ -337,9 +339,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 // clobbered. Without If-Match the write is unconditional — the plugin always
 // sends the etag it was given, so that path is for tooling.
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	book, uri, ok := splitID(r.PathValue("id"))
+	id, ok := parseID(r.PathValue("id"))
 	if !ok {
-		writeError(w, http.StatusBadRequest, "id must be <address book uri>/<card uri>")
+		writeError(w, http.StatusBadRequest, "id must be a positive integer")
 		return
 	}
 	data, p, ok := h.readCard(w, r)
@@ -347,7 +349,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalOf(r)
-	current, err := h.contacts.Card(r.Context(), principal, book, uri)
+	current, err := h.contacts.CardByID(r.Context(), principal, id)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -356,6 +358,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such contact")
 		return
 	}
+	uri := current.URI
 	// The file name is fixed once a card exists, and another client may have
 	// named it without regard to the UID (a phone writing ABC123.vcf holding
 	// UID:urn:uuid:…). Such a card must stay editable, so the rule here is
@@ -387,7 +390,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	stored, err := h.contacts.Card(r.Context(), principal, book, uri)
+	stored, err := h.contacts.CardByID(r.Context(), principal, id)
 	if err != nil || stored == nil {
 		h.fail(w, r, err)
 		return
@@ -397,12 +400,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 // delete removes one contact by id.
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	book, uri, ok := splitID(r.PathValue("id"))
+	id, ok := parseID(r.PathValue("id"))
 	if !ok {
-		writeError(w, http.StatusBadRequest, "id must be <address book uri>/<card uri>")
+		writeError(w, http.StatusBadRequest, "id must be a positive integer")
 		return
 	}
-	c, err := h.contacts.Card(r.Context(), principalOf(r), book, uri)
+	c, err := h.contacts.CardByID(r.Context(), principalOf(r), id)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -411,7 +414,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such contact")
 		return
 	}
-	if err := h.cards.DeleteCard(c.BookID, uri); err != nil {
+	if err := h.cards.DeleteCard(c.BookID, c.URI); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -423,21 +426,20 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 // a phone in the meantime.
 func (h *Handler) batchDelete(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		IDs []string `json:"ids"`
+		IDs []int64 `json:"ids"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	principal := principalOf(r)
 	deleted := 0
-	missing := []string{}
+	missing := []int64{}
 	for _, id := range body.IDs {
-		book, uri, ok := splitID(id)
-		if !ok {
+		if id <= 0 {
 			missing = append(missing, id)
 			continue
 		}
-		c, err := h.contacts.Card(r.Context(), principal, book, uri)
+		c, err := h.contacts.CardByID(r.Context(), principal, id)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -446,7 +448,7 @@ func (h *Handler) batchDelete(w http.ResponseWriter, r *http.Request) {
 			missing = append(missing, id)
 			continue
 		}
-		if err := h.cards.DeleteCard(c.BookID, uri); err != nil {
+		if err := h.cards.DeleteCard(c.BookID, c.URI); err != nil {
 			h.fail(w, r, err)
 			return
 		}

@@ -107,11 +107,11 @@ func New(db *sql.DB, backend auth.Backend, tombstoned func(string) bool, opts Op
 	m.HandleFunc("GET /api/v1/contacts/by-email", h.byEmail)
 	m.HandleFunc("GET /api/v1/contacts/by-uid/{uid}", h.byUID)
 	m.HandleFunc("POST /api/v1/contacts/batch-delete", h.batchDelete)
-	// An id is "<book uri>/<card uri>": two segments, so the routes need the
-	// trailing-wildcard form or the first request 404s.
-	m.HandleFunc("GET /api/v1/contacts/{id...}", h.get)
-	m.HandleFunc("PUT /api/v1/contacts/{id...}", h.update)
-	m.HandleFunc("DELETE /api/v1/contacts/{id...}", h.delete)
+	// An id is the cards row's serial: a number, because SnappyMail's action
+	// layer runs contact ids through intval() before any driver sees them.
+	m.HandleFunc("GET /api/v1/contacts/{id}", h.get)
+	m.HandleFunc("PUT /api/v1/contacts/{id}", h.update)
+	m.HandleFunc("DELETE /api/v1/contacts/{id}", h.delete)
 	m.HandleFunc("GET /api/v1/suggestions", h.suggestions)
 	m.HandleFunc("POST /api/v1/frecency", h.bumpFrecency)
 	return h

@@ -159,6 +159,18 @@ func (e *env) want(r resp, code int) resp {
 	return r
 }
 
+// idOf is the cards row id for a uri, for cards created behind the API's back.
+func (e *env) idOf(uri string) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.db.QueryRow(`SELECT id FROM cards WHERE uri = $1`, uri).Scan(&id); err != nil {
+		e.t.Fatalf("id of %s: %v", uri, err)
+	}
+	return id
+}
+
+func path(id int64) string { return fmt.Sprintf("/api/v1/contacts/%d", id) }
+
 func vcf(uid, fn string, emails ...string) string {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:" + uid + "\r\nFN:" + fn + "\r\n")
@@ -170,8 +182,9 @@ func vcf(uid, fn string, emails ...string) string {
 }
 
 type contactJSON struct {
-	ID      string `json:"id"`
+	ID      int64  `json:"id"`
 	Book    string `json:"book"`
+	URI     string `json:"uri"`
 	UID     string `json:"uid"`
 	ETag    string `json:"etag"`
 	Changed int64  `json:"changed"`
@@ -226,7 +239,7 @@ func TestContactLifecycle(t *testing.T) {
 	// A user with no address book at all: the create makes "webmail".
 	var created contactJSON
 	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("u1", "Bob Builder", "Bob@Example.net")}), 201).json(t, &created)
-	if created.ID != "webmail/u1.vcf" || created.Book != "webmail" || created.UID != "u1" || len(created.ETag) != 32 || created.Changed == 0 {
+	if created.ID <= 0 || created.Book != "webmail" || created.URI != "u1.vcf" || created.UID != "u1" || len(created.ETag) != 32 || created.Changed == 0 {
 		t.Fatalf("created = %+v", created)
 	}
 	// Creating it again is a conflict, not a silent overwrite.
@@ -234,12 +247,12 @@ func TestContactLifecycle(t *testing.T) {
 
 	var list listJSON
 	e.want(e.do(alice, "GET", "/api/v1/contacts", nil), 200).json(t, &list)
-	if list.Total != 1 || len(list.Contacts) != 1 || list.Contacts[0].ID != "webmail/u1.vcf" {
+	if list.Total != 1 || len(list.Contacts) != 1 || list.Contacts[0].ID != created.ID {
 		t.Fatalf("list = %+v", list)
 	}
 
 	var got contactJSON
-	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/u1.vcf", nil), 200).json(t, &got)
+	e.want(e.do(alice, "GET", path(created.ID), nil), 200).json(t, &got)
 	if got.ETag != created.ETag || !strings.Contains(got.VCard, "FN:Bob Builder") {
 		t.Errorf("get = %+v", got)
 	}
@@ -251,7 +264,8 @@ func TestContactLifecycle(t *testing.T) {
 
 	// Another principal sees none of it: the principal is part of every query.
 	e.principal("mallory@example.org")
-	e.want(e.do("mallory@example.org", "GET", "/api/v1/contacts/webmail/u1.vcf", nil), 404)
+	e.want(e.do("mallory@example.org", "GET", path(created.ID), nil), 404)
+	e.want(e.do(alice, "GET", "/api/v1/contacts/not-a-number", nil), http.StatusBadRequest)
 	e.want(e.do("mallory@example.org", "GET", "/api/v1/contacts", nil), 200).json(t, &list)
 	if list.Total != 0 {
 		t.Errorf("mallory sees %d of alice's contacts", list.Total)
@@ -259,7 +273,7 @@ func TestContactLifecycle(t *testing.T) {
 
 	// Update with the right If-Match: new etag, new bytes.
 	var updated contactJSON
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/u1.vcf",
+	e.want(e.do(alice, "PUT", path(created.ID),
 		map[string]string{"vcard": vcf("u1", "Bob the Builder", "bob@example.net")},
 		"If-Match", `"`+created.ETag+`"`), 200).json(t, &updated)
 	if updated.ETag == created.ETag || !strings.Contains(updated.VCard, "FN:Bob the Builder") {
@@ -267,22 +281,22 @@ func TestContactLifecycle(t *testing.T) {
 	}
 	// The stale etag (the phone-edited-it-first case) is refused, and the
 	// stored card is untouched.
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/u1.vcf",
+	e.want(e.do(alice, "PUT", path(created.ID),
 		map[string]string{"vcard": vcf("u1", "Clobber")},
 		"If-Match", `"`+created.ETag+`"`), http.StatusPreconditionFailed)
-	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/u1.vcf", nil), 200).json(t, &got)
+	e.want(e.do(alice, "GET", path(created.ID), nil), 200).json(t, &got)
 	if got.ETag != updated.ETag {
 		t.Errorf("a refused update changed the card: etag %s, want %s", got.ETag, updated.ETag)
 	}
 	// If-Match: * and no If-Match are unconditional.
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/u1.vcf",
+	e.want(e.do(alice, "PUT", path(created.ID),
 		map[string]string{"vcard": vcf("u1", "Bob Star")}, "If-Match", "*"), 200)
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/u1.vcf",
+	e.want(e.do(alice, "PUT", path(created.ID),
 		map[string]string{"vcard": vcf("u1", "Bob Plain")}), 200)
-	// A card whose UID disagrees with its uri is refused.
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/u1.vcf",
+	// A card whose UID changes under its uri is refused.
+	e.want(e.do(alice, "PUT", path(created.ID),
 		map[string]string{"vcard": vcf("other", "Bob")}), http.StatusBadRequest)
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/missing.vcf",
+	e.want(e.do(alice, "PUT", path(created.ID+1000),
 		map[string]string{"vcard": vcf("missing", "Nobody")}), 404)
 
 	// Every write left a change-log row and moved the synctoken, so a DAV
@@ -295,8 +309,8 @@ func TestContactLifecycle(t *testing.T) {
 		t.Errorf("change rows = %d, want 4", changes)
 	}
 
-	e.want(e.do(alice, "DELETE", "/api/v1/contacts/webmail/u1.vcf", nil), http.StatusNoContent)
-	e.want(e.do(alice, "DELETE", "/api/v1/contacts/webmail/u1.vcf", nil), 404)
+	e.want(e.do(alice, "DELETE", path(created.ID), nil), http.StatusNoContent)
+	e.want(e.do(alice, "DELETE", path(created.ID), nil), 404)
 	e.want(e.do(alice, "GET", "/api/v1/contacts", nil), 200).json(t, &list)
 	if list.Total != 0 {
 		t.Errorf("after delete total = %d", list.Total)
@@ -337,7 +351,7 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	}
 	var created contactJSON
 	e.want(e.do(carol, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("c1", "Dave")}), 201).json(t, &created)
-	if created.Book != "addressbook" || created.ID != "addressbook/c1.vcf" {
+	if created.Book != "addressbook" || created.URI != "c1.vcf" {
 		t.Errorf("created in %q, want the sole book: %+v", created.Book, created)
 	}
 	// With two books and neither named webmail, a webmail book is created
@@ -377,15 +391,18 @@ func TestUpdateEdgeCases(t *testing.T) {
 	if _, err := cardDAV.CreateCard(bookID, "ABC123.vcf", []byte(phone)); err != nil {
 		t.Fatal(err)
 	}
+	phoneID := e.idOf("ABC123.vcf")
 	var got contactJSON
-	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
-	if got.UID != "urn:uuid:0e1" {
-		t.Errorf("uid = %q", got.UID)
+	e.want(e.do(alice, "GET", path(phoneID), nil), 200).json(t, &got)
+	if got.UID != "urn:uuid:0e1" || got.URI != "ABC123.vcf" {
+		t.Errorf("got = %+v", got)
 	}
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+	// ...and by-uid finds it through the scan, since its uri is not <uid>.vcf.
+	e.want(e.do(alice, "GET", "/api/v1/contacts/by-uid/urn:uuid:0e1", nil), 200)
+	e.want(e.do(alice, "PUT", path(phoneID),
 		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Phone Renamed", 1)},
 		"If-Match", got.ETag), 200)
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+	e.want(e.do(alice, "PUT", path(phoneID),
 		map[string]string{"vcard": vcf("some-other-uid", "Phone")}), http.StatusBadRequest)
 	// A UID that could never be a file name (a space, 300 characters) is no
 	// obstacle to editing a card that already has one.
@@ -393,7 +410,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 	if _, err := cardDAV.CreateCard(bookID, "odd.vcf", []byte(odd)); err != nil {
 		t.Fatal(err)
 	}
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/odd.vcf",
+	e.want(e.do(alice, "PUT", path(e.idOf("odd.vcf")),
 		map[string]string{"vcard": strings.Replace(odd, "Odd UID", "Odd Edited", 1)}), 200)
 	// ...while a create with such a UID is still refused, since there the UID
 	// becomes the file name.
@@ -413,10 +430,10 @@ func TestUpdateEdgeCases(t *testing.T) {
 
 	// A present-but-empty If-Match is a precondition that cannot hold, not an
 	// unconditional write.
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+	e.want(e.do(alice, "PUT", path(phoneID),
 		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Clobber", 1)},
 		"If-Match", ""), http.StatusPreconditionFailed)
-	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
+	e.want(e.do(alice, "GET", path(phoneID), nil), 200).json(t, &got)
 	if !strings.Contains(got.VCard, "Phone Renamed") {
 		t.Errorf("an empty If-Match wrote the card: %s", got.VCard)
 	}
@@ -426,12 +443,12 @@ func TestUpdateEdgeCases(t *testing.T) {
 	if _, err := e.db.Exec(`UPDATE cards SET etag = NULL WHERE uri = 'ABC123.vcf'`); err != nil {
 		t.Fatal(err)
 	}
-	e.want(e.do(alice, "GET", "/api/v1/contacts/webmail/ABC123.vcf", nil), 200).json(t, &got)
+	e.want(e.do(alice, "GET", path(phoneID), nil), 200).json(t, &got)
 	if len(got.ETag) != 32 {
 		t.Fatalf("etag for a NULL-etag row = %q, want an md5", got.ETag)
 	}
 	var updated contactJSON
-	e.want(e.do(alice, "PUT", "/api/v1/contacts/webmail/ABC123.vcf",
+	e.want(e.do(alice, "PUT", path(phoneID),
 		map[string]string{"vcard": strings.Replace(phone, "Phone Named", "Phone Final", 1)},
 		"If-Match", `"`+got.ETag+`"`), 200).json(t, &updated)
 	if updated.ETag == got.ETag || len(updated.ETag) != 32 {
@@ -602,18 +619,20 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 		t.Errorf("delete-all on an empty book changed something: %+v, rows %d, token %d", res, c, tok)
 	}
 	e.want(e.do(alice, "GET", "/api/v1/contacts", nil), 200).json(t, &list)
-	if list.Total != 1 || list.Contacts[0].ID != "personal/p1.vcf" {
+	if list.Total != 1 || list.Contacts[0].URI != "p1.vcf" {
 		t.Errorf("the other book was touched: %+v", list)
 	}
 
-	// Batch delete: one real, one missing, one malformed.
-	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("w3", "Three")}), 201)
+	// Batch delete: one real, one missing, one malformed — ids are numbers,
+	// the shape SnappyMail's DoContactsDelete hands a driver after intval().
+	var w3 contactJSON
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("w3", "Three")}), 201).json(t, &w3)
 	var batch struct {
-		Deleted int      `json:"deleted"`
-		Missing []string `json:"missing"`
+		Deleted int     `json:"deleted"`
+		Missing []int64 `json:"missing"`
 	}
-	e.want(e.do(alice, "POST", "/api/v1/contacts/batch-delete", map[string][]string{
-		"ids": {"webmail/w3.vcf", "webmail/gone.vcf", "nonsense"},
+	e.want(e.do(alice, "POST", "/api/v1/contacts/batch-delete", map[string][]int64{
+		"ids": {w3.ID, w3.ID + 1000, 0},
 	}), 200).json(t, &batch)
 	if batch.Deleted != 1 || len(batch.Missing) != 2 {
 		t.Errorf("batch = %+v", batch)

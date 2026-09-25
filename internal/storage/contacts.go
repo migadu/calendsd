@@ -35,11 +35,15 @@ var ReservedAddressBookURIs = map[string]bool{"by-uid": true, "by-email": true, 
 // still succeed (UpdateCardIfMatch compares the same expression).
 const cardETagExpr = `coalesce(c.etag, md5(c.carddata))`
 
-// ContactCard is one stored card with the book it lives in. ETag is the bare
-// md5 as the column stores it — not the quoted form CardInfo carries — because
-// the API compares it against If-Match after unquoting and hands it to the
-// client bare.
+// ContactCard is one stored card with the book it lives in. ID is the cards
+// row's serial, which is what the API hands out as the contact id: SnappyMail's
+// own action layer runs contact ids through intval() before they reach any
+// driver (Actions\Contacts::DoContactsDelete), so the id has to be a number.
+// ETag is the bare md5 as the column stores it — not the quoted form CardInfo
+// carries — because the API compares it against If-Match after unquoting and
+// hands it to the client bare.
 type ContactCard struct {
+	ID           int64
 	BookID       string
 	BookURI      string
 	URI          string
@@ -84,7 +88,7 @@ func (c *Contacts) Books(ctx context.Context, principalURI string) ([]AddressBoo
 // cards, and nothing here is worse than what the DAV REPORT path already does).
 func (c *Contacts) Cards(ctx context.Context, principalURI string) ([]ContactCard, error) {
 	rows, err := c.DB.QueryContext(ctx, `
-SELECT a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
+SELECT c.id, a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1
  ORDER BY a.uri, c.uri`, principalURI)
@@ -96,7 +100,7 @@ SELECT a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified
 	for rows.Next() {
 		var bookID int64
 		var card ContactCard
-		if err := rows.Scan(&bookID, &card.BookURI, &card.URI, &card.Data, &card.ETag, &card.LastModified); err != nil {
+		if err := rows.Scan(&card.ID, &bookID, &card.BookURI, &card.URI, &card.Data, &card.ETag, &card.LastModified); err != nil {
 			return nil, err
 		}
 		card.BookID = strconv.FormatInt(bookID, 10)
@@ -116,18 +120,39 @@ SELECT count(*) FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
 	return n, err
 }
 
-// Card returns one card by its (book uri, card uri) path, or nil when either
-// half does not exist for this principal. The principal is part of the lookup,
-// which is what makes "a handler physically cannot read another user's cards"
-// true at the storage layer rather than by convention.
-func (c *Contacts) Card(ctx context.Context, principalURI, bookURI, uri string) (*ContactCard, error) {
+// CardByID returns one card by its row id, or nil when it does not exist or
+// belongs to another principal. The principal is part of the lookup, which is
+// what makes "a handler physically cannot read another user's cards" true at
+// the storage layer rather than by convention.
+func (c *Contacts) CardByID(ctx context.Context, principalURI string, id int64) (*ContactCard, error) {
+	var bookID int64
+	card := ContactCard{ID: id}
+	err := c.DB.QueryRowContext(ctx, `
+SELECT a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
+  FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
+ WHERE a.principaluri = $1 AND c.id = $2`,
+		principalURI, id).Scan(&bookID, &card.BookURI, &card.URI, &card.Data, &card.ETag, &card.LastModified)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	card.BookID = strconv.FormatInt(bookID, 10)
+	return &card, nil
+}
+
+// CardByPath returns one card by its (book uri, card uri) path, or nil when
+// either half does not exist for this principal — the create path's conflict
+// check, where the id does not exist yet.
+func (c *Contacts) CardByPath(ctx context.Context, principalURI, bookURI, uri string) (*ContactCard, error) {
 	var bookID int64
 	card := ContactCard{BookURI: bookURI, URI: uri}
 	err := c.DB.QueryRowContext(ctx, `
-SELECT a.id, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
+SELECT c.id, a.id, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1 AND a.uri = $2 AND c.uri = $3`,
-		principalURI, bookURI, uri).Scan(&bookID, &card.Data, &card.ETag, &card.LastModified)
+		principalURI, bookURI, uri).Scan(&card.ID, &bookID, &card.Data, &card.ETag, &card.LastModified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -145,11 +170,11 @@ func (c *Contacts) CardByURI(ctx context.Context, principalURI, uri string) (*Co
 	var bookID int64
 	card := ContactCard{URI: uri}
 	err := c.DB.QueryRowContext(ctx, `
-SELECT a.id, a.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
+SELECT c.id, a.id, a.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1 AND c.uri = $2
  ORDER BY a.uri LIMIT 1`,
-		principalURI, uri).Scan(&bookID, &card.BookURI, &card.Data, &card.ETag, &card.LastModified)
+		principalURI, uri).Scan(&card.ID, &bookID, &card.BookURI, &card.Data, &card.ETag, &card.LastModified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
