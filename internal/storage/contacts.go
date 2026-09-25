@@ -158,16 +158,19 @@ SELECT c.id, a.id, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
 
 // CardByURI finds a card by its uri in any of the principal's books — the fast
 // path for "by uid", since both the migration and the API name a card
-// <uid>.vcf. Nil when absent.
-func (c *Contacts) CardByURI(ctx context.Context, principalURI, uri string) (*ContactCard, error) {
+// <uid>.vcf. With the same uri in several books (duplicate UIDs across books
+// exist after the migration), the copy in preferBook wins, then the book
+// whose uri sorts first; so the answer is deterministic and, for webmail,
+// the webmail copy. Nil when absent.
+func (c *Contacts) CardByURI(ctx context.Context, principalURI, uri, preferBook string) (*ContactCard, error) {
 	var bookID int64
 	card := ContactCard{URI: uri}
 	err := c.DB.QueryRowContext(ctx, `
 SELECT c.id, a.id, a.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1 AND c.uri = $2
- ORDER BY a.uri LIMIT 1`,
-		principalURI, uri).Scan(&card.ID, &bookID, &card.BookURI, &card.Data, &card.ETag, &card.LastModified)
+ ORDER BY (a.uri = $3) DESC, a.uri LIMIT 1`,
+		principalURI, uri, preferBook).Scan(&card.ID, &bookID, &card.BookURI, &card.Data, &card.ETag, &card.LastModified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

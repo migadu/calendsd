@@ -146,7 +146,7 @@ func (h *Handler) byUID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalOf(r)
-	c, err := h.contacts.CardByURI(r.Context(), principal, uid+".vcf")
+	c, err := h.contacts.CardByURI(r.Context(), principal, uid+".vcf", h.opts.DefaultBookURI)
 	if err != nil {
 		h.fail(w, r, err)
 		return

@@ -373,6 +373,57 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	}
 }
 
+// TestConflictNamesTheWebmailCopy is the bug the 409 body exists for: the same
+// UID in two books, and a create that conflicts. Before the 409 carried an id,
+// the plugin looked the card up by UID, which searched every book in name
+// order and found the copy in "addressbook" — so the update went to the wrong
+// card and the webmail one stayed as it was.
+func TestConflictNamesTheWebmailCopy(t *testing.T) {
+	e := newEnv(t, "calserver_capi_conflict", contactsapi.Options{})
+	e.principal("alice@example.org")
+	const alice = "alice@example.org"
+	cardDAV := &storage.CardDAV{DB: e.db}
+	// "addressbook" sorts before "webmail"; give it a card with the same UID.
+	otherID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "addressbook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cardDAV.CreateCard(otherID, "dup.vcf", []byte(vcf("dup", "Phone Copy"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil); err != nil {
+		t.Fatal(err)
+	}
+	var created contactJSON
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("dup", "Webmail Copy")}), 201).json(t, &created)
+	if created.Book != "webmail" {
+		t.Fatalf("created in %q, want webmail", created.Book)
+	}
+	phoneID := e.idOf("dup.vcf")
+	if phoneID == created.ID {
+		// idOf takes the first row; make sure we hold the addressbook copy.
+		if err := e.db.QueryRow(`SELECT c.id FROM cards c JOIN addressbooks a ON a.id = c.addressbookid WHERE c.uri = 'dup.vcf' AND a.uri = 'addressbook'`).Scan(&phoneID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var conflict struct {
+		ID   int64  `json:"id"`
+		ETag string `json:"etag"`
+	}
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("dup", "Webmail Again")}), http.StatusConflict).json(t, &conflict)
+	if conflict.ID != created.ID || conflict.ID == phoneID || conflict.ETag != created.ETag {
+		t.Errorf("409 names id %d (etag %s); want the webmail copy %d, not the addressbook copy %d", conflict.ID, conflict.ETag, created.ID, phoneID)
+	}
+	// And the read-side lookup by UID prefers the webmail copy too, rather
+	// than whichever book name sorts first.
+	var byUID contactJSON
+	e.want(e.do(alice, "GET", "/api/v1/contacts/by-uid/dup", nil), 200).json(t, &byUID)
+	if byUID.ID != created.ID {
+		t.Errorf("by-uid = id %d in %q, want the webmail copy %d", byUID.ID, byUID.Book, created.ID)
+	}
+}
+
 func TestUpdateEdgeCases(t *testing.T) {
 	e := newEnv(t, "calserver_capi_update", contactsapi.Options{})
 	e.principal("alice@example.org")
