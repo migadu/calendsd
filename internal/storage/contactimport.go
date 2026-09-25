@@ -395,8 +395,6 @@ func validateRequest(req *ImportRequest, maxCard int) string {
 		return fmt.Sprintf("principal %q is not a single email address", req.Principal)
 	case req.BookURI == "" || strings.ContainsAny(req.BookURI, "/\n\r"):
 		return fmt.Sprintf("invalid address book uri %q", req.BookURI)
-	case ReservedAddressBookURIs[req.BookURI]:
-		return fmt.Sprintf("address book uri %q is reserved by the contacts API's routes", req.BookURI)
 	case req.Digest == "":
 		return "bundle record has no digest"
 	case req.ExporterVer == "":

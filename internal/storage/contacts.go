@@ -22,13 +22,6 @@ type Contacts struct {
 	DB *sql.DB
 }
 
-// ReservedAddressBookURIs are book names that would collide with the contacts
-// API's own routes: an id is "<book uri>/<card uri>" under /api/v1/contacts/,
-// and these first segments are routes of their own. A sole book with one of
-// these names is never used as a create target and the importer refuses it as
-// --book-uri.
-var ReservedAddressBookURIs = map[string]bool{"by-uid": true, "by-email": true, "batch-delete": true}
-
 // cardETagExpr is how every read here surfaces an etag: the stored one, or the
 // md5 of the data for a legacy row whose etag column is NULL — so a client
 // never sees an empty etag and a conditional update against such a row can

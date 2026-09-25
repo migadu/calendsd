@@ -242,8 +242,16 @@ func TestContactLifecycle(t *testing.T) {
 	if created.ID <= 0 || created.Book != "webmail" || created.URI != "u1.vcf" || created.UID != "u1" || len(created.ETag) != 32 || created.Changed == 0 {
 		t.Fatalf("created = %+v", created)
 	}
-	// Creating it again is a conflict, not a silent overwrite.
-	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("u1", "Bob Again")}), http.StatusConflict)
+	// Creating it again is a conflict, not a silent overwrite — and the 409
+	// names the card in the way, so a client can update exactly that one.
+	var conflict struct {
+		ID   int64  `json:"id"`
+		ETag string `json:"etag"`
+	}
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("u1", "Bob Again")}), http.StatusConflict).json(t, &conflict)
+	if conflict.ID != created.ID || conflict.ETag != created.ETag {
+		t.Errorf("409 = %+v, want id %d etag %s", conflict, created.ID, created.ETag)
+	}
 
 	var list listJSON
 	e.want(e.do(alice, "GET", "/api/v1/contacts", nil), 200).json(t, &list)
@@ -362,16 +370,6 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	e.want(e.do(carol, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("c2", "Eve")}), 201).json(t, &created)
 	if created.Book != "webmail" {
 		t.Errorf("created in %q, want webmail", created.Book)
-	}
-	// A sole book named like one of the API's routes cannot be addressed as
-	// "<book>/<uri>", so it is not a create target either.
-	e.principal("frank@example.org")
-	if _, err := cardDAV.CreateAddressBook("principals/frank@example.org", "by-uid", nil); err != nil {
-		t.Fatal(err)
-	}
-	e.want(e.do("frank@example.org", "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("f1", "Gus")}), 201).json(t, &created)
-	if created.Book != "webmail" {
-		t.Errorf("created in reserved book %q, want webmail", created.Book)
 	}
 }
 

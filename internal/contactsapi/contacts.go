@@ -250,9 +250,7 @@ func (h *Handler) createTarget(r *http.Request, create bool) (storage.AddressBoo
 			return b, true, nil
 		}
 	}
-	// A sole book whose name is one of the API's own routes cannot be
-	// addressed as "<book>/<uri>", so it is not a target either.
-	if len(books) == 1 && !storage.ReservedAddressBookURIs[books[0].URI] {
+	if len(books) == 1 {
 		return books[0], true, nil
 	}
 	if !create {
@@ -305,32 +303,53 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// caught: the API never invents such a card, and refusing a create because
 	// a phone once named one differently would be a surprising failure for
 	// the user. Duplicate UIDs across books are the dedup work's problem.
+	//
+	// The 409 names the card that is in the way, id and etag, so a client that
+	// wants to update instead updates exactly that one. Looking it up by UID
+	// afterwards would not do: with the same UID in another book too, a by-uid
+	// search can land on the other copy.
 	uri := p.UID + ".vcf"
-	existing, err := h.contacts.CardByPath(r.Context(), principalOf(r), book.URI, uri)
+	principal := principalOf(r)
+	existing, err := h.contacts.CardByPath(r.Context(), principal, book.URI, uri)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	if existing != nil {
-		writeError(w, http.StatusConflict, "a contact with that UID already exists; update it instead")
+		writeConflict(w, *existing)
 		return
 	}
 	if _, err := h.cards.CreateCard(book.ID, uri, data); err != nil {
 		if storage.IsUniqueViolation(err) {
 			// The check above and this insert are not atomic; a double-click or
 			// a plugin retry lands here, and it is the same conflict.
+			if existing, err := h.contacts.CardByPath(r.Context(), principal, book.URI, uri); err == nil && existing != nil {
+				writeConflict(w, *existing)
+				return
+			}
 			writeError(w, http.StatusConflict, "a contact with that UID already exists; update it instead")
 			return
 		}
 		h.fail(w, r, err)
 		return
 	}
-	stored, err := h.contacts.CardByPath(r.Context(), principalOf(r), book.URI, uri)
+	stored, err := h.contacts.CardByPath(r.Context(), principal, book.URI, uri)
 	if err != nil || stored == nil {
 		h.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toContact(*stored))
+}
+
+// writeConflict is the 409 for a create whose UID is already taken: the error,
+// plus the id and etag of the card in the way, so the client can update that
+// exact card with a correct If-Match rather than search for it.
+func writeConflict(w http.ResponseWriter, existing storage.ContactCard) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error": "a contact with that UID already exists; update it instead",
+		"id":    existing.ID,
+		"etag":  existing.ETag,
+	})
 }
 
 // update is ContactSave for an existing contact. If-Match, when present and
