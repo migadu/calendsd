@@ -292,6 +292,56 @@ func TestContactImportNeverDeletes(t *testing.T) {
 	}
 }
 
+// TestContactImportLeavesOutCardsHeldElsewhere: a user who pointed
+// SnappyMail's own CardDAV sync at this server already has their webmail
+// contacts in a DAV book under the same UIDs. Importing those into "webmail"
+// would show each of them twice on every phone, so the importer leaves them
+// out, on the first run and on every run after it, and reports which.
+func TestContactImportLeavesOutCardsHeldElsewhere(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_ctimport_elsewhere")
+	imp := &storage.ContactImport{DB: db}
+	cardDAV := &storage.CardDAV{DB: db}
+
+	bookID, err := cardDAV.CreateAddressBook("principals/lena@example.org", "addressbook", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cardDAV.CreateCard(bookID, "c2.vcf", []byte(fmt.Sprintf(importVCF, "c2", "Two From Sync"))); err != nil {
+		t.Fatal(err)
+	}
+
+	cards := []storage.ImportCard{card("c1", "One"), card("c2", "Two"), card("c3", "Three")}
+	first := mustImport(t, imp, baseRequest("lena@example.org", cards))
+	if first.Action != storage.ActionImported {
+		t.Fatalf("action = %q (%s), want imported", first.Action, first.Reason)
+	}
+	if first.CardsCreated != 2 || len(first.Elsewhere) != 1 || first.Elsewhere[0] != "c2.vcf" {
+		t.Fatalf("created = %d, elsewhere = %v; want 2 and [c2.vcf]", first.CardsCreated, first.Elsewhere)
+	}
+	if got := readCounters(t, db, first.BookID); got.cards != 2 {
+		t.Errorf("webmail cards = %d, want 2", got.cards)
+	}
+	// The user's own copy is untouched.
+	if info, err := cardDAV.Card(bookID, "c2.vcf"); err != nil || !contains(string(info.CardData), "Two From Sync") {
+		t.Errorf("the user's copy changed or vanished: %v", err)
+	}
+
+	// A changed bundle on a later run must not bring the twin either.
+	changed := append([]storage.ImportCard{}, cards...)
+	changed[0] = card("c1", "One Renamed")
+	second := mustImport(t, imp, baseRequest("lena@example.org", changed))
+	if second.Action != storage.ActionDiffed {
+		t.Fatalf("second action = %q (%s), want diffed", second.Action, second.Reason)
+	}
+	if second.CardsCreated != 0 || second.CardsUpdated != 1 || len(second.Elsewhere) != 1 {
+		t.Errorf("second run: created %d updated %d elsewhere %v; want 0, 1, [c2.vcf]",
+			second.CardsCreated, second.CardsUpdated, second.Elsewhere)
+	}
+	if got := readCounters(t, db, first.BookID); got.cards != 2 {
+		t.Errorf("webmail cards after second run = %d, want 2", got.cards)
+	}
+}
+
 // TestContactImportRefusals walks the policy stops. Each is a reported result
 // rather than an error, so one bad principal never ends a 110k-principal run.
 func TestContactImportRefusals(t *testing.T) {

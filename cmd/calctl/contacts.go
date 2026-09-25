@@ -181,15 +181,16 @@ type importRun struct {
 	// importing nothing.
 	onlySeen map[string]bool
 
-	mu       sync.Mutex
-	counts   map[storage.ImportAction]int
-	cards    int
-	written  int
-	skipped  int
-	orphans  int
-	failed   int
-	visited  int
-	refusals []storage.ImportResult
+	mu        sync.Mutex
+	counts    map[storage.ImportAction]int
+	cards     int
+	written   int
+	skipped   int
+	orphans   int
+	elsewhere int
+	failed    int
+	visited   int
+	refusals  []storage.ImportResult
 	// shardErrors are shards that could not be read at all — a truncated
 	// export, a damaged file, a sentinel that does not match its records. Every
 	// principal in such a shard is simply not visited, so these have to reach
@@ -443,6 +444,7 @@ func (r *importRun) record(res storage.ImportResult, failed bool) {
 	r.written += res.CardsCreated + res.CardsUpdated
 	r.skipped += res.CardsSkipped
 	r.orphans += len(res.Orphans)
+	r.elsewhere += len(res.Elsewhere)
 	if failed {
 		r.failed++
 	}
@@ -492,6 +494,7 @@ func (r *importRun) print() {
 	fmt.Fprintf(w, "cards written\t%d\n", r.written)
 	fmt.Fprintf(w, "cards unchanged\t%d\n", r.skipped)
 	fmt.Fprintf(w, "cards present here but not in the bundle\t%d\n", r.orphans)
+	fmt.Fprintf(w, "cards left out, already in another book\t%d\n", r.elsewhere)
 	fmt.Fprintf(w, "elapsed\t%s\n", time.Since(r.started).Round(time.Millisecond))
 	w.Flush()
 

@@ -162,6 +162,14 @@ type ImportResult struct {
 	// which, so the operator gets the uris and decides. On a fresh COPY or an
 	// ordinary diff the count is enough.
 	Created []string `json:"created,omitempty"`
+	// Elsewhere lists the bundle cards whose uri already exists in another of
+	// the principal's address books, which the importer left out. SnappyMail's
+	// own CardDAV sync wrote webmail contacts to a DAV book under their own
+	// UID, so a card with that UID in the user's other book IS that contact,
+	// and importing it again would show every such contact twice on every
+	// phone. The match is exact — same uri, same principal — and never a guess
+	// on name or address, and nothing is merged: the user's copy stays as it is.
+	Elsewhere []string `json:"elsewhere,omitempty"`
 }
 
 // ledgerRow is the contact_import row for one principal.
@@ -272,6 +280,14 @@ func (c *ContactImport) ImportPrincipal(ctx context.Context, req ImportRequest) 
 		return res, err
 	}
 	res.PrincipalCreated = created
+
+	// Leave out the cards the user already has in another book (see
+	// ImportResult.Elsewhere). Applied on every run, not only the first: a
+	// card skipped here must stay skipped when the diff runs later, or the
+	// second run would bring the twin the first run avoided.
+	if req.Cards, res.Elsewhere, err = withoutCardsElsewhere(ctx, tx, principalURI, req.BookURI, req.Cards); err != nil {
+		return res, err
+	}
 
 	if ledger == nil {
 		// No ledger row, so any book under this uri is the user's own — a
@@ -470,6 +486,43 @@ SELECT book_id, book_uri, bundle_digest, exporter_ver, synctoken
 	// bundle_digest is CHAR(64) and comes back blank-padded on some drivers.
 	row.Digest = strings.TrimSpace(row.Digest)
 	return &row, nil
+}
+
+// withoutCardsElsewhere splits cards into those to import and the uris of
+// those the principal already holds in an address book other than bookURI.
+func withoutCardsElsewhere(ctx context.Context, tx *sql.Tx, principalURI, bookURI string, cards []ImportCard) ([]ImportCard, []string, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT c.uri
+  FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
+ WHERE a.principaluri = $1 AND a.uri <> $2`, principalURI, bookURI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing cards in other books: %w", err)
+	}
+	defer rows.Close()
+	taken := map[string]bool{}
+	for rows.Next() {
+		var uri string
+		if err := rows.Scan(&uri); err != nil {
+			return nil, nil, err
+		}
+		taken[uri] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if len(taken) == 0 {
+		return cards, nil, nil
+	}
+	keep := cards[:0:0]
+	var elsewhere []string
+	for _, card := range cards {
+		if taken[card.URI] {
+			elsewhere = append(elsewhere, card.URI)
+			continue
+		}
+		keep = append(keep, card)
+	}
+	return keep, elsewhere, nil
 }
 
 func bookSyncToken(ctx context.Context, tx *sql.Tx, bookID int64) (int64, bool, error) {
