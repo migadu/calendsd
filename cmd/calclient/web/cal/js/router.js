@@ -4,6 +4,8 @@
 //
 //   /cal/calendar/<view>/<date>   view ∈ day|week|month|agenda, date = YYYY-MM-DD
 //   /cal/calendar/agenda?q=term   the agenda's whole-calendar search filter
+//   /cal/calendar?cal=<uri>       focus one of my calendars (share-invite emails
+//                                 link here; see main.js applyCalTarget)
 //   /cal/tasks | /cal/contacts | /cal/settings
 //   /cal/event/<uid>[?occ=…]      read-only detail overlay over the calendar
 //   /cal/event/<uid>/edit[?occ=…] the editor overlay
@@ -35,9 +37,12 @@ export function parseRoute() {
   if (SECTIONS.includes(segs[0]) && segs[0] !== 'calendar') {
     return { name: segs[0] };
   }
-  // calendar (the default): optional /<view>/<date> and ?q= filter.
+  // calendar (the default): optional /<view>/<date>, ?q= filter, ?cal= target.
   const view = VIEWS.includes(segs[1]) ? segs[1] : '';
-  return { name: 'calendar', view, date: view ? (segs[2] || '') : '', q: query.get('q') || '' };
+  return {
+    name: 'calendar', view, date: view ? (segs[2] || '') : '',
+    q: query.get('q') || '', cal: query.get('cal') || '',
+  };
 }
 
 // ---- path builders -------------------------------------------------------
@@ -55,14 +60,17 @@ export function occValue(date) {
   return `${localDate(date)}T${p2(date.getHours())}:${p2(date.getMinutes())}:${p2(date.getSeconds())}`;
 }
 
-export function calendarPath({ view, date, q } = {}) {
+export function calendarPath({ view, date, q, cal } = {}) {
   let path = BASE + 'calendar';
   if (view) {
     path += '/' + view;
     const seg = dateSeg(date);
     if (seg) path += '/' + seg;
   }
-  if (q) path += '?q=' + encodeURIComponent(q);
+  const params = [];
+  if (q) params.push('q=' + encodeURIComponent(q));
+  if (cal) params.push('cal=' + encodeURIComponent(cal));
+  if (params.length) path += '?' + params.join('&');
   return path;
 }
 

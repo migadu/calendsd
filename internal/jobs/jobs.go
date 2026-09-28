@@ -228,6 +228,48 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 	return nil
 }
 
+// EnqueueLatest persists a relay-identity job that coalesces latest-wins per
+// (worker, key): while a job for the same key is still pending ('available'), a
+// higher generation replaces its args and resets its retry state, and an equal
+// or lower generation is a no-op. The queue stamps args.coalesce_key and
+// args.generation, so args must marshal to a JSON object. generation must be
+// monotonic per key (share_notify uses the sharee's instance id).
+//
+// Coalescing only covers pending jobs: one already executing may still send,
+// and a retry or reclaim of it yields to a newer pending generation (see
+// store.reschedule and store.reclaimOrphans) rather than violating the index.
+// WithCredential is refused — these jobs never carry a secret.
+func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generation int64, args any, opts ...Opt) error {
+	o := enqueueOpts{queue: "default", maxAttempts: 6}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	if o.credential != nil {
+		return errors.New("jobs: EnqueueLatest does not take a credential")
+	}
+	if key == "" {
+		return errors.New("jobs: EnqueueLatest needs a coalesce key")
+	}
+	if o.scheduledAt.IsZero() {
+		o.scheduledAt = time.Now()
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("jobs: marshal args: %w", err)
+	}
+	if len(raw) == 0 || raw[0] != '{' {
+		return errors.New("jobs: EnqueueLatest args must be a JSON object")
+	}
+	if err := q.store.enqueueLatest(ctx, o.queue, worker, key, generation, raw, o.maxAttempts, o.scheduledAt); err != nil {
+		return fmt.Errorf("jobs: enqueue: %w", err)
+	}
+	q.signalWake()
+	if _, err := q.store.db.ExecContext(ctx, `SELECT pg_notify($1, '')`, notifyChannel); err != nil {
+		q.log.Debug("jobs: pg_notify failed", "err", err)
+	}
+	return nil
+}
+
 // Start runs the claim loops, the LISTEN wake, and the sweep tick until ctx is
 // cancelled. Safe to `go q.Start(ctx)`; it never returns an error the caller
 // must act on. Register all handlers first.

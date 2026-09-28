@@ -54,7 +54,11 @@ BEGIN
         ('contact_import',   'bundle_digest'), ('contact_import', 'exporter_ver'),
         ('contact_import',   'cards_total'),   ('contact_import', 'cards_written'),
         ('contact_import',   'cards_skipped'), ('contact_import', 'synctoken'),
-        ('contact_import',   'run_id'),        ('contact_import', 'imported_at')
+        ('contact_import',   'run_id'),        ('contact_import', 'imported_at'),
+        ('domain_scheduling_policy', 'domain'),
+        ('domain_scheduling_policy', 'local_notify'),
+        ('domain_scheduling_policy', 'share_notify'),
+        ('domain_scheduling_policy', 'updated_at')
       ) AS v(tbl, col)
      WHERE to_regclass(v.tbl) IS NOT NULL
        AND NOT EXISTS (
@@ -209,6 +213,35 @@ CREATE INDEX IF NOT EXISTS jobs_reclaim_ix ON jobs (state, attempted_at);
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_coalesce_ix ON jobs (
     (args->>'uid'), (args->>'recipient'), (args->>'method')
 ) WHERE state = 'available';
+
+-- Latest-wins coalescing for workers that enqueue through Queue.EnqueueLatest
+-- (today: share_notify, docs/share-invite-email.md). The queue stamps
+-- args.coalesce_key (for share_notify: "<calendar id>|<principal>") and a
+-- monotonic args.generation (the sharee's calendarinstances.id); at most one
+-- such job per (worker, key) is pending, and a newer generation replaces it.
+-- Separate from jobs_coalesce_ix, whose keys these jobs never carry, so iMIP
+-- coalescing is unaffected.
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_latest_ix ON jobs (
+    worker, (args->>'coalesce_key')
+) WHERE state = 'available' AND args ? 'coalesce_key';
+
+
+-- Per-recipient-domain notification policy. A domain operator opts its users
+-- in to calserver emails that are not part of CalDAV itself; a domain with no
+-- row gets the defaults, so nothing changes until an admin inserts one. Keyed
+-- on the RECIPIENT's email domain, stored lowercased. Edited by SQL/ansible.
+--   share_notify  'email' = email a local user when a calendar is newly
+--                 shared with them (docs/share-invite-email.md)
+--   local_notify  reserved for docs/local-attendee-email.md (not yet read)
+-- A NEW calserver-only table; a co-resident sabre never references it.
+CREATE TABLE IF NOT EXISTS domain_scheduling_policy (
+    domain       TEXT        NOT NULL PRIMARY KEY CHECK (domain = lower(domain)),
+    local_notify TEXT        NOT NULL DEFAULT 'inbox_only'
+        CHECK (local_notify IN ('inbox_only', 'email', 'notification')),
+    share_notify TEXT        NOT NULL DEFAULT 'off'
+        CHECK (share_notify IN ('off', 'email')),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 
 -- Drop sabre's over-strict calendarinstances_principaluri_share_href unique

@@ -41,6 +41,7 @@ type Set struct {
 
 	imipDeliveries *prometheus.CounterVec
 	imipDuration   prometheus.Histogram
+	shareNotify    *prometheus.CounterVec
 }
 
 // New builds a Set with every instrument registered, plus the Go runtime and
@@ -114,6 +115,10 @@ func New(version string) *Set {
 			Help:    "SMTP send duration for iMip messages (the Mailer.Send call only).",
 			Buckets: []float64{0.01, 0.05, 0.25, 1, 5, 15},
 		}),
+		shareNotify: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "calserver_share_notify_total",
+			Help: "Calendar-share notice emails by outcome (docs/share-invite-email.md). queued counts accepted enqueues (including coalesced no-ops), sent counts SMTP successes. enqueue_error, policy_error, lookup_error, smtp_error, and retry_exhausted are alert-worthy; skipped_* are expected.",
+		}, []string{"outcome"}),
 	}
 
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -133,7 +138,7 @@ func New(version string) *Set {
 		s.authAttempts, s.authCheckDuration, s.rcptdRequests, s.rcptdDuration,
 		s.authCacheEvents,
 		s.dbOpDuration, s.syncTruncated,
-		s.imipDeliveries, s.imipDuration,
+		s.imipDeliveries, s.imipDuration, s.shareNotify,
 	)
 	return s
 }
@@ -308,6 +313,17 @@ func (s *Set) IMipDelivery(outcome string) {
 		return
 	}
 	s.imipDeliveries.WithLabelValues(outcome).Inc()
+}
+
+// ShareNotify counts one share-notice outcome: queued, sent, skipped_policy,
+// skipped_obsolete, skipped_excluded, invalid_recipient, no_mailer,
+// no_web_url, policy_error, lookup_error, enqueue_error, smtp_error, or
+// retry_exhausted.
+func (s *Set) ShareNotify(outcome string) {
+	if s == nil {
+		return
+	}
+	s.shareNotify.WithLabelValues(outcome).Inc()
 }
 
 // ObserveIMipSend records the SMTP send duration (observed whether or not

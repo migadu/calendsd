@@ -28,6 +28,7 @@ var (
 	_ caldav.ReplySupport         = (*CalDAV)(nil)
 	_ caldav.PublishSupport       = (*CalDAV)(nil)
 	_ caldav.NotificationsBackend = (*CalDAV)(nil)
+	_ caldav.ShareLookup          = (*CalDAV)(nil)
 )
 
 // Invites returns the sharees of a calendar — the owner plus every principal
@@ -70,32 +71,148 @@ SELECT principaluri, access, share_href, share_displayname, share_invitestatus
 
 // UpdateInvites applies a set of sharee changes to a calendar. Port of sabre's
 // PDO::updateInvites: a NOACCESS entry deletes the matching sharee instance; a
-// known href updates that instance's access/displayname/status; a new href
-// clones the owner's instance into a fresh per-sharee row. Because there is no
-// invitation UI, a resolved principal is auto-accepted and an unresolved one
-// is recorded as invalid, exactly as sabre does.
-func (b *CalDAV) UpdateInvites(id caldav.CalendarID, sharees []caldav.Sharee) error {
-	current, err := b.Invites(id)
-	if err != nil {
+// known sharee's instance is updated in place; a new one clones the owner's
+// instance into a fresh per-sharee row. Because there is no invitation UI, a
+// resolved principal is auto-accepted and an unresolved one is recorded as
+// invalid, exactly as sabre does.
+//
+// Unlike sabre it is serialized per calendar and reports what it committed
+// (docs/share-invite-email.md): the owner's instance row is locked FOR UPDATE
+// before the roster is read, so two concurrent share requests for the same
+// calendar apply one after the other and the second sees the first's result.
+// The request is first reduced to one final entry per sharee (identified by
+// principal, or by address while unresolved; the last entry wins, so a remove
+// beats a set in the same POST), which is what makes a re-POSTed roster — or
+// the same person under two aliases — report no new share.
+func (b *CalDAV) UpdateInvites(id caldav.CalendarID, sharees []caldav.Sharee) ([]caldav.ShareChange, error) {
+	var changes []caldav.ShareChange
+	err := withTx(b.DB, func(tx *sql.Tx) error {
+		owner, err := lockOwnerInstance(tx, id.Calendar)
+		if err != nil {
+			return err
+		}
+		current, err := shareeRows(tx, id.Calendar)
+		if err != nil {
+			return err
+		}
+		changes, err = applyShareeChanges(tx, id, caldav.FinalSharees(sharees, owner), current)
 		return err
-	}
-
-	return withTx(b.DB, func(tx *sql.Tx) error {
-		return applyShareeChanges(tx, id, sharees, current)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return changes, nil
 }
 
-// applyShareeChanges is UpdateInvites' per-sharee loop, run inside its
-// transaction.
-func applyShareeChanges(tx *sql.Tx, id caldav.CalendarID, sharees, current []caldav.Sharee) error {
-	for _, sharee := range sharees {
+// lockOwnerInstance takes the per-calendar sharing lock — a row lock on the
+// owner's (access=1) instance — and returns the owner principal. Every sharing
+// mutation (UpdateInvites, ShareReply) takes it first, so they never
+// interleave. A co-resident sabre does not follow this protocol.
+func lockOwnerInstance(tx *sql.Tx, calendarID string) (string, error) {
+	var owner sql.NullString
+	err := tx.QueryRow(
+		`SELECT principaluri FROM calendarinstances WHERE calendarid = $1 AND access = 1 FOR UPDATE`,
+		calendarID).Scan(&owner)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("sharing: calendar %s has no owner instance", calendarID)
+	}
+	return owner.String, err
+}
+
+// shareeRow is one existing sharee instance (access 2/3) as the sharing
+// transaction sees it.
+type shareeRow struct {
+	id          int64
+	uri         string
+	principal   string // "" for an unresolved (invalid) invite
+	href        string
+	displayName string
+}
+
+func shareeRows(tx *sql.Tx, calendarID string) ([]shareeRow, error) {
+	rows, err := tx.Query(`
+SELECT id, uri, principaluri, share_href, share_displayname
+  FROM calendarinstances WHERE calendarid = $1 AND access IN (2, 3) ORDER BY id`, calendarID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []shareeRow
+	for rows.Next() {
+		var r shareeRow
+		var principal, href, name sql.NullString
+		if err := rows.Scan(&r.id, &r.uri, &principal, &href, &name); err != nil {
+			return nil, err
+		}
+		r.principal, r.href, r.displayName = principal.String, href.String, name.String
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// matchSharee finds the existing instance a final request entry refers to: by
+// principal for a resolved sharee, falling back to an unresolved row with the
+// same address (an invite that now resolves). An unresolved entry matches by
+// address — an unresolved row first, else any row stored under it (an address
+// that no longer resolves still names the row it was shared under, as in
+// sabre, rather than adding a second one).
+func matchSharee(current []shareeRow, s caldav.Sharee) *shareeRow {
+	if s.Principal != "" {
+		for i := range current {
+			if current[i].principal == s.Principal {
+				return &current[i]
+			}
+		}
+	}
+	for i := range current {
+		if current[i].principal == "" && strings.EqualFold(current[i].href, s.Href) {
+			return &current[i]
+		}
+	}
+	if s.Principal == "" {
+		for i := range current {
+			if strings.EqualFold(current[i].href, s.Href) {
+				return &current[i]
+			}
+		}
+	}
+	return nil
+}
+
+// applyShareeChanges applies the already-normalized final entries inside the
+// sharing transaction and returns one ShareChange per sharee instance left in
+// place.
+func applyShareeChanges(tx *sql.Tx, id caldav.CalendarID, final []caldav.Sharee, current []shareeRow) ([]caldav.ShareChange, error) {
+	var changes []caldav.ShareChange
+	// Rows a set in this request granted or updated. A removal never deletes
+	// them: re-sharing someone under a new address while removing a stale
+	// alias of theirs in the same POST must leave the share they were just
+	// granted (the stale alias still names their row).
+	granted := map[int64]bool{}
+	for _, sharee := range final {
+		match := matchSharee(current, sharee)
+
 		if sharee.Access == caldav.AccessNoAccess {
 			// Removal: only sharee rows (access 2/3) match, so the owner's
-			// own row can never be dropped by a share request.
-			if _, err := tx.Exec(
-				`DELETE FROM calendarinstances WHERE calendarid = $1 AND share_href = $2 AND access IN (2, 3)`,
-				id.Calendar, sharee.Href); err != nil {
-				return err
+			// own row can never be dropped by a share request. An unresolved
+			// address also clears any other pre-existing row stored under it
+			// (sabre removes by share_href).
+			var drop []int64
+			if match != nil && !granted[match.id] {
+				drop = append(drop, match.id)
+			}
+			if sharee.Principal == "" {
+				for _, r := range current {
+					if strings.EqualFold(r.href, sharee.Href) && !granted[r.id] && (match == nil || r.id != match.id) {
+						drop = append(drop, r.id)
+					}
+				}
+			}
+			for _, rowID := range drop {
+				if _, err := tx.Exec(
+					`DELETE FROM calendarinstances WHERE id = $1 AND access IN (2, 3)`, rowID); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
@@ -110,21 +227,36 @@ func applyShareeChanges(tx *sql.Tx, id caldav.CalendarID, sharees, current []cal
 			principal = sharee.Principal
 		}
 
-		if old := findSharee(current, sharee.Href); old != nil {
+		if match != nil {
 			// Update in place. Keep the prior display name when the request
-			// omits a common-name (sabre merges the old properties in).
+			// omits a common-name (sabre merges the old properties in). An
+			// unresolved row that now resolves is bound to its principal; a
+			// bound row matched by an address that no longer resolves keeps
+			// its principal (only its status becomes invalid, as in sabre).
 			displayName := sharee.CommonName
 			if displayName == "" {
-				displayName = old.CommonName
+				displayName = match.displayName
 			}
-			// Restrict to sharee rows (access 2/3), symmetric with the delete
-			// branch, so a share update can never touch the owner's own row.
-			if _, err := tx.Exec(`
-UPDATE calendarinstances SET access = $1, share_displayname = $2, share_invitestatus = $3
- WHERE calendarid = $4 AND share_href = $5 AND access IN (2, 3)`,
-				sharee.Access, nullIfEmpty(displayName), status, id.Calendar, sharee.Href); err != nil {
-				return err
+			res, err := tx.Exec(`
+UPDATE calendarinstances
+   SET access = $1, share_displayname = $2, share_invitestatus = $3, principaluri = COALESCE($4, principaluri)
+ WHERE id = $5 AND access IN (2, 3)`,
+				sharee.Access, nullIfEmpty(displayName), status, principal, match.id)
+			if err != nil {
+				return nil, err
 			}
+			if n, err := res.RowsAffected(); err != nil {
+				return nil, err
+			} else if n != 1 {
+				return nil, fmt.Errorf("sharing: sharee instance %d vanished under the calendar lock", match.id)
+			}
+			granted[match.id] = true
+			changes = append(changes, caldav.ShareChange{
+				Href: sharee.Href, Principal: sharee.Principal,
+				InstanceID: match.id, InstanceURI: match.uri,
+				Access: sharee.Access, Comment: sharee.Comment,
+				Created: match.principal == "" && sharee.Principal != "",
+			})
 			continue
 		}
 
@@ -132,9 +264,11 @@ UPDATE calendarinstances SET access = $1, share_displayname = $2, share_invitest
 		// order, color, timezone) into a fresh row keyed to the sharee.
 		uri, err := newUUID()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if _, err := tx.Exec(`
+		var instanceID int64
+		var instanceURI string
+		if err := tx.QueryRow(`
 INSERT INTO calendarinstances
     (calendarid, principaluri, access, displayname, uri, description,
      calendarorder, calendarcolor, timezone, transparent,
@@ -142,23 +276,44 @@ INSERT INTO calendarinstances
 SELECT $1, $2, $3, displayname, $4, description,
        calendarorder, calendarcolor, timezone, 1,
        $5, $6, $7
-  FROM calendarinstances WHERE id = $8`,
+  FROM calendarinstances WHERE id = $8
+RETURNING id, uri`,
 			id.Calendar, principal, sharee.Access, uri, sharee.Href,
-			nullIfEmpty(sharee.CommonName), status, id.Instance); err != nil {
-			return err
+			nullIfEmpty(sharee.CommonName), status, id.Instance).Scan(&instanceID, &instanceURI); err != nil {
+			return nil, err
 		}
+		granted[instanceID] = true
+		changes = append(changes, caldav.ShareChange{
+			Href: sharee.Href, Principal: sharee.Principal,
+			InstanceID: instanceID, InstanceURI: instanceURI,
+			Access: sharee.Access, Comment: sharee.Comment, Created: true,
+		})
 	}
-	return nil
+	return changes, nil
 }
 
-// findSharee returns the existing invite with the given href, or nil.
-func findSharee(invites []caldav.Sharee, href string) *caldav.Sharee {
-	for i := range invites {
-		if invites[i].Href == href {
-			return &invites[i]
-		}
+// SharedInstance returns principal's current instance of a shared calendar,
+// with the owner and the owner's name for the calendar, or nil when they hold
+// none. The share-notice worker revalidates against it before every send.
+func (b *CalDAV) SharedInstance(calendarID, principal string) (*caldav.SharedInstance, error) {
+	var (
+		inst  caldav.SharedInstance
+		owner sql.NullString
+	)
+	err := b.DB.QueryRow(`
+SELECT s.id, s.uri, s.access, o.principaluri, COALESCE(NULLIF(o.displayname, ''), o.uri)
+  FROM calendarinstances s
+  JOIN calendarinstances o ON o.calendarid = s.calendarid AND o.access = 1
+ WHERE s.calendarid = $1 AND s.principaluri = $2 AND s.access IN (2, 3)`,
+		calendarID, principal).Scan(&inst.ID, &inst.URI, &inst.Access, &owner, &inst.CalendarName)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
-	return nil
+	if err != nil {
+		return nil, err
+	}
+	inst.OwnerPrincipal = owner.String
+	return &inst, nil
 }
 
 // nullIfEmpty maps an empty string to a SQL NULL so cleared display names
@@ -205,9 +360,11 @@ func (b *CalDAV) ShareReply(principalURI, href string, status int, calendarURI, 
 	err := withTx(b.DB, func(tx *sql.Tx) error {
 		// Resolve the shared calendar from the owner's own (access=1) instance,
 		// then the replying principal's instance of that calendar.
+		// Take the per-calendar sharing lock (the owner's instance row, as
+		// UpdateInvites does) before touching the sharee's instance.
 		var calendarID int64
 		err := tx.QueryRow(
-			`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND uri = $2 AND access = 1`,
+			`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND uri = $2 AND access = 1 FOR UPDATE`,
 			ownerPrincipal, ownerURI).Scan(&calendarID)
 		if err == sql.ErrNoRows {
 			return nil

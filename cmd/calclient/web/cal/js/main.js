@@ -42,12 +42,57 @@ function route(r = router.parseRoute()) {
     // Canonicalize when the path is bare (/cal, /cal/calendar) or the shown view
     // differs from what the URL asked — e.g. a narrow screen coerced week→day —
     // so the address bar stays shareable and matches the grid (replace only, no
-    // re-render).
+    // re-render). A ?cal= target stays, so a reload or a sign-in as another
+    // account retries it.
     const cur = currentCalendarRoute();
-    if (!r.view || cur.view !== r.view) router.replaceUrl(router.calendarPath(cur));
+    if (!r.view || cur.view !== r.view) router.replaceUrl(router.calendarPath({ ...cur, cal: r.cal }));
+    setCalTarget(r.cal);
   } else {
     render();
   }
+}
+
+// ---- ?cal= target (share-invite email links) ------------------------------
+//
+// /cal/calendar?cal=<uri> names one of my calendars by its segment in my home.
+// Once per navigation (route() re-arms it; bus-driven re-renders don't), after
+// the calendar list has loaded: make sure it is shown, scroll it into view and
+// flash it — then, once the share notifications have loaded, open the
+// invitations panel if a share is still waiting for an answer, so Decline is
+// one click away. An unknown target says so without naming anyone.
+
+let calTarget = null;   // { cal, focused } while a target is pending
+
+function setCalTarget(cal) {
+  calTarget = cal ? { cal, focused: false } : null;
+  applyCalTarget();
+}
+
+function applyCalTarget() {
+  const t = calTarget;
+  if (!t || $('#topbar').hidden || !store.state.calendarsLoaded) return;
+  if (!t.focused) {
+    t.focused = true;
+    const cal = store.state.calendars.find(c =>
+      !c.delegatedFrom && c.name === t.cal && c.href.startsWith(store.state.calHome));
+    if (!cal) {
+      calTarget = null;
+      toast('This calendar isn\u2019t available to this account. It may have been removed, ' +
+        'or you may need to sign in with another account.');
+      return;
+    }
+    if (store.state.hidden.has(cal.href)) store.setCalendarHidden(cal.href, false);
+    renderSidebar();
+    const li = [...document.querySelectorAll('#cal-list li')].find(x => x.dataset.href === cal.href);
+    if (li) {
+      li.scrollIntoView({ block: 'nearest' });
+      li.classList.add('flash-change');
+      li.addEventListener('animationend', () => li.classList.remove('flash-change'), { once: true });
+    }
+  }
+  if (!store.state.shareNotificationsLoaded) return;   // the 'sharenotifs' event re-enters
+  calTarget = null;
+  if (store.state.shareNotifications.some(n => n.status === 'noresponse')) toggleInvites(true);
 }
 
 // setSection switches the top-level chrome. The CSS keys off body.dataset.view
@@ -407,6 +452,7 @@ function updateBell() {
 }
 store.bus.addEventListener('invites', updateBell);
 store.bus.addEventListener('sharenotifs', updateBell);
+store.bus.addEventListener('sharenotifs', applyCalTarget);
 // The open panel derives conflict lines and its empty-state pointer from the
 // instance cache — refresh it when that cache changes.
 store.bus.addEventListener('events', () => {

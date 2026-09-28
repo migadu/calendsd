@@ -39,6 +39,12 @@ temp_file_filter = false # Intercept OS junk files (._*, .DS_Store, Thumbs.db,
 temp_file_dir = ""      # Scratch directory for temp_file_filter. Empty = a
                         # calserver-tempfiles subdir of the system temp dir.
                         # Files are never auto-deleted; sweep it externally.
+web_url = ""            # calclient origin that emails link to, e.g.
+                        # "https://calendar.example.org". Empty disables the
+                        # share-invite email (docs/share-invite-email.md),
+                        # which also needs [scheduling.imip] smtp and a
+                        # domain_scheduling_policy row with share_notify =
+                        # 'email' for the recipient's domain.
 
 # TLS / HTTPS. Leave both empty to serve plain HTTP (terminate TLS in front,
 # e.g. behind a reverse proxy). Basic/Digest send credentials, so if calserver

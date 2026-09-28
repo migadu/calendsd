@@ -39,8 +39,26 @@ type Sharee struct {
 
 // SharingSupport marks backends that implement calendar sharing.
 type SharingSupport interface {
-	UpdateInvites(id CalendarID, sharees []Sharee) error
+	// UpdateInvites applies a {cs}share request and reports the committed
+	// result: at most one ShareChange per sharee instance the request leaves
+	// in place (removals report nothing). It returns changes only after the
+	// write committed.
+	UpdateInvites(id CalendarID, sharees []Sharee) ([]ShareChange, error)
 	Invites(id CalendarID) ([]Sharee, error)
+}
+
+// ShareChange is one sharee instance UpdateInvites created or updated.
+type ShareChange struct {
+	Href        string // the address the request used for this sharee
+	Principal   string // resolved local principal; "" for an unresolved (invalid) invite
+	InstanceID  int64  // the sharee's calendarinstances.id; orders re-shares
+	InstanceURI string // the sharee's calendar segment in their own home
+	Access      int    // committed access level (AccessRead or AccessReadWrite)
+	Comment     string // the request's {cs}summary for this sharee
+	// Created is true for a new instance row, and for an unresolved invite
+	// that this request turned into a usable local share. An access change or
+	// an unchanged re-send is false.
+	Created bool
 }
 
 // PublishSupport marks backends supporting calendar publishing.
@@ -66,14 +84,15 @@ type MockSharingBackend struct {
 	Shares map[CalendarID][]Sharee
 }
 
-func (m *MockSharingBackend) UpdateInvites(id CalendarID, sharees []Sharee) error {
+func (m *MockSharingBackend) UpdateInvites(id CalendarID, sharees []Sharee) ([]ShareChange, error) {
 	if m.Shares == nil {
 		m.Shares = map[CalendarID][]Sharee{}
 	}
-	for _, sharee := range sharees {
+	var changes []ShareChange
+	for _, sharee := range finalSharees(sharees, "") {
 		existing := -1
 		for i, cur := range m.Shares[id] {
-			if cur.Href == sharee.Href {
+			if sameSharee(cur, sharee) {
 				existing = i
 			}
 		}
@@ -81,13 +100,33 @@ func (m *MockSharingBackend) UpdateInvites(id CalendarID, sharees []Sharee) erro
 		switch {
 		case sharee.Access == AccessNoAccess && existing >= 0:
 			m.Shares[id] = append(m.Shares[id][:existing], m.Shares[id][existing+1:]...)
+		case sharee.Access == AccessNoAccess:
 		case existing >= 0:
+			created := m.Shares[id][existing].Principal == "" && sharee.Principal != ""
 			m.Shares[id][existing] = sharee
-		case sharee.Access != AccessNoAccess:
+			changes = append(changes, m.change(id, sharee, created))
+		default:
 			m.Shares[id] = append(m.Shares[id], sharee)
+			changes = append(changes, m.change(id, sharee, true))
 		}
 	}
-	return nil
+	return changes, nil
+}
+
+// change reports a mock share with a stable per-(calendar, sharee) identity;
+// the mock has no instance rows, so the id is the sharee's position + 1.
+func (m *MockSharingBackend) change(id CalendarID, s Sharee, created bool) ShareChange {
+	var n int64
+	for i, cur := range m.Shares[id] {
+		if sameSharee(cur, s) {
+			n = int64(i + 1)
+		}
+	}
+	return ShareChange{
+		Href: s.Href, Principal: s.Principal, InstanceID: n,
+		InstanceURI: "shared-" + id.Calendar + "-" + strings.TrimPrefix(s.Principal, "principals/"),
+		Access:      s.Access, Comment: s.Comment, Created: created,
+	}
 }
 
 func (m *MockSharingBackend) Invites(id CalendarID) ([]Sharee, error) {
@@ -107,6 +146,10 @@ func (m *MockSharingBackend) ShareReply(principalURI, href string, status int, c
 // SharingPlugin handles the calendarserver sharing POSTs. Port of
 // CalDAV\SharingPlugin + the relevant DAV\Sharing\Plugin behavior.
 type SharingPlugin struct {
+	// Notifier, when non-nil, is told about every sharee a {cs}share request
+	// newly granted a usable local share, so it can email them.
+	Notifier ShareNotifier
+
 	server *dav.Server
 }
 
@@ -189,7 +232,8 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	for i := range sharees {
 		sharees[i].Principal = p.principalForAddress(sharees[i].Href)
 	}
-	if err := sharing.UpdateInvites(calNode.Info.ID, sharees); err != nil {
+	changes, err := sharing.UpdateInvites(calNode.Info.ID, sharees)
+	if err != nil {
 		return err
 	}
 	// Drop an invite-notification into each added local sharee's inbox, so
@@ -210,10 +254,77 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 			})
 		}
 	}
+	// Email each newly usable local sharee (best effort, never fails the
+	// share). The notifier applies the owner/resource exclusions and the
+	// recipient domain's policy.
+	if p.Notifier != nil {
+		for _, c := range changes {
+			if !c.Created || c.Principal == "" || c.Principal == calNode.Owner() {
+				continue
+			}
+			p.Notifier.NotifyShare(r, ShareNotice{
+				CalendarID:     calNode.Info.ID.Calendar,
+				CalendarPath:   calPath,
+				OwnerPrincipal: calNode.Owner(),
+				Principal:      c.Principal,
+				InstanceID:     c.InstanceID,
+				InstanceURI:    c.InstanceURI,
+				Comment:        c.Comment,
+			})
+		}
+	}
 	w.Header().Set("X-Sabre-Status", "everything-went-well")
 	w.WriteHeader(http.StatusOK)
 	return nil
 }
+
+// finalSharees reduces a share request to its final effect per sharee, in
+// first-seen order: the last entry for a sharee wins, so a remove (parsed
+// after every set) beats a set of the same sharee in the same POST. A
+// resolved sharee is identified by principal — so address spellings and
+// aliases collapse — and an unresolved one by its address. Entries for the
+// owner are dropped: sharing a calendar with its owner means nothing.
+func finalSharees(sharees []Sharee, owner string) []Sharee {
+	var order []string
+	last := map[string]Sharee{}
+	for _, s := range sharees {
+		if owner != "" && s.Principal == owner {
+			continue
+		}
+		k := shareeKey(s)
+		if _, seen := last[k]; !seen {
+			order = append(order, k)
+		}
+		last[k] = s
+	}
+	out := make([]Sharee, 0, len(order))
+	for _, k := range order {
+		out = append(out, last[k])
+	}
+	return out
+}
+
+func shareeKey(s Sharee) string {
+	if s.Principal != "" {
+		return "p:" + s.Principal
+	}
+	return "h:" + strings.ToLower(s.Href)
+}
+
+// sameSharee reports whether an existing roster entry is the sharee s names:
+// the same principal, or the same address for an entry not yet bound to a
+// principal — or for an s that doesn't resolve (its address still names the
+// entry it was shared under).
+func sameSharee(cur, s Sharee) bool {
+	if s.Principal != "" && cur.Principal == s.Principal {
+		return true
+	}
+	return (cur.Principal == "" || s.Principal == "") && strings.EqualFold(cur.Href, s.Href)
+}
+
+// FinalSharees exposes finalSharees to backends outside this package, which
+// must apply the same normalization inside their own transaction.
+func FinalSharees(sharees []Sharee, owner string) []Sharee { return finalSharees(sharees, owner) }
 
 // requestTime returns a deterministic timestamp when available (parity/tests
 // pin it), else now.

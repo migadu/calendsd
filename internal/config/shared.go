@@ -113,6 +113,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
 	requestLogDir := flag.String("request-log-dir", "", "debug: dump every request/response (headers + bounded bodies, Authorization redacted) to one file per request under this directory; empty disables. Do not use in production")
 	accessLog := flag.Bool("access-log", false, "log one line per request (method, path, status, bytes, duration) into the main log; overrides [logging].access_log")
+	webURL := flag.String("web-url", "", "calclient origin that emails link to (e.g. https://calendar.example.org); empty disables share-invite emails (docs/share-invite-email.md)")
 	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). Overrides [logging].level; when neither is set, $CALSERVER_LOG_LEVEL applies")
 
 	return func() (*Merged, error) {
@@ -207,6 +208,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			RcptdToken:                rcptdTok,
 			RequestLogDir:             m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
 			AccessLog:                 m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
+			WebURL:                    m.Str("web-url", *webURL, m.File.Server.WebURL),
 			RetentionDays:             RetentionDays(m.File.Retention.DeletedDays),
 			Push: server.PushConfig{
 				Enabled:         m.File.Push.Enabled,

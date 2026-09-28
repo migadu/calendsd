@@ -120,7 +120,7 @@ func TestShareTwoCalendarsWithOnePerson(t *testing.T) {
 
 	// Share BOTH calendars with Bob — the second must not collide.
 	for _, cal := range cals {
-		if err := backend.UpdateInvites(cal.ID, []caldav.Sharee{
+		if _, err := backend.UpdateInvites(cal.ID, []caldav.Sharee{
 			{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessReadWrite},
 		}); err != nil {
 			t.Fatalf("sharing calendar %q with bob: %v", cal.ID.Calendar, err)
@@ -141,7 +141,7 @@ func TestCalendarSharing(t *testing.T) {
 	calID := ownerCalID(t, backend)
 
 	// --- Phase 1: add Bob (read-write) and Carol (read-only). ---------------
-	err := backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err := backend.UpdateInvites(calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", CommonName: "Bob B", Access: caldav.AccessReadWrite},
 		{Href: carolHref, Principal: "principals/carol", CommonName: "Carol C", Access: caldav.AccessRead},
 	})
@@ -207,7 +207,7 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// --- Phase 2: downgrade Bob to read-only; must update, not duplicate. ---
-	err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", CommonName: "Bob B", Access: caldav.AccessRead},
 	})
 	if err != nil {
@@ -227,7 +227,7 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// --- Phase 3: an unresolved principal is recorded as an invalid invite. -
-	err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
 		{Href: danHref, Principal: "", CommonName: "Dan D", Access: caldav.AccessRead},
 	})
 	if err != nil {
@@ -239,7 +239,7 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// --- Phase 4: removing a sharee drops their instance row entirely. ------
-	err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
 		{Href: carolHref, Access: caldav.AccessNoAccess},
 	})
 	if err != nil {
@@ -264,7 +264,7 @@ func TestCalendarShareReply(t *testing.T) {
 	backend := sharingDB(t, "calserver_sharereply")
 	calID := ownerCalID(t, backend)
 
-	if err := backend.UpdateInvites(calID, []caldav.Sharee{
+	if _, err := backend.UpdateInvites(calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessReadWrite},
 		{Href: carolHref, Principal: "principals/carol", Access: caldav.AccessRead},
 	}); err != nil {

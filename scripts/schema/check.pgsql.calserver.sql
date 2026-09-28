@@ -29,6 +29,7 @@ WITH checks AS (
         ('deleted_principals'), ('deleted_principals_purge_after_ix'),
         ('push_subscriptions'), ('push_subscriptions_token'), ('push_subscriptions_lookup'),
         ('jobs'), ('jobs_claim_ix'), ('jobs_reclaim_ix'), ('jobs_coalesce_ix'),
+        ('jobs_latest_ix'), ('domain_scheduling_policy'),
         ('contact_frecency'), ('contact_frecency_rank_ix'),
         ('contact_import'), ('contact_import_run_ix')
       ) AS v(name)
@@ -86,7 +87,11 @@ WITH checks AS (
         ('contact_import',   'bundle_digest'), ('contact_import', 'exporter_ver'),
         ('contact_import',   'cards_total'),   ('contact_import', 'cards_written'),
         ('contact_import',   'cards_skipped'), ('contact_import', 'synctoken'),
-        ('contact_import',   'run_id'),        ('contact_import', 'imported_at')
+        ('contact_import',   'run_id'),        ('contact_import', 'imported_at'),
+        ('domain_scheduling_policy', 'domain'),
+        ('domain_scheduling_policy', 'local_notify'),
+        ('domain_scheduling_policy', 'share_notify'),
+        ('domain_scheduling_policy', 'updated_at')
       ) AS v(tbl, col)
       LEFT JOIN pg_attribute a
              ON a.attrelid = to_regclass(v.tbl) AND a.attname = v.col
@@ -108,6 +113,7 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
       ('deleted_principals'), ('deleted_principals_purge_after_ix'),
       ('push_subscriptions'), ('push_subscriptions_token'), ('push_subscriptions_lookup'),
       ('jobs'), ('jobs_claim_ix'), ('jobs_reclaim_ix'), ('jobs_coalesce_ix'),
+      ('jobs_latest_ix'), ('domain_scheduling_policy'),
       ('contact_frecency'), ('contact_frecency_rank_ix'),
       ('contact_import'), ('contact_import_run_ix')) AS v(name)
     UNION ALL
@@ -135,6 +141,8 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
         ('contact_import','bundle_digest'), ('contact_import','exporter_ver'),
         ('contact_import','cards_total'), ('contact_import','cards_written'),
         ('contact_import','cards_skipped'), ('contact_import','synctoken'),
-        ('contact_import','run_id'), ('contact_import','imported_at')
+        ('contact_import','run_id'), ('contact_import','imported_at'),
+        ('domain_scheduling_policy','domain'), ('domain_scheduling_policy','local_notify'),
+        ('domain_scheduling_policy','share_notify'), ('domain_scheduling_policy','updated_at')
       ) AS v(tbl, col)
   ) AS all_checks(ok);

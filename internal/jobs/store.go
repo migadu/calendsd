@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // store is the jobs-table persistence layer. It owns every SQL statement the
@@ -56,6 +58,37 @@ WHERE (COALESCE((EXCLUDED.args->>'sequence')::int, 0), COALESCE(EXCLUDED.args->>
     > (COALESCE((jobs.args->>'sequence')::int, 0), COALESCE(jobs.args->>'dtstamp', ''))`,
 		queue, worker, []byte(args), maxAttempts, scheduledAt, ct, nonce, keyID)
 	return err
+}
+
+// enqueueLatest inserts a latest-wins job (Queue.EnqueueLatest), stamping the
+// coalesce key and generation into args. A pending job for the same (worker,
+// key) is replaced only by a strictly newer generation; the replacement resets
+// retry accounting exactly as the iMIP supersede does. Arbitrated by
+// jobs_latest_ix; these rows never carry the iMIP keys, so jobs_coalesce_ix is
+// unaffected.
+func (s *store) enqueueLatest(ctx context.Context, queue, worker, key string, generation int64, args json.RawMessage, maxAttempts int, scheduledAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO jobs (queue, worker, args, state, max_attempts, scheduled_at)
+VALUES ($1, $2, $3::jsonb || jsonb_build_object('coalesce_key', $4::text, 'generation', $5::bigint),
+        'available', $6, $7)
+ON CONFLICT (worker, (args->>'coalesce_key')) WHERE state = 'available' AND args ? 'coalesce_key'
+DO UPDATE SET
+    queue        = EXCLUDED.queue,
+    args         = EXCLUDED.args,
+    max_attempts = EXCLUDED.max_attempts,
+    attempt      = 0,
+    scheduled_at = EXCLUDED.scheduled_at,
+    inserted_at  = now(),
+    last_error   = NULL
+WHERE (EXCLUDED.args->>'generation')::bigint > (jobs.args->>'generation')::bigint`,
+		queue, worker, []byte(args), key, generation, maxAttempts, scheduledAt)
+	return err
+}
+
+// isUniqueViolation reports a Postgres unique_violation (23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // claimed is a row the claim loop handed to a worker: identity, payload, retry
@@ -117,11 +150,70 @@ WHERE id = $1`, id)
 
 // reschedule returns a transiently-failed job to the queue, due after backoff,
 // keeping its credential for the next attempt.
+//
+// A latest-wins job (args.coalesce_key) may meet a pending sibling that was
+// enqueued while it executed; only one may be 'available' (jobs_latest_ix). The
+// higher generation survives — a pending sibling wins a tie, being the fresher
+// enqueue — and the other is discarded as superseded. A sibling inserted
+// between the check and the update surfaces as a unique violation; the whole
+// decision is simply retried.
 func (s *store) reschedule(ctx context.Context, id int64, runAt time.Time, lastErr string) error {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE jobs SET state = 'available', scheduled_at = $2, last_error = $3
-WHERE id = $1`, id, runAt, lastErr)
+	var err error
+	for try := 0; try < 3; try++ {
+		if err = s.rescheduleOnce(ctx, id, runAt, lastErr); !isUniqueViolation(err) {
+			return err
+		}
+	}
 	return err
+}
+
+func (s *store) rescheduleOnce(ctx context.Context, id int64, runAt time.Time, lastErr string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var worker string
+	var key sql.NullString
+	var gen sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+SELECT worker, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
+		id).Scan(&worker, &key, &gen); err != nil {
+		return err
+	}
+	if key.Valid {
+		var otherID, otherGen int64
+		err := tx.QueryRowContext(ctx, `
+SELECT id, (args->>'generation')::bigint FROM jobs
+ WHERE worker = $1 AND args ? 'coalesce_key' AND args->>'coalesce_key' = $2
+   AND state = 'available' AND id <> $3
+   FOR UPDATE`, worker, key.String, id).Scan(&otherID, &otherGen)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		case otherGen >= gen.Int64:
+			if _, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = $2
+WHERE id = $1`, id, "superseded by a newer pending job; last error: "+lastErr); err != nil {
+				return err
+			}
+			return tx.Commit()
+		default:
+			if _, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = 'superseded by a newer generation awaiting retry'
+WHERE id = $1`, otherID); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'available', scheduled_at = $2, last_error = $3
+WHERE id = $1`, id, runAt, lastErr); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // discard marks a job terminally failed but KEEPS enc_credential: a given-up
@@ -139,8 +231,54 @@ WHERE id = $1`, id, lastErr)
 // a worker that died mid-send — back to 'available', or to 'discarded' when
 // they are out of attempts. Without this the durability goal half-fails for the
 // jobs a crash was meant to save (D9). Returns the number reclaimed.
+//
+// Latest-wins jobs (args.coalesce_key) are first reduced so the bulk reset
+// cannot put two pending rows on one key (jobs_latest_ix): of the orphans that
+// would return to 'available' and any pending sibling, only the highest
+// generation survives (a pending sibling wins a tie); the rest are discarded as
+// superseded.
 func (s *store) reclaimOrphans(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// An orphan is outranked by a pending sibling of at least its generation,
+	// or by another returning orphan of a higher (generation, id).
+	if _, err := tx.ExecContext(ctx, `
+UPDATE jobs j
+   SET state = 'discarded', completed_at = now(),
+       last_error = 'reclaimed: superseded by a newer job for the same key'
+ WHERE j.state = 'executing' AND j.attempted_at < $1 AND j.attempt < j.max_attempts
+   AND j.args ? 'coalesce_key'
+   AND EXISTS (
+     SELECT 1 FROM jobs o
+      WHERE o.id <> j.id AND o.worker = j.worker AND o.args ? 'coalesce_key'
+        AND o.args->>'coalesce_key' = j.args->>'coalesce_key'
+        AND (
+          (o.state = 'available'
+             AND (o.args->>'generation')::bigint >= (j.args->>'generation')::bigint)
+          OR (o.state = 'executing' AND o.attempted_at < $1 AND o.attempt < o.max_attempts
+             AND ((o.args->>'generation')::bigint, o.id) > ((j.args->>'generation')::bigint, j.id))
+        ))`, cutoff); err != nil {
+		return 0, err
+	}
+	// A pending sibling older than a surviving orphan yields to it.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE jobs o
+   SET state = 'discarded', completed_at = now(),
+       last_error = 'superseded by a newer generation reclaimed for retry'
+ WHERE o.state = 'available' AND o.args ? 'coalesce_key'
+   AND EXISTS (
+     SELECT 1 FROM jobs j
+      WHERE j.state = 'executing' AND j.attempted_at < $1 AND j.attempt < j.max_attempts
+        AND j.worker = o.worker AND j.args ? 'coalesce_key'
+        AND j.args->>'coalesce_key' = o.args->>'coalesce_key'
+        AND (j.args->>'generation')::bigint > (o.args->>'generation')::bigint)`, cutoff); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
 UPDATE jobs
    SET state        = CASE WHEN attempt >= max_attempts THEN 'discarded' ELSE 'available' END,
        -- A reclaimed job is due now (retry promptly); a fresh scheduled_at also
@@ -152,7 +290,11 @@ UPDATE jobs
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
 }
 
 // purgeCredentials clears a stored credential once the job no longer needs it —

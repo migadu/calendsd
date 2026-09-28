@@ -87,6 +87,9 @@ async function bootstrap() {
   // loadDelegatedCalendars); never let it block or break the first render.
   loadDelegatedCalendars().catch(() => {});
   loadInvites().catch(() => {});
+  // A new session's inbox is unknown until this load lands (a ?cal= link
+  // waits for it before deciding whether to open the invitations panel).
+  state.shareNotificationsLoaded = false;
   loadShareNotifications().catch(() => {});
   initContacts().catch(() => {});
   startPolling();

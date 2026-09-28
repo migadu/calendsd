@@ -65,6 +65,10 @@ type Config struct {
 		// a subdir of the system temp dir when empty). Off by default.
 		TempFileFilter bool
 		TempFileDir    string
+		// WebURL is the calclient origin (e.g. https://calendar.example.org)
+		// that emails link to. Empty disables share-invite emails
+		// (docs/share-invite-email.md).
+		WebURL string
 	}
 	Database struct {
 		DSN string
@@ -263,6 +267,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Rcptd.Token = str("server.rcptd.token")
 	cfg.Server.TempFileFilter = boolean("server.temp_file_filter")
 	cfg.Server.TempFileDir = str("server.temp_file_dir")
+	cfg.Server.WebURL = str("server.web_url")
 	cfg.Database.DSN = str("database.dsn")
 	cfg.Database.MaxOpenConns = integer("database.max_open_conns")
 	cfg.Database.MaxIdleConns = integer("database.max_idle_conns")
@@ -331,6 +336,7 @@ var known = map[string]bool{
 	"server.tls.cert": true, "server.tls.key": true,
 	"server.rcptd.url": true, "server.rcptd.token": true,
 	"server.temp_file_filter": true, "server.temp_file_dir": true,
+	"server.web_url":             true,
 	"database.dsn":               true,
 	"database.max_open_conns":    true,
 	"database.max_idle_conns":    true,

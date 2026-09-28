@@ -64,7 +64,12 @@ export async function loadShareNotifications() {
   // The collection only exists when the backend supports notifications; a 404
   // there just means no inbox, so treat any non-207 as "nothing pending".
   const r = await dav.propfind(base, ['d:getetag'], '1');
-  if (r.status !== 207) { state.shareNotifications = []; emit('sharenotifs'); return; }
+  if (r.status !== 207) {
+    state.shareNotifications = [];
+    state.shareNotificationsLoaded = true;
+    emit('sharenotifs');
+    return;
+  }
   const hrefs = dav.msResponses(r.xml).map(x => x.href)
     .filter(h => h !== base && !h.endsWith('/'));
   const items = [];
@@ -89,6 +94,7 @@ export async function loadShareNotifications() {
     } catch { /* skip unreadable items */ }
   }
   state.shareNotifications = items;
+  state.shareNotificationsLoaded = true;
   emit('sharenotifs');
 }
 

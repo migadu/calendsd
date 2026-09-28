@@ -115,6 +115,11 @@ type Config struct {
 	// present (fail closed). The worker that delivers notifications is started
 	// separately via NewWithBackground.
 	Push PushConfig
+	// WebURL is the calclient origin emails link to. Empty disables the
+	// share-invite email (docs/share-invite-email.md); so does a recipient
+	// domain without share_notify = 'email', and a missing relay (IMipSMTP).
+	// Not part of Canonical(): it changes no DAV semantics.
+	WebURL string
 	// IMipQueue holds the durable iMIP job-queue settings (JOB-QUEUE-PLAN.md).
 	// The queue is constructed and started separately (NewWithBackground); its
 	// CredentialKey gates the metered per-user durable retry.
@@ -318,6 +323,15 @@ func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Q
 	})
 	q.Register("imip_send", imip.DurableHandler)
 	imip.Durable = q
+	// Share-invite notices ride the same queue (relay identity, no credential).
+	for _, p := range srv.Plugins() {
+		if sp, ok := p.(*caldav.SharingPlugin); ok {
+			if sm, ok := sp.Notifier.(*caldav.ShareMailer); ok {
+				q.Register(caldav.ShareNotifyWorker, sm.DurableHandler)
+				sm.Durable = q
+			}
+		}
+	}
 	return q
 }
 
@@ -464,7 +478,23 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		}
 	}
 	srv.AddPlugin(schedule)
-	srv.AddPlugin(&caldav.SharingPlugin{})
+	// Share-invite email (docs/share-invite-email.md). Always wired so an
+	// opted-in domain on a deployment that can't send is metered (no_web_url,
+	// no_mailer); domains without a policy row are skipped before any send.
+	shareMailer := &caldav.ShareMailer{
+		SenderEmail: cfg.IMipSender,
+		WebURL:      cfg.WebURL,
+		Policy:      &storage.CachedSharePolicy{Source: &storage.DomainPolicy{DB: db}, TTL: time.Minute},
+		Shares:      calendars,
+		Principals:  principals,
+		IsResource:  schedule.AutoSchedule,
+		Metrics:     cfg.Metrics,
+	}
+	if cfg.IMipSMTP != "" {
+		// Server mail through the shared relay, never as the user.
+		shareMailer.Mailer = &caldav.SMTPMailer{Addr: cfg.IMipSMTP}
+	}
+	srv.AddPlugin(&caldav.SharingPlugin{Notifier: shareMailer})
 	srv.AddPlugin(&caldav.NotificationsPlugin{})
 	srv.AddPlugin(&carddav.Plugin{})
 	if cfg.IMipSMTP != "" || cfg.IMipSubmission != "" {
