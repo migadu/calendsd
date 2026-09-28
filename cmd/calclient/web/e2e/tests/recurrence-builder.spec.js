@@ -22,7 +22,12 @@ async function storedRRule(request, title) {
   for (const col of cols) {
     for (const h of (await propfind(col)).filter(x => x.endsWith('.ics'))) {
       const body = await (await request.fetch(h, { headers: auth })).text();
-      if (body.includes(title)) return body.split(/\r?\n/).find(l => l.startsWith('RRULE:')) || '';
+      // The event's own RRULE: the server may prepend a VTIMEZONE whose
+      // observances carry yearly RRULEs of their own.
+      if (body.includes(title)) {
+        const ev = body.slice(body.indexOf('BEGIN:VEVENT'));
+        return ev.split(/\r?\n/).find(l => l.startsWith('RRULE:')) || '';
+      }
     }
   }
   return '';

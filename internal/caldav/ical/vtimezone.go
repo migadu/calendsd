@@ -123,6 +123,18 @@ func (z *vtimezone) offsetAt(wall time.Time) int {
 	return off
 }
 
+// offsetAtInstant returns the offset in effect at a UTC instant.
+func (z *vtimezone) offsetAtInstant(t time.Time) int {
+	off := z.firstOffset
+	for _, tr := range z.transitions {
+		if t.Before(tr.at) {
+			break
+		}
+		off = tr.offset
+	}
+	return off
+}
+
 // parseVTimezone builds a transition table from a VTIMEZONE component by
 // expanding each STANDARD/DAYLIGHT sub-component's onset rule over a wide year
 // range. Returns nil if the component carries no usable offsets.
@@ -164,6 +176,15 @@ func parseVTimezone(comp *goical.Component) *vtimezone {
 			return local.Add(-time.Duration(offFrom) * time.Second)
 		}
 
+		// RDATE lists further onsets of the same observance (local time,
+		// like DTSTART).
+		for _, rd := range sub.Props[goical.PropRecurrenceDates] {
+			for _, v := range strings.Split(rd.Value, ",") {
+				if local, err := time.ParseInLocation("20060102T150405", v, time.UTC); err == nil {
+					raw = append(raw, tzTransition{at: toUTC(local), offset: offTo})
+				}
+			}
+		}
 		roption, _ := sub.Props.RecurrenceRule()
 		if roption == nil {
 			raw = append(raw, tzTransition{at: toUTC(onset), offset: offTo})

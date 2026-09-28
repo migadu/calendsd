@@ -2,7 +2,8 @@
 // edits. The server does the real validation; malformed bodies surface as
 // 4xx in the raw drawer, which is itself a useful demonstration.
 
-import { DAY, localDate, localDT } from './time.js';
+import { DAY, localDate, localDT, zoneFields, zonedToInstant, isKnownZone, isFoldSecond,
+  wallMs, fieldsFromWallMs, tzOffsetMs } from './time.js';
 
 export function icalEscape(v) {
   return String(v).replace(/\\/g, '\\\\').replace(/;/g, '\\;')
@@ -26,20 +27,25 @@ export function dateOnly(v) { return v.replaceAll('-', ''); }
 
 // eventLines renders the VEVENT body lines (no BEGIN/END wrapper), shared by
 // buildEvent and the calweb override editor. attendees: email strings or
-// {email, partstat, cn} objects.
+// {email, partstat, cn} objects. tz is the zone timed DTSTART/DTEND are
+// written in (see dtLine); undefined keeps the legacy UTC form, which the
+// protocol demo app relies on. recurrenceIdLine, when given, is a complete
+// RECURRENCE-ID line (see occurrenceLine) and wins over recurrenceId.
 export function eventLines({ uid, summary, start, end, allDay, rrule, exdates = [],
-  organizer, attendees = [], description, location, url, recurrenceId, confidential, alarms }) {
-  const dt = allDay
-    ? v => `;VALUE=DATE:${dateOnly(v)}`
-    : v => `:${utc(v)}`;
+  organizer, attendees = [], description, location, url, recurrenceId, recurrenceIdLine,
+  confidential, alarms, tz }) {
+  const dt = (name, v) => allDay ? `${name};VALUE=DATE:${dateOnly(v)}`
+    : tz === undefined ? `${name}:${utc(v)}`
+    : dtLine(name, new Date(v), tz);
   const l = [
     `UID:${uid}`,
     `DTSTAMP:${stamp()}`,
-    `DTSTART${dt(start)}`,
-    `DTEND${dt(end)}`,
+    dt('DTSTART', start),
+    dt('DTEND', end),
     `SUMMARY:${icalEscape(summary)}`,
   ];
-  if (recurrenceId) {
+  if (recurrenceIdLine) l.push(recurrenceIdLine);
+  else if (recurrenceId) {
     // A date-only RECURRENCE-ID (all-day series) must carry VALUE=DATE, or the
     // server reads 20260726 as a truncated DATE-TIME and the override misses.
     l.push(/^\d{8}$/.test(recurrenceId)
@@ -171,8 +177,10 @@ export function foldLong(line) {
 }
 
 // parseICalDate parses a basic iCal DATE or DATE-TIME value into
-// {allDay, date}, or null if it doesn't parse. A trailing Z parses as UTC; a
-// floating value as local time. This module owns the wire-format grammar —
+// {allDay, date, tzid}, or null if it doesn't parse. A trailing Z parses as
+// UTC; a TZID Intl knows resolves in that zone (gaps and folds per RFC 5545,
+// see zonedToInstant); anything else — floating time, an Outlook-style zone
+// name — as device-local time. This module owns the wire-format grammar —
 // callers that want other shapes (input values, instants) derive from it.
 export function parseICalDate(v, params = {}) {
   if (params.VALUE === 'DATE' || /^\d{8}$/.test(v)) {
@@ -180,7 +188,84 @@ export function parseICalDate(v, params = {}) {
   }
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v);
   if (!m) return null;
+  if (!m[7] && isKnownZone(params.TZID)) {
+    return { allDay: false, date: zonedToInstant(parseWall(v), params.TZID), tzid: params.TZID };
+  }
   return { allDay: false, date: new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]}`) };
+}
+
+// ---- zoned DATE-TIME values ------------------------------------------------
+// calweb writes timed events as wall-clock time in an IANA zone so recurring
+// series keep their local hour across DST (docs/dst-recurring-events.md).
+
+const p2 = n => String(n).padStart(2, '0');
+
+// formatWall/parseWall convert wall-clock fields to and from the basic
+// DATE-TIME form without a Z (20260313T090000).
+function formatWall(f) {
+  return `${String(f.y).padStart(4, '0')}${p2(f.mo)}${p2(f.d)}T${p2(f.h)}${p2(f.mi)}${p2(f.s || 0)}`;
+}
+function parseWall(v) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(v || '');
+  return m ? { y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5], s: +m[6] } : null;
+}
+
+// zonedParts is the wall-clock value of an instant in tz (20260313T090000).
+export function zonedParts(date, tz) { return formatWall(zoneFields(date, tz)); }
+
+function isUTCZone(tz) { return !tz || tz === 'UTC' || tz === 'Etc/UTC'; }
+
+// dtLine renders a timed date-time property: NAME;TZID=<tz>:<wall> in a zone
+// Intl knows, else NAME:<utc>Z. The second occurrence of a repeated local
+// time can't be named by wall-clock fields (they resolve to the first), so
+// that instant keeps the UTC form rather than silently moving an hour.
+export function dtLine(name, date, tz) {
+  if (isUTCZone(tz) || !isKnownZone(tz) || isFoldSecond(date, tz)) return `${name}:${utc(date)}`;
+  return `${name};TZID=${tz}:${zonedParts(date, tz)}`;
+}
+
+// seriesZone is the zone a stored DTSTART's recurrences are computed in:
+// its TZID when Intl knows it, 'UTC' for a Z value, and undefined (device
+// time) for floating or DATE values.
+export function seriesZone(ds) {
+  if (!ds) return undefined;
+  if (/Z$/.test(ds.value)) return 'UTC';
+  if (ds.params?.VALUE === 'DATE' || /^\d{8}$/.test(ds.value)) return undefined;
+  return isKnownZone(ds.params?.TZID) ? ds.params.TZID : undefined;
+}
+
+// occurrenceLine renders a RECURRENCE-ID or EXDATE naming the occurrence that
+// starts at `date`, in the same form as the master's DTSTART (ds): Apple and
+// Google compare the value form, not just the instant. allDay series use
+// VALUE=DATE; a TZID master gets its zone's wall time; anything else UTC.
+export function occurrenceLine(name, date, allDay, ds) {
+  if (allDay) return `${name};VALUE=DATE:${dateOnly(localDate(date))}`;
+  const tz = ds?.params?.TZID;
+  if (!/Z$/.test(ds?.value || '') && isKnownZone(tz) && !isFoldSecond(date, tz)) {
+    return `${name};TZID=${tz}:${zonedParts(date, tz)}`;
+  }
+  return `${name}:${utc(date)}`;
+}
+
+// parseLine splits one unfolded content line into {name, params, value}.
+function parseLine(line) {
+  const idx = line.indexOf(':');
+  if (idx < 0) return null;
+  const [name, ...paramParts] = splitParams(line.slice(0, idx));
+  const params = {};
+  for (const p of paramParts) {
+    const eq = p.indexOf('=');
+    if (eq > 0) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"|"$/g, '');
+  }
+  return { name: name.toUpperCase(), params, value: line.slice(idx + 1) };
+}
+
+// lineInstant is the instant (or all-day date) a date-valued content line
+// names, as a number for comparison; NaN when it doesn't parse.
+function lineInstant(line) {
+  const p = parseLine(line);
+  const d = p && parseICalDate(p.value.split(',')[0], p.params);
+  return d ? +d.date : NaN;
 }
 
 // icalToLocal converts a basic DATE-TIME to a datetime-local input value
@@ -250,11 +335,16 @@ export function forceSendAttendees(text, emails) {
 // addExdate excludes one occurrence (dtValue in the same form as DTSTART)
 // from the master VEVENT.
 export function addExdate(text, dtValue, allDay) {
+  return addExdateLine(text, allDay ? `EXDATE;VALUE=DATE:${dtValue}` : `EXDATE:${dtValue}`);
+}
+
+// addExdateLine inserts a complete EXDATE line (see occurrenceLine) into the
+// master VEVENT.
+export function addExdateLine(text, line) {
   const lines = unfold(text);
   const range = masterComponentRange(lines, 'VEVENT');
   if (!range) return text;
-  const ex = allDay ? `EXDATE;VALUE=DATE:${dtValue}` : `EXDATE:${dtValue}`;
-  lines.splice(range[1], 0, ex);
+  lines.splice(range[1], 0, line);
   return fold(lines);
 }
 
@@ -265,11 +355,14 @@ export function addOverride(text, overrideEventLines) {
   let lines = unfold(text);
   const rid = overrideEventLines.find(l => /^RECURRENCE-ID/i.test(l));
   if (rid) {
-    // drop an existing override with the same RECURRENCE-ID
+    // drop an existing override for the same occurrence — compared by instant,
+    // since a stored override may name it in another form (UTC vs TZID)
+    const at = lineInstant(rid);
     for (let i = 0; i < lines.length; i++) {
       if (/^BEGIN:VEVENT/i.test(lines[i])) {
         const end = lines.findIndex((l, j) => j > i && /^END:VEVENT/i.test(l));
-        if (end > i && lines.slice(i, end).some(l => l.toUpperCase() === rid.toUpperCase())) {
+        if (end > i && lines.slice(i, end).some(l => /^RECURRENCE-ID/i.test(l) &&
+          (l.toUpperCase() === rid.toUpperCase() || lineInstant(l) === at))) {
           lines = [...lines.slice(0, i), ...lines.slice(end + 1)];
           break;
         }
@@ -374,23 +467,37 @@ export function readReminders(component, related = 'START') {
   return { triggers, custom: false };
 }
 
-// shiftDate rewrites a DTSTART/DTEND line shifted by deltaMs, or returns null
-// for forms we can't shift safely (TZID or floating local time) so the caller
-// leaves the stored value unchanged rather than corrupting it.
-export function shiftDate(name, prop, deltaMs) {
+// shiftDate rewrites a DTSTART/DTEND property for a move of the occurrence
+// that started at `from` to `to` (both instants), or returns null for forms
+// it can't shift safely (floating time, a TZID Intl doesn't know) so the
+// caller reports it rather than corrupting the stored value. Each form moves
+// by its own kind of delta (docs/dst-recurring-events.md §3):
+//   - DATE values by calendar days (from/to read as device-local dates);
+//   - UTC values by elapsed time;
+//   - TZID values by wall-clock time in the value's OWN zone: from/to are
+//     projected into that zone and their wall difference is added to the
+//     stored wall time. Moving Zurich 09:00 on 28 March to 09:00 on 29 March
+//     is 23 elapsed hours but one wall day, and must stay one day when applied
+//     to a master whose first occurrence is in another season.
+export function shiftDate(name, prop, { from, to }) {
   const { value, params = {} } = prop;
-  if (params.TZID) return null;
   if (params.VALUE === 'DATE' || /^\d{8}$/.test(value)) {
-    const days = Math.round(deltaMs / DAY);
+    const day = d => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const days = Math.round((day(to) - day(from)) / DAY);
     const d = new Date(+value.slice(0, 4), +value.slice(4, 6) - 1, +value.slice(6, 8) + days);
     return `${name};VALUE=DATE:${dateOnly(localDate(d))}`;
   }
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
   if (m) {
-    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + deltaMs);
-    return `${name}:${utc(d.toISOString())}`;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) + (+to - +from));
+    return `${name}:${utc(d)}`;
   }
-  return null;
+  const tz = params.TZID;
+  const wall = parseWall(value);
+  if (!tz || !wall || !isKnownZone(tz)) return null;
+  const delta = wallMs(zoneFields(to, tz)) - wallMs(zoneFields(from, tz));
+  const moved = zonedToInstant(fieldsFromWallMs(wallMs(wall) + delta), tz);
+  return `${name};TZID=${tz}:${zonedParts(moved, tz)}`;
 }
 
 // icalUnescape reverses icalEscape for display.
@@ -466,35 +573,50 @@ function renderRRule(parts) {
 // below reproduces. Anything with BY* parts, or monthly/yearly on a day past the
 // 28th (real expansion skips short months), is left un-splittable so the editor
 // hides the "this and following" option rather than corrupt the series.
-export function canSplitSeries(dtstart, rrule) {
+//
+// tz is the zone the series recurs in (seriesZone of its DTSTART): steps are
+// taken on that zone's wall clock, as the server's expander does. Omitted, the
+// device's local time is used (DATE series, floating time).
+export function canSplitSeries(dtstart, rrule, tz) {
   const p = rruleParts(rrule);
   if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(p.FREQ)) return false;
   for (const k of ['BYDAY', 'BYMONTHDAY', 'BYMONTH', 'BYSETPOS', 'BYWEEKNO', 'BYYEARDAY', 'BYHOUR']) {
     if (p[k]) return false;
   }
-  if ((p.FREQ === 'MONTHLY' || p.FREQ === 'YEARLY') && dtstart.getDate() > 28) return false;
+  const dayOfMonth = tz ? zoneFields(dtstart, tz).d : dtstart.getDate();
+  if ((p.FREQ === 'MONTHLY' || p.FREQ === 'YEARLY') && dayOfMonth > 28) return false;
   return true;
 }
 
-// stepOccurrence advances a Date by one recurrence step.
-function stepOccurrence(d, freq, interval) {
-  const n = new Date(d);
-  if (freq === 'DAILY') n.setDate(n.getDate() + interval);
-  else if (freq === 'WEEKLY') n.setDate(n.getDate() + 7 * interval);
-  else if (freq === 'MONTHLY') n.setMonth(n.getMonth() + interval);
-  else if (freq === 'YEARLY') n.setFullYear(n.getFullYear() + interval);
-  return n;
+// stepOccurrence advances a Date by one recurrence step, on tz's wall clock
+// when given (so a weekly 09:00 stays 09:00 across DST), else device-local.
+function stepOccurrence(d, freq, interval, tz) {
+  const step = (n, get, set) => {
+    if (freq === 'DAILY') n[set.date](n[get.date]() + interval);
+    else if (freq === 'WEEKLY') n[set.date](n[get.date]() + 7 * interval);
+    else if (freq === 'MONTHLY') n[set.month](n[get.month]() + interval);
+    else if (freq === 'YEARLY') n[set.year](n[get.year]() + interval);
+    return n;
+  };
+  if (!tz) {
+    return step(new Date(d), { date: 'getDate', month: 'getMonth', year: 'getFullYear' },
+      { date: 'setDate', month: 'setMonth', year: 'setFullYear' });
+  }
+  const w = step(new Date(wallMs(zoneFields(d, tz))),
+    { date: 'getUTCDate', month: 'getUTCMonth', year: 'getUTCFullYear' },
+    { date: 'setUTCDate', month: 'setUTCMonth', year: 'setUTCFullYear' });
+  return zonedToInstant(fieldsFromWallMs(+w), tz);
 }
 
 // occurrencesBefore counts the occurrences of a splittable series whose start is
 // strictly before `cutoff` (a Date). Returns null when the rule isn't splittable.
-export function occurrencesBefore(dtstart, rrule, cutoff) {
-  if (!canSplitSeries(dtstart, rrule)) return null;
+export function occurrencesBefore(dtstart, rrule, cutoff, tz) {
+  if (!canSplitSeries(dtstart, rrule, tz)) return null;
   const p = rruleParts(rrule);
   const interval = Math.max(1, parseInt(p.INTERVAL || '1', 10));
   const total = p.COUNT ? parseInt(p.COUNT, 10) : Infinity;
   let n = 0, occ = new Date(dtstart);
-  while (occ < cutoff && n < total && n < 10000) { n++; occ = stepOccurrence(occ, p.FREQ, interval); }
+  while (occ < cutoff && n < total && n < 10000) { n++; occ = stepOccurrence(occ, p.FREQ, interval, tz); }
   return n;
 }
 
@@ -503,15 +625,15 @@ export function occurrencesBefore(dtstart, rrule, cutoff) {
 // steppable FREQ(+INTERVAL) rule (canSplitSeries) — callers fall back to the
 // master's start. If the series ends before `from`, its last real occurrence is
 // returned (still in the past, which is correct). Bounded so a rule can't spin.
-export function nextOccurrence(dtstart, rrule, from) {
-  if (!canSplitSeries(dtstart, rrule)) return null;
+export function nextOccurrence(dtstart, rrule, from, tz) {
+  if (!canSplitSeries(dtstart, rrule, tz)) return null;
   const p = rruleParts(rrule);
   const interval = Math.max(1, parseInt(p.INTERVAL || '1', 10));
   const total = p.COUNT ? parseInt(p.COUNT, 10) : Infinity;
   const until = p.UNTIL ? parseICalDate(p.UNTIL)?.date : null;
   let occ = new Date(dtstart);
   for (let n = 1; occ < from && n < total && n < 10000; n++) {
-    const next = stepOccurrence(occ, p.FREQ, interval);
+    const next = stepOccurrence(occ, p.FREQ, interval, tz);
     if (until && next > until) break;   // series ended before `from`
     occ = next;
   }
@@ -533,8 +655,8 @@ export function rruleWithUntil(rrule, until) {
 // `tail` is the rule for the new forward series (its COUNT reduced by the
 // occurrences the head keeps), and `past` is that kept count. Returns null when
 // the rule can't be split exactly.
-export function splitSeriesRRules(dtstart, rrule, cutoff, headUntil) {
-  const past = occurrencesBefore(dtstart, rrule, cutoff);
+export function splitSeriesRRules(dtstart, rrule, cutoff, headUntil, tz) {
+  const past = occurrencesBefore(dtstart, rrule, cutoff, tz);
   if (past == null) return null;
   const p = rruleParts(rrule);
   const head = { ...p };
@@ -555,14 +677,15 @@ export function splitSeriesRRules(dtstart, rrule, cutoff, headUntil) {
 // instances — this strips them so the removed tail truly disappears.
 export function dropForward(text, cutoff) {
   const lines = unfold(text);
-  const atOrAfter = v => { const d = parseICalDate((v || '').split(',')[0].trim(), {}); return d && +d.date >= +cutoff; };
+  const atOrAfter = (v, params = {}) => { const d = parseICalDate((v || '').split(',')[0].trim(), params); return d && +d.date >= +cutoff; };
   // EXDATEs live inside the master VEVENT, so filter them within a kept block
   // rather than at the top level.
   const filterExdate = block => block.flatMap(l => {
     if (!/^EXDATE/i.test(l)) return [l];
     const m = /^(EXDATE(?:;[^:]*)?):(.*)$/i.exec(l);
     const all = m[2].split(',');
-    const keep = all.filter(v => !atOrAfter(v));
+    const params = parseLine(l)?.params || {};
+    const keep = all.filter(v => !atOrAfter(v, params));
     return !keep.length ? [] : [keep.length === all.length ? l : `${m[1]}:${keep.join(',')}`];
   });
   const out = [];
@@ -577,7 +700,8 @@ export function dropForward(text, cutoff) {
       } while (j < lines.length && depth > 0);
       const block = lines.slice(i, j);
       const rid = block.find(l => /^RECURRENCE-ID/i.test(l));
-      if (rid && atOrAfter(rid.replace(/^RECURRENCE-ID(;[^:]*)?:/i, ''))) { i = j; continue; } // drop forward override
+      const ridP = rid && parseLine(rid);
+      if (ridP && atOrAfter(ridP.value, ridP.params)) { i = j; continue; } // drop forward override
       out.push(...filterExdate(block));
       i = j;
       continue;
@@ -586,6 +710,219 @@ export function dropForward(text, cutoff) {
     i++;
   }
   return fold(out);
+}
+
+// ---- converting a UTC series to a zone (docs/dst-recurring-events.md §4) ----
+//
+// A series stored with a UTC DTSTART recurs at one UTC time, so its local
+// time moves with every DST change. convertSeriesToZone rewrites the whole
+// object so it recurs at a fixed wall time in tz, keeping the FIRST
+// occurrence's instant. Everything that names a recurrence slot (the
+// overrides' RECURRENCE-IDs, EXDATEs, the RRULE's UNTIL bound) is mapped to
+// the corresponding slot of the converted series — slot k of the UTC series is
+// at the anchor's UTC time on some date; the same slot of the zoned series is
+// at the anchor's wall time on the matching date, i.e. the UTC slot shifted by
+// the anchor's offset. Formatting the old instant in the new zone instead
+// would detach every exception after a transition (20260403T080000Z must name
+// Zurich 09:00, not 10:00). Explicit times the user chose — an override's own
+// DTSTART/DTEND, RDATEs — keep their instants.
+//
+// All or nothing: returns {text} or {error} with a reason for the user, and
+// never a partial rewrite.
+export function convertSeriesToZone(text, tz) {
+  if (isUTCZone(tz) || !isKnownZone(tz)) return { error: 'There is no local time zone to convert to.' };
+  const lines = unfold(text);
+  const range = masterComponentRange(lines, 'VEVENT');
+  if (!range) return { error: 'The event has no series to convert.' };
+  const dsLine = topLevel(lines, range).find(i => /^DTSTART[;:]/i.test(lines[i]));
+  const ds = dsLine != null && parseLine(lines[dsLine]);
+  const rr = topLevel(lines, range).map(i => parseLine(lines[i])).find(p => p?.name === 'RRULE');
+  if (!ds || !/Z$/.test(ds.value) || !rr) return { error: 'The series is not stored in UTC.' };
+  const s0 = parseICalDate(ds.value, ds.params).date;
+  if (isFoldSecond(s0, tz)) {
+    return { error: 'The series starts in the hour that repeats when the clocks go back, which a local time cannot name.' };
+  }
+  const rule = rr.value.toUpperCase();
+  if (/(^|;)BY(HOUR|MINUTE|SECOND)=/.test(rule)) return { error: 'The series repeats at several times of day.' };
+  const off0 = tzOffsetMs(s0, tz);
+  const utcDay = s0.toISOString().slice(0, 10);
+  const wallDay = new Date(+s0 + off0).toISOString().slice(0, 10);
+  if (utcDay !== wallDay && /(^|;)BY(DAY|MONTHDAY|YEARDAY|WEEKNO|MONTH|SETPOS)=/.test(rule)) {
+    return { error: 'The series is anchored to UTC days that differ from local days, so its weekdays or dates would change.' };
+  }
+
+  const slotWall = v => formatWall(fieldsFromWallMs(+parseICalDate(v, {}).date + off0));
+  const isUtcValue = v => /^\d{8}T\d{6}Z$/.test(v);
+  let failure = '';
+  const fail = msg => { failure = failure || msg; return null; };
+  // A slot reference: a UTC value mapped to the zoned series' slot.
+  const slotLine = (p, multi) => {
+    const vals = multi ? p.value.split(',') : [p.value];
+    if (p.params.RANGE) return fail('An exception applies to a range of occurrences.');
+    if (!vals.every(isUtcValue)) return fail('An exception is not stored in UTC.');
+    return `${p.name}${paramsString(p.params, tz)}:${vals.map(slotWall).join(',')}`;
+  };
+  // An explicit instant: kept exactly, written as wall time unless it is the
+  // second occurrence of a repeated hour (then it stays UTC).
+  const instantLine = (p, multi) => {
+    const vals = multi ? p.value.split(',') : [p.value];
+    if (!vals.every(isUtcValue)) return `${p.name}${paramsString(p.params)}:${p.value}`;
+    const dates = vals.map(v => parseICalDate(v, {}).date);
+    if (dates.some(d => isFoldSecond(d, tz))) {
+      if (multi) return fail('A date in the series falls in the hour that repeats when the clocks go back.');
+      return `${p.name}${paramsString(p.params)}:${p.value}`;
+    }
+    return `${p.name}${paramsString(p.params, tz)}:${dates.map(d => zonedParts(d, tz)).join(',')}`;
+  };
+  const untilLine = p => {
+    const parts = rruleParts(p.value);
+    if (parts.UNTIL && isUtcValue(parts.UNTIL)) {
+      parts.UNTIL = utc(zonedToInstant(parseWall(slotWall(parts.UNTIL)), tz));
+    }
+    return `RRULE:${renderRRule(parts)}`;
+  };
+
+  const out = [];
+  let depth = 0, inEvent = false, isMaster = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^BEGIN:/i.test(l)) {
+      depth++;
+      if (/^BEGIN:VEVENT$/i.test(l)) { inEvent = true; isMaster = i === range[0]; }
+      out.push(l); continue;
+    }
+    if (/^END:/i.test(l)) { depth--; if (/^END:VEVENT$/i.test(l)) inEvent = false; out.push(l); continue; }
+    // Only a VEVENT's own properties (depth 2), never a nested VALARM's.
+    const p = inEvent && depth === 2 ? parseLine(l) : null;
+    if (!p) { out.push(l); continue; }
+    let next = l;
+    if (p.name === 'DTSTART' && isMaster) next = `DTSTART${paramsString(p.params, tz)}:${zonedParts(s0, tz)}`;
+    else if (p.name === 'DTSTART' || p.name === 'DTEND') next = instantLine(p, false);
+    else if (p.name === 'RECURRENCE-ID') next = slotLine(p, false);
+    else if (p.name === 'EXDATE') next = slotLine(p, true);
+    else if (p.name === 'RDATE') next = p.params.VALUE === 'PERIOD' ? fail('The series has extra dates given as periods.') : instantLine(p, true);
+    else if (p.name === 'RRULE' && isMaster) next = untilLine(p);
+    if (next == null) break;
+    out.push(next);
+  }
+  if (failure) return { error: failure };
+  return { text: fold(out) };
+}
+
+// convertedSlot is where an occurrence of a UTC series starting at `first`
+// (at instant `date`) lands once the series is converted to tz: the same
+// slot, at the first occurrence's wall time (see convertSeriesToZone).
+export function convertedSlot(date, first, tz) {
+  return zonedToInstant(fieldsFromWallMs(+date + tzOffsetMs(first, tz)), tz);
+}
+
+// convertAndMove converts a UTC series to tz (convertSeriesToZone) and then
+// applies an "all events" time edit as a TARGET on the converted series: the
+// user opened an occurrence that, once converted, is at `shown` ({start,
+// end}: its converted slot — see convertedSlot — or an override's own
+// times, which conversion keeps) and asked for it to be at `target`. The
+// series moves by the wall-clock difference between the two, so what the
+// user typed is where the occurrence, and with it the series, lands.
+// (Shifting the UTC master by the elapsed difference first would, for a
+// winter-anchored series, turn a corrected summer 10:00 → 09:00 into 08:00.)
+// With no time change (target equals shown) this is plain conversion, which
+// keeps the first occurrence's local time. Returns {text} or {error}.
+export function convertAndMove(text, tz, shown, target) {
+  const r = convertSeriesToZone(text, tz);
+  if (r.error || !target || (+target.start === +shown.start && +target.end === +shown.end)) return r;
+  const lines = unfold(r.text);
+  const range = masterComponentRange(lines, 'VEVENT');
+  const own = topLevel(lines, range).map(i => parseLine(lines[i]));
+  const ds = own.find(p => p?.name === 'DTSTART');
+  const de = own.find(p => p?.name === 'DTEND');
+  const props = {};
+  if (+target.start !== +shown.start) {
+    props.DTSTART = shiftDate('DTSTART', ds, { from: shown.start, to: target.start });
+  }
+  if (de && +target.end !== +shown.end) {
+    props.DTEND = shiftDate('DTEND', de, { from: shown.end, to: target.end });
+  }
+  if (Object.values(props).some(v => v == null)) return { error: 'The series’ times could not be moved.' };
+  return { text: setMasterProps(r.text, props) };
+}
+
+// topLevel lists the line indexes of a component's own properties (not those
+// of nested components) within [range[0], range[1]].
+function topLevel(lines, range) {
+  const out = [];
+  let depth = 0;
+  for (let i = range[0]; i <= range[1]; i++) {
+    if (/^BEGIN:/i.test(lines[i])) { depth++; continue; }
+    if (/^END:/i.test(lines[i])) { depth--; continue; }
+    if (depth === 1) out.push(i);
+  }
+  return out;
+}
+
+// paramsString renders params back (VALUE dropped, since every value written
+// here is a DATE-TIME), with TZID set to tz or removed when tz is omitted.
+function paramsString(params, tz) {
+  const out = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (k === 'TZID' || k === 'VALUE') continue;
+    out.push(`;${k}=${/[;:,]/.test(v) ? `"${v}"` : v}`);
+  }
+  if (tz) out.unshift(`;TZID=${tz}`);
+  return out.join('');
+}
+
+// utcSeriesInfo describes a recurring master stored in UTC, for the editor's
+// conversion notice and preview: {calweb, start (the first occurrence),
+// rrule} or null when the master isn't a UTC series.
+export function utcSeriesInfo(text) {
+  const master = components(parse(text), 'VEVENT').find(v => !prop(v, 'RECURRENCE-ID'));
+  const ds = master && prop(master, 'DTSTART');
+  const rrule = master ? propValue(master, 'RRULE') : '';
+  if (!ds || !rrule || !/Z$/.test(ds.value)) return null;
+  const prodid = /^PRODID:(.*)$/im.exec(text.replace(/\r\n[ \t]/g, ''))?.[1]?.trim() || '';
+  return { calweb: prodid === '-//calclient//EN', start: parseICalDate(ds.value, ds.params).date, rrule };
+}
+
+// conversionMovesOccurrences reports whether converting a UTC series
+// starting at `start` to tz changes when any occurrence happens: only when
+// tz's offset differs somewhere in the series' span from its offset at the
+// start. Checked daily over the series' first 400 days (bounded by UNTIL):
+// a year covers every annual DST cycle, and daily steps catch a change even
+// in a series only weeks long.
+export function conversionMovesOccurrences(start, rrule, tz) {
+  if (isUTCZone(tz) || !isKnownZone(tz)) return false;
+  const until = rruleParts(rrule).UNTIL;
+  const end = until ? +parseICalDate(until, {})?.date : Infinity;
+  const off0 = tzOffsetMs(start, tz);
+  for (let k = 1; k <= 400; k++) {
+    const t = +start + k * DAY;
+    if (t > end + DAY) break;
+    if (tzOffsetMs(new Date(t), tz) !== off0) return true;
+  }
+  return false;
+}
+
+// conversionPreview lists up to n occurrences at or after `from` whose time
+// changes when the UTC series is converted to tz: [{before, after}]. Returns
+// null for rules the stepper can't reproduce (the editor then describes the
+// change instead of listing it).
+export function conversionPreview(start, rrule, tz, from, n = 5) {
+  if (!canSplitSeries(start, rrule, 'UTC')) return null;
+  const p = rruleParts(rrule);
+  const interval = Math.max(1, parseInt(p.INTERVAL || '1', 10));
+  const total = p.COUNT ? parseInt(p.COUNT, 10) : Infinity;
+  const until = p.UNTIL ? +parseICalDate(p.UNTIL, {})?.date : Infinity;
+  const off0 = tzOffsetMs(start, tz);
+  const out = [];
+  let occ = new Date(start);
+  for (let k = 0; k < total && k < 2000 && +occ <= until && out.length < n; k++) {
+    if (+occ >= +from) {
+      const after = zonedToInstant(fieldsFromWallMs(+occ + off0), tz);
+      if (+after !== +occ) out.push({ before: occ, after });
+    }
+    occ = stepOccurrence(occ, p.FREQ, interval, 'UTC');
+  }
+  return out;
 }
 
 // buildFreeBusyRequest renders the METHOD:REQUEST VFREEBUSY body an outbox

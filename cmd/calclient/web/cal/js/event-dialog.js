@@ -6,7 +6,8 @@
 import * as store from '/shared/store.js';
 import * as ical from '/shared/ical.js';
 import { $, html, frag } from '/shared/dom.js';
-import { DAY, localDate, formatTimeOfDay, parseTimeOfDay, startOfDay, addDays } from '/shared/time.js';
+import { DAY, localDate, formatTimeOfDay, parseTimeOfDay, startOfDay, addDays, writeZone, zoneFields,
+  zonedToInstant, fieldsFromInputs, fieldsFromWallMs, wallMs, dateValueIn, weekdayIn, formatHM } from '/shared/time.js';
 import { toast, showError, busyWhile } from './ui.js';
 import { createGuestField } from './guest-field.js';
 import { createReminderField } from './reminder-field.js';
@@ -28,13 +29,27 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
     catch (e) { showError(e); return; }
   }
 
+  // Timed fields are shown, typed and written in the display zone (the tz
+  // preference, else the device zone), so what the user enters is a wall
+  // time in the same zone the grid shows and the event is stored in
+  // (docs/dst-recurring-events.md §1). All-day values stay calendar dates.
+  const zone = writeZone(store.state.prefs.tz);
   const now = new Date();
-  const base = defaultDay ? new Date(defaultDay) : now;
-  if (!o.timed) base.setHours(now.getHours() + 1, 0, 0, 0);
+  let base;
+  if (defaultDay && o.timed) base = new Date(defaultDay);
+  else {
+    // The next full hour in the display zone, on the clicked day (grid days
+    // are device-local dates) or today.
+    const nowF = zoneFields(now, zone);
+    const day = defaultDay ? localDate(new Date(defaultDay)) : dateValueIn(now, zone);
+    base = zonedToInstant(fieldsFromWallMs(wallMs(fieldsFromInputs(day, { h: nowF.h + 1, m: 0 }))), zone);
+  }
   let start = inst ? inst.start : base;
   let end = inst ? inst.end : new Date(+base + (store.state.prefs.defaultDuration || 60) * 60000);
-  if (!inst && o.allDay) { start = startOfDay(base); end = addDays(startOfDay(base), 1); }
-  const rrulePreset = inst ? ical.parseRRulePreset(inst.rrule) : { freq: '', ends: 'never' };
+  if (!inst && o.allDay) {
+    const day = startOfDay(defaultDay ? new Date(defaultDay) : now);
+    start = day; end = addDays(day, 1);
+  }
   const isRecurring = !!(inst && (inst.rrule || inst.rid));
   const guests = (inst?.attendees ?? []).map(a => ({ ...a }));
 
@@ -44,12 +59,49 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   const masterVevent = master && ical.components(ical.parse(master.text), 'VEVENT')
     .find(v => !ical.prop(v, 'RECURRENCE-ID'));
   const masterRRule = masterVevent ? ical.propValue(masterVevent, 'RRULE') : '';
+  // The repeat controls show the series' rule: the occurrence the editor was
+  // opened on is a server-expanded instance, whose RRULE is stripped.
+  const rrulePreset = inst ? ical.parseRRulePreset(masterRRule || inst.rrule) : { freq: '', ends: 'never' };
   const masterDs = masterVevent && ical.prop(masterVevent, 'DTSTART');
   const masterStart = masterDs ? ical.parseICalDate(masterDs.value, masterDs.params)?.date : null;
+  // The zone the stored series recurs in: its TZID, 'UTC' for a UTC DTSTART.
+  // Existing series keep it when edited (overrides, the tail of a split),
+  // unless the edit converts a UTC series (see utcSeries below).
+  const anchorZone = masterDs ? ical.seriesZone(masterDs) : undefined;
   // Offer "this and following" only for a splittable rule and not on the first
   // occurrence (there it's just "all"), so a split can never corrupt a series.
   const canFuture = isRecurring && !!masterRRule && !!masterStart
-    && ical.canSplitSeries(masterStart, masterRRule) && +inst.start > +masterStart;
+    && ical.canSplitSeries(masterStart, masterRRule, anchorZone) && +inst.start > +masterStart;
+  // A series stored in UTC recurs at a fixed UTC time, so its local time moves
+  // with DST. Editing it — any occurrence, in any scope — converts it to the
+  // display zone: automatically for series calweb wrote, and only on explicit
+  // opt-in (with a preview) for anything else, whose UTC timing may be
+  // intentional (§4).
+  const utcSeries = isRecurring && master && zone !== 'UTC' ? ical.utcSeriesInfo(master.text) : null;
+  const tzMoves = !!utcSeries && ical.conversionMovesOccurrences(utcSeries.start, utcSeries.rrule, zone);
+  // Whether this series can be converted at all is known up front (an edit
+  // doesn't change what makes it fail), so nothing is shown or offered as
+  // converted unless it will be.
+  const canConvert = !!utcSeries && !ical.convertSeriesToZone(master.text, zone).error;
+  // The occurrence's original slot, and whether it is an override: conversion
+  // maps slots, but keeps an override's own chosen times.
+  const ridAt = inst && ((inst.rid && ical.parseICalDate(inst.rid, {})?.date) || inst.start);
+  const isOverride = !!inst?.rid && !!master && ical.components(ical.parse(master.text), 'VEVENT').some(v => {
+    const r = ical.prop(v, 'RECURRENCE-ID');
+    const d = r && ical.parseICalDate(r.value, r.params)?.date;
+    return !!d && +d === +ridAt;
+  });
+  // The occurrence is shown where it will be: for a series this edit
+  // converts, at its converted position (the first occurrence's local time)
+  // rather than where it drifted to — unless it's an override, which keeps
+  // its times. The times on screen are what gets saved, so an untouched time
+  // lands there in every scope.
+  const shownTimes = converting => converting && canConvert && !isOverride
+    ? { start: ical.convertedSlot(inst.start, utcSeries.start, zone), end: ical.convertedSlot(inst.end, utcSeries.start, zone) }
+    : { start: inst?.start, end: inst?.end };
+  if (utcSeries?.calweb) ({ start, end } = shownTimes(true));
+  // shown is the baseline an edit is measured from when nothing is converted.
+  let shown = { start, end };
 
   const dlg = html`<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="${inst ? 'Edit event' : 'New event'}">
     <h2>${inst ? 'Edit event' : 'New event'}</h2>
@@ -59,6 +111,11 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
         ${canFuture && frag`<option value="future">this and all following events</option>`}
         <option value="all">all events in the series</option>
       </select></label>`}
+    ${canConvert && utcSeries.calweb && tzMoves && frag`<p class="note" id="ev-tzfix">This series was stored in UTC; saving fixes its times across daylight-saving changes.</p>`}
+    ${canConvert && !utcSeries.calweb && tzMoves && frag`<div id="ev-tzopt">
+      <label class="row"><input type="checkbox" id="ev-tzfix-opt"> Keep this series at a fixed local time</label>
+      <div class="note" id="ev-tzpreview" hidden></div>
+    </div>`}
     <div class="grid">
       <label class="full">Title<input id="ev-title" type="text" value="${inst?.summary === '(no title)' ? '' : inst?.summary ?? ''}" placeholder="Add a title"></label>
       <label>Calendar<select id="ev-cal"></select></label>
@@ -149,6 +206,28 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   syncCalLock();
   scopeSel?.addEventListener('change', syncCalLock);
 
+  q('#ev-tzfix-opt')?.addEventListener('change', ev => {
+    // Opting in (or out) moves the shown occurrence to where it will be saved.
+    ({ start, end } = shownTimes(ev.target.checked));
+    shown = { start, end };
+    syncDateInputs();
+    prevStart = readPair(startD, startT);
+    const box = q('#ev-tzpreview');
+    box.hidden = !ev.target.checked;
+    if (!ev.target.checked) return;
+    const rows = ical.conversionPreview(utcSeries.start, utcSeries.rrule, zone, now, 5);
+    const fmt = d => d.toLocaleString(undefined, { timeZone: zone, weekday: 'short', day: 'numeric',
+      month: 'short', hour: 'numeric', minute: '2-digit', hour12: !!store.state.prefs.hour12 });
+    const time = d => d.toLocaleTimeString(undefined, { timeZone: zone, hour: 'numeric', minute: '2-digit',
+      hour12: !!store.state.prefs.hour12 });
+    box.replaceChildren(rows == null
+      ? html`<p>Occurrences during daylight-saving time move by the clock change, so every occurrence keeps the local time of the first one.</p>`
+      : rows.length
+        ? html`<p>These upcoming occurrences change:</p>`
+        : html`<p>No upcoming occurrences change.</p>`);
+    for (const r of rows || []) box.append(html`<p>${fmt(r.before)} → ${time(r.after)}</p>`);
+  });
+
   // date/time inputs: a native date input plus our own time text field. The
   // time is not the native datetime-local half because browsers format that
   // per the *browser* locale (Chromium ignores the element's lang attribute),
@@ -163,30 +242,37 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
     q('#ev-times').append(html`<option value="${formatTimeOfDay(new Date(2000, 0, 1, i >> 1, (i % 2) * 30), hour12)}"></option>`);
   }
   const allDayBox = q('#ev-allday');
+  // start/end are device-local midnights for all-day data and instants for
+  // timed data; each shows its calendar date accordingly.
+  const datesAreLocal = !!(inst ? inst.allDay : o.allDay);
+  const dateOf = d => datesAreLocal ? localDate(d) : dateValueIn(d, zone);
+  const timeOf = d => { const f = zoneFields(d, zone); return formatHM(f.h, f.mi, hour12); };
   function syncDateInputs() {
     const allDay = allDayBox.checked;
     startT.hidden = endT.hidden = allDay;
-    startD.value = localDate(start);
+    startD.value = dateOf(start);
     // all-day shows the inclusive last day, not the exclusive DTEND date
-    endD.value = allDay ? localDate(new Date(Math.max(+start, +end - DAY))) : localDate(end);
-    if (!allDay) { startT.value = formatTimeOfDay(start, hour12); endT.value = formatTimeOfDay(end, hour12); }
+    endD.value = allDay && datesAreLocal ? localDate(new Date(Math.max(+start, +end - DAY))) : dateOf(end);
+    if (!allDay) { startT.value = timeOf(start); endT.value = timeOf(end); }
   }
   syncDateInputs();
 
-  // readPair/setPair combine a date input and its time field into a Date.
-  // A time the parser doesn't understand reads as null (flagged .invalid).
+  // readPair/setPair combine a date input and its time field. All-day reads a
+  // device-local date; timed reads wall-clock fields in the display zone and
+  // resolves them to an instant (a skipped time moves forward, a repeated
+  // one takes the earlier instant — see zonedToInstant). A time the parser
+  // doesn't understand reads as null (flagged .invalid).
   const readPair = (dInp, tInp) => {
     if (!dInp.value) return null;
-    const d = new Date(dInp.value + 'T00:00');
-    if (allDayBox.checked) return d;
+    if (allDayBox.checked) return new Date(dInp.value + 'T00:00');
     const t = parseTimeOfDay(tInp.value);
     if (!t) return null;
-    d.setHours(t.h, t.m);
-    return d;
+    return zonedToInstant(fieldsFromInputs(dInp.value, t), zone);
   };
   const setPair = (dInp, tInp, d) => {
-    dInp.value = localDate(d);
-    if (!allDayBox.checked) tInp.value = formatTimeOfDay(d, hour12);
+    if (allDayBox.checked) { dInp.value = localDate(d); return; }
+    dInp.value = dateValueIn(d, zone);
+    tInp.value = timeOf(d);
   };
   // Rewrite whatever the user typed ("130p", "9.15") in the canonical format
   // once they leave the field, and mark it when it didn't parse.
@@ -225,7 +311,9 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   // A new weekly repeat defaults to (and always includes) its own start weekday,
   // so the DTSTART is a real occurrence — otherwise a BYDAY that omits it makes
   // the series start on a different day than the user picked.
-  if (!inst) bydaySet.add(WEEKDAYS[start.getDay()][0]);
+  // The weekday is the start's day in the zone the series will recur in.
+  const weekdayOf = d => (allDayBox.checked ? d.getDay() : weekdayIn(d, zone));
+  if (!inst) bydaySet.add(WEEKDAYS[weekdayOf(start)][0]);
   const startWk = store.state.prefs.weekStart === 0 ? 0 : 1;
   for (let i = 0; i < 7; i++) {
     const [code, label] = WEEKDAYS[(startWk + i) % 7];
@@ -334,13 +422,13 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
       return;
     }
     const scope = isRecurring ? q('#ev-scope').value : '';
-    const rrule = freqSel.value === 'CUSTOM' ? inst.rrule : ical.buildRRule({
+    const rrule = freqSel.value === 'CUSTOM' ? (masterRRule || inst.rrule) : ical.buildRRule({
       freq: freqSel.value, ends: endsSel.value,
       interval: q('#ev-interval').value, byday: (() => {
         // Keep the start weekday in a weekly BYDAY so the series still occurs on
         // its own start date even if the user changed the date after picking days.
         const days = [...bydaySet];
-        const wd = t.start && WEEKDAYS[t.start.getDay()][0];
+        const wd = t.start && WEEKDAYS[weekdayOf(t.start)][0];
         if (freqSel.value === 'WEEKLY' && days.length && wd && !days.includes(wd)) days.push(wd);
         return days;
       })(),
@@ -383,13 +471,45 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
     // leaves whatever alarms setMasterProps already preserved.
     const applyReminder = text => fields.alarms == null
       ? text : ical.setMasterAlarms(text, fields.alarms, fields.summary);
+    // UTC-series conversion for this save: automatic for a calweb series,
+    // opt-in otherwise, in every scope.
+    const optIn = !!q('#ev-tzfix-opt')?.checked;
+    const convert = canConvert && (utcSeries.calweb || optIn);
+    // convertText converts an object whose master times the edit doesn't
+    // touch (the head of a "this and following" split; the series an "only
+    // this" override is added to); "all events" edits go through
+    // ical.convertAndMove, which applies the typed times after converting.
+    // A conversion that can't be done exactly never rewrites anything: an
+    // automatic one saves the edit as it is and says why, an opted-in one
+    // stops so the user can decide.
+    const convertText = text => {
+      if (!convert) return { text };
+      const r = ical.convertSeriesToZone(text, zone);
+      if (!r.error) return { text: r.text, converted: true };
+      if (optIn) return { error: `Can’t keep this series at a fixed local time: ${r.error}` };
+      toast(`Saved, but the series’ times weren’t fixed: ${r.error}`);
+      return { text };
+    };
     try {
       if (!inst) {
         await store.putObject(store.eventHref(calSel.value, fields.uid),
-          ical.buildEvent(fields), null);
+          ical.buildEvent({ ...fields, tz: zone }), null);
       } else if (isRecurring && scope === 'one') {
-        const text = ical.addOverride(master.text, ical.eventLines({
-          ...fields, rrule: '', recurrenceId: store.ridValue(inst),
+        // An override names its occurrence, and is written, in the series'
+        // own form (its zone, or UTC for a UTC series). Converting the series
+        // first, it names the converted slot in the display zone.
+        let base = master.text, tz = anchorZone || zone;
+        let ridLine = store.ridLine('RECURRENCE-ID', inst, masterDs);
+        const conv = convertText(master.text);
+        if (conv.error) { q('#ev-error').textContent = conv.error; return; }
+        if (conv.converted) {
+          base = conv.text;
+          tz = zone;
+          ridLine = ical.occurrenceLine('RECURRENCE-ID', ical.convertedSlot(ridAt, utcSeries.start, zone),
+            inst.allDay, { value: '', params: { TZID: zone } });
+        }
+        const text = ical.addOverride(base, ical.eventLines({
+          ...fields, rrule: '', tz, recurrenceIdLine: ridLine,
         }));
         await store.putObject(inst.href, text, master.etag);
       } else if (isRecurring && scope === 'future') {
@@ -399,36 +519,71 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
         const headUntil = t.allDay
           ? ical.dateOnly(localDate(new Date(+inst.start - DAY)))
           : ical.utc(new Date(+inst.start - 1000).toISOString());
-        const split = ical.splitSeriesRRules(masterStart, masterRRule, inst.start, headUntil);
+        const split = ical.splitSeriesRRules(masterStart, masterRRule, inst.start, headUntil, anchorZone);
         if (!split) { q('#ev-error').textContent = 'This repeat is too complex to split.'; return; }
-        const head = ical.dropForward(
-          ical.setMasterProps(master.text, { RRULE: `RRULE:${split.head}` }), inst.start);
-        await store.putObject(inst.href, head, master.etag);
-        const fwd = { ...fields, uid: crypto.randomUUID(), rrule: split.tail };
+        const head = convertText(ical.dropForward(
+          ical.setMasterProps(master.text, { RRULE: `RRULE:${split.head}` }), inst.start));
+        if (head.error) { q('#ev-error').textContent = head.error; return; }
+        await store.putObject(inst.href, head.text, master.etag);
+        // The tail keeps the series' zone: the display zone once converted, UTC
+        // for a UTC series left as it is. It starts at the times on screen,
+        // which for a converting edit already show the converted position.
+        const tailZone = head.converted ? zone : (anchorZone || zone);
+        const fwd = { ...fields, uid: crypto.randomUUID(), rrule: split.tail, tz: tailZone };
         await store.putObject(store.eventHref(calSel.value, fwd.uid), ical.buildEvent(fwd), null);
       } else if (isRecurring) {
         // "All events": edit the master VEVENT in place so overrides, alarms,
-        // EXDATEs, and unmodeled properties survive. Shift the series by the
+        // EXDATEs, and unmodeled properties survive. Move the series by the
         // change made to *this* occurrence rather than re-anchoring it to the
         // clicked date, and never rewrite the RRULE — the server expands
         // recurrences, so the master rule isn't available here to reconstruct.
-        const m0 = ical.components(ical.parse(master.text), 'VEVENT')
-          .find(v => !ical.prop(v, 'RECURRENCE-ID'));
-        const props = { ...commonProps };
-        const ds = m0 && ical.prop(m0, 'DTSTART');
-        const de = m0 && ical.prop(m0, 'DTEND');
-        const startDelta = +t.start - +inst.start;
-        const endDelta = +t.end - +inst.end;
-        if (ds && startDelta) { const l = ical.shiftDate('DTSTART', ds, startDelta); if (l) props.DTSTART = l; }
-        if (de && endDelta) { const l = ical.shiftDate('DTEND', de, endDelta); if (l) props.DTEND = l; }
-        await store.putObject(inst.href, applyReminder(ical.setMasterProps(master.text, props)), master.etag);
+        // Start and end move separately, each by its own form's delta (a zoned
+        // value by wall-clock time in its zone, UTC by elapsed time).
+        // Converting a UTC series: convert first, then apply the typed times
+        // as a target on the converted series (ical.convertAndMove), so the
+        // edited occurrence lands exactly where the user put it.
+        let out = null;
+        if (convert) {
+          const r = ical.convertAndMove(applyReminder(ical.setMasterProps(master.text, commonProps)), zone,
+            shown, { start: t.start, end: t.end });
+          if (!r.error) out = r.text;
+          else if (optIn) { q('#ev-error').textContent = `Can’t keep this series at a fixed local time: ${r.error}`; return; }
+          else toast(`Saved, but the series’ times weren’t fixed: ${r.error}`);
+        }
+        if (out == null) {
+          // Without conversion (or after an automatic one failed) the stored
+          // series keeps its form.
+          const m0 = ical.components(ical.parse(master.text), 'VEVENT')
+            .find(v => !ical.prop(v, 'RECURRENCE-ID'));
+          const props = { ...commonProps };
+          const ds = m0 && ical.prop(m0, 'DTSTART');
+          const de = m0 && ical.prop(m0, 'DTEND');
+          const unsupported = 'This series stores its times in a time zone this app can’t work with, so its date and time can’t be changed here.';
+          if (ds && +t.start !== +shown.start) {
+            const l = ical.shiftDate('DTSTART', ds, { from: shown.start, to: t.start });
+            if (!l) { q('#ev-error').textContent = unsupported; return; }
+            props.DTSTART = l;
+          }
+          if (de && +t.end !== +shown.end) {
+            const l = ical.shiftDate('DTEND', de, { from: shown.end, to: t.end });
+            if (!l) { q('#ev-error').textContent = unsupported; return; }
+            props.DTEND = l;
+          }
+          out = applyReminder(ical.setMasterProps(master.text, props));
+        }
+        await store.putObject(inst.href, out, master.etag);
       } else {
         // Plain event: rewrite the master's fields in place (no series to
-        // re-anchor), preserving alarms and unmodeled properties.
+        // re-anchor), preserving alarms and unmodeled properties. A zoned event
+        // keeps its zone; a one-off stored in UTC stays UTC (it's correct as
+        // it is) unless it gains a repeat, which makes it a zoned series.
+        const dsZone = masterDs && !masterDs.params?.VALUE && ical.seriesZone(masterDs);
+        const tz = dsZone && dsZone !== 'UTC' ? dsZone
+          : dsZone === 'UTC' && !fields.rrule ? 'UTC' : zone;
         const props = {
           ...commonProps,
-          DTSTART: fields.allDay ? `DTSTART;VALUE=DATE:${ical.dateOnly(fields.start)}` : `DTSTART:${ical.utc(fields.start)}`,
-          DTEND: fields.allDay ? `DTEND;VALUE=DATE:${ical.dateOnly(fields.end)}` : `DTEND:${ical.utc(fields.end)}`,
+          DTSTART: fields.allDay ? `DTSTART;VALUE=DATE:${ical.dateOnly(fields.start)}` : ical.dtLine('DTSTART', new Date(fields.start), tz),
+          DTEND: fields.allDay ? `DTEND;VALUE=DATE:${ical.dateOnly(fields.end)}` : ical.dtLine('DTEND', new Date(fields.end), tz),
           RRULE: fields.rrule ? `RRULE:${fields.rrule}` : null,
         };
         await store.putObject(inst.href, applyReminder(ical.setMasterProps(master.text, props)), master.etag);

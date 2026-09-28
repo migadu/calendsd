@@ -12,7 +12,7 @@ export { haveSession, login, logout, restore, startPolling, stopPolling } from '
 export { loadCalendars, eventCalendars, isReadOnly, calColor, calInk, inkOn,
   createCalendar, updateCalendar, deleteCalendar, reorderCalendars } from './store/calendars.js';
 export { setRange, refreshEvents, visibleInstances, searchEvents, resolveEvent, setCalendarHidden, moveEvent,
-  eventHref, ridValue, instanceKey, deleteEvent, resendInvitations } from './store/events.js';
+  eventHref, ridValue, ridLine, masterDtstart, instanceKey, deleteEvent, resendInvitations } from './store/events.js';
 export { getObject, putObject, deleteObject, moveObject } from './store/objects.js';
 export { loadDelegates, grantDelegate, revokeDelegate, resolvePrincipal } from './store/proxy.js';
 export { shareCalendar, loadSharees, unshareCalendar,

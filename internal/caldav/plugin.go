@@ -22,6 +22,12 @@ var (
 // Plugin implements the CalDAV protocol layer. Port of sabre's
 // CalDAV\Plugin.
 type Plugin struct {
+	// AddVTimezones attaches a generated VTIMEZONE to a PUT that uses an IANA
+	// TZID without defining it (RFC 5545 §3.6.5; docs/dst-recurring-events.md
+	// §5). Off by default, matching sabre, which stores such bodies as sent;
+	// the calserver composition turns it on.
+	AddVTimezones bool
+
 	server *dav.Server
 }
 

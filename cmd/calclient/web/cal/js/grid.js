@@ -7,7 +7,7 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
 import { DAY, HOUR, startOfDay, addDays, sameDay, nextDate, isoWeek,
-  startOfWeek as weekStartOf, tzDayStart as tzDayStartIn } from '/shared/time.js';
+  startOfWeek as weekStartOf, tzDayStart as tzDayStartIn, shiftWallDays, writeZone } from '/shared/time.js';
 import { layoutColumns, spans } from './layout.js';
 import { fmtTime, fmtDate, toast, showError } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
@@ -273,8 +273,14 @@ function swallowNextClick() {
   setTimeout(() => window.removeEventListener('click', stop, true));
 }
 
-async function commitMove(inst, deltaMs) {
-  try { await store.moveEvent(inst, deltaMs); toast('Moved.'); }
+// commitMove moves an event by whole days (on the display zone's wall clock,
+// so a day across a DST change stays a day — or plain calendar days for an
+// all-day event) plus elapsed minutes, and stores it via the target instant.
+async function commitMove(inst, days, minutes = 0) {
+  const to = inst.allDay
+    ? new Date(inst.start.getFullYear(), inst.start.getMonth(), inst.start.getDate() + days)
+    : new Date(+shiftWallDays(inst.start, days, writeZone(store.state.prefs.tz)) + minutes * 60000);
+  try { await store.moveEvent(inst, to); toast('Moved.'); }
   catch (e) { showError(e); store.refreshEvents().catch(() => {}); }
 }
 
@@ -318,8 +324,8 @@ function attachChipDrag(chip, inst) {
       if (!dragged) return;
       swallowNextClick();
       if (!drop?.dataset.date) return;
-      const deltaMs = +drop.dataset.date - +startOfDay(inst.start);
-      if (deltaMs) commitMove(inst, deltaMs);
+      const days = Math.round((+drop.dataset.date - +startOfDay(inst.start)) / DAY);
+      if (days) commitMove(inst, days);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -333,7 +339,7 @@ function attachBlockDrag(block, inst, day) {
     if (ev.button !== 0 || ev.pointerType === 'touch') return;
     const sx = ev.clientX, sy = ev.clientY;
     const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    let dragging = false, deltaMs = 0;
+    let dragging = false, days = 0, minutes = 0;
     const stop = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
@@ -352,18 +358,18 @@ function attachBlockDrag(block, inst, day) {
       const snapMin = Math.round((mv.clientY - sy) / (HOUR_REM * remPx) * 60 / 15) * 15;
       const home = block.parentElement;
       const overCol = document.elementFromPoint(mv.clientX, mv.clientY)?.closest('.week .col');
-      const dayMs = overCol?.dataset.date ? +overCol.dataset.date - +day : 0;
-      deltaMs = dayMs + snapMin * 60000;
+      days = overCol?.dataset.date ? Math.round((+overCol.dataset.date - +day) / DAY) : 0;
+      minutes = snapMin;
       const dx = overCol && overCol !== home
         ? overCol.getBoundingClientRect().left - home.getBoundingClientRect().left : 0;
       block.style.transform = `translate(${dx}px, ${snapMin / 60 * HOUR_REM}rem)`;
     };
     const onUp = () => {
-      const d = deltaMs, was = dragging;
+      const was = dragging;
       stop();
       if (!was) return;
       swallowNextClick();
-      if (d) commitMove(inst, d);
+      if (days || minutes) commitMove(inst, days, minutes);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -538,8 +544,9 @@ function renderTimed(instances, days) {
       const rect = col.getBoundingClientRect();
       const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       const hr = Math.floor((ev.clientY - rect.top) / (HOUR_REM * remPx));
-      const when = new Date(day);
-      when.setHours(Math.min(23, Math.max(0, hr)));
+      // Hours down the column are counted from the display zone's midnight,
+      // the same geometry the blocks are drawn with.
+      const when = new Date(+top + Math.min(23, Math.max(0, hr)) * HOUR);
       openEventDialog(null, when, { timed: true });
     });
     el.append(col);

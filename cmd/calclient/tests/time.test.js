@@ -105,3 +105,58 @@ test('tzDayStart maps a calendar date to midnight in the display zone', () => {
   // and in winter UTC+1 → 23:00Z
   assert.equal(+tzDayStart(new Date(2026, 0, 15), 'Europe/Zurich'), Date.UTC(2026, 0, 14, 23));
 });
+
+// ---- zoned wall-clock time (docs/dst-recurring-events.md §2) ---------------
+
+import * as tzt from '../web/shared/time.js';
+
+const iso = d => d.toISOString();
+const f = (y, mo, d, h, mi = 0) => ({ y, mo, d, h, mi, s: 0 });
+
+test('zonedToInstant round-trips unambiguous times across both transitions', () => {
+  for (const tz of ['Europe/Zurich', 'America/New_York']) {
+    for (const w of [f(2026, 3, 1, 9), f(2026, 3, 30, 9), f(2026, 10, 24, 9), f(2026, 11, 2, 9)]) {
+      const t = tzt.zonedToInstant(w, tz);
+      assert.deepEqual(tzt.zoneFields(t, tz), w, `${tz} ${JSON.stringify(w)}`);
+    }
+  }
+});
+
+test('zonedToInstant: a repeated time is the earlier instant, a skipped one moves forward', () => {
+  const Z = 'Europe/Zurich';
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 10, 25, 2, 30), Z)), '2026-10-25T00:30:00.000Z');
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 3, 29, 2, 30), Z)), '2026-03-29T01:30:00.000Z');
+  const NY = 'America/New_York';
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 11, 1, 1, 30), NY)), '2026-11-01T05:30:00.000Z');
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 3, 8, 2, 30), NY)), '2026-03-08T07:30:00.000Z');
+});
+
+test('zonedToInstant handles a 30-minute transition (Lord Howe)', () => {
+  const LH = 'Australia/Lord_Howe';
+  // 5 April 2026, 02:00 +11 → 01:30 +10:30: 01:45 occurs twice.
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 4, 5, 1, 45), LH)), '2026-04-04T14:45:00.000Z');
+  assert.equal(tzt.isFoldSecond(new Date('2026-04-04T15:15:00Z'), LH), true);
+  // 4 October 2026, 02:00 +10:30 → 02:30 +11: 02:15 doesn't exist.
+  assert.equal(iso(tzt.zonedToInstant(f(2026, 10, 4, 2, 15), LH)), '2026-10-03T15:45:00.000Z');
+});
+
+test('isFoldSecond names only the second occurrence of a repeated time', () => {
+  assert.equal(tzt.isFoldSecond(new Date('2026-10-25T00:30:00Z'), 'Europe/Zurich'), false);
+  assert.equal(tzt.isFoldSecond(new Date('2026-10-25T01:30:00Z'), 'Europe/Zurich'), true);
+});
+
+test('tzOffsetMs is exact and independent of the device zone', () => {
+  assert.equal(tzt.tzOffsetMs(new Date('2026-07-01T00:00:00Z'), 'America/New_York'), -4 * 36e5);
+  assert.equal(tzt.tzOffsetMs(new Date('2026-01-01T00:00:00Z'), 'Asia/Kolkata'), 5.5 * 36e5);
+});
+
+test('shiftWallDays keeps the wall time across DST (23- and 25-hour days)', () => {
+  const Z = 'Europe/Zurich';
+  assert.equal(iso(tzt.shiftWallDays(new Date('2026-03-28T08:00:00Z'), 1, Z)), '2026-03-29T07:00:00.000Z');
+  assert.equal(iso(tzt.shiftWallDays(new Date('2026-10-24T07:00:00Z'), 1, Z)), '2026-10-25T08:00:00.000Z');
+});
+
+test('writeZone prefers a known preference, then the device zone', () => {
+  assert.equal(tzt.writeZone('Europe/Zurich'), 'Europe/Zurich');
+  assert.equal(tzt.writeZone('Not/AZone'), tzt.isKnownZone(tzt.deviceZone()) ? tzt.deviceZone() : 'UTC');
+});

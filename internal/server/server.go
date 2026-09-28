@@ -446,7 +446,9 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		AdminPrincipals:                   []string{"principals/admin"},
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
 	})
-	srv.AddPlugin(&caldav.Plugin{})
+	// AddVTimezones departs from sabre deliberately: bare IANA TZIDs (calweb
+	// writes them) get the VTIMEZONE RFC 5545 requires.
+	srv.AddPlugin(&caldav.Plugin{AddVTimezones: true})
 	// WebDAV-Push (PUSH-PLAN.md). Registered here on purpose: after the ACL
 	// plugin (so its PropFind values honor the read-deny latch) and after
 	// caldav.Plugin, but before SharingPlugin (so a collection POST reaches it

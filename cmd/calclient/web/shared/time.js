@@ -89,14 +89,142 @@ export function parseTimeOfDay(s) {
 // instant of its midnight *in the given zone* (tz = IANA name, '' = device).
 
 export function tzOffsetMs(date, tz) {
-  // Re-reading the instant's wall clock in tz vs in UTC (both parsed the same
-  // way) cancels the browser's own zone, leaving tz's offset from UTC.
-  return new Date(date.toLocaleString('en-US', { timeZone: tz }))
-       - new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+  // Wall-clock fields of the instant in tz, read back as if they were UTC,
+  // minus the instant itself. formatToParts is exact; re-parsing a localized
+  // string through Date (the old way) depends on the device's own zone.
+  const t = Math.floor(+date / 1000) * 1000;
+  return wallMs(zoneFields(new Date(t), tz || deviceZone())) - t;
 }
 
 export function tzDayStart(day, tz) {
   if (!tz) return startOfDay(day);                 // '' = device zone: local midnight is right
   const guess = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate());
   return new Date(guess - tzOffsetMs(new Date(guess), tz));
+}
+
+// ---- zoned wall-clock time ---------------------------------------------------
+// calweb stores timed events as local wall-clock time plus an IANA zone
+// (DTSTART;TZID=Europe/Zurich:20260313T090000), so a recurring series keeps
+// its local hour across daylight-saving changes (docs/dst-recurring-events.md).
+// These helpers convert between instants and a zone's wall-clock fields
+// {y, mo, d, h, mi, s} (mo is 1-based) using Intl only.
+
+// deviceZone is the browser's IANA zone name, or '' when it reports none.
+export function deviceZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+}
+
+const fmtCache = new Map();
+function zoneFormatter(tz) {
+  let f = fmtCache.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23',
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+    });
+    fmtCache.set(tz, f);
+  }
+  return f;
+}
+
+// isKnownZone reports whether Intl can resolve tz (an IANA name). Outlook-style
+// names ("W. Europe Standard Time") are not known.
+export function isKnownZone(tz) {
+  if (!tz) return false;
+  try { zoneFormatter(tz); return true; } catch { return false; }
+}
+
+// writeZone resolves the zone calweb writes timed events in: the display-zone
+// preference, else the device zone, else 'UTC' (today's behavior) when neither
+// names a zone Intl knows.
+export function writeZone(prefTz) {
+  if (isKnownZone(prefTz)) return prefTz;
+  const dev = deviceZone();
+  return isKnownZone(dev) ? dev : 'UTC';
+}
+
+// zoneFields returns the wall-clock fields of an instant in tz.
+export function zoneFields(date, tz) {
+  const f = { y: 0, mo: 0, d: 0, h: 0, mi: 0, s: 0 };
+  for (const p of zoneFormatter(tz).formatToParts(date)) {
+    if (p.type === 'year') f.y = +p.value;
+    else if (p.type === 'month') f.mo = +p.value;
+    else if (p.type === 'day') f.d = +p.value;
+    else if (p.type === 'hour') f.h = +p.value % 24;
+    else if (p.type === 'minute') f.mi = +p.value;
+    else if (p.type === 'second') f.s = +p.value;
+  }
+  return f;
+}
+
+// wallMs reads wall-clock fields as if they were UTC: a timestamp used only
+// for calendar arithmetic (differences in wall time, adding days), never as an
+// instant.
+export function wallMs(f) { return Date.UTC(f.y, f.mo - 1, f.d, f.h, f.mi, f.s || 0); }
+
+// fieldsFromWallMs is wallMs's inverse.
+export function fieldsFromWallMs(ms) {
+  const d = new Date(ms);
+  return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(),
+    h: d.getUTCHours(), mi: d.getUTCMinutes(), s: d.getUTCSeconds() };
+}
+
+// zonedToInstant resolves wall-clock fields in tz to an instant, per the
+// DATE-TIME rules of RFC 5545 §3.3.5: a time that occurs twice (a fold) is
+// the earlier instant; a time that doesn't exist (a gap) is interpreted with
+// the offset in effect before the gap, i.e. it moves forward by the gap's
+// size. Candidates come from the offsets around the date and are validated by
+// formatting back, so no one-hour or single-correction assumption is made.
+export function zonedToInstant(f, tz) {
+  const L = wallMs(f);
+  const offsets = new Set();
+  for (const k of [-3, -1, 0, 1, 3]) offsets.add(tzOffsetMs(new Date(L + k * DAY), tz));
+  const hits = [];
+  for (const o of offsets) {
+    const t = L - o;
+    if (wallMs(zoneFields(new Date(t), tz)) === L) hits.push(t);
+  }
+  if (hits.length) return new Date(Math.min(...hits));
+  // Gap: the offset before it is the one a day earlier (transitions are never
+  // closer together than that).
+  return new Date(L - tzOffsetMs(new Date(L - DAY), tz));
+}
+
+// isFoldSecond reports whether an instant is the second occurrence of a
+// repeated wall time in tz — the one local fields alone cannot name.
+export function isFoldSecond(date, tz) {
+  return +zonedToInstant(zoneFields(date, tz), tz) !== +date;
+}
+
+// shiftWallDays moves an instant by whole calendar days of tz's wall clock,
+// keeping its local time (one day across a DST change is 23 or 25 hours).
+export function shiftWallDays(date, days, tz) {
+  if (!days) return new Date(date);
+  const f = zoneFields(date, tz);
+  return zonedToInstant(fieldsFromWallMs(wallMs(f) + days * DAY), tz);
+}
+
+// weekdayIn is the day of week (0 = Sunday) of an instant in tz.
+export function weekdayIn(date, tz) {
+  const f = zoneFields(date, tz);
+  return new Date(Date.UTC(f.y, f.mo - 1, f.d)).getUTCDay();
+}
+
+// dateValueIn is the YYYY-MM-DD calendar date of an instant in tz (a date
+// input value); fieldsFromInputs combines a date input value and {h, m} into
+// wall-clock fields.
+export function dateValueIn(date, tz) {
+  const f = zoneFields(date, tz);
+  return `${f.y}-${p2(f.mo)}-${p2(f.d)}`;
+}
+export function fieldsFromInputs(dateValue, t) {
+  const [y, mo, d] = dateValue.split('-').map(Number);
+  return { y, mo, d, h: t ? t.h : 0, mi: t ? t.m : 0, s: 0 };
+}
+
+// formatHM renders an hour/minute pair like formatTimeOfDay.
+export function formatHM(h, m, hour12) {
+  if (!hour12) return `${p2(h)}:${p2(m)}`;
+  return `${(h % 12) || 12}:${p2(m)} ${h < 12 ? 'AM' : 'PM'}`;
 }

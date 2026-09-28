@@ -512,6 +512,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	sent := raw
 	for _, p := range c.server.Plugins() {
 		if hook, ok := p.(WriteInterceptor); ok {
 			raw, err = hook.InterceptWrite(r, path, raw, isNew)
@@ -521,6 +522,10 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	body = bytes.NewReader(raw)
+	// RFC 4791 §5.3.4: a server that stores something other than the body it
+	// was sent must not return a strong ETag for it — the client would take
+	// the tag to describe its own bytes. (sabre does the same.)
+	modified := !bytes.Equal(sent, raw)
 
 	if !isNew {
 		node, err := c.server.Tree.NodeForPath(path)
@@ -536,6 +541,9 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		c.fireAfterWrite(r, path)
+		if modified {
+			etag = ""
+		}
 		writeCreated(w, etag, http.StatusNoContent)
 		return nil
 	}
@@ -557,6 +565,9 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	c.fireAfterWrite(r, path)
+	if modified {
+		etag = ""
+	}
 	writeCreated(w, etag, http.StatusCreated)
 	return nil
 }

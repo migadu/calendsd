@@ -74,6 +74,10 @@ export function instanceFrom(ev, href, calHref, etag) {
     rid: ical.propValue(ev, 'RECURRENCE-ID') || '',
     recurring: !!ical.prop(ev, 'RRULE') || !!ical.propValue(ev, 'RECURRENCE-ID'),
     rrule: ical.propValue(ev, 'RRULE'),
+    // The zone the stored series recurs in (a TZID, 'UTC', or undefined for
+    // floating/DATE) — meaningful on a stored master, not on an expanded
+    // instance (the server returns those in UTC).
+    zone: ical.seriesZone(dtstart),
     allDay: s.allDay,
     start: s.date, end,
     summary: ical.icalUnescape(ical.propValue(ev, 'SUMMARY')) || '(no title)',
@@ -152,7 +156,7 @@ export async function searchEvents(query) {
 // unchanged. The shifted start keeps the master's time-of-day and duration.
 function atNextOccurrence(inst, now) {
   if (!inst.rrule || +inst.start >= now) return inst;
-  const next = ical.nextOccurrence(inst.start, inst.rrule, new Date(now));
+  const next = ical.nextOccurrence(inst.start, inst.rrule, new Date(now), inst.zone);
   if (!next || +next === +inst.start) return inst;
   const dur = +inst.end - +inst.start;
   return { ...inst, start: next, end: new Date(+next + dur) };
@@ -231,22 +235,26 @@ async function reportEvents(cal, propFilter) {
   return out;
 }
 
-// moveEvent shifts a (non-recurring) event by deltaMs — the drag & drop path.
-// DTSTART/DTEND are rewritten in place so alarms, overrides, and unmodeled
-// properties survive; callers guard against recurring events (moving an
-// occurrence needs the editor's scope choice).
-export async function moveEvent(inst, deltaMs) {
+// moveEvent moves a (non-recurring) event so it starts at `to` instead of
+// inst.start — the drag & drop path. DTSTART/DTEND are rewritten in place so
+// alarms, overrides, and unmodeled properties survive; each property moves by
+// the delta of its own form (ical.shiftDate: wall-clock in a TZID's zone,
+// elapsed for UTC, days for DATE), and DTEND by the same move as DTSTART.
+// Callers guard against recurring events (moving an occurrence needs the
+// editor's scope choice).
+export async function moveEvent(inst, to) {
   const { text, etag } = await getObject(inst.href);
   const master = ical.components(ical.parse(text), 'VEVENT')
     .find(v => !ical.prop(v, 'RECURRENCE-ID'));
   const ds = master && ical.prop(master, 'DTSTART');
   const cantShift = new Error('This event stores its dates in a form that cannot be dragged — use Edit instead.');
-  const start = ds && ical.shiftDate('DTSTART', ds, deltaMs);
+  const move = { from: inst.start, to };
+  const start = ds && ical.shiftDate('DTSTART', ds, move);
   if (!start) throw cantShift;
   const props = { DTSTART: start };
   const de = ical.prop(master, 'DTEND');
   if (de) {
-    const end = ical.shiftDate('DTEND', de, deltaMs);
+    const end = ical.shiftDate('DTEND', de, move);
     if (!end) throw cantShift;
     props.DTEND = end;
   }
@@ -278,7 +286,7 @@ export function eventHref(calHref, uid) {
 export async function deleteEvent(inst, scope = 'all') {
   if (scope === 'one') {
     const { text, etag } = await getObject(inst.href);
-    await putObject(inst.href, ical.addExdate(text, ridValue(inst), inst.allDay), etag);
+    await putObject(inst.href, ical.addExdateLine(text, ridLine('EXDATE', inst, masterDtstart(text))), etag);
   } else if (scope === 'future') {
     const { text, etag } = await getObject(inst.href);
     const m0 = ical.components(ical.parse(text), 'VEVENT').find(v => !ical.prop(v, 'RECURRENCE-ID'));
@@ -311,4 +319,19 @@ export function ridValue(inst) {
   if (inst.rid) return inst.rid;
   if (inst.allDay) return ical.dateOnly(localDate(inst.start));
   return ical.utc(inst.start.toISOString());
+}
+
+// ridLine renders a RECURRENCE-ID or EXDATE line naming the instance's
+// original occurrence in the same form as the master's DTSTART (ds): a zoned
+// series gets its zone's wall time. The server returns an expanded instance's
+// RECURRENCE-ID in UTC, which names the same instant.
+export function ridLine(name, inst, ds) {
+  const at = inst.rid ? ical.parseICalDate(inst.rid, {})?.date : inst.start;
+  return ical.occurrenceLine(name, at || inst.start, inst.allDay, ds);
+}
+
+// masterDtstart is the DTSTART property of a stored object's master VEVENT.
+export function masterDtstart(text) {
+  const m0 = ical.components(ical.parse(text), 'VEVENT').find(v => !ical.prop(v, 'RECURRENCE-ID'));
+  return (m0 && ical.prop(m0, 'DTSTART')) || null;
 }

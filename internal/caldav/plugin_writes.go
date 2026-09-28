@@ -58,6 +58,18 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 		return nil, invalidComponentType(fmt.Sprintf(
 			"This calendar only supports %s; the object is a %s", strings.Join(allowed, ", "), compType))
 	}
+	// RFC 5545 §3.6.5: every TZID used needs a VTIMEZONE. Clients (calweb
+	// among them) send bare IANA names; attach a definition generated from the
+	// same zone data expansion uses (docs/dst-recurring-events.md §5). A zone
+	// whose future rule can't be written faithfully rejects the PUT rather
+	// than store an approximation.
+	if p.AddVTimezones {
+		withTZ, err := ical.AddMissingVTimezones(data, cal)
+		if err != nil {
+			return nil, invalidCalendarData("Cannot attach a time zone definition: %s", err)
+		}
+		data = withTZ
+	}
 	// The backend denormalizes every stored object (first/last occurrence,
 	// recurrence bounds). Run that here so data which parses structurally but
 	// is semantically invalid — a malformed DURATION, date, or RRULE — fails
