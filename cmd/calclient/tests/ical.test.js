@@ -401,6 +401,46 @@ test('convertedSlot puts a drifted occurrence back at the first occurrence’s l
     '2026-03-20T08:00:00.000Z');
 });
 
+test('convertSeriesToZone leaves an override stored in another zone exactly as it is', () => {
+  const t = utcSeries().replace('DTSTART:20260410T120000Z', 'DTSTART;TZID=America/New_York:20260410T080000')
+    .replace('DTEND:20260410T130000Z', 'DTEND;TZID=America/New_York:20260410T090000');
+  const r = ical.convertSeriesToZone(t, Z);
+  assert.equal(r.error, undefined);
+  assert.match(r.text, /\r\nDTSTART;TZID=America\/New_York:20260410T080000\r\n/);
+  assert.match(r.text, /\r\nDTEND;TZID=America\/New_York:20260410T090000\r\n/);
+});
+
+test('convertSeriesToZone keeps exceptions attached to RDATE occurrences', () => {
+  // An added occurrence at 10:00 CEST (08:00Z) keeps its instant, and so do
+  // the EXDATE and override naming it — while rule slots move to 09:00.
+  const t = utcSeries().replace('EXDATE:20260403T080000Z', 'RDATE:20260711T080000Z\r\nEXDATE:20260403T080000Z,20260711T080000Z')
+    .replace('RECURRENCE-ID:20260410T080000Z', 'RECURRENCE-ID:20260711T080000Z')
+    .replace('UNTIL=20260424T075959Z', 'UNTIL=20261231T000000Z');
+  const r = ical.convertSeriesToZone(t, Z);
+  assert.equal(r.error, undefined);
+  assert.match(r.text, /RDATE;TZID=Europe\/Zurich:20260711T100000/);
+  assert.match(r.text, /EXDATE;TZID=Europe\/Zurich:20260403T090000,20260711T100000/);
+  assert.match(r.text, /RECURRENCE-ID;TZID=Europe\/Zurich:20260711T100000/);
+  const info = ical.utcSeriesInfo(t);
+  assert.equal(ical.convertedRef(at('2026-07-11T08:00:00Z'), info, Z).toISOString(), '2026-07-11T08:00:00.000Z');
+  assert.equal(ical.convertedRef(at('2026-04-03T08:00:00Z'), info, Z).toISOString(), '2026-04-03T07:00:00.000Z');
+});
+
+test('convertSeriesToZone refuses monthly/yearly and sub-daily rules whose dates depend on UTC days', () => {
+  // 23:30Z on 31 January is 00:30 on 1 February in Zurich: monthly on the
+  // 31st (skipping short months) would become monthly on the 1st.
+  const monthly = utcSeries().replace('DTSTART:20260313T080000Z', 'DTSTART:20260131T233000Z')
+    .replace('RRULE:FREQ=WEEKLY;UNTIL=20260424T075959Z', 'RRULE:FREQ=MONTHLY');
+  assert.match(ical.convertSeriesToZone(monthly, Z).error, /days/);
+  const yearly = monthly.replace('RRULE:FREQ=MONTHLY', 'RRULE:FREQ=YEARLY');
+  assert.match(ical.convertSeriesToZone(yearly, Z).error, /days/);
+  // The same rule anchored on the same local and UTC day converts.
+  const sameDay = monthly.replace('DTSTART:20260131T233000Z', 'DTSTART:20260131T080000Z');
+  assert.equal(ical.convertSeriesToZone(sameDay, Z).error, undefined);
+  const hourly = utcSeries().replace('RRULE:FREQ=WEEKLY;UNTIL=20260424T075959Z', 'RRULE:FREQ=HOURLY;COUNT=48');
+  assert.match(ical.convertSeriesToZone(hourly, Z).error, /times of day/);
+});
+
 test('utcSeriesInfo distinguishes calweb series; conversion notice and preview', () => {
   assert.equal(ical.utcSeriesInfo(utcSeries()).calweb, true);
   assert.equal(ical.utcSeriesInfo(utcSeries('-//Apple Inc.//EN')).calweb, false);

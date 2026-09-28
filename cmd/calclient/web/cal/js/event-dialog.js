@@ -96,9 +96,13 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   // rather than where it drifted to — unless it's an override, which keeps
   // its times. The times on screen are what gets saved, so an untouched time
   // lands there in every scope.
-  const shownTimes = converting => converting && canConvert && !isOverride
-    ? { start: ical.convertedSlot(inst.start, utcSeries.start, zone), end: ical.convertedSlot(inst.end, utcSeries.start, zone) }
-    : { start: inst?.start, end: inst?.end };
+  const shownTimes = converting => {
+    if (!converting || !canConvert || isOverride) return { start: inst?.start, end: inst?.end };
+    // An occurrence moves with its slot (an RDATE occurrence keeps its time);
+    // the end moves with the start.
+    const s0 = ical.convertedRef(inst.start, utcSeries, zone);
+    return { start: s0, end: new Date(+inst.end + (+s0 - +inst.start)) };
+  };
   if (utcSeries?.calweb) ({ start, end } = shownTimes(true));
   // shown is the baseline an edit is measured from when nothing is converted.
   let shown = { start, end };
@@ -211,6 +215,7 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
     ({ start, end } = shownTimes(ev.target.checked));
     shown = { start, end };
     syncDateInputs();
+    rememberShown();
     prevStart = readPair(startD, startT);
     const box = q('#ev-tzpreview');
     box.hidden = !ev.target.checked;
@@ -257,6 +262,15 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   }
   syncDateInputs();
 
+  // What the inputs showed for start/end. Fields left as shown keep the shown
+  // instant: re-reading "02:30" on the day the clocks go back resolves to the
+  // first 02:30, which would move an event at the second one an hour earlier.
+  let shownInputs = null;
+  const rememberShown = () => {
+    shownInputs = { sd: startD.value, st: startT.value, ed: endD.value, et: endT.value, allDay: allDayBox.checked };
+  };
+  rememberShown();
+
   // readPair/setPair combine a date input and its time field. All-day reads a
   // device-local date; timed reads wall-clock fields in the display zone and
   // resolves them to an instant (a skipped time moves forward, a repeated
@@ -300,7 +314,7 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
   // (as 01:00) and would yank the end around on every keystroke.
   startT.addEventListener('change', () => { normalize(startT); startChanged(); });
   endT.addEventListener('change', () => normalize(endT));
-  allDayBox.addEventListener('change', () => { syncDateInputs(); prevStart = readPair(startD, startT); });
+  allDayBox.addEventListener('change', () => { syncDateInputs(); rememberShown(); prevStart = readPair(startD, startT); });
 
   // repeat controls
   const freqSel = q('#ev-freq'), endsWrap = q('#ev-ends-wrap'), endsSel = q('#ev-ends');
@@ -355,7 +369,11 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
       const s = new Date(sv + 'T00:00');
       return { allDay, start: s, end: new Date(+new Date(ev + 'T00:00') + DAY), sVal: sv, eVal: ev };
     }
-    const s = readPair(startD, startT), e = readPair(endD, endT);
+    const asShown = shownInputs && !shownInputs.allDay;
+    const s = asShown && startD.value === shownInputs.sd && startT.value === shownInputs.st
+      ? start : readPair(startD, startT);
+    const e = asShown && endD.value === shownInputs.ed && endT.value === shownInputs.et
+      ? end : readPair(endD, endT);
     if (!s || !e) return { badTime: true };
     return { allDay, start: s, end: e, sVal: sv, eVal: ev };
   }
@@ -505,7 +523,7 @@ export async function openEventDialog(inst, defaultDay, opts, onClose) {
         if (conv.converted) {
           base = conv.text;
           tz = zone;
-          ridLine = ical.occurrenceLine('RECURRENCE-ID', ical.convertedSlot(ridAt, utcSeries.start, zone),
+          ridLine = ical.occurrenceLine('RECURRENCE-ID', ical.convertedRef(ridAt, utcSeries, zone),
             inst.allDay, { value: '', params: { TZID: zone } });
         }
         const text = ical.addOverride(base, ical.eventLines({

@@ -385,6 +385,17 @@ Where the implementation refines or departs from the text above:
 - **Conversion anchor.** Decided: without a time change, the first
   occurrence anchors the conversion. With one, the typed time is applied as a
   target after converting (section 4, `ical.convertAndMove`).
+- **What conversion maps, and what it refuses.** Rule slots move by the
+  anchor's offset. RDATE occurrences keep their instants, and so does any
+  RECURRENCE-ID or EXDATE naming one (it would otherwise detach). Values not
+  stored in UTC (an override in another zone, a DATE) are left exactly as
+  stored. Refused, besides the cases above: sub-daily frequencies, and
+  MONTHLY/YEARLY rules whose anchor's UTC date isn't its local date (the
+  month-day and month they take from DTSTART would change).
+- **Untouched inputs keep their instant.** The editor re-resolves typed
+  times with the earlier-instant rule, so date/time fields left as shown keep
+  the shown instant — otherwise a title-only edit of an event at the second
+  02:30 of the October change would move it an hour earlier.
 - **Conversion scope.** Every edit of a UTC series converts it (not only the
   "all events"/"this and following" edits the first draft of section 4
   named): users edit a drifted occurrence with the default "only this event"

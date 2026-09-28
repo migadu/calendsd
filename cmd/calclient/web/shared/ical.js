@@ -743,41 +743,69 @@ export function convertSeriesToZone(text, tz) {
     return { error: 'The series starts in the hour that repeats when the clocks go back, which a local time cannot name.' };
   }
   const rule = rr.value.toUpperCase();
-  if (/(^|;)BY(HOUR|MINUTE|SECOND)=/.test(rule)) return { error: 'The series repeats at several times of day.' };
+  if (/(^|;)BY(HOUR|MINUTE|SECOND)=/.test(rule) || /(^|;)FREQ=(HOURLY|MINUTELY|SECONDLY)(;|$)/.test(rule)) {
+    return { error: 'The series repeats at several times of day.' };
+  }
   const off0 = tzOffsetMs(s0, tz);
   const utcDay = s0.toISOString().slice(0, 10);
   const wallDay = new Date(+s0 + off0).toISOString().slice(0, 10);
-  if (utcDay !== wallDay && /(^|;)BY(DAY|MONTHDAY|YEARDAY|WEEKNO|MONTH|SETPOS)=/.test(rule)) {
+  // Slots map by a constant shift, which keeps every date consistent — unless
+  // the rule picks dates by calendar fields and the anchor's UTC date isn't
+  // its local date. That covers explicit BY* parts, and the month-day and
+  // month a MONTHLY/YEARLY rule takes implicitly from DTSTART (a UTC series
+  // on the 31st skips short months; converted to the 1st it wouldn't).
+  if (utcDay !== wallDay && (/(^|;)BY(DAY|MONTHDAY|YEARDAY|WEEKNO|MONTH|SETPOS)=/.test(rule)
+    || /(^|;)FREQ=(MONTHLY|YEARLY)(;|$)/.test(rule))) {
     return { error: 'The series is anchored to UTC days that differ from local days, so its weekdays or dates would change.' };
   }
 
-  const slotWall = v => formatWall(fieldsFromWallMs(+parseICalDate(v, {}).date + off0));
   const isUtcValue = v => /^\d{8}T\d{6}Z$/.test(v);
   let failure = '';
   const fail = msg => { failure = failure || msg; return null; };
+  // RDATE occurrences keep their instants (below), so a RECURRENCE-ID or
+  // EXDATE naming one must keep that instant too, or it would detach from
+  // its RDATE; only rule slots move.
+  const rdates = new Set();
+  for (const i of topLevel(lines, range)) {
+    const p = parseLine(lines[i]);
+    if (p?.name === 'RDATE' && p.params.VALUE !== 'PERIOD') {
+      for (const v of p.value.split(',')) if (isUtcValue(v)) rdates.add(+parseICalDate(v, {}).date);
+    }
+  }
+  const refWall = v => {
+    const d = parseICalDate(v, {}).date;
+    if (!rdates.has(+d)) return formatWall(fieldsFromWallMs(+d + off0));
+    if (isFoldSecond(d, tz)) return fail('An added date falls in the hour that repeats when the clocks go back.');
+    return zonedParts(d, tz);
+  };
   // A slot reference: a UTC value mapped to the zoned series' slot.
   const slotLine = (p, multi) => {
     const vals = multi ? p.value.split(',') : [p.value];
     if (p.params.RANGE) return fail('An exception applies to a range of occurrences.');
     if (!vals.every(isUtcValue)) return fail('An exception is not stored in UTC.');
-    return `${p.name}${paramsString(p.params, tz)}:${vals.map(slotWall).join(',')}`;
+    const walls = vals.map(refWall);
+    if (walls.some(w => w == null)) return null;
+    return `${p.name}${paramsString(p.params, tz)}:${walls.join(',')}`;
   };
   // An explicit instant: kept exactly, written as wall time unless it is the
-  // second occurrence of a repeated hour (then it stays UTC).
-  const instantLine = (p, multi) => {
+  // second occurrence of a repeated hour (then it stays as stored). A value
+  // that isn't UTC (another zone, a DATE) is already what it means and is
+  // left exactly as stored — line included.
+  const instantLine = (p, multi, line) => {
     const vals = multi ? p.value.split(',') : [p.value];
-    if (!vals.every(isUtcValue)) return `${p.name}${paramsString(p.params)}:${p.value}`;
+    if (!vals.every(isUtcValue)) return line;
     const dates = vals.map(v => parseICalDate(v, {}).date);
     if (dates.some(d => isFoldSecond(d, tz))) {
       if (multi) return fail('A date in the series falls in the hour that repeats when the clocks go back.');
-      return `${p.name}${paramsString(p.params)}:${p.value}`;
+      return line;
     }
     return `${p.name}${paramsString(p.params, tz)}:${dates.map(d => zonedParts(d, tz)).join(',')}`;
   };
   const untilLine = p => {
     const parts = rruleParts(p.value);
     if (parts.UNTIL && isUtcValue(parts.UNTIL)) {
-      parts.UNTIL = utc(zonedToInstant(parseWall(slotWall(parts.UNTIL)), tz));
+      const wall = formatWall(fieldsFromWallMs(+parseICalDate(parts.UNTIL, {}).date + off0));
+      parts.UNTIL = utc(zonedToInstant(parseWall(wall), tz));
     }
     return `RRULE:${renderRRule(parts)}`;
   };
@@ -797,10 +825,10 @@ export function convertSeriesToZone(text, tz) {
     if (!p) { out.push(l); continue; }
     let next = l;
     if (p.name === 'DTSTART' && isMaster) next = `DTSTART${paramsString(p.params, tz)}:${zonedParts(s0, tz)}`;
-    else if (p.name === 'DTSTART' || p.name === 'DTEND') next = instantLine(p, false);
+    else if (p.name === 'DTSTART' || p.name === 'DTEND') next = instantLine(p, false, l);
     else if (p.name === 'RECURRENCE-ID') next = slotLine(p, false);
     else if (p.name === 'EXDATE') next = slotLine(p, true);
-    else if (p.name === 'RDATE') next = p.params.VALUE === 'PERIOD' ? fail('The series has extra dates given as periods.') : instantLine(p, true);
+    else if (p.name === 'RDATE') next = p.params.VALUE === 'PERIOD' ? fail('The series has extra dates given as periods.') : instantLine(p, true, l);
     else if (p.name === 'RRULE' && isMaster) next = untilLine(p);
     if (next == null) break;
     out.push(next);
@@ -873,14 +901,24 @@ function paramsString(params, tz) {
 
 // utcSeriesInfo describes a recurring master stored in UTC, for the editor's
 // conversion notice and preview: {calweb, start (the first occurrence),
-// rrule} or null when the master isn't a UTC series.
+// rrule, rdates (instants of its UTC RDATEs)} or null when the master isn't
+// a UTC series.
 export function utcSeriesInfo(text) {
   const master = components(parse(text), 'VEVENT').find(v => !prop(v, 'RECURRENCE-ID'));
   const ds = master && prop(master, 'DTSTART');
   const rrule = master ? propValue(master, 'RRULE') : '';
   if (!ds || !rrule || !/Z$/.test(ds.value)) return null;
   const prodid = /^PRODID:(.*)$/im.exec(text.replace(/\r\n[ \t]/g, ''))?.[1]?.trim() || '';
-  return { calweb: prodid === '-//calclient//EN', start: parseICalDate(ds.value, ds.params).date, rrule };
+  const rdates = master.props.filter(p => p.name === 'RDATE' && p.params.VALUE !== 'PERIOD')
+    .flatMap(p => p.value.split(',')).filter(v => /Z$/.test(v)).map(v => +parseICalDate(v, {}).date);
+  return { calweb: prodid === '-//calclient//EN', start: parseICalDate(ds.value, ds.params).date, rrule, rdates };
+}
+
+// convertedRef is where the occurrence originally at `date` is once the UTC
+// series `info` is converted to tz: an RDATE occurrence keeps its instant,
+// a rule occurrence moves to its converted slot (convertedSlot).
+export function convertedRef(date, info, tz) {
+  return info.rdates.includes(+date) ? new Date(date) : convertedSlot(date, info.start, tz);
 }
 
 // conversionMovesOccurrences reports whether converting a UTC series

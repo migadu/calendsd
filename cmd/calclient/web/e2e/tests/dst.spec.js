@@ -159,3 +159,21 @@ test('editing one occurrence of a drifted UTC series shows and keeps the origina
   expect(await shown('2026-12-07')).toEqual(['10:00']);
   expect(await stored(request, uid)).toContain('DTSTART;TZID=Europe/Zurich:20260911T100000');
 });
+
+test('a title-only edit keeps an event at the second 02:30 of the October change', async ({ page, request }) => {
+  // 01:30Z on 25 October is 02:30 CET — the second 02:30 in Zurich that
+  // night; re-reading "02:30" from the inputs would give the first (00:30Z).
+  const uid = `${TAG}fold-${Date.now()}`;
+  await seed(request, uid, ['DTSTART:20261025T013000Z', 'DTEND:20261025T020000Z']);
+  await page.goto('/cal/calendar/week/2026-10-19');
+  await page.locator('.block', { hasText: uid }).click();
+  await page.click('#ed-edit');
+  await expect(page.locator('#ev-start-time')).toHaveValue('02:30');
+  await page.fill('#ev-title', uid + ' renamed');
+  await page.click('#ev-save');
+  await expect(page.locator('#ev-title')).toHaveCount(0);
+  const body = await stored(request, uid);
+  expect(body).toContain('SUMMARY:' + uid + ' renamed');
+  expect(body).toContain('DTSTART:20261025T013000Z');
+  expect(body).toContain('DTEND:20261025T020000Z');
+});
