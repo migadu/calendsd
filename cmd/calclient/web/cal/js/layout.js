@@ -33,7 +33,7 @@ export function layoutColumns(evs) {
 // each assigned a lane (greedy) and the columns it covers within the week.
 export function spans(instances, weekStart) {
   const weekEnd = addDays(weekStart, 7);
-  const col = d => Math.min(6, Math.max(0, Math.floor((startOfDay(d) - weekStart) / DAY)));
+  const col = d => Math.min(6, Math.max(0, Math.round((startOfDay(d) - weekStart) / DAY)));
   const multi = instances
     .filter(i => +i.end - +i.start > DAY && +i.start < +weekEnd && +i.end > +weekStart
       && (col(new Date(+i.end - 1)) > col(i.start) || +i.start < +weekStart))

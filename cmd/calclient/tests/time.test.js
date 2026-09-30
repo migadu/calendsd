@@ -23,6 +23,18 @@ test('startOfDay / addDays / nextDate / sameDay', () => {
   assert.ok(!sameDay(d, new Date(2026, 6, 16)));
 });
 
+// Relational, so it holds in any zone; under a DST zone (TZ=Europe/Zurich)
+// it covers the 25-hour Oct 25 2026 and 23-hour Mar 28 2027 that 24-hour
+// steps turned into a repeated "25" in the month grid.
+test('addDays steps by calendar date across DST changes', () => {
+  for (const start of [new Date(2026, 9, 19), new Date(2027, 2, 22)]) {
+    for (let n = 0; n < 14; n++) {
+      assert.equal(+addDays(start, n), +new Date(start.getFullYear(), start.getMonth(), start.getDate() + n));
+    }
+  }
+  assert.equal(+addDays(new Date(2026, 10, 2), -14), +new Date(2026, 9, 19));
+});
+
 test('startOfWeek honors the week-start preference', () => {
   const wed = new Date(2026, 7, 5); // Wednesday 2026-08-05
   assert.equal(+startOfWeek(wed, 1), +new Date(2026, 7, 3));  // Monday

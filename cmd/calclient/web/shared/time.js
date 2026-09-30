@@ -9,9 +9,10 @@ const p2 = n => String(n).padStart(2, '0');
 
 export function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 
-// addDays moves by exact 24-hour steps, which is what the grid's fixed-height
-// columns want. For calendar-date arithmetic across DST changes use nextDate.
-export function addDays(d, n) { return new Date(+d + n * DAY); }
+// addDays moves by n calendar days, keeping the local time of day (DST-safe:
+// a 23- or 25-hour day still advances by one date, so a midnight stays a
+// midnight and the grid never repeats or skips a date).
+export function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
 // nextDate is the following calendar date (DST-safe: 23- and 25-hour days
 // still advance by one date).
