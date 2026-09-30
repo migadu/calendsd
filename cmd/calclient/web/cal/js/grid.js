@@ -7,7 +7,7 @@ import * as store from '/shared/store.js';
 import { $, html, frag } from '/shared/dom.js';
 import { icon } from '/shared/icons.js';
 import { DAY, HOUR, startOfDay, addDays, sameDay, nextDate, isoWeek,
-  startOfWeek as weekStartOf, tzDayStart as tzDayStartIn, shiftWallDays, writeZone } from '/shared/time.js';
+  startOfWeek as weekStartOf, spansDays, tzDayStart as tzDayStartIn, shiftWallDays, writeZone } from '/shared/time.js';
 import { layoutColumns, spans } from './layout.js';
 import { fmtTime, fmtDate, toast, showError } from './ui.js';
 import { openEventDialog } from './event-dialog.js';
@@ -152,9 +152,13 @@ function title() {
 
 // instances overlapping the calendar date `day`, with the day's boundaries
 // taken in the display zone so an event near midnight lands in the right column.
+// All-day events are floating dates (stored as device-local midnights), so they
+// match by date instead: against display-zone midnights a one-day event would
+// also overlap the next or previous day whenever the two zones differ.
 function eventsOnDay(instances, day) {
   const s = +tzDayStart(day), e = +tzDayStart(nextDate(day));
-  return instances.filter(i => +i.start < e && +i.end > s);
+  const ds = +startOfDay(day), de = +nextDate(day);
+  return instances.filter(i => i.allDay ? +i.start < de && +i.end > ds : +i.start < e && +i.end > s);
 }
 
 // centerNextRender scrolls the next timed render to the current-time line
@@ -442,7 +446,7 @@ function renderMonth(instances) {
       const cell = html`<div class="cell${day.getMonth() !== cursor.getMonth() ? ' other' : ''}${sameDay(day, today) ? ' today' : ''}" role="button" tabindex="0" aria-label="${day.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} — add event" data-date="${+day}"><span class="num">${day.getDate()}</span></div>`;
       // reserve vertical room so single-day chips clear the spanning bars
       if (laneCount) cell.append(html`<div class="bar-space" style="height:${laneCount * 1.25}rem"></div>`);
-      const single = eventsOnDay(instances, day).filter(i => +i.end - +i.start <= DAY);
+      const single = eventsOnDay(instances, day).filter(i => !spansDays(i));
       for (const inst of single.slice(0, MAX)) {
         const chip = chipFor(inst);
         attachChipDrag(chip, inst);

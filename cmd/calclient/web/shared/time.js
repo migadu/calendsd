@@ -18,6 +18,13 @@ export function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n
 // still advance by one date).
 export function nextDate(day) { return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1); }
 
+// spansDays reports whether an instance covers more than one day: all-day
+// events by calendar date (their day may be 23 or 25 hours long), timed ones
+// by lasting longer than 24 hours.
+export function spansDays(i) {
+  return i.allDay ? +i.end > +nextDate(i.start) : +i.end - +i.start > DAY;
+}
+
 export function sameDay(a, b) { return a.toDateString() === b.toDateString(); }
 
 // startOfWeek returns the week's first midnight; weekStart is 1 = Monday

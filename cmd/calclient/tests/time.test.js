@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DAY, HOUR, startOfDay, addDays, nextDate, sameDay, startOfWeek, isoWeek,
+  DAY, HOUR, startOfDay, addDays, nextDate, sameDay, spansDays, startOfWeek, isoWeek,
   localDT, localDate, tzOffsetMs, tzDayStart, formatTimeOfDay, parseTimeOfDay,
 } from '../web/shared/time.js';
 
@@ -33,6 +33,16 @@ test('addDays steps by calendar date across DST changes', () => {
     }
   }
   assert.equal(+addDays(new Date(2026, 10, 2), -14), +new Date(2026, 9, 19));
+});
+
+test('spansDays: all-day by calendar date, timed by duration', () => {
+  const allDay = (s, e) => ({ allDay: true, start: s, end: e });
+  assert.ok(!spansDays(allDay(new Date(2026, 9, 25), new Date(2026, 9, 26))));   // 25h in Zurich
+  assert.ok(!spansDays(allDay(new Date(2027, 2, 28), new Date(2027, 2, 29))));   // 23h in Zurich
+  assert.ok(spansDays(allDay(new Date(2026, 9, 1), new Date(2026, 9, 3))));
+  const t = new Date(2026, 6, 15, 9);
+  assert.ok(!spansDays({ start: t, end: new Date(+t + DAY) }));
+  assert.ok(spansDays({ start: t, end: new Date(+t + DAY + 1) }));
 });
 
 test('startOfWeek honors the week-start preference', () => {

@@ -2,7 +2,7 @@
 // it can be unit-tested under node (hence the relative import, which resolves
 // both in the browser and on the filesystem).
 
-import { DAY, startOfDay, addDays } from '../../shared/time.js';
+import { DAY, startOfDay, addDays, spansDays } from '../../shared/time.js';
 
 // layoutColumns splits a day's timed events into side-by-side columns so that
 // overlapping events sit next to each other instead of stacking. Each event is
@@ -35,7 +35,7 @@ export function spans(instances, weekStart) {
   const weekEnd = addDays(weekStart, 7);
   const col = d => Math.min(6, Math.max(0, Math.round((startOfDay(d) - weekStart) / DAY)));
   const multi = instances
-    .filter(i => +i.end - +i.start > DAY && +i.start < +weekEnd && +i.end > +weekStart
+    .filter(i => spansDays(i) && +i.start < +weekEnd && +i.end > +weekStart
       && (col(new Date(+i.end - 1)) > col(i.start) || +i.start < +weekStart))
     .map(i => ({
       inst: i,
