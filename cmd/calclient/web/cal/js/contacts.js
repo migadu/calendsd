@@ -609,6 +609,7 @@ function contactDialog(c) {
       <label class="full">Display name (optional)<input id="cd-fn" type="text" value="${c?.fn ?? ''}" placeholder="Defaults to first + last"></label>
       <label>Organization<input id="cd-org" type="text" value="${c?.org ?? ''}"></label>
       <label>Job title<input id="cd-title" type="text" value="${c?.title ?? ''}"></label>
+      <label class="full" id="cd-book-row">Address book<select id="cd-book"></select></label>
 
       <div class="full field-group">
         <div class="fg-head"><span>Email</span><button type="button" id="cd-add-email" class="ghost">${icon('plus', 13)} Add email</button></div>
@@ -642,6 +643,16 @@ function contactDialog(c) {
   </div></div>`;
 
   const q = sel => $(sel, dlg);
+
+  // Address book: where a new contact lands (the sidebar's book, else the
+  // first) and, for an existing one, where it moves on save. Hidden when there
+  // is no book yet — the first save creates one.
+  const books = store.state.books;
+  const bookSel = q('#cd-book');
+  for (const b of books) bookSel.append(html`<option value="${b.href}">${b.displayName}</option>`);
+  bookSel.value = c?.book || (selection.type === 'book' ? selection.href : books[0]?.href) || '';
+  q('#cd-book-row').hidden = !books.length;
+
   const emailsBox = q('#cd-emails'), telsBox = q('#cd-tels');
   const emails = c?.emails?.length ? c.emails : [{ value: '', type: '' }];
   const tels = c?.tels?.length ? c.tels : [{ value: '', type: 'CELL' }];
@@ -690,7 +701,7 @@ function contactDialog(c) {
     if (!fn) { q('#cd-error').textContent = 'Please enter a name.'; return; }
     try {
       await store.saveContact({
-        href: c?.href, etag: c?.etag, uid: c?.uid,
+        href: c?.href, etag: c?.etag, uid: c?.uid, book: c?.book,
         preserve: photoLine ? [...otherPreserve, photoLine] : otherPreserve,
         fn, first, last,
         org: q('#cd-org').value.trim(), title: q('#cd-title').value.trim(),
@@ -703,11 +714,14 @@ function contactDialog(c) {
         },
         url: q('#cd-url').value.trim(), bday: q('#cd-bday').value.trim(),
         note: q('#cd-note').value.trim(),
-      }, !c && selection.type === 'book' ? selection.href : undefined);
+      }, bookSel.value || undefined);
       close();
       toast('Contact saved.');
     } catch (e) {
-      if (e.conflict) q('#cd-error').textContent = e.message;
+      // The edit was stored and only the move failed: keeping the dialog open
+      // would invite a re-save with the old ETag, which can only 412.
+      if (e.saved) { close(); showError(e); }
+      else if (e.conflict) q('#cd-error').textContent = e.message;
       else showError(e);
     }
   });

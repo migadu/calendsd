@@ -220,4 +220,75 @@ test.describe('contacts management', () => {
     expect(saved).toMatch(/TEL;TYPE=CELL:\+1 555 909 0009/);
     expect(saved).not.toMatch(/item1\.|item2\.|X-ABLABEL/i);
   });
+
+  // Two tagged books (the slug carries the tag, so the cleanup removes them).
+  const bookA = `/addressbooks/bob/${TAG.toLowerCase()}-a/`, bookB = `/addressbooks/bob/${TAG.toLowerCase()}-b/`;
+  async function makeBooks(request) {
+    for (const [href, name] of [[bookA, `${TAG} A`], [bookB, `${TAG} B`]]) {
+      const r = await request.fetch(href, {
+        method: 'MKCOL', headers: { ...auth, 'Content-Type': 'application/xml; charset=utf-8' },
+        data: `<?xml version="1.0" encoding="utf-8"?><d:mkcol xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:set><d:prop>
+          <d:resourcetype><d:collection/><card:addressbook/></d:resourcetype><d:displayname>${name}</d:displayname></d:prop></d:set></d:mkcol>`,
+      });
+      expect(r.status(), `MKCOL ${href}`).toBe(201);
+    }
+  }
+  const cardsIn = async (request, book) => (await propfind(request, book)).hrefs.filter(h => h.endsWith('.vcf'));
+
+  test('the editor picks the address book of a new contact and moves an existing one', async ({ page, request }) => {
+    await makeBooks(request);
+    const name = `${TAG} Mover`;
+
+    await login(page);
+    await gotoContacts(page);
+
+    // New contact from "All Contacts": the picker decides the book.
+    await page.click('#ct-add');
+    await page.fill('#cd-first', name);
+    await page.selectOption('#cd-book', { label: `${TAG} A` });
+    await page.click('#cd-save');
+    await page.locator('#cd-save').waitFor({ state: 'hidden' });
+    await expect.poll(() => cardsIn(request, bookA)).toHaveLength(1);
+
+    // Editing it and choosing the other book moves the card there.
+    await page.locator('.contact', { hasText: name }).click();
+    await page.click('#cv-edit');
+    await expect(page.locator('#cd-book')).toHaveValue(bookA);
+    await page.selectOption('#cd-book', { label: `${TAG} B` });
+    await page.click('#cd-save');
+    await page.locator('#cd-save').waitFor({ state: 'hidden' });
+    await expect.poll(() => cardsIn(request, bookB)).toHaveLength(1);
+    expect(await cardsIn(request, bookA)).toHaveLength(0);
+  });
+
+  test('moving a contact never replaces a copy with the same UID in the target book', async ({ page, request }) => {
+    await makeBooks(request);
+    // The same UID in both books, edited apart: the situation the migration
+    // leaves behind for contacts that lived in two books.
+    const uid = `${TAG.toLowerCase()}-dup-uid`;
+    const put = (book, fn) => request.fetch(`${book}${uid}.vcf`, {
+      method: 'PUT', headers: { ...auth, 'Content-Type': 'text/vcard; charset=utf-8' },
+      data: `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${uid}\r\nFN:${fn}\r\nN:${fn};;;;\r\nEND:VCARD\r\n`,
+    });
+    expect((await put(bookA, `${TAG} Copy A`)).status()).toBeLessThan(300);
+    expect((await put(bookB, `${TAG} Copy B`)).status()).toBeLessThan(300);
+
+    await login(page);
+    await gotoContacts(page);
+    await page.locator('.contact', { hasText: `${TAG} Copy A` }).click();
+    await page.click('#cv-edit');
+    await page.fill('#cd-org', 'Edited');
+    await page.selectOption('#cd-book', { label: `${TAG} B` });
+    await page.click('#cd-save');
+
+    // The edit is kept, the move refused, and the dialog closes rather than
+    // offering a re-save that could only fail on the stale ETag.
+    await expect(page.locator('#toast')).toContainText('already has a copy of this contact');
+    await expect(page.locator('#cd-save')).toHaveCount(0);
+    const inA = await (await request.fetch(`${bookA}${uid}.vcf`, { headers: auth })).text();
+    const inB = await (await request.fetch(`${bookB}${uid}.vcf`, { headers: auth })).text();
+    expect(inA).toContain('ORG:Edited');
+    expect(inB).toContain(`FN:${TAG} Copy B`);
+    expect(inB).not.toContain('Edited');
+  });
 });

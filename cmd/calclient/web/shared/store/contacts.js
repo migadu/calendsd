@@ -5,7 +5,7 @@
 import * as dav from '../dav.js';
 import * as ical from '../ical.js';
 import { state, emit, check } from './core.js';
-import { getObject, putObject, deleteObject } from './objects.js';
+import { getObject, putObject, deleteObject, moveObject } from './objects.js';
 import { rewriteMemberLines } from './dedup.js';
 
 const { NS, key } = dav;
@@ -265,19 +265,45 @@ async function ensureBook() {
 // putContact writes the editor model (see parseContact) without reloading the
 // list. New contacts get a UID and land in targetBook (the selected address
 // book) when given, otherwise the first/auto-created book; edits overwrite in
-// place with ETag. The bulk importer calls this in a loop and reloads once.
+// place with ETag, and a targetBook other than the contact's own book then
+// moves it there (WebDAV MOVE, same file name). The bulk importer calls this
+// in a loop and reloads once.
+//
+// The move never overwrites: a card of the same name in the target book is a
+// copy of this contact (same UID) that may have been edited on its own, so the
+// move is refused and the user merges the two instead. A failed move throws an
+// error with saved=true — the edit itself is stored, so the caller must not
+// offer to re-send it with the old ETag.
 export async function putContact(model, targetBook) {
   const uid = model.uid || crypto.randomUUID();
   const text = ical.buildVCard({ ...model, uid });
   const dir = targetBook || (await ensureBook());
   const target = model.href ?? dir + encodeURIComponent(uid) + '.vcf';
   await putObject(target, text, model.href ? model.etag : null, 'text/vcard; charset=utf-8');
+  if (model.href && model.book && targetBook && targetBook !== model.book) {
+    try {
+      await moveObject(model.href, targetBook + model.href.slice(model.href.lastIndexOf('/') + 1), { overwrite: false });
+    } catch (e) {
+      const book = state.books.find(b => b.href === targetBook)?.displayName || 'that address book';
+      const err = new Error(e.status === 412
+        ? `Saved, but not moved: “${book}” already has a copy of this contact. Merge the duplicates instead.`
+        : `Saved, but not moved to “${book}”: ${e.message}`);
+      err.saved = true;
+      throw err;
+    }
+  }
 }
 
 // saveContact writes one contact and refreshes the list — the interactive
-// editor path.
+// editor path. The list is refreshed after a failed move too, since the edit
+// was stored.
 export async function saveContact(model, targetBook) {
-  await putContact(model, targetBook);
+  try {
+    await putContact(model, targetBook);
+  } catch (e) {
+    if (e.saved) await loadContacts();
+    throw e;
+  }
   await loadContacts();
 }
 

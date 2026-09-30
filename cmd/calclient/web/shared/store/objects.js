@@ -31,7 +31,11 @@ export async function deleteObject(href, etag) {
 // at its default (true): the destination filename is UID-derived, so a name
 // clash means a stale copy of the same event (e.g. from an interrupted move) —
 // replacing it is correct, and refusing (Overwrite:F) would 412 forever.
-export async function moveObject(href, destHref) {
+// Contacts pass overwrite:false: the same UID in two address books is a
+// separately edited copy, not a leftover, and must not be silently replaced.
+export async function moveObject(href, destHref, { overwrite = true } = {}) {
   const dest = new URL(destHref, location.origin).href;
-  check(await dav.req('MOVE', href, { headers: { Destination: dest } }), [201, 204]);
+  const headers = { Destination: dest };
+  if (!overwrite) headers.Overwrite = 'F';
+  check(await dav.req('MOVE', href, { headers }), [201, 204]);
 }
