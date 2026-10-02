@@ -99,7 +99,11 @@ func (i *Inbox) ACL() []acl.ACE {
 func (i *Inbox) SupportedPrivileges() *acl.Privilege {
 	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
 		{Name: "{DAV:}read"},
+		// write-properties lets the owner PROPPATCH the inbox's own
+		// properties; like sabre's default set, which its
+		// Inbox extends with schedule-deliver.
 		{Name: "{DAV:}write", Aggregates: []acl.Privilege{
+			{Name: "{DAV:}write-properties"}, {Name: "{DAV:}write-content"},
 			{Name: "{DAV:}bind"}, {Name: "{DAV:}unbind"},
 		}},
 		{Name: "{urn:ietf:params:xml:ns:caldav}schedule-deliver", Aggregates: []acl.Privilege{
