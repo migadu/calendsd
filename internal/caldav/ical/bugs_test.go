@@ -407,3 +407,41 @@ func TestBug6NonIANATZIDWithVTimezone(t *testing.T) {
 		t.Fatalf("Expand of non-IANA TZID with VTIMEZONE errored: %v", err)
 	}
 }
+
+// TestNonIANATZIDSummerOffset: an Outlook VTIMEZONE anchors its rules in
+// 1601, and rrule-go ends a series ~292 years after DTSTART, so the
+// transitions used to stop in 1893 and every later summer date was read with
+// the winter offset. 10:00 W. Europe in June is 08:00Z, not 09:00Z.
+func TestNonIANATZIDSummerOffset(t *testing.T) {
+	data := ics(
+		"BEGIN:VTIMEZONE", "TZID:W. Europe Standard Time",
+		"BEGIN:STANDARD", "DTSTART:16011028T030000",
+		"TZOFFSETFROM:+0200", "TZOFFSETTO:+0100",
+		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10", "END:STANDARD",
+		"BEGIN:DAYLIGHT", "DTSTART:16010325T020000",
+		"TZOFFSETFROM:+0100", "TZOFFSETTO:+0200",
+		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3", "END:DAYLIGHT",
+		"END:VTIMEZONE",
+		"BEGIN:VEVENT", "UID:tz-nia-2", "DTSTAMP:20260101T000000Z",
+		"DTSTART;TZID=W. Europe Standard Time:20260601T100000",
+		"DTEND;TZID=W. Europe Standard Time:20260601T110000",
+		"END:VEVENT",
+	)
+	cal, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Expand(cal,
+		time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC),
+		time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Children) != 1 {
+		t.Fatalf("expanded %d components, want 1", len(out.Children))
+	}
+	if got := out.Children[0].Props.Get("DTSTART").Value; got != "20260601T080000Z" {
+		t.Errorf("DTSTART = %s, want 20260601T080000Z", got)
+	}
+}

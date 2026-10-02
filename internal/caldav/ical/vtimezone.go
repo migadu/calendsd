@@ -190,8 +190,24 @@ func parseVTimezone(comp *goical.Component) *vtimezone {
 			raw = append(raw, tzTransition{at: toUTC(onset), offset: offTo})
 			continue
 		}
-		// Expand the yearly onset rule across a wide window.
-		set, err := recurrenceSet(sub, time.UTC)
+		// Expand the yearly onset rule across a wide window. rrule-go stops a
+		// series about 292 years (the range of a time.Duration) after its
+		// DTSTART, and Outlook anchors its rules in 1601, which would end the
+		// transitions in 1893 and leave every later date on the last offset
+		// seen. An anchor before 1970 is moved to 1970: the rule, not the
+		// anchor, decides each year's onset, and the extra instance the moved
+		// DTSTART itself adds lies decades in the past.
+		ruleSub := sub
+		if onset.Year() < 1970 {
+			ruleSub = &goical.Component{Name: sub.Name, Props: goical.Props{}, Children: sub.Children}
+			for name, props := range sub.Props {
+				ruleSub.Props[name] = props
+			}
+			moved := cloneProp(*dsProp)
+			moved.Value = onset.AddDate(1970-onset.Year(), 0, 0).Format("20060102T150405")
+			ruleSub.Props[goical.PropDateTimeStart] = []goical.Prop{moved}
+		}
+		set, err := recurrenceSet(ruleSub, time.UTC)
 		if err != nil || set == nil {
 			raw = append(raw, tzTransition{at: toUTC(onset), offset: offTo})
 			continue
