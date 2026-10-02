@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	goical "github.com/emersion/go-ical"
+	"github.com/teambition/rrule-go"
 )
 
 // VAVAILABILITY (RFC 7953) support: a user's working hours, stored as the
@@ -25,6 +27,21 @@ const (
 
 	// MaxAvailabilitySize bounds a stored calendar-availability value.
 	MaxAvailabilitySize = 64 << 10
+
+	// maxAvailabilityScan caps the instances one AVAILABLE series may step
+	// through to reach a free-busy window. Validation allows at most one
+	// RRULE instance a day, so this is centuries of daily working hours,
+	// and keeps a probe's worst case to milliseconds.
+	maxAvailabilityScan = 100_000
+
+	// availabilityHorizon is how far ahead validation proves a value stays
+	// expandable, so one accepted today does not hit maxAvailabilityScan and
+	// silently stop applying later.
+	availabilityHorizon = 10 // years
+
+	// lowestPriority is where PRIORITY 0 (undefined) and an absent PRIORITY
+	// rank: below 9 (RFC 7953 §3.2, RFC 5545 §3.8.1.9).
+	lowestPriority = 10
 )
 
 // ErrInvalidAvailability wraps every reason an availability value is
@@ -66,10 +83,13 @@ func ValidateAvailability(data []byte) error {
 		return invalidAvailability("no VAVAILABILITY component")
 	}
 	// Expansion problems a static check misses (a malformed RRULE value, an
-	// unparseable EXDATE) surface here rather than at free-busy time.
+	// unparseable EXDATE) surface here rather than at free-busy time, as does
+	// a series anchored so far back that it would outgrow the scan cap.
 	now := time.Now()
-	if _, err := unavailablePeriods(data, now, now.AddDate(0, 0, 7)); err != nil {
-		return err
+	for _, from := range []time.Time{now, now.AddDate(availabilityHorizon, 0, 0)} {
+		if _, err := unavailablePeriods(data, from, from.AddDate(0, 0, 7)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -90,6 +110,26 @@ func validateVAvailability(comp *goical.Component, zones availabilityZoneSet) er
 	}
 	if !start.IsZero() && !end.IsZero() && !end.After(start) {
 		return invalidAvailability("VAVAILABILITY ends before it starts")
+	}
+	if d := comp.Props.Get(goical.PropDuration); d != nil {
+		if start.IsZero() {
+			return invalidAvailability("VAVAILABILITY DURATION without DTSTART")
+		}
+		if !end.IsZero() {
+			return invalidAvailability("VAVAILABILITY has both DTEND and DURATION")
+		}
+		dur, err := d.Duration()
+		if err != nil {
+			return invalidAvailability("VAVAILABILITY DURATION: %v", err)
+		}
+		if dur <= 0 {
+			return invalidAvailability("VAVAILABILITY DURATION is not positive")
+		}
+	}
+	if p := comp.Props.Get(goical.PropPriority); p != nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(p.Value)); err != nil || n < 0 || n > 9 {
+			return invalidAvailability("VAVAILABILITY PRIORITY %q is not 0-9", p.Value)
+		}
 	}
 	masters := map[string]bool{}
 	for _, sub := range comp.Children {
@@ -138,13 +178,15 @@ func validateAvailable(comp *goical.Component, zones availabilityZoneSet) error 
 		return invalidAvailability("RRULE: %v", err)
 	}
 	if roption != nil {
-		freq := strings.ToUpper(comp.Props.Get(goical.PropRecurrenceRule).Value)
-		// Working hours repeat daily at most often. A sub-daily rule anchored
-		// years back would also need more than maxTimeRangeScan steps to
-		// reach today.
-		if strings.Contains(freq, "FREQ=SECONDLY") || strings.Contains(freq, "FREQ=MINUTELY") ||
-			strings.Contains(freq, "FREQ=HOURLY") {
+		// Working hours repeat daily at most often, which is what keeps a
+		// series anchored years back within maxAvailabilityScan. BYHOUR,
+		// BYMINUTE and BYSECOND would multiply a DAILY rule back into a
+		// sub-daily one.
+		if roption.Freq > rrule.DAILY {
 			return invalidAvailability("RRULE frequency below DAILY is not supported")
+		}
+		if len(roption.Byhour) > 0 || len(roption.Byminute) > 0 || len(roption.Bysecond) > 0 {
+			return invalidAvailability("RRULE BYHOUR, BYMINUTE and BYSECOND are not supported")
 		}
 	}
 	return nil
@@ -196,41 +238,88 @@ func checkDateTimes(comp *goical.Component, zones availabilityZoneSet) error {
 }
 
 // UnavailablePeriods returns the parts of [start, end) that the availability
-// marks as unavailable: for each VAVAILABILITY, its coverage (DTSTART/DTEND,
-// either unbounded) minus the union of its AVAILABLE instances, unioned across
-// components (v1 ignores PRIORITY). Every instance is computed in its own
-// zone before conversion to UTC, which is what keeps a 09:00 day at 09:00
-// local across DST (VAVAILABILITY-PLAN.md §4.1). Errors wrap
-// ErrInvalidAvailability.
+// marks as unavailable. Each VAVAILABILITY's coverage (DTSTART/DTEND, either
+// unbounded) minus the union of its AVAILABLE instances is unavailable. A
+// component decides all the time it covers over every lower-PRIORITY one
+// (RFC 7953 §4, like sabre's FreeBusyGenerator); components of equal priority
+// combine, so time unavailable in any of them is unavailable. Every instance
+// is computed in its own zone before conversion to UTC, which is what keeps a
+// 09:00 day at 09:00 local across DST (VAVAILABILITY-PLAN.md §4.1). Errors
+// wrap ErrInvalidAvailability.
 func unavailablePeriods(data []byte, start, end time.Time) ([]busyPeriod, error) {
 	cal, err := Decode([]byte(NormalizeCRLF(string(data))))
 	if err != nil {
 		return nil, invalidAvailability("not an iCalendar object: %v", err)
 	}
 	zones := availabilityZones(cal)
-	var out []busyPeriod
+	type layer struct{ cover, unavailable []interval }
+	layers := map[int]*layer{}
 	for _, comp := range cal.Children {
 		if comp.Name != compAvailability {
 			continue
 		}
-		p, err := zones.componentUnavailable(comp, start, end)
+		cover, unavail, ok, err := zones.componentUnavailable(comp, start, end)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, p...)
+		if !ok {
+			continue
+		}
+		pr := availabilityPriority(comp)
+		if layers[pr] == nil {
+			layers[pr] = &layer{}
+		}
+		layers[pr].cover = append(layers[pr].cover, cover)
+		layers[pr].unavailable = append(layers[pr].unavailable, unavail...)
+	}
+	priorities := make([]int, 0, len(layers))
+	for pr := range layers {
+		priorities = append(priorities, pr)
+	}
+	// Lowest priority first, so each higher layer overwrites what it covers.
+	sort.Sort(sort.Reverse(sort.IntSlice(priorities)))
+	var unavailable []interval
+	for _, pr := range priorities {
+		l := layers[pr]
+		var kept []interval
+		for _, iv := range unavailable {
+			kept = append(kept, subtract(iv, l.cover)...)
+		}
+		unavailable = append(kept, l.unavailable...)
+	}
+	out := make([]busyPeriod, 0, len(unavailable))
+	for _, iv := range unavailable {
+		out = append(out, busyPeriod{start: iv.start, end: iv.end, fbType: fbBusyUnavailable})
 	}
 	return coalesce(out), nil
+}
+
+// availabilityPriority ranks a VAVAILABILITY: 1 is the highest, and 0, an
+// absent or an unparseable PRIORITY rank below 9.
+func availabilityPriority(comp *goical.Component) int {
+	p := comp.Props.Get(goical.PropPriority)
+	if p == nil {
+		return lowestPriority
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(p.Value))
+	if err != nil || n < 1 || n > 9 {
+		return lowestPriority
+	}
+	return n
 }
 
 // interval is a half-open [start, end) span of absolute time.
 type interval struct{ start, end time.Time }
 
-func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start, end time.Time) ([]busyPeriod, error) {
+// componentUnavailable returns one VAVAILABILITY's coverage within
+// [start, end) and the unavailable parts of it; ok is false when it covers
+// none of the window.
+func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start, end time.Time) (cover interval, unavailable []interval, ok bool, err error) {
 	covStart, covEnd := start, end
 	if p := comp.Props.Get(goical.PropDateTimeStart); p != nil {
 		t, err := z.instant(p)
 		if err != nil {
-			return nil, invalidAvailability("VAVAILABILITY DTSTART: %v", err)
+			return interval{}, nil, false, invalidAvailability("VAVAILABILITY DTSTART: %v", err)
 		}
 		if t.After(covStart) {
 			covStart = t
@@ -238,7 +327,7 @@ func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start,
 		if d := comp.Props.Get(goical.PropDuration); d != nil && comp.Props.Get(goical.PropDateTimeEnd) == nil {
 			dur, err := d.Duration()
 			if err != nil {
-				return nil, invalidAvailability("VAVAILABILITY DURATION: %v", err)
+				return interval{}, nil, false, invalidAvailability("VAVAILABILITY DURATION: %v", err)
 			}
 			if e := t.Add(dur); e.Before(covEnd) {
 				covEnd = e
@@ -248,14 +337,14 @@ func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start,
 	if p := comp.Props.Get(goical.PropDateTimeEnd); p != nil {
 		t, err := z.instant(p)
 		if err != nil {
-			return nil, invalidAvailability("VAVAILABILITY DTEND: %v", err)
+			return interval{}, nil, false, invalidAvailability("VAVAILABILITY DTEND: %v", err)
 		}
 		if t.Before(covEnd) {
 			covEnd = t
 		}
 	}
 	if !covStart.Before(covEnd) {
-		return nil, nil
+		return interval{}, nil, false, nil
 	}
 
 	// Group AVAILABLE by UID: one master plus RECURRENCE-ID overrides.
@@ -296,28 +385,25 @@ func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start,
 		for _, o := range g.overrides {
 			rid, err := z.instant(o.Props.Get(goical.PropRecurrenceID))
 			if err != nil {
-				return nil, invalidAvailability("AVAILABLE RECURRENCE-ID: %v", err)
+				return interval{}, nil, false, invalidAvailability("AVAILABLE RECURRENCE-ID: %v", err)
 			}
 			replaced[rid.Unix()] = true
 			s, e, err := z.span(o)
 			if err != nil {
-				return nil, invalidAvailability("AVAILABLE: %v", err)
+				return interval{}, nil, false, invalidAvailability("AVAILABLE: %v", err)
 			}
 			avail = append(avail, interval{s, e})
 		}
 		if g.master != nil {
 			inst, err := z.expand(g.master, covStart, covEnd, replaced)
 			if err != nil {
-				return nil, err
+				return interval{}, nil, false, err
 			}
 			avail = append(avail, inst...)
 		}
 	}
-	var out []busyPeriod
-	for _, iv := range subtract(interval{covStart, covEnd}, avail) {
-		out = append(out, busyPeriod{start: iv.start, end: iv.end, fbType: fbBusyUnavailable})
-	}
-	return out, nil
+	cover = interval{covStart, covEnd}
+	return cover, subtract(cover, avail), true, nil
 }
 
 // expand lists a master AVAILABLE's instances overlapping [start, end),
@@ -342,16 +428,10 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 	// which keeps every instance at its local time. An embedded (non-IANA)
 	// VTIMEZONE has no time.Location, so the rule is expanded on the bare
 	// wall clock (as UTC) and each instance is placed with the VTIMEZONE's
-	// offset for that wall time; a UTC UNTIL is moved onto the same wall
-	// clock so it ends the series at the right instance.
-	dtstartProp := comp.Props.Get(goical.PropDateTimeStart)
-	custom := z[dtstartProp.Params.Get(goical.PropTimezoneID)]
-	ruleComp := comp
-	if custom != nil {
-		ruleComp = stripTZID(comp, dtstartProp.Params.Get(goical.PropTimezoneID))
-		if rr := ruleComp.Props.Get(goical.PropRecurrenceRule); rr != nil {
-			rr.Value = untilOnWallClock(rr.Value, custom)
-		}
+	// offset for that wall time.
+	ruleComp, custom, err := z.ruleComponent(comp)
+	if err != nil {
+		return nil, invalidAvailability("AVAILABLE: %v", err)
 	}
 	dtstart, err := ruleComp.Props.Get(goical.PropDateTimeStart).DateTime(time.UTC)
 	if err != nil {
@@ -375,13 +455,13 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 	var out []interval
 	next := set.Iterator()
 	// A weekly rule anchored years ago is normal for working hours, so the
-	// cap is the window-bounded maxTimeRangeScan, not maxRecurrences, which
-	// would stop a long-running rule before it reaches the window.
+	// cap is maxAvailabilityScan, not maxRecurrences, which would stop a
+	// long-running rule before it reaches the window.
 	for i := 0; ; i++ {
-		if i == maxTimeRangeScan {
+		if i == maxAvailabilityScan {
 			// Stopping here would report the rest of the window as
 			// unavailable; an unusable value is the honest answer.
-			return nil, invalidAvailability("AVAILABLE recurrence does not reach the window within %d instances", maxTimeRangeScan)
+			return nil, invalidAvailability("AVAILABLE recurrence does not reach the window within %d instances", maxAvailabilityScan)
 		}
 		occ, more := next()
 		if !more {
@@ -454,14 +534,34 @@ func availabilityZones(cal *goical.Calendar) availabilityZoneSet {
 
 // instant resolves a single date-time property to an absolute time.
 func (z availabilityZoneSet) instant(p *goical.Prop) (time.Time, error) {
-	if tz := z[p.Params.Get(goical.PropTimezoneID)]; tz != nil {
-		wall, err := time.ParseInLocation("20060102T150405", p.Value, time.UTC)
+	if tzid := p.Params.Get(goical.PropTimezoneID); z[tzid] != nil {
+		return z.valueInstant(p.Value, tzid)
+	}
+	return p.DateTime(time.UTC)
+}
+
+// valueInstant resolves one DATE-TIME value (a single entry of an EXDATE or
+// RDATE list) written with tzid, or in UTC with a trailing Z. A floating
+// value, which validation rejects, is read as UTC.
+func (z availabilityZoneSet) valueInstant(v, tzid string) (time.Time, error) {
+	if tz := z[tzid]; tz != nil {
+		wall, err := time.ParseInLocation("20060102T150405", v, time.UTC)
 		if err != nil {
 			return time.Time{}, err
 		}
 		return wall.Add(-time.Duration(tz.offsetAt(wall)) * time.Second), nil
 	}
-	return p.DateTime(time.UTC)
+	if strings.HasSuffix(v, "Z") {
+		return time.Parse("20060102T150405Z", v)
+	}
+	loc := time.UTC
+	if tzid != "" {
+		var err error
+		if loc, err = time.LoadLocation(tzid); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return time.ParseInLocation("20060102T150405", v, loc)
 }
 
 // span resolves a single (non-recurring) component's [DTSTART, end).
@@ -505,19 +605,65 @@ func untilOnWallClock(rule string, tz *vtimezone) string {
 	return strings.Join(parts, ";")
 }
 
-// stripTZID returns a shallow copy of comp whose date-time properties in zone
-// tzid become floating, so they can be expanded on the bare wall clock.
-func stripTZID(comp *goical.Component, tzid string) *goical.Component {
+// ruleComponent returns a copy of a master AVAILABLE whose DTSTART, DTEND,
+// EXDATE and RDATE all read on one clock that rrule can expand, plus the
+// embedded VTIMEZONE that clock belongs to (nil when it is real time).
+//
+// With DTSTART in an embedded zone, the clock is that zone's bare wall clock:
+// values in the zone lose their TZID, and values written in UTC or another
+// zone are moved onto it (as is a UTC UNTIL), so they still match the
+// instances they name. A floating value (only in an imported value, since
+// validation rejects them) already reads on that clock. Otherwise only values in an embedded zone, which
+// rrule cannot load, change: they become UTC.
+func (z availabilityZoneSet) ruleComponent(comp *goical.Component) (*goical.Component, *vtimezone, error) {
+	tzid := comp.Props.Get(goical.PropDateTimeStart).Params.Get(goical.PropTimezoneID)
+	custom := z[tzid]
 	cp := &goical.Component{Name: comp.Name, Props: goical.Props{}, Children: comp.Children}
 	for name, props := range comp.Props {
+		switch name {
+		case goical.PropDateTimeStart, goical.PropDateTimeEnd,
+			goical.PropExceptionDates, goical.PropRecurrenceDates:
+		default:
+			cp.Props[name] = props
+			continue
+		}
 		out := make([]goical.Prop, len(props))
 		for i, p := range props {
 			out[i] = cloneProp(p)
-			if out[i].Params.Get(goical.PropTimezoneID) == tzid {
-				out[i].Params.Del(goical.PropTimezoneID)
+			ptz := p.Params.Get(goical.PropTimezoneID)
+			if custom == nil && z[ptz] == nil {
+				continue // already on rrule's clock
 			}
+			out[i].Params.Del(goical.PropTimezoneID)
+			if custom != nil && ptz == tzid {
+				continue // the wall clock itself
+			}
+			values := strings.Split(p.Value, ",")
+			for j, v := range values {
+				if custom != nil && ptz == "" && !strings.HasSuffix(v, "Z") {
+					continue // floating: already the wall clock
+				}
+				t, err := z.valueInstant(v, ptz)
+				if err != nil {
+					return nil, nil, fmt.Errorf("%s: %w", name, err)
+				}
+				if custom != nil {
+					wall := t.Add(time.Duration(custom.offsetAtInstant(t)) * time.Second)
+					values[j] = wall.Format("20060102T150405")
+				} else {
+					values[j] = t.UTC().Format("20060102T150405Z")
+				}
+			}
+			out[i].Value = strings.Join(values, ",")
 		}
 		cp.Props[name] = out
 	}
-	return cp
+	if custom != nil {
+		if rr := cp.Props.Get(goical.PropRecurrenceRule); rr != nil {
+			cloned := cloneProp(*rr)
+			cloned.Value = untilOnWallClock(rr.Value, custom)
+			cp.Props[goical.PropRecurrenceRule] = []goical.Prop{cloned}
+		}
+	}
+	return cp, custom, nil
 }

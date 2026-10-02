@@ -25,6 +25,20 @@ func workweek(tzid string, vavail, avail []string, extra ...string) []byte {
 	return ics(lines...)
 }
 
+// withWEurope embeds an Outlook-style "W. Europe Standard Time" VTIMEZONE
+// (CET/CEST) before the first VAVAILABILITY.
+func withWEurope(data []byte) []byte {
+	return []byte(strings.Replace(string(data), "BEGIN:VAVAILABILITY", strings.Join([]string{
+		"BEGIN:VTIMEZONE", "TZID:W. Europe Standard Time",
+		"BEGIN:STANDARD", "DTSTART:16011028T030000",
+		"TZOFFSETFROM:+0200", "TZOFFSETTO:+0100",
+		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10", "END:STANDARD",
+		"BEGIN:DAYLIGHT", "DTSTART:16010325T020000",
+		"TZOFFSETFROM:+0100", "TZOFFSETTO:+0200",
+		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3", "END:DAYLIGHT",
+		"END:VTIMEZONE", "BEGIN:VAVAILABILITY"}, "\r\n"), 1))
+}
+
 func utc(s string) time.Time {
 	t, err := time.Parse("20060102T150405Z", s)
 	if err != nil {
@@ -87,15 +101,7 @@ func TestAvailabilityNewYorkAcrossDSTEnd(t *testing.T) {
 // DST rules, like the IANA zone it stands for.
 func TestAvailabilityNonIANATZIDFollowsDST(t *testing.T) {
 	data := workweek("W. Europe Standard Time", nil, nil)
-	data = []byte(strings.Replace(string(data), "BEGIN:VAVAILABILITY", strings.Join([]string{
-		"BEGIN:VTIMEZONE", "TZID:W. Europe Standard Time",
-		"BEGIN:STANDARD", "DTSTART:16011028T030000",
-		"TZOFFSETFROM:+0200", "TZOFFSETTO:+0100",
-		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10", "END:STANDARD",
-		"BEGIN:DAYLIGHT", "DTSTART:16010325T020000",
-		"TZOFFSETFROM:+0100", "TZOFFSETTO:+0200",
-		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3", "END:DAYLIGHT",
-		"END:VTIMEZONE", "BEGIN:VAVAILABILITY"}, "\r\n"), 1))
+	data = withWEurope(data)
 	if err := ValidateAvailability(data); err != nil {
 		t.Fatalf("ValidateAvailability: %v", err)
 	}
@@ -172,8 +178,8 @@ func TestAvailabilityExdateRdateAndWindowEdges(t *testing.T) {
 	wantPeriods(t, got, "20500103T000000Z/20500103T080000Z", "20500103T160000Z/20500104T000000Z")
 }
 
-// Two VAVAILABILITY components merge: the coverage is their union and so is
-// the available time (v1 ignores PRIORITY).
+// Two VAVAILABILITY components of equal priority combine: time unavailable
+// in either is unavailable.
 func TestAvailabilityMergesComponents(t *testing.T) {
 	data := ics(
 		"BEGIN:VAVAILABILITY", "UID:a", "DTSTAMP:20260101T000000Z",
@@ -209,6 +215,19 @@ func TestValidateAvailabilityRejects(t *testing.T) {
 		"end before start": strings.Replace(valid, "20260105T170000", "20260105T080000", 1),
 		"minutely":         strings.Replace(valid, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "FREQ=MINUTELY", 1),
 		"hourly":           strings.Replace(valid, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "FREQ=HOURLY", 1),
+		"byhour":           strings.Replace(valid, "BYDAY=MO,TU,WE,TH,FR", "BYDAY=MO,TU,WE,TH,FR;BYHOUR=9,13", 1),
+		"byminute":         strings.Replace(valid, "BYDAY=MO,TU,WE,TH,FR", "BYDAY=MO,TU,WE,TH,FR;BYMINUTE=0,30", 1),
+		"bysecond":         strings.Replace(valid, "BYDAY=MO,TU,WE,TH,FR", "BYDAY=MO,TU,WE,TH,FR;BYSECOND=0,1", 1),
+		// Daily since 1700 passes the scan cap within availabilityHorizon.
+		"anchored too far back": strings.Replace(strings.Replace(valid,
+			"FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "FREQ=DAILY", 1), "20260105T", "17000105T", 2),
+		"priority out of range":    strings.Replace(valid, "UID:ww\r\n", "UID:ww\r\nPRIORITY:10\r\n", 1),
+		"priority not a number":    strings.Replace(valid, "UID:ww\r\n", "UID:ww\r\nPRIORITY:high\r\n", 1),
+		"duration without dtstart": strings.Replace(valid, "UID:ww\r\n", "UID:ww\r\nDURATION:P1W\r\n", 1),
+		"duration and dtend": strings.Replace(valid, "UID:ww\r\n",
+			"UID:ww\r\nDTSTART:20260101T000000Z\r\nDTEND:20260201T000000Z\r\nDURATION:P1W\r\n", 1),
+		"negative duration": strings.Replace(valid, "UID:ww\r\n",
+			"UID:ww\r\nDTSTART:20260101T000000Z\r\nDURATION:-P1W\r\n", 1),
 		"duplicate master": strings.Replace(valid, "END:VAVAILABILITY",
 			"BEGIN:AVAILABLE\r\nUID:ww-days\r\nDTSTAMP:20260101T000000Z\r\n"+
 				"DTSTART;TZID=Europe/Berlin:20260110T090000\r\nDTEND;TZID=Europe/Berlin:20260110T120000\r\n"+
@@ -282,17 +301,75 @@ func TestAvailabilityScanCapIsAnError(t *testing.T) {
 func TestAvailabilityNonIANAUntil(t *testing.T) {
 	data := workweek("W. Europe Standard Time", nil, nil)
 	data = []byte(strings.Replace(string(data), "BYDAY=MO,TU,WE,TH,FR", "BYDAY=MO,TU,WE,TH,FR;UNTIL=20260603T070000Z", 1))
-	data = []byte(strings.Replace(string(data), "BEGIN:VAVAILABILITY", strings.Join([]string{
-		"BEGIN:VTIMEZONE", "TZID:W. Europe Standard Time",
-		"BEGIN:STANDARD", "DTSTART:16011028T030000",
-		"TZOFFSETFROM:+0200", "TZOFFSETTO:+0100",
-		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10", "END:STANDARD",
-		"BEGIN:DAYLIGHT", "DTSTART:16010325T020000",
-		"TZOFFSETFROM:+0100", "TZOFFSETTO:+0200",
-		"RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3", "END:DAYLIGHT",
-		"END:VTIMEZONE", "BEGIN:VAVAILABILITY"}, "\r\n"), 1))
+	data = withWEurope(data)
 	got := unavailable(t, data, "20260603T000000Z", "20260605T000000Z")
 	wantPeriods(t, got,
 		"20260603T000000Z/20260603T070000Z",
 		"20260603T150000Z/20260605T000000Z")
+}
+
+// A higher-PRIORITY VAVAILABILITY decides all the time it covers: a week of
+// 12–20 layered over regular 09–17 (Berlin, CEST) is free 10:00Z–18:00Z on
+// its days, and the regular hours still apply outside that week. PRIORITY 0
+// ranks below 9.
+func TestAvailabilityPriorityOverrides(t *testing.T) {
+	data := ics(
+		"BEGIN:VAVAILABILITY", "UID:base", "DTSTAMP:20260101T000000Z", "PRIORITY:0",
+		"BEGIN:AVAILABLE", "UID:base-days", "DTSTAMP:20260101T000000Z",
+		"DTSTART;TZID=Europe/Berlin:20260105T090000", "DTEND;TZID=Europe/Berlin:20260105T170000",
+		"RRULE:FREQ=DAILY", "END:AVAILABLE", "END:VAVAILABILITY",
+		"BEGIN:VAVAILABILITY", "UID:late", "DTSTAMP:20260101T000000Z", "PRIORITY:9",
+		"DTSTART;TZID=Europe/Berlin:20260601T000000", "DTEND;TZID=Europe/Berlin:20260608T000000",
+		"BEGIN:AVAILABLE", "UID:late-days", "DTSTAMP:20260101T000000Z",
+		"DTSTART;TZID=Europe/Berlin:20260601T120000", "DTEND;TZID=Europe/Berlin:20260601T200000",
+		"RRULE:FREQ=DAILY", "END:AVAILABLE", "END:VAVAILABILITY")
+	if err := ValidateAvailability(data); err != nil {
+		t.Fatalf("ValidateAvailability: %v", err)
+	}
+	got := unavailable(t, data, "20260607T000000Z", "20260609T000000Z")
+	wantPeriods(t, got,
+		"20260607T000000Z/20260607T100000Z",
+		"20260607T180000Z/20260608T070000Z",
+		"20260608T150000Z/20260609T000000Z")
+}
+
+// On an Outlook-zone series, EXDATE and RDATE written in UTC name the
+// instants they say: Wednesday 2026-06-03 09:00 CEST (07:00Z) is excluded,
+// and an extra Saturday 10:00 CEST (08:00Z) for two hours is added.
+func TestAvailabilityNonIANAUTCExdateRdate(t *testing.T) {
+	data := withWEurope(workweek("W. Europe Standard Time", nil, []string{
+		"EXDATE:20260603T070000Z", "RDATE:20260606T080000Z"}))
+	if err := ValidateAvailability(data); err != nil {
+		t.Fatalf("ValidateAvailability: %v", err)
+	}
+	got := unavailable(t, data, "20260603T000000Z", "20260604T000000Z")
+	wantPeriods(t, got, "20260603T000000Z/20260604T000000Z")
+	got = unavailable(t, data, "20260606T000000Z", "20260607T000000Z")
+	wantPeriods(t, got,
+		"20260606T000000Z/20260606T080000Z",
+		"20260606T160000Z/20260607T000000Z")
+}
+
+// A DTEND in another zone than an Outlook-zone DTSTART still gives the
+// instance its real length: 09:00 CEST to 15:00Z is 09–17 local.
+func TestAvailabilityNonIANAMixedZoneEnd(t *testing.T) {
+	data := withWEurope(workweek("W. Europe Standard Time", nil, nil))
+	data = []byte(strings.Replace(string(data),
+		"DTEND;TZID=W. Europe Standard Time:20260105T170000", "DTEND:20260105T160000Z", 1))
+	if err := ValidateAvailability(data); err != nil {
+		t.Fatalf("ValidateAvailability: %v", err)
+	}
+	got := unavailable(t, data, "20260603T000000Z", "20260604T000000Z")
+	wantPeriods(t, got,
+		"20260603T000000Z/20260603T070000Z",
+		"20260603T150000Z/20260604T000000Z")
+}
+
+// A floating EXDATE on an Outlook-zone series (only possible in an imported
+// value; validation rejects it) is read on the zone's wall clock, as before
+// UTC values were moved onto it.
+func TestAvailabilityNonIANAFloatingExdate(t *testing.T) {
+	data := withWEurope(workweek("W. Europe Standard Time", nil, []string{"EXDATE:20260603T090000"}))
+	got := unavailable(t, data, "20260603T000000Z", "20260604T000000Z")
+	wantPeriods(t, got, "20260603T000000Z/20260604T000000Z")
 }

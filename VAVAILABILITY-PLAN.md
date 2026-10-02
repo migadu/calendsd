@@ -61,6 +61,10 @@ interoperate for free.
   and RECURRENCE-ID overrides (CalDAVTester's `1.ics` uses an override).
   RDATE adds instances to an RRULE series. Without an RRULE, the AVAILABLE is
   its single DTSTART instance, the same as for events in `eventBusyPeriods`.
+- `PRIORITY` between overlapping VAVAILABILITY components (RFC 7953 §4, as
+  sabre does it): a component decides all the time it covers over every
+  lower-priority one, and 0 or no PRIORITY ranks below 9. Components of equal
+  priority combine, so time unavailable in any of them is unavailable.
 - IANA TZIDs, plus non-IANA TZIDs with an embedded VTIMEZONE (Outlook style),
   expanded in that zone's wall-clock time (§4.1).
 - `BUSY-UNAVAILABLE` in **outbox POST** free/busy.
@@ -71,11 +75,6 @@ interoperate for free.
 
 - VAVAILABILITY stored as calendar objects. PUT keeps returning 403 (sabre
   behavior; CalDAVTester's "Verify cannot PUT VAVAILABILITY" expects that).
-- `PRIORITY` ordering between overlapping VAVAILABILITY components. v1 merges
-  them: the coverage is the union of their ranges and the available time is
-  the union of all AVAILABLE instances. That is what you get when all
-  priorities are equal, and it covers every single-component client (Apple
-  and calweb both write one).
 - `BUSY-TYPE` values other than the default `BUSY-UNAVAILABLE`.
   `BUSY-TENTATIVE`/`BUSY` are accepted on write but reported as
   BUSY-UNAVAILABLE.
@@ -106,9 +105,8 @@ Its columns go into the `check.pgsql.calserver.sql` column list. A
 implemented by `storage.CalDAV`, so handler tests can use the in-memory fake
 as they do for other backends.
 
-One row per principal fits v1, which merges all VAVAILABILITY components
-anyway (§2). `PRIORITY` support later doesn't need a schema change, because
-the whole VCALENDAR is stored.
+One row per principal holds the whole VCALENDAR, every VAVAILABILITY
+component included (§2 layers them by `PRIORITY`).
 
 ### 3.2 Property names
 
@@ -183,11 +181,17 @@ The value is rejected if any of these hold:
   second master would silently replace the first (`expand.go` does exactly
   that for VEVENTs).
 - An AVAILABLE has no DTSTART or no DTEND/DURATION, or its end is ≤ its start.
-- An RRULE uses `FREQ=SECONDLY|MINUTELY|HOURLY`. Working hours repeat daily
-  at most, and a sub-daily rule anchored years back would need more than
-  `maxTimeRangeScan` steps to reach today. A stored value that hits that cap
-  anyway is treated as unusable (plain free/busy), never as "unavailable for
-  the rest of the window".
+- An RRULE uses `FREQ=SECONDLY|MINUTELY|HOURLY`, or `BYHOUR`, `BYMINUTE` or
+  `BYSECOND` (which turn a DAILY rule back into a sub-daily one). Working
+  hours repeat daily at most, and that bound is what keeps a series anchored
+  years back within `maxAvailabilityScan` (100,000 instances).
+- A series doesn't stay within `maxAvailabilityScan` for 10 years from now
+  (validation also expands a week then), so an accepted value can't silently
+  stop applying later. A stored value that hits the cap anyway is treated as
+  unusable (plain free/busy), never as "unavailable for the rest of the
+  window".
+- A VAVAILABILITY `PRIORITY` that isn't 0–9, or a `DURATION` without DTSTART,
+  next to DTEND, or not positive.
 - The value is larger than 64 KiB.
 - The request sets or removes both property names at once. They name the same
   row, so the two writes would conflict.
@@ -256,10 +260,12 @@ Algorithm, all in absolute time (UTC instants):
 4. Expand each master **in its own zone**. For an IANA TZID, rrule runs in that
    `time.Location`, which keeps every instance at its local time. That one
    step is the DST correctness. The expansion reuses `recurrenceSet` (so
-   comma-list EXDATE/RDATE work) and `masterDurationIn`.
+   comma-list EXDATE/RDATE work) and `masterDurationIn`. With an embedded
+   (non-IANA) zone the rule runs on that zone's bare wall clock, and
+   DTEND/EXDATE/RDATE/UNTIL written in UTC or another zone are moved onto
+   that clock first, so they still name the right instances.
 5. Expansion starts at the rule's DTSTART (a weekly rule from 2019 is normal)
-   and is bounded by the window end and `maxTimeRangeScan`, as in
-   `eventBusyPeriods`. It deliberately doesn't use `Expand`/`expandGroup`:
+   and is bounded by the window end and `maxAvailabilityScan`. It deliberately doesn't use `Expand`/`expandGroup`:
    those stop at `maxRecurrences` (3500), which a weekday rule reaches after
    about 13 years, and they build cloned components where intervals are
    enough.
@@ -477,8 +483,6 @@ BUSY-UNAVAILABLE as soon as step 3 is deployed.
 - **Rooms with hours.** Let auto-schedule decline bookings outside a room's
   availability, opt-in per room, with an explicit decline reason instead of
   overloading the busy-substring check.
-- **PRIORITY** across overlapping VAVAILABILITY components (vacation blocks
-  layered over regular hours) if a client starts writing them.
 
 ## 10. Who can see your free/busy (per-user visibility)
 
