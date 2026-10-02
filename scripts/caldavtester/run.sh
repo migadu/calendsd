@@ -3,6 +3,8 @@
 #
 #   direnv exec . scripts/caldavtester/run.sh          # run the curated list
 #   direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml   # one file
+#   VERBOSE=1 direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml
+#                                     # also print each test and why it failed
 #
 # CalDAVTester is Python 2 only and Python 2 is EOL, so this builds a py2.7
 # interpreter from the nixos-26.05 channel (allowing the insecure package) and
@@ -82,7 +84,12 @@ printf "\n%-38s %6s %6s %6s %6s\n" "FILE" "ok" "fail" "ignd" "err"
 to=0; tf=0; ti=0; te=0
 for f in "${files[@]}"; do
     seed  # restore default collections a prior file's DELETEALL removed
-    out="$("$PY2" testcaldav.py "$f" 2>/dev/null || true)"
+    if [ -n "${VERBOSE:-}" ]; then
+        out="$("$PY2" testcaldav.py "$f" 2>&1 || true)"
+        printf '%s\n' "$out"
+    else
+        out="$("$PY2" testcaldav.py "$f" 2>/dev/null || true)"
+    fi
     s="$(printf '%s' "$out" | grep -E '\(ok=' | tail -1)"
     ok=$(printf '%s' "$s" | sed -nE 's/.*ok=([0-9]+).*/\1/p'); ok=${ok:-0}
     fa=$(printf '%s' "$s" | sed -nE 's/.*failed=([0-9]+).*/\1/p'); fa=${fa:-0}

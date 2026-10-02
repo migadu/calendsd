@@ -373,3 +373,54 @@ func TestAvailabilityNonIANAFloatingExdate(t *testing.T) {
 	got := unavailable(t, data, "20260603T000000Z", "20260604T000000Z")
 	wantPeriods(t, got, "20260603T000000Z/20260604T000000Z")
 }
+
+// CalDAVTester's availability.xml "free-busy reports/1" (availability/17.xml,
+// 4.ics, 19.ics, with $now.year.0 = 2026 and $now.year.1 = 2027): Montreal
+// weekday hours and a one-hour US/Eastern event. CalendarServer expects
+// BUSY 17:00Z/PT1H and BUSY-UNAVAILABLE 00:00Z–14:00Z and 22:00Z–24:00Z on
+// one line; calserver writes the same periods in sabre's format, which is
+// why the suite itself still fails this test (scripts/caldavtester/README.md).
+func TestGenerateFreeBusyCalDAVTesterAvailability(t *testing.T) {
+	montreal := []string{
+		"BEGIN:VTIMEZONE", "TZID:America/Montreal",
+		"BEGIN:DAYLIGHT", "DTSTART:20000404T020000", "RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4",
+		"TZOFFSETFROM:-0500", "TZOFFSETTO:-0400", "END:DAYLIGHT",
+		"BEGIN:STANDARD", "DTSTART:20001026T020000", "RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10",
+		"TZOFFSETFROM:-0400", "TZOFFSETTO:-0500", "END:STANDARD",
+		"END:VTIMEZONE",
+	}
+	availability := ics(append(montreal,
+		"BEGIN:VAVAILABILITY", "ORGANIZER:mailto:bernard@example.com",
+		"UID:20061005T133225Z-00002-availability@example.com", "DTSTAMP:20061005T133225Z",
+		"DTSTART;TZID=America/Montreal:20260101T000000",
+		"BEGIN:AVAILABLE", "UID:20061005T133225Z-00001-A-availability@example.com",
+		"DTSTAMP:20061005T133225Z",
+		"DTSTART;TZID=America/Montreal:20260105T090000",
+		"DTEND;TZID=America/Montreal:20260105T170000",
+		"RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+		"END:AVAILABLE", "END:VAVAILABILITY")...)
+	event := ics("BEGIN:VEVENT", "UID:event1", "DTSTAMP:20051222T205953Z",
+		"DTSTART;TZID=US/Eastern:20270104T120000", "DURATION:PT1H", "END:VEVENT")
+	if err := ValidateAvailability(availability); err != nil {
+		t.Fatalf("ValidateAvailability: %v", err)
+	}
+	start, end := utc("20270104T000000Z"), utc("20270105T000000Z")
+	got, err := GenerateFreeBusyWithAvailability([][]byte{event}, availability, start, end, time.UTC, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, l := range fbLines(string(got)) {
+		if strings.HasPrefix(l, "FREEBUSY") {
+			lines = append(lines, l)
+		}
+	}
+	want := []string{
+		"FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:20270104T000000Z/20270104T140000Z",
+		"FREEBUSY:20270104T170000Z/20270104T180000Z",
+		"FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:20270104T220000Z/20270105T000000Z",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("free-busy:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}

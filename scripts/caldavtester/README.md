@@ -12,6 +12,7 @@ make caldavtester-full                                 # the entire suite, categ
 # or call the scripts directly:
 direnv exec . scripts/caldavtester/run.sh              # curated list
 direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml   # a single file
+VERBOSE=1 direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml  # per-test results and failure reasons
 direnv exec . scripts/caldavtester/run-full.sh         # full sweep (fresh server per file)
 ```
 
@@ -57,8 +58,9 @@ Two of its seven tests fail, by design, not because of a calserver bug
   `FREEBUSY;FBTYPE=BUSY:…T170000Z/PT1H` and the two BUSY-UNAVAILABLE spans
   comma-joined on one line. calserver writes free-busy in sabre's format, so
   the same periods come back as `FREEBUSY:…T170000Z/…T180000Z` and one
-  BUSY-UNAVAILABLE line per span. The ical and handler unit tests cover the
-  scenario.
+  BUSY-UNAVAILABLE line per span.
+  `TestGenerateFreeBusyCalDAVTesterAvailability` replays this test's data and
+  pins those periods.
 
 RFC-level behaviour (sync-collection, calendar-query, multiget, ACL reports) is
 verified more directly by the sabre-extracted corpus in `internal/corpus/` and
