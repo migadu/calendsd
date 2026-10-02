@@ -230,6 +230,9 @@ func TestAdminQueries(t *testing.T) {
 		INSERT INTO groupmembers (principal_id, member_id) VALUES (99991, 99992);
 		INSERT INTO propertystorage (path, name, valuetype, value)
 			VALUES ('calendars/nobody/gone', '{DAV:}note', 1, 'orphan');
+		INSERT INTO propertystorage (path, name, valuetype, value) VALUES
+			('calendars/alice/inbox', '{http://calendarserver.org/ns/}calendar-availability', 1, 'live'),
+			('calendars/nobody/inbox', '{http://calendarserver.org/ns/}calendar-availability', 1, 'orphan');
 		INSERT INTO calendarobjects (calendardata, uri, calendarid, lastmodified, etag, size, componenttype)
 			VALUES ('NOT AN ICAL', 'broken.ics', `+calID+`, 0, 'x', 11, 'VEVENT');
 	`)
@@ -260,7 +263,7 @@ func TestAdminQueries(t *testing.T) {
 	for check, want := range map[string]int{
 		"orphaned-instance":          1, // ghost-cal → calendars id 9999
 		"dangling-groupmember":       1,
-		"orphaned-property":          1, // calendars/nobody/gone
+		"orphaned-property":          2, // calendars/nobody/gone, calendars/nobody/inbox
 		"unparseable-calendardata":   1, // broken.ics
 		"stale-denormalized-columns": 1, // evt.ics size bumped
 		"principal-without-user":     1, // bob (from the earlier seed)
@@ -274,8 +277,9 @@ func TestAdminQueries(t *testing.T) {
 	if report.ObjectsScanned != 2 || report.Truncated {
 		t.Fatalf("doctor scan: objects=%d truncated=%t", report.ObjectsScanned, report.Truncated)
 	}
-	// The valid per-user overlay and collection props must NOT be flagged.
-	if got["orphaned-property"] != 1 {
+	// The valid per-user overlay, collection props and alice's inbox row
+	// must NOT be flagged.
+	if got["orphaned-property"] != 2 {
 		t.Fatalf("valid propertystorage rows were flagged: %+v", report.Findings)
 	}
 
@@ -379,9 +383,21 @@ func TestAdminQueries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DeleteOrphans(%s): %v", check, err)
 		}
-		if n != 1 {
-			t.Errorf("DeleteOrphans(%s) = %d rows, want 1", check, n)
+		want := int64(1)
+		if check == "orphaned-property" {
+			want = 2 // calendars/nobody/gone, calendars/nobody/inbox
 		}
+		if n != want {
+			t.Errorf("DeleteOrphans(%s) = %d rows, want %d", check, n, want)
+		}
+	}
+	var liveInbox int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM propertystorage WHERE path = 'calendars/alice/inbox'`).Scan(&liveInbox); err != nil {
+		t.Fatal(err)
+	}
+	if liveInbox != 1 {
+		t.Fatalf("DeleteOrphans removed a live user's inbox property")
 	}
 	if _, err := writes.DeleteOrphans("stale-denormalized-columns"); err == nil {
 		t.Fatal("non-deletable check accepted; want error")

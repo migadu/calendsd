@@ -277,6 +277,11 @@ func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
 			ok = principals[target]
 		case parts[0] == "calendars" && len(parts) == 2:
 			ok = principals["principals/"+parts[1]]
+		case parts[0] == "calendars" && len(parts) == 3 && (parts[2] == "inbox" || parts[2] == "outbox"):
+			// The schedule inbox/outbox exist for as long as the principal
+			// does; they are not calendarinstances rows. The inbox carries
+			// calendar-availability (VAVAILABILITY-PLAN.md §3.4).
+			ok = principals["principals/"+parts[1]]
 		case parts[0] == "calendars" && len(parts) == 3:
 			ok = calendarInstances[pair("principals/"+parts[1], parts[2])]
 		case parts[0] == "addressbooks" && len(parts) == 2:
