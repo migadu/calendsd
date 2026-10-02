@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"calserver/internal/pgdial"
 )
 
 // notifyChannel is the LISTEN/NOTIFY channel an Enqueue pings so an idle worker
@@ -444,7 +446,11 @@ func (q *Queue) listenLoop(ctx context.Context) {
 }
 
 func (q *Queue) listen(ctx context.Context) error {
-	conn, err := pgx.Connect(ctx, q.cfg.DSN)
+	cfg, err := pgdial.Config(q.cfg.DSN)
+	if err != nil {
+		return err
+	}
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}

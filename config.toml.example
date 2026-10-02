@@ -77,6 +77,11 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 # server (no persistence) for WebDAV/litmus testing only.
 [database]
 dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
+# For a cluster, list every node and calserver fails over between them in
+# order: "host=10.0.0.1,10.0.0.2,10.0.0.3 port=5433 dbname=calserver ...".
+# Each host gets connect_timeout seconds (default 5) before the next is tried.
+# Behind pgbouncer the database must be pooled in session mode: the push and
+# job workers LISTEN, and scheduling write-backs take session advisory locks.
 # Connection-pool bounds. Optional; the defaults (max_open 20, max_idle 5,
 # lifetime 5m) leave headroom under a Postgres shared with a live sabre
 # instance. Raise max_open_conns only if that database has connections to

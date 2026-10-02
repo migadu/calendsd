@@ -16,13 +16,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	// Registers the pgx database/sql driver.
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
 	"calserver/internal/metrics"
+	"calserver/internal/pgdial"
 )
 
 // syncTokenPrefix is sabre's Sync\Plugin::SYNCTOKEN_PREFIX; the ctag/token
@@ -58,12 +58,14 @@ func Open(dsn string) (*sql.DB, error) {
 }
 
 // OpenPool connects and applies pool bounds, filling any zero field from
-// DefaultPool so an unbounded pool can never reach the shared database.
+// DefaultPool so an unbounded pool can never reach the shared database. The
+// DSN may list several hosts; see pgdial for the failover defaults applied.
 func OpenPool(dsn string, pool Pool) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	cfg, err := pgdial.Config(dsn)
 	if err != nil {
 		return nil, err
 	}
+	db := stdlib.OpenDB(*cfg)
 	if pool.MaxOpen <= 0 {
 		pool.MaxOpen = DefaultPool.MaxOpen
 	}

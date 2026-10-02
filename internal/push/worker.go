@@ -12,6 +12,7 @@ import (
 
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
+	"calserver/internal/pgdial"
 )
 
 // coalesceWindow batches a burst of notifications for one collection into a
@@ -82,7 +83,11 @@ func (w *Worker) Run(ctx context.Context) {
 // listen holds one LISTEN connection and dispatches coalesced notifications
 // until the connection fails or ctx is cancelled.
 func (w *Worker) listen(ctx context.Context, housekeeping *time.Ticker) error {
-	conn, err := pgx.Connect(ctx, w.dsn)
+	cfg, err := pgdial.Config(w.dsn)
+	if err != nil {
+		return err
+	}
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
