@@ -61,7 +61,11 @@ BEGIN
         ('domain_scheduling_policy', 'updated_at'),
         ('calendar_availability', 'principal'),
         ('calendar_availability', 'data'),
-        ('calendar_availability', 'updated_at')
+        ('calendar_availability', 'updated_at'),
+        ('free_busy_visibility', 'principal'),
+        ('free_busy_visibility', 'audience'),
+        ('free_busy_visibility', 'allowed'),
+        ('free_busy_visibility', 'updated_at')
       ) AS v(tbl, col)
      WHERE to_regclass(v.tbl) IS NOT NULL
        AND NOT EXISTS (
@@ -439,6 +443,21 @@ DELETE FROM propertystorage ps
                    '{urn:ietf:params:xml:ns:caldav}calendar-availability')
    AND EXISTS (SELECT 1 FROM calendar_availability ca
                 WHERE ca.principal = 'principals/' || split_part(ps.path, '/', 2));
+
+
+-- Who may see a principal's free-busy and working hours
+-- (VAVAILABILITY-PLAN.md §10): 'domain' (everyone in their mail domain, the
+-- default when there is no row) or 'nobody', plus principals that may always
+-- see it. Enforced by the read-free-busy ACE of every calendar. A NEW
+-- calserver-only table; AdminWrites' user deletes remove the principal's row
+-- and drop it from everyone's allowed list.
+CREATE TABLE IF NOT EXISTS free_busy_visibility (
+    principal  VARCHAR(320) PRIMARY KEY,           -- 'principals/alice@example.org'
+    audience   TEXT         NOT NULL DEFAULT 'domain'
+        CHECK (audience IN ('domain', 'nobody')),
+    allowed    TEXT[]       NOT NULL DEFAULT '{}', -- principal URIs
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
 
 
 -- Apply the column widenings described above, but only where they are still

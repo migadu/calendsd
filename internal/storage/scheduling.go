@@ -6,7 +6,10 @@ import (
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 
+	"calserver/internal/acl"
 	"calserver/internal/caldav"
 )
 
@@ -92,4 +95,68 @@ ON CONFLICT (principal) DO UPDATE SET data = $2, updated_at = now()`,
 func (b *CalDAV) DeleteAvailability(principalURI string) error {
 	_, err := b.DB.Exec(`DELETE FROM calendar_availability WHERE principal = $1`, principalURI)
 	return err
+}
+
+var _ caldav.FreeBusyVisibilityBackend = (*CalDAV)(nil)
+
+// FreeBusyVisibility reads who may see a principal's free-busy
+// (VAVAILABILITY-PLAN.md §10); the zero value (their mail domain) when no
+// row exists. It backs the ACL plugin's FreeBusyPolicy, so it runs on every
+// non-owner read-free-busy check.
+func (b *CalDAV) FreeBusyVisibility(principalURI string) (acl.FreeBusyVisibility, error) {
+	defer b.Metrics.DBOpTimer("free_busy_visibility")()
+	var audience string
+	var allowed []string
+	err := b.DB.QueryRow(
+		`SELECT audience, array_to_json(allowed)::text FROM free_busy_visibility WHERE principal = $1`,
+		principalURI).Scan(&audience, jsonStrings{&allowed})
+	if err == sql.ErrNoRows {
+		return acl.FreeBusyVisibility{}, nil
+	}
+	if err != nil {
+		return acl.FreeBusyVisibility{}, err
+	}
+	return acl.FreeBusyVisibility{Hidden: audience == "nobody", Allowed: allowed}, nil
+}
+
+func (b *CalDAV) SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error {
+	audience := "domain"
+	if v.Hidden {
+		audience = "nobody"
+	}
+	allowed, err := json.Marshal(append([]string{}, v.Allowed...))
+	if err != nil {
+		return err
+	}
+	_, err = b.DB.Exec(`
+INSERT INTO free_busy_visibility (principal, audience, allowed)
+VALUES ($1, $2, ARRAY(SELECT json_array_elements_text($3::json)))
+ON CONFLICT (principal) DO UPDATE SET audience = $2, allowed = EXCLUDED.allowed, updated_at = now()`,
+		principalURI, audience, string(allowed))
+	return err
+}
+
+func (b *CalDAV) DeleteFreeBusyVisibility(principalURI string) error {
+	_, err := b.DB.Exec(`DELETE FROM free_busy_visibility WHERE principal = $1`, principalURI)
+	return err
+}
+
+// jsonStrings scans a JSON array of strings (array_to_json of a TEXT[]),
+// which avoids depending on a driver-specific array type.
+type jsonStrings struct{ dst *[]string }
+
+func (j jsonStrings) Scan(src any) error {
+	var raw []byte
+	switch v := src.(type) {
+	case string:
+		raw = []byte(v)
+	case []byte:
+		raw = v
+	case nil:
+		*j.dst = nil
+		return nil
+	default:
+		return fmt.Errorf("jsonStrings: unsupported %T", src)
+	}
+	return json.Unmarshal(raw, j.dst)
 }

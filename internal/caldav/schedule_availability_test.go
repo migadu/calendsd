@@ -49,7 +49,7 @@ func availabilityServer(loggedIn string) (*dav.Server, *caldav.MockSchedulingBac
 	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
 	srv := dav.NewServer("/", root)
 	srv.AddPlugin(auth.NewLoggedInPlugin(loggedIn))
-	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}, FreeBusyPolicy: backend})
 	srv.AddPlugin(&caldav.Plugin{})
 	srv.AddPlugin(&caldav.SchedulePlugin{})
 	srv.AddPlugin(&dav.PropertyStoragePlugin{Backend: props})

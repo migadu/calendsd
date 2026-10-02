@@ -479,3 +479,95 @@ BUSY-UNAVAILABLE as soon as step 3 is deployed.
   overloading the busy-substring check.
 - **PRIORITY** across overlapping VAVAILABILITY components (vacation blocks
   layered over regular hours) if a client starts writing them.
+
+## 10. Who can see your free/busy (per-user visibility)
+
+Today `read-free-busy` on every calendar is a protected ACE for
+`acl.SameDomain`: everyone in your mail domain sees your busy time and working
+hours, and nobody else does. Users can hide single events (TRANSP) or whole
+calendars (`schedule-calendar-transp`), but not choose *who* sees them.
+Outlook's model is a default for the organization plus per-person grants. v1
+takes its free/busy-only level and adds the "who".
+
+Implemented server-side; the calweb part (§10.3) is still open.
+
+### 10.1 Model
+
+One setting per **user**, not per calendar. The outbox answer combines all
+calendars and shows working hours as soon as any calendar is readable (§4.3),
+so per-calendar grants would leave "who sees my hours" undefined.
+
+- **Audience:** `domain` (the default, today's behavior) or `nobody`.
+- **Allowed:** a list of principals (people or groups) who may always see it,
+  whatever the audience. A grant can name someone outside your domain, by
+  address (§10.3). That's an explicit choice by the owner.
+- The owner always sees their own free/busy. Delegates keep seeing it through
+  `{DAV:}read`, which includes `read-free-busy`.
+- No title/location/details levels. Seeing more than busy time is calendar
+  sharing, which exists already.
+
+### 10.2 Enforcement
+
+A new pseudo-principal `acl.FreeBusyAudience` replaces `acl.SameDomain` in
+`Calendar.ACL()`'s `read-free-busy` ACE. The ACL plugin resolves it through an
+`acl.FreeBusyPolicy` (the owner's setting):
+
+1. The requester is the owner → yes.
+2. The requester or one of their groups is in Allowed → yes.
+3. Audience `domain` → the same-domain test as before.
+4. Audience `nobody` → no.
+
+No setting means `domain`. If the policy can't be read, the answer is **no**:
+an outage can hide free/busy but never widen it.
+
+Everything that checks `read-free-busy` goes through this one rule: the outbox
+POST, the `free-busy-query` REPORT and `current-user-privilege-set`. They can't
+disagree, and working hours follow automatically. In practice the outbox is
+what other people reach. `BeforeMethod` gates every REPORT with `{DAV:}read`
+(stricter than sabre), so `free-busy-query` stays owner-and-delegate only,
+whatever the visibility. A hidden user is answered
+`3.7;Could not find principal`, exactly like an unknown address, so the
+setting can't be used to find out who exists (§5).
+
+### 10.3 Storage and protocol
+
+- **Table** `free_busy_visibility (principal PK, audience CHECK IN
+  ('domain','nobody'), allowed TEXT[] of principal URIs, updated_at)` in
+  `pgsql.calserver.sql`. Deleting a user deletes their row and removes them
+  from everyone's Allowed list. The doctor flags a row whose principal is gone.
+- **Property** `{urn:x-calserver}free-busy-visibility`, a live property on the
+  inbox and owner-only like `calendar-availability`. It's always present; an
+  unset setting reads as the default:
+
+  ```xml
+  <x:free-busy-visibility xmlns:x="urn:x-calserver" xmlns:d="DAV:">
+    <x:audience>nobody</x:audience>
+    <x:allow>
+      <d:href>/principals/bob/</d:href>
+      <d:href>mailto:team@example.org</d:href>
+    </x:allow>
+  </x:free-busy-visibility>
+  ```
+
+  The allowed list must not reveal which accounts exist outside the owner's
+  domain, which the server hides everywhere else (listings, the `3.7`
+  answer):
+  - **A `mailto:` address belonging to a principal in the owner's domain** is
+    stored as that principal's URI, so a group grant covers its members.
+  - **Any other well-formed address** is stored as the lower-cased address,
+    whether or not an account has it, and matched against the requester's
+    calendar-user addresses at check time. So a cross-domain grant is by
+    address, and cross-domain groups aren't supported.
+  - **A principal path** is accepted only for a principal in the owner's
+    domain. A path to another domain gets the same 403 as one that doesn't
+    exist.
+
+  At most 200 entries. An unknown audience, a refused href, a malformed
+  address or too many entries → 403, nothing stored. `remove` restores the
+  default. Deleting a user removes both their URI and their address from
+  every list.
+- **calweb:** a "Who can see when I'm busy" section in Settings, next to
+  Working hours: Everyone in my organization / Only the people below, plus a
+  people picker. It also needs the calendar transparency toggle ("Don't show
+  this calendar as busy") and "Show as: Free" in the event editor, both of
+  which the server already supports.

@@ -52,15 +52,16 @@ func (p *SchedulePlugin) inboxPropFind(pf *dav.PropFind, inbox *Inbox) {
 }
 
 // PrePropPatch implements dav.PrePropPatchHook. On a schedule inbox it claims
-// calendar-availability before property storage can take it as a dead
-// property, and validates the value first: a rejected value is marked 403
-// before any PROPPATCH callback runs, so nothing in the request is stored
-// (§3.3).
+// free-busy-visibility (§10) and calendar-availability before property
+// storage can take them as dead properties, and validates each value first:
+// a rejected value is marked 403 before any PROPPATCH callback runs, so
+// nothing in the request is stored (§3.3).
 func (p *SchedulePlugin) PrePropPatch(ctx context.Context, path string, node dav.Node, pp *dav.PropPatch) error {
 	inbox, ok := node.(*Inbox)
 	if !ok {
 		return nil
 	}
+	p.prePropPatchVisibility(inbox, pp)
 	var changed []xml.Name
 	var value any
 	for _, name := range availabilityNames {

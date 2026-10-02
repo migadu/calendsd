@@ -134,12 +134,13 @@ func (p *SchedulePlugin) availabilitySupported() bool {
 }
 
 // PropFind provides the scheduling properties on principals, and
-// calendar-availability on schedule inboxes.
+// calendar-availability and free-busy-visibility on schedule inboxes.
 func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	cal := func(local string) xml.Name { return xml.Name{Space: davxml.NSCalDAV, Local: local} }
 
 	if inbox, ok := node.(*Inbox); ok {
 		p.inboxPropFind(pf, inbox)
+		p.inboxVisibilityPropFind(pf, inbox)
 		return nil
 	}
 

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"calserver/internal/acl"
 	"calserver/internal/storage"
 )
 
@@ -138,11 +140,71 @@ func TestCalendarAvailability(t *testing.T) {
 		t.Error("DeleteOrphans removed a live user's availability")
 	}
 
-	// Deleting the user deletes their working hours.
+	// Free-busy visibility round-trip (VAVAILABILITY-PLAN.md §10).
+	vis := func(principal string) acl.FreeBusyVisibility {
+		t.Helper()
+		v, err := backend.FreeBusyVisibility(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := vis("principals/alice"); v.Hidden || len(v.Allowed) != 0 {
+		t.Errorf("unset visibility = %+v, want the default", v)
+	}
+	if err := backend.SetFreeBusyVisibility("principals/alice",
+		acl.FreeBusyVisibility{Hidden: true, Allowed: []string{"principals/bob", "principals/carol"}}); err != nil {
+		t.Fatal(err)
+	}
+	if v := vis("principals/alice"); !v.Hidden || strings.Join(v.Allowed, ",") != "principals/bob,principals/carol" {
+		t.Errorf("alice visibility = %+v", v)
+	}
+	if err := backend.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := vis("principals/alice"); v.Hidden || len(v.Allowed) != 0 {
+		t.Errorf("replaced visibility = %+v, want domain with nobody extra", v)
+	}
+	if err := backend.SetFreeBusyVisibility("principals/alice",
+		acl.FreeBusyVisibility{Allowed: []string{"principals/carol"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.SetFreeBusyVisibility("principals/bob",
+		acl.FreeBusyVisibility{Hidden: true, Allowed: []string{"principals/alice", "mailto:alice@example.org", "principals/carol"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.SetFreeBusyVisibility("principals/nobody", acl.FreeBusyVisibility{Hidden: true}); err != nil {
+		t.Fatal(err)
+	}
+	report, err = (&storage.AdminQueries{DB: db}).Doctor(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flagged = nil
+	for _, f := range report.Findings {
+		if f.Check == "orphaned-visibility" {
+			flagged = append(flagged, f.Subject)
+		}
+	}
+	if len(flagged) != 1 || flagged[0] != "free-busy visibility of principals/nobody" {
+		t.Errorf("orphaned-visibility findings = %v", flagged)
+	}
+	if n, err := writes.DeleteOrphans("orphaned-visibility"); err != nil || n != 1 {
+		t.Errorf("DeleteOrphans(orphaned-visibility) = %d, %v; want 1", n, err)
+	}
+
+	// Deleting the user deletes their working hours, their visibility, and
+	// their place on everyone else's allowed list.
 	if err := writes.DeleteUserCascade("alice"); err != nil {
 		t.Fatal(err)
 	}
 	if got := get("principals/alice"); got != "" {
 		t.Errorf("DeleteUserCascade left availability %q", got)
+	}
+	if v := vis("principals/alice"); v.Hidden || len(v.Allowed) != 0 {
+		t.Errorf("DeleteUserCascade left alice's visibility %+v", v)
+	}
+	if v := vis("principals/bob"); !v.Hidden || strings.Join(v.Allowed, ",") != "principals/carol" {
+		t.Errorf("bob's visibility after alice's deletion = %+v, want only carol", v)
 	}
 }

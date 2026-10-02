@@ -203,8 +203,8 @@ func (w *AdminWrites) DeleteUserCascade(username string) error {
 }
 
 // deletePrincipalRows removes the rows shared by both delete paths: the
-// principal's group-membership, scheduling-inbox and working-hours
-// (calendar_availability) rows, its principal
+// principal's group-membership, scheduling-inbox, working-hours
+// (calendar_availability) and free-busy visibility rows, its principal
 // triple (the principal plus the two proxy sub-principals), and its users
 // row (absent for group principals, which is fine). It errors if no
 // principal row matched, so deleting an unknown account is reported.
@@ -224,6 +224,21 @@ DELETE FROM groupmembers
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM calendar_availability WHERE principal = $1`, principal); err != nil {
+		return err
+	}
+	// Their own free-busy setting, and their place on everyone else's
+	// allowed list (a later account with the same name must not inherit
+	// those grants).
+	if _, err := tx.Exec(
+		`DELETE FROM free_busy_visibility WHERE principal = $1`, principal); err != nil {
+		return err
+	}
+	// Grants name the principal by URI or by its address.
+	if _, err := tx.Exec(`
+UPDATE free_busy_visibility v
+   SET allowed = array_remove(array_remove(v.allowed, $1::text), a.addr), updated_at = now()
+  FROM (SELECT coalesce('mailto:' || lower((SELECT email FROM principals WHERE uri = $1)), '') AS addr) a
+ WHERE $1::text = ANY (v.allowed) OR a.addr = ANY (v.allowed)`, principal); err != nil {
 		return err
 	}
 	res, err := tx.Exec(
@@ -428,13 +443,15 @@ var deletableOrphanSQL = map[string]string{
 	    AND NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = s.principaluri)`,
 	"orphaned-availability": `DELETE FROM calendar_availability ca
 	  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = ca.principal)`,
+	"orphaned-visibility": `DELETE FROM free_busy_visibility v
+	  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = v.principal)`,
 }
 
 // DeletableOrphanChecks lists the doctor checks DeleteOrphans accepts.
 func DeletableOrphanChecks() []string {
 	return []string{"orphaned-instance", "orphaned-object", "orphaned-card",
 		"dangling-groupmember", "orphaned-scheduling-object", "orphaned-availability",
-		"orphaned-property"}
+		"orphaned-visibility", "orphaned-property"}
 }
 
 // DeleteOrphans removes the rows a doctor check flagged, returning how many

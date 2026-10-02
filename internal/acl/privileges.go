@@ -3,6 +3,7 @@ package acl
 import (
 	"context"
 	"encoding/xml"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -137,6 +138,10 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 			if authenticated && p.sameDomainAsOwner(ctx, node) {
 				collected = append(collected, ace.Privilege)
 			}
+		case FreeBusyAudience:
+			if authenticated && p.inFreeBusyAudience(ctx, node, principals) {
+				collected = append(collected, ace.Privilege)
+			}
 		default:
 			if isPrincipal(ace.Principal) {
 				collected = append(collected, ace.Privilege)
@@ -160,6 +165,55 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 		collected = append(collected, flat[priv]...)
 	}
 	return out, nil
+}
+
+// inFreeBusyAudience reports whether the current principal (or one of its
+// groups, in principals) may read the node owner's free-busy under the
+// owner's visibility setting. A setting that cannot be read denies: an outage
+// may hide free-busy but never widens it.
+func (p *Plugin) inFreeBusyAudience(ctx context.Context, node dav.Node, principals []string) bool {
+	owned, ok := node.(interface{ Owner() string })
+	if !ok {
+		return false
+	}
+	owner := owned.Owner()
+	if owner == "" {
+		return false
+	}
+	if owner == dav.Principal(ctx) {
+		return true
+	}
+	if p.FreeBusyPolicy == nil {
+		return p.sameDomainAsOwner(ctx, node)
+	}
+	vis, err := p.FreeBusyPolicy.FreeBusyVisibility(owner)
+	if err != nil {
+		slog.Warn("reading free-busy visibility; denying", "owner", owner, "err", err)
+		return false
+	}
+	var addresses []string // the requester's, loaded only if an address is listed
+	for _, allowed := range vis.Allowed {
+		if !strings.HasPrefix(allowed, "mailto:") {
+			if slices.Contains(principals, allowed) {
+				return true
+			}
+			continue
+		}
+		if addresses == nil {
+			addresses = []string{}
+			if n, err := p.server.Tree.NodeForPath(dav.Principal(ctx)); err == nil {
+				if ph, ok := n.(PrincipalHolder); ok {
+					for _, a := range ph.AlternateURISet() {
+						addresses = append(addresses, strings.ToLower(a))
+					}
+				}
+			}
+		}
+		if slices.Contains(addresses, allowed) {
+			return true
+		}
+	}
+	return !vis.Hidden && p.sameDomainAsOwner(ctx, node)
 }
 
 // sameDomainAsOwner reports whether the current principal's email domain

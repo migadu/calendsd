@@ -445,6 +445,9 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	srv.AddPlugin(&acl.Plugin{
 		AdminPrincipals:                   []string{"principals/admin"},
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
+		// Each owner's free-busy visibility decides who passes calendars'
+		// read-free-busy (VAVAILABILITY-PLAN.md §10).
+		FreeBusyPolicy: calendars,
 	})
 	// AddVTimezones departs from sabre deliberately: bare IANA TZIDs (calweb
 	// writes them) get the VTIMEZONE RFC 5545 requires.

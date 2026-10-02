@@ -493,16 +493,18 @@ func (c *Calendar) transparent() bool {
 
 // ACL mirrors sabre Calendar::getACL — owner + proxies read, and write only
 // when the view is not read-only — except for free-busy: sabre grants
-// read-free-busy to {DAV:}authenticated, while we restrict it to principals
-// in the owner's email domain so users cannot probe availability across
-// domains (both the free-busy-query REPORT and the outbox POST honor it).
+// read-free-busy to {DAV:}authenticated, while we grant it to the owner's
+// free-busy audience: their email domain by default, so users cannot probe
+// availability across domains, narrowed or extended by the owner's
+// free-busy visibility (VAVAILABILITY-PLAN.md §10). Both the free-busy-query
+// REPORT and the outbox POST honor it.
 func (c *Calendar) ACL() []acl.ACE {
 	owner := c.Owner()
 	aces := []acl.ACE{
 		{Privilege: "{DAV:}read", Principal: owner, Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-write", Protected: true},
 		{Privilege: "{DAV:}read", Principal: owner + "/calendar-proxy-read", Protected: true},
-		{Privilege: "{urn:ietf:params:xml:ns:caldav}read-free-busy", Principal: acl.SameDomain, Protected: true},
+		{Privilege: "{urn:ietf:params:xml:ns:caldav}read-free-busy", Principal: acl.FreeBusyAudience, Protected: true},
 	}
 	if !c.readOnly() {
 		aces = append(aces,

@@ -32,6 +32,10 @@ type Plugin struct {
 	// 401 (prompting login) rather than 403, so anonymous clients get a
 	// chance to authenticate. When false, the failure is a plain 403.
 	AllowUnauthenticatedAccess bool
+	// FreeBusyPolicy resolves the FreeBusyAudience pseudo-principal from
+	// each owner's free-busy visibility. Nil treats every owner as the
+	// default (their mail domain).
+	FreeBusyPolicy FreeBusyPolicy
 }
 
 func (p *Plugin) PluginName() string { return "acl" }

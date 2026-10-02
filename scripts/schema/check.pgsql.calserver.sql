@@ -32,7 +32,7 @@ WITH checks AS (
         ('jobs_latest_ix'), ('domain_scheduling_policy'),
         ('contact_frecency'), ('contact_frecency_rank_ix'),
         ('contact_import'), ('contact_import_run_ix'),
-        ('calendar_availability')
+        ('calendar_availability'), ('free_busy_visibility')
       ) AS v(name)
 
     UNION ALL
@@ -95,7 +95,11 @@ WITH checks AS (
         ('domain_scheduling_policy', 'updated_at'),
         ('calendar_availability', 'principal'),
         ('calendar_availability', 'data'),
-        ('calendar_availability', 'updated_at')
+        ('calendar_availability', 'updated_at'),
+        ('free_busy_visibility', 'principal'),
+        ('free_busy_visibility', 'audience'),
+        ('free_busy_visibility', 'allowed'),
+        ('free_busy_visibility', 'updated_at')
       ) AS v(tbl, col)
       LEFT JOIN pg_attribute a
              ON a.attrelid = to_regclass(v.tbl) AND a.attname = v.col
@@ -120,7 +124,7 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
       ('jobs_latest_ix'), ('domain_scheduling_policy'),
       ('contact_frecency'), ('contact_frecency_rank_ix'),
       ('contact_import'), ('contact_import_run_ix'),
-      ('calendar_availability')) AS v(name)
+      ('calendar_availability'), ('free_busy_visibility')) AS v(name)
     UNION ALL
     SELECT to_regclass('calendarinstances_principaluri_share_href') IS NULL
     UNION ALL
@@ -150,6 +154,8 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
         ('domain_scheduling_policy','domain'), ('domain_scheduling_policy','local_notify'),
         ('domain_scheduling_policy','share_notify'), ('domain_scheduling_policy','updated_at'),
         ('calendar_availability','principal'), ('calendar_availability','data'),
-        ('calendar_availability','updated_at')
+        ('calendar_availability','updated_at'),
+        ('free_busy_visibility','principal'), ('free_busy_visibility','audience'),
+        ('free_busy_visibility','allowed'), ('free_busy_visibility','updated_at')
       ) AS v(tbl, col)
   ) AS all_checks(ok);

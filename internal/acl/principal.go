@@ -35,6 +35,31 @@ type ACE struct {
 // like proxy sub-principals that carry no address.
 const SameDomain = "{urn:x-calserver}same-domain"
 
+// FreeBusyAudience is a calserver extension pseudo-principal for
+// read-free-busy: it matches whoever the node owner's free-busy visibility
+// lets in (VAVAILABILITY-PLAN.md §10): the owner, anyone on the owner's
+// Allowed list (directly or through a group), and, unless the owner chose
+// "nobody", the SameDomain audience. Without a FreeBusyPolicy it is exactly
+// SameDomain.
+const FreeBusyAudience = "{urn:x-calserver}free-busy-audience"
+
+// FreeBusyVisibility is one owner's free-busy setting. The zero value is the
+// default: the owner's mail domain, nobody extra.
+type FreeBusyVisibility struct {
+	// Hidden restricts the audience to Allowed ("nobody" in the property);
+	// false means the owner's mail domain.
+	Hidden bool
+	// Allowed lists who may always see the owner's free-busy: principal
+	// URIs ("principals/bob", members of a group included) and lower-cased
+	// "mailto:" addresses, matched against the requester's own addresses.
+	Allowed []string
+}
+
+// FreeBusyPolicy looks up an owner's free-busy visibility.
+type FreeBusyPolicy interface {
+	FreeBusyVisibility(ownerPrincipal string) (FreeBusyVisibility, error)
+}
+
 // ACLHolder is a node carrying its own ACL (sabre's IACL subset).
 type ACLHolder interface {
 	ACL() []ACE

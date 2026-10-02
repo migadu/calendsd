@@ -142,6 +142,10 @@ func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
 			`SELECT 'availability of ' || ca.principal
 			   FROM calendar_availability ca
 			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = ca.principal)`},
+		{"orphaned-visibility", "free_busy_visibility row for a nonexistent principal",
+			`SELECT 'free-busy visibility of ' || v.principal
+			   FROM free_busy_visibility v
+			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = v.principal)`},
 	} {
 		rows, err := q.DB.Query(c.query)
 		if err != nil {

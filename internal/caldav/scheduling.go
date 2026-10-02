@@ -37,10 +37,28 @@ type AvailabilityBackend interface {
 	DeleteAvailability(principalURI string) error
 }
 
+// FreeBusyVisibilityBackend stores who may see a principal's free-busy
+// (VAVAILABILITY-PLAN.md §10). A scheduling backend that implements it turns
+// on the inbox's free-busy-visibility property; the same store is what the
+// ACL plugin's FreeBusyPolicy reads. FreeBusyVisibility returns the zero
+// value (the default) when nothing is set.
+type FreeBusyVisibilityBackend interface {
+	acl.FreeBusyPolicy
+	SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error
+	DeleteFreeBusyVisibility(principalURI string) error
+}
+
 // Inbox is a principal's schedule inbox. Port of Schedule\Inbox.
 type Inbox struct {
 	backend      SchedulingBackend
 	principalURI string
+}
+
+// visibility returns the inbox's free-busy visibility store, or nil when
+// the backend has none.
+func (i *Inbox) visibility() FreeBusyVisibilityBackend {
+	vb, _ := i.backend.(FreeBusyVisibilityBackend)
+	return vb
 }
 
 // availability returns the inbox's working-hours store, or nil when the
@@ -235,6 +253,25 @@ type MockSchedulingBackend struct {
 	Scheduling map[string]map[string][]byte
 	// Availabilities maps principal → calendar-availability VCALENDAR.
 	Availabilities map[string][]byte
+	// Visibilities maps principal → free-busy visibility.
+	Visibilities map[string]acl.FreeBusyVisibility
+}
+
+func (m *MockSchedulingBackend) FreeBusyVisibility(principalURI string) (acl.FreeBusyVisibility, error) {
+	return m.Visibilities[principalURI], nil
+}
+
+func (m *MockSchedulingBackend) SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error {
+	if m.Visibilities == nil {
+		m.Visibilities = map[string]acl.FreeBusyVisibility{}
+	}
+	m.Visibilities[principalURI] = v
+	return nil
+}
+
+func (m *MockSchedulingBackend) DeleteFreeBusyVisibility(principalURI string) error {
+	delete(m.Visibilities, principalURI)
+	return nil
 }
 
 func (m *MockSchedulingBackend) Availability(principalURI string) ([]byte, error) {
