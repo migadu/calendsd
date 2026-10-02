@@ -26,7 +26,30 @@ type busyPeriod struct {
 // handler passes UID/ORGANIZER/ATTENDEE so the response echoes the queried
 // recipient, matching sabre; the free-busy-query REPORT passes none.
 func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
-	var periods []busyPeriod
+	return generateFreeBusy(objects, nil, start, end, loc, now, extraProps...)
+}
+
+// GenerateFreeBusyWithAvailability is GenerateFreeBusy plus the principal's
+// working hours: time in [start, end) that the calendar-availability value
+// marks unavailable is reported as FBTYPE=BUSY-UNAVAILABLE
+// (VAVAILABILITY-PLAN.md §4.2). Only the outbox POST passes availability;
+// the free-busy-query REPORT and the auto-schedule conflict check keep using
+// GenerateFreeBusy. An unusable availability value returns an error wrapping
+// ErrInvalidAvailability, so the caller can fall back to GenerateFreeBusy.
+func GenerateFreeBusyWithAvailability(objects [][]byte, availability []byte, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
+	unavailable, err := unavailablePeriods(availability, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return generateFreeBusy(objects, unavailable, start, end, loc, now, extraProps...)
+}
+
+// generateFreeBusy computes the response from the objects' busy time plus
+// extra precomputed periods (already clamped to [start, end)). Periods of each
+// FBTYPE coalesce separately, so an event outside working hours is still
+// listed as BUSY alongside the BUSY-UNAVAILABLE span, like CalendarServer.
+func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
+	periods := append([]busyPeriod(nil), extra...)
 	for _, data := range objects {
 		cal, err := Decode(data)
 		if err != nil {

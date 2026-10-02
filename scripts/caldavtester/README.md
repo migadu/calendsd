@@ -45,6 +45,21 @@ non-passing results that are **not** calserver bugs:
 - **Harness state contamination.** Destructive files delete shared
   collections; per-file-in-isolation numbers are the trustworthy ones.
 
+### Known failures in `CalDAV/availability.xml`
+
+Two of its seven tests fail, by design, not because of a calserver bug
+(VAVAILABILITY-PLAN.md §7):
+
+- `Capabilities/2` expects VTIMEZONE and VFREEBUSY in a calendar's
+  `supported-calendar-component-set` (CalendarServer's default). calserver's
+  is `VEVENT,VTODO`.
+- `free-busy reports/1` matches CalendarServer's exact text:
+  `FREEBUSY;FBTYPE=BUSY:…T170000Z/PT1H` and the two BUSY-UNAVAILABLE spans
+  comma-joined on one line. calserver writes free-busy in sabre's format, so
+  the same periods come back as `FREEBUSY:…T170000Z/…T180000Z` and one
+  BUSY-UNAVAILABLE line per span. The ical and handler unit tests cover the
+  scenario.
+
 RFC-level behaviour (sync-collection, calendar-query, multiget, ACL reports) is
 verified more directly by the sabre-extracted corpus in `internal/corpus/` and
 the live parity test in `internal/storage/`. Treat CalDAVTester as an

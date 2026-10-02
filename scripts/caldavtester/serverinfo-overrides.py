@@ -52,6 +52,7 @@ features = """	<features>
 		<feature>json-data</feature>
 		<feature>caldav</feature>
 		<feature>carddav</feature>
+		<feature>vavailability</feature>
 	</features>"""
 if not full:
     s = re.sub(r"\t<features>.*?</features>", features, s, count=1, flags=re.S)

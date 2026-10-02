@@ -59,8 +59,10 @@ interoperate for free.
   may be unbounded).
 - AVAILABLE subcomponents with DTSTART + DTEND/DURATION, RRULE, RDATE, EXDATE
   and RECURRENCE-ID overrides (CalDAVTester's `1.ics` uses an override).
+  RDATE adds instances to an RRULE series. Without an RRULE, the AVAILABLE is
+  its single DTSTART instance, the same as for events in `eventBusyPeriods`.
 - IANA TZIDs, plus non-IANA TZIDs with an embedded VTIMEZONE (Outlook style),
-  using the existing `resolveNonIANATZIDs`.
+  expanded in that zone's wall-clock time (§4.1).
 - `BUSY-UNAVAILABLE` in **outbox POST** free/busy.
 - calweb: a "Working hours" settings section and Suggested times that use
   `BUSY-UNAVAILABLE`.
@@ -181,8 +183,11 @@ The value is rejected if any of these hold:
   second master would silently replace the first (`expand.go` does exactly
   that for VEVENTs).
 - An AVAILABLE has no DTSTART or no DTEND/DURATION, or its end is ≤ its start.
-- An RRULE uses `FREQ=SECONDLY|MINUTELY`. That expands too densely for
-  working hours and is an easy CPU sink.
+- An RRULE uses `FREQ=SECONDLY|MINUTELY|HOURLY`. Working hours repeat daily
+  at most, and a sub-daily rule anchored years back would need more than
+  `maxTimeRangeScan` steps to reach today. A stored value that hits that cap
+  anyway is treated as unusable (plain free/busy), never as "unavailable for
+  the rest of the window".
 - The value is larger than 64 KiB.
 - The request sets or removes both property names at once. They name the same
   row, so the two writes would conflict.
@@ -191,7 +196,9 @@ The value is rejected if any of these hold:
 
 - `SchedulePlugin.Features()` adds `calendar-availability` and
   `inbox-availability` to the DAV header (CalDAVTester `Capabilities/1`; the
-  first token is the RFC 7953 one).
+  first token is the RFC 7953 one). It adds them only when the calendar
+  backend implements `AvailabilityBackend`, so a server without the store
+  doesn't advertise it.
 - `allprop` exclusion comes for free from the live property (§3.2).
 
 ### 3.5 Lifecycle
@@ -212,7 +219,9 @@ The value is rejected if any of these hold:
   insert the value (CRLF-normalized) and delete the `propertystorage` row.
   Values aren't validated at import time; one that fails to parse is handled
   like any corrupt row (§4.3: warn, no availability). The user sees it in
-  calweb as "set in another app" (§6.1) and can replace it. After the import,
+  calweb as "set in another app" (§6.1) and can replace it. A NULL or non-UTF-8 value
+  can't become TEXT. It stays in `propertystorage` with a NOTICE rather than
+  stopping the schema run. After the import,
   `SchedulePlugin` claims both names on the inbox, so `propertystorage` never
   receives them again.
 - The doctor fix already made for inbox/outbox `propertystorage` rows stays.
@@ -220,40 +229,58 @@ The value is rejected if any of these hold:
 
 ## 4. Server: free/busy computation
 
-### 4.1 New function in `internal/caldav/ical`
+### 4.1 Expansion in `internal/caldav/ical` (`availability.go`)
 
 ```go
-// UnavailablePeriods returns the parts of [start, end) that the
-// VAVAILABILITY data marks as unavailable: the union of each component's
-// coverage minus the union of its AVAILABLE instances.
-func UnavailablePeriods(availability []byte, start, end time.Time) ([]busyPeriod, error)
+// unavailablePeriods returns the parts of [start, end) that the
+// VAVAILABILITY data marks as unavailable: for each component, its coverage
+// minus the union of its AVAILABLE instances, unioned across components.
+func unavailablePeriods(availability []byte, start, end time.Time) ([]busyPeriod, error)
 ```
+
+It's unexported. `GenerateFreeBusyWithAvailability` (§4.2) and
+`ValidateAvailability` (§3.3) are the entry points, and every error wraps
+`ErrInvalidAvailability`.
 
 Algorithm, all in absolute time (UTC instants):
 
-1. Decode (the stored value already has CRLF line endings, §3.3) and run
-   `resolveNonIANATZIDs`.
+1. Decode (the stored value already has CRLF line endings, §3.3).
 2. For each VAVAILABILITY: coverage = `[DTSTART or -∞, DTEND or +∞) ∩
-   [start, end)`. If it's empty, skip the component.
-3. Expand its AVAILABLE components into instances overlapping the window.
-   Group by UID within the VAVAILABILITY, with overrides replacing their
-   RECURRENCE-ID instance. Reuse `expandGroup` and `recurrenceSet` rather than
-   writing new code. `expandGroup` doesn't depend on the component type, but
-   the UID grouping currently sits inline in `Expand` and only looks at
-   VEVENTs, so pull it out into a helper that takes the child component name
-   (`VEVENT` for `Expand`, `AVAILABLE` here). Validation already guarantees
-   one master per UID (§3.3); at read time a duplicate master (a value that
-   bypassed validation) is logged and skipped rather than replacing the
-   first. `expandGroup` and `recurrenceSet` already handle
-   comma-list EXDATE/RDATE and the DST cases fixed in recent commits. Each
-   instance's start is computed **in its TZID's location** before converting
-   to UTC. That one step is the DST correctness.
-4. Expansion starts at the rule's DTSTART (a weekly rule from 2019 is normal),
-   bounded by the window end and `maxTimeRangeScan`, as in
-   `eventBusyPeriods`.
-5. unavailable = coverage − ⋃ instances (sort, merge, subtract).
-6. Union across components (the v1 merge rule, §2), FBTYPE
-   `BUSY-UNAVAILABLE`.
+   [start, end)` (DTSTART+DURATION is accepted in place of DTEND). If it's
+   empty, skip the component.
+3. Group its AVAILABLE components by UID: one master plus its RECURRENCE-ID
+   overrides. Validation guarantees one master per UID (§3.3); a second
+   master that got in anyway (an imported value) is ignored rather than
+   replacing the first. Each override contributes its own span and removes
+   the instance it replaces.
+4. Expand each master **in its own zone**. For an IANA TZID, rrule runs in that
+   `time.Location`, which keeps every instance at its local time. That one
+   step is the DST correctness. The expansion reuses `recurrenceSet` (so
+   comma-list EXDATE/RDATE work) and `masterDurationIn`.
+5. Expansion starts at the rule's DTSTART (a weekly rule from 2019 is normal)
+   and is bounded by the window end and `maxTimeRangeScan`, as in
+   `eventBusyPeriods`. It deliberately doesn't use `Expand`/`expandGroup`:
+   those stop at `maxRecurrences` (3500), which a weekday rule reaches after
+   about 13 years, and they build cloned components where intervals are
+   enough.
+6. unavailable = coverage − ⋃ instances (sort, subtract), FBTYPE
+   `BUSY-UNAVAILABLE`, merged across components (the v1 rule, §2).
+
+**Non-IANA TZIDs (Outlook style).** `resolveNonIANATZIDs` isn't used: it
+rewrites such times to fixed UTC values, so a weekly rule would drift by an
+hour at every DST change, and it only looks at top-level components, never
+the AVAILABLE inside a VAVAILABILITY. Instead, an AVAILABLE in a zone defined
+only by its embedded VTIMEZONE is expanded on the bare wall clock, and each
+instance is placed with that VTIMEZONE's offset for its wall time
+(`parseVTimezone`/`offsetAt`). A UTC `UNTIL` in the rule is moved onto
+the same wall clock first, so the series ends at the right instance.
+
+Writing the test for this found a bug in `parseVTimezone`, now fixed and
+covered by `TestNonIANATZIDSummerOffset`. Outlook anchors its VTIMEZONE rules
+in 1601, and rrule-go stops a series about 292 years after its DTSTART (the
+range of a `time.Duration`). So the transitions ended in 1893, and every
+Outlook-zone **event** in summer was read with the winter offset, an hour off.
+Anchors before 1970 are now moved to 1970 before expanding.
 
 ### 4.2 Wiring into `GenerateFreeBusy`
 
@@ -261,7 +288,9 @@ Extract the body into an internal `generateFreeBusy(objects, extra
 []busyPeriod, …)`. `GenerateFreeBusy` keeps its exact signature and passes no
 extra periods, so the REPORT, auto-schedule and golden tests are untouched. A
 new `GenerateFreeBusyWithAvailability(objects, availability []byte, …)` calls
-`UnavailablePeriods` and passes the result through. BUSY-UNAVAILABLE periods
+`unavailablePeriods` and passes the result through. If the availability is
+unusable it returns an `ErrInvalidAvailability` error, and the outbox falls
+back to plain `GenerateFreeBusy` (§4.3). BUSY-UNAVAILABLE periods
 go through the existing per-FBTYPE `coalesce`, so a BUSY event outside hours
 is still listed as BUSY. That matches CalendarServer, and the client can
 ignore the overlap.
@@ -368,7 +397,7 @@ existing owner-only ACL. Add a test that another user's PROPFIND on
 
 **`internal/caldav` (handler):**
 
-- PROPPATCH valid/invalid/floating/DATE/oversized/MINUTELY/missing UID or
+- PROPPATCH valid/invalid/floating/DATE/oversized/MINUTELY/HOURLY/missing UID or
   DTSTAMP/duplicate AVAILABLE master UID/both names in one request → 403 and
   nothing stored. Invalid availability plus a valid other property in the
   same request → 403 + 424, and neither stored (all-or-nothing, §3.3).
@@ -415,12 +444,20 @@ them in `scripts/caldavtester/README.md`:
 
 ## 8. Rollout
 
-1. `ical.UnavailablePeriods` + `GenerateFreeBusyWithAvailability` + the DST
-   unit tests. No behavior change yet.
+Steps 1–3 are implemented. Applying `pgsql.calserver.sql` (which creates the
+table and moves existing dead properties) must happen **before** deploying the
+server, because user deletion now deletes from `calendar_availability`.
+
+1. `ical` expansion + `GenerateFreeBusyWithAvailability` + the DST unit tests
+   (plus the Outlook VTIMEZONE fix, §4.1). No behavior change yet.
 2. `calendar_availability` table, backend, import step, cascade deletes and
    doctor check (§3.1, §3.5). Then the live inbox property: PROPFIND,
    PROPPATCH validation and write, DAV features (§3.2–§3.4). (The doctor's
    inbox/outbox orphan fix for `propertystorage` is already in.)
+   The inbox's privilege tree had no `write-properties` under `{DAV:}write`,
+   so even the owner's PROPPATCH on the inbox was refused. It now matches
+   sabre's default set (`write-properties`, `write-content`, `bind`,
+   `unbind`).
 3. Outbox POST uses it. Enable the CalDAVTester suite.
 4. calweb Working hours settings.
 5. calweb Suggested times consumes BUSY-UNAVAILABLE (§6.2 fallback for users

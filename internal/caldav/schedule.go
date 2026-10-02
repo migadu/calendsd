@@ -51,6 +51,11 @@ type SchedulePlugin struct {
 	// Used when WriteBackLocker is nil (single-process / tests).
 	writeBackLocks objectLocks
 
+	// availability caches whether the calendar backend can store working
+	// hours (AvailabilityBackend); the tree is fixed once the server runs.
+	availabilityOnce sync.Once
+	availability     bool
+
 	// WriteBackLocker, when set, serializes the SCHEDULE-STATUS write-back per
 	// object. The default (nil → in-process writeBackLocks) only coordinates one
 	// process; wire an AdvisoryLocker for a multi-node deployment so durable
@@ -99,6 +104,11 @@ func (p *SchedulePlugin) Init(s *dav.Server) { p.server = s }
 
 func (p *SchedulePlugin) Features() []string {
 	f := []string{"calendar-auto-schedule"}
+	if p.availabilitySupported() {
+		// calendar-availability is RFC 7953's token, inbox-availability
+		// CalendarServer's (what Apple and CalDAVTester look for).
+		f = append(f, "calendar-availability", "inbox-availability")
+	}
 	if p.ExpandGroups {
 		f = append(f, "calendarserver-group-attendee")
 	}
@@ -107,9 +117,31 @@ func (p *SchedulePlugin) Features() []string {
 
 func (p *SchedulePlugin) Methods(path string) []string { return []string{"POST"} }
 
-// PropFind provides the scheduling properties on principals.
+// availabilitySupported reports whether the calendar backend stores working
+// hours, so the DAV header only advertises calendar-availability where an
+// inbox can actually hold it.
+func (p *SchedulePlugin) availabilitySupported() bool {
+	p.availabilityOnce.Do(func() {
+		node, err := p.server.Tree.NodeForPath("calendars")
+		if err != nil {
+			return
+		}
+		if root, ok := node.(*CalendarRoot); ok {
+			_, p.availability = root.backend.(AvailabilityBackend)
+		}
+	})
+	return p.availability
+}
+
+// PropFind provides the scheduling properties on principals, and
+// calendar-availability on schedule inboxes.
 func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	cal := func(local string) xml.Name { return xml.Name{Space: davxml.NSCalDAV, Local: local} }
+
+	if inbox, ok := node.(*Inbox); ok {
+		p.inboxPropFind(pf, inbox)
+		return nil
+	}
 
 	ph, isPrincipal := node.(acl.PrincipalHolder)
 	if !isPrincipal {

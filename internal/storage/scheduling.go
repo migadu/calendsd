@@ -65,3 +65,31 @@ func (b *CalDAV) DeleteSchedulingObject(principalURI, objectURI string) error {
 		principalURI, objectURI)
 	return err
 }
+
+var _ caldav.AvailabilityBackend = (*CalDAV)(nil)
+
+// Availability reads a principal's working hours from calendar_availability
+// (VAVAILABILITY-PLAN.md §3.1); nil when none are set.
+func (b *CalDAV) Availability(principalURI string) ([]byte, error) {
+	defer b.Metrics.DBOpTimer("availability")()
+	var data []byte
+	err := b.DB.QueryRow(
+		`SELECT data FROM calendar_availability WHERE principal = $1`, principalURI).Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return data, err
+}
+
+func (b *CalDAV) SetAvailability(principalURI string, data []byte) error {
+	_, err := b.DB.Exec(`
+INSERT INTO calendar_availability (principal, data) VALUES ($1, $2)
+ON CONFLICT (principal) DO UPDATE SET data = $2, updated_at = now()`,
+		principalURI, string(data))
+	return err
+}
+
+func (b *CalDAV) DeleteAvailability(principalURI string) error {
+	_, err := b.DB.Exec(`DELETE FROM calendar_availability WHERE principal = $1`, principalURI)
+	return err
+}

@@ -66,6 +66,15 @@ func (pp *PropPatch) HandleRemaining(fn PatchHandler) {
 	pp.callbacks = append(pp.callbacks, patchCallback{remaining, fn})
 }
 
+// Mutation returns the requested change for name: the new value (string
+// for text content, []byte for a raw XML fragment, nil for removal) and
+// whether the request changes name at all. Lets a pre-hook validate a value
+// before claiming it.
+func (pp *PropPatch) Mutation(name xml.Name) (value any, ok bool) {
+	value, ok = pp.mutations[name]
+	return value, ok
+}
+
 // Remaining lists mutations no handler has claimed yet.
 func (pp *PropPatch) Remaining() []xml.Name {
 	var out []xml.Name

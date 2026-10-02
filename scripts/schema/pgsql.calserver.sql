@@ -58,7 +58,10 @@ BEGIN
         ('domain_scheduling_policy', 'domain'),
         ('domain_scheduling_policy', 'local_notify'),
         ('domain_scheduling_policy', 'share_notify'),
-        ('domain_scheduling_policy', 'updated_at')
+        ('domain_scheduling_policy', 'updated_at'),
+        ('calendar_availability', 'principal'),
+        ('calendar_availability', 'data'),
+        ('calendar_availability', 'updated_at')
       ) AS v(tbl, col)
      WHERE to_regclass(v.tbl) IS NOT NULL
        AND NOT EXISTS (
@@ -377,6 +380,65 @@ CREATE TABLE IF NOT EXISTS contact_import (
 );
 
 CREATE INDEX IF NOT EXISTS contact_import_run_ix ON contact_import (run_id);
+
+
+-- A principal's working hours (VAVAILABILITY-PLAN.md §3): the RFC 7953
+-- calendar-availability property of their schedule inbox, one VCALENDAR per
+-- principal with CRLF line endings. Outbox free-busy reports the time outside
+-- these hours as BUSY-UNAVAILABLE. A NEW calserver-only table, keyed by the
+-- principal URI like contact_frecency; AdminWrites' user deletes remove the
+-- row and the doctor flags one whose principal is gone.
+CREATE TABLE IF NOT EXISTS calendar_availability (
+    principal  VARCHAR(320) PRIMARY KEY,           -- 'principals/alice@example.org'
+    data       TEXT         NOT NULL,              -- the VCALENDAR
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+-- Before this table existed, a client (Apple Calendar's Availability
+-- settings) could PROPPATCH calendar-availability onto the inbox, where it
+-- landed as a dead property in propertystorage. Move those values over, once:
+-- the CalendarServer name wins over the RFC 7953 one, a principal that already
+-- has a row keeps it, and line endings become CRLF. The values are not
+-- validated here; one that does not parse is ignored at free-busy time like
+-- any unusable row. A NULL value, or bytes that are not UTF-8, cannot become
+-- TEXT and are left behind with a NOTICE rather than stopping the whole file
+-- (they stay in propertystorage, where the doctor still sees them). Re-running
+-- finds nothing left to move.
+DO $$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT DISTINCT ON (pr.uri) pr.uri AS principal, ps.id, ps.value
+          FROM propertystorage ps
+          JOIN principals pr ON pr.uri = 'principals/' || split_part(ps.path, '/', 2)
+         WHERE ps.path ~ '^calendars/[^/]+/inbox/?$'
+           AND ps.name IN ('{http://calendarserver.org/ns/}calendar-availability',
+                           '{urn:ietf:params:xml:ns:caldav}calendar-availability')
+           AND ps.valuetype = 1
+           AND ps.value IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM calendar_availability ca WHERE ca.principal = pr.uri)
+         ORDER BY pr.uri, ps.name = '{http://calendarserver.org/ns/}calendar-availability' DESC
+    LOOP
+        BEGIN
+            INSERT INTO calendar_availability (principal, data)
+            VALUES (r.principal,
+                    replace(replace(convert_from(r.value, 'UTF8'), E'\r\n', E'\n'), E'\n', E'\r\n'));
+        EXCEPTION WHEN character_not_in_repertoire OR untranslatable_character THEN
+            RAISE NOTICE 'calendar-availability of % (propertystorage id %) is not UTF-8; not moved',
+                         r.principal, r.id;
+        END;
+    END LOOP;
+END $$;
+
+-- The table now answers both names, so the dead rows are dead weight; drop
+-- them once their principal has a row (the one just moved, or a newer one).
+DELETE FROM propertystorage ps
+ WHERE ps.path ~ '^calendars/[^/]+/inbox/?$'
+   AND ps.name IN ('{http://calendarserver.org/ns/}calendar-availability',
+                   '{urn:ietf:params:xml:ns:caldav}calendar-availability')
+   AND EXISTS (SELECT 1 FROM calendar_availability ca
+                WHERE ca.principal = 'principals/' || split_part(ps.path, '/', 2));
 
 
 -- Apply the column widenings described above, but only where they are still

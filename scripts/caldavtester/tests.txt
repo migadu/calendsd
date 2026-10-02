@@ -14,6 +14,7 @@ CalDAV/delete.xml
 CalDAV/options.xml
 CalDAV/freebusy.xml
 CalDAV/sync-report.xml
+CalDAV/availability.xml
 CardDAV/current-user-principal.xml
 CardDAV/propfind.xml
 CardDAV/get.xml

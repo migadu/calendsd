@@ -5,7 +5,9 @@ package caldav
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -213,8 +215,44 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 	if !readable {
 		return nil, false, nil
 	}
+	// Working hours apply only now that the requester has passed the
+	// read-free-busy check, so they reach exactly who could already see busy
+	// time. A principal whose calendars are all private still reports them:
+	// hours are not calendar content (VAVAILABILITY-PLAN.md §4.3).
+	if availability := p.availabilityFor(name); availability != nil {
+		fb, err = ical.GenerateFreeBusyWithAvailability(payloads, availability, start, end, time.UTC, time.Now(), extraProps...)
+		if !errors.Is(err, ical.ErrInvalidAvailability) {
+			return fb, true, err
+		}
+		// A value validation never saw (one imported from a dead property)
+		// must not turn the probe into an error: answer without hours.
+		slog.Warn("ignoring unusable calendar-availability", "principal", principalURI, "err", err)
+	}
 	fb, err = ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now(), extraProps...)
 	return fb, true, err
+}
+
+// availabilityFor returns the stored calendar-availability of the user whose
+// home is calendars/<name>, or nil when none is set or it cannot be read.
+func (p *SchedulePlugin) availabilityFor(name string) []byte {
+	node, err := p.server.Tree.NodeForPath("calendars/" + name + "/inbox")
+	if err != nil {
+		return nil
+	}
+	inbox, ok := node.(*Inbox)
+	if !ok {
+		return nil
+	}
+	ab := inbox.availability()
+	if ab == nil {
+		return nil
+	}
+	data, err := ab.Availability(inbox.principalURI)
+	if err != nil {
+		slog.Warn("reading calendar-availability", "principal", inbox.principalURI, "err", err)
+		return nil
+	}
+	return data
 }
 
 // formatICalProp serializes an iCalendar property to a single unfolded content

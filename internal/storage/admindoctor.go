@@ -138,6 +138,10 @@ func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
 			   FROM schedulingobjects s
 			  WHERE s.principaluri IS NOT NULL
 			    AND NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = s.principaluri)`},
+		{"orphaned-availability", "calendar_availability row for a nonexistent principal",
+			`SELECT 'availability of ' || ca.principal
+			   FROM calendar_availability ca
+			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = ca.principal)`},
 	} {
 		rows, err := q.DB.Query(c.query)
 		if err != nil {

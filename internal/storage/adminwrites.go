@@ -203,7 +203,8 @@ func (w *AdminWrites) DeleteUserCascade(username string) error {
 }
 
 // deletePrincipalRows removes the rows shared by both delete paths: the
-// principal's group-membership and scheduling-inbox rows, its principal
+// principal's group-membership, scheduling-inbox and working-hours
+// (calendar_availability) rows, its principal
 // triple (the principal plus the two proxy sub-principals), and its users
 // row (absent for group principals, which is fine). It errors if no
 // principal row matched, so deleting an unknown account is reported.
@@ -219,6 +220,10 @@ DELETE FROM groupmembers
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM schedulingobjects WHERE principaluri = $1`, principal); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM calendar_availability WHERE principal = $1`, principal); err != nil {
 		return err
 	}
 	res, err := tx.Exec(
@@ -421,12 +426,15 @@ var deletableOrphanSQL = map[string]string{
 	"orphaned-scheduling-object": `DELETE FROM schedulingobjects s
 	  WHERE s.principaluri IS NOT NULL
 	    AND NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = s.principaluri)`,
+	"orphaned-availability": `DELETE FROM calendar_availability ca
+	  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = ca.principal)`,
 }
 
 // DeletableOrphanChecks lists the doctor checks DeleteOrphans accepts.
 func DeletableOrphanChecks() []string {
 	return []string{"orphaned-instance", "orphaned-object", "orphaned-card",
-		"dangling-groupmember", "orphaned-scheduling-object", "orphaned-property"}
+		"dangling-groupmember", "orphaned-scheduling-object", "orphaned-availability",
+		"orphaned-property"}
 }
 
 // DeleteOrphans removes the rows a doctor check flagged, returning how many

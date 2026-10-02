@@ -27,10 +27,27 @@ type SchedulingBackend interface {
 	DeleteSchedulingObject(principalURI, objectURI string) error
 }
 
+// AvailabilityBackend stores a principal's working hours: the RFC 7953
+// calendar-availability property of their schedule inbox, as one VCALENDAR
+// (VAVAILABILITY-PLAN.md §3.1). A scheduling backend that implements it turns
+// the property on; Availability returns nil data when none is set.
+type AvailabilityBackend interface {
+	Availability(principalURI string) ([]byte, error)
+	SetAvailability(principalURI string, data []byte) error
+	DeleteAvailability(principalURI string) error
+}
+
 // Inbox is a principal's schedule inbox. Port of Schedule\Inbox.
 type Inbox struct {
 	backend      SchedulingBackend
 	principalURI string
+}
+
+// availability returns the inbox's working-hours store, or nil when the
+// backend has none.
+func (i *Inbox) availability() AvailabilityBackend {
+	ab, _ := i.backend.(AvailabilityBackend)
+	return ab
 }
 
 // NewInbox builds a schedule inbox node.
@@ -216,6 +233,25 @@ type MockSchedulingBackend struct {
 	MockBackend
 	// Scheduling maps principal → uri → data.
 	Scheduling map[string]map[string][]byte
+	// Availabilities maps principal → calendar-availability VCALENDAR.
+	Availabilities map[string][]byte
+}
+
+func (m *MockSchedulingBackend) Availability(principalURI string) ([]byte, error) {
+	return m.Availabilities[principalURI], nil
+}
+
+func (m *MockSchedulingBackend) SetAvailability(principalURI string, data []byte) error {
+	if m.Availabilities == nil {
+		m.Availabilities = map[string][]byte{}
+	}
+	m.Availabilities[principalURI] = data
+	return nil
+}
+
+func (m *MockSchedulingBackend) DeleteAvailability(principalURI string) error {
+	delete(m.Availabilities, principalURI)
+	return nil
 }
 
 func (m *MockSchedulingBackend) SchedulingObjects(principalURI string) ([]SchedulingObjectInfo, error) {
