@@ -204,7 +204,7 @@ func checkDatabase(dsn string) checkResult {
 	return checkResult{
 		Component: "database",
 		Status:    "healthy",
-		Message:   "connected, sabre schema present",
+		Message:   "connected, sabre and calserver schema present",
 		Duration:  d.Truncate(time.Millisecond).String(),
 	}
 }

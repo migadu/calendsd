@@ -111,5 +111,5 @@ func checkDatabase(dsn string) healthResult {
 			Message: fmt.Sprintf("schema check failed: %v", err), Duration: since()}
 	}
 	return healthResult{Component: "database", Status: "healthy",
-		Message: "connected, sabre schema present", Duration: since()}
+		Message: "connected, sabre and calserver schema present", Duration: since()}
 }

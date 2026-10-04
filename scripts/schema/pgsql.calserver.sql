@@ -17,6 +17,10 @@
 --
 --     psql -v ON_ERROR_STOP=1 -d sabredav -f scripts/schema/pgsql.calserver.sql
 --
+-- calctl carries this file (scripts/schema/schema.go embeds it), and
+-- `calctl schema apply` runs it as one transaction with the config's DSN; the
+-- Ansible role does that on every deploy.
+--
 -- What re-runnable does NOT mean: this is not a migration runner. CREATE TABLE
 -- IF NOT EXISTS matches on the name, so a table that already exists with an
 -- OUTDATED definition is skipped silently, not brought up to date. The guard at

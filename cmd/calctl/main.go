@@ -90,6 +90,8 @@ func main() {
 		handleImip(subArgs)
 	case "contacts":
 		handleContacts(subArgs)
+	case "schema":
+		handleSchema(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()
@@ -153,6 +155,9 @@ Commands:
                                            not in the bundle
   contacts summary [--run-id UUID] [--json] Totals from the import ledger, plus the orphaned
                                            address book check (exit 1 on findings)
+  schema apply [--db DSN] [--timeout DUR] [--lock-timeout DUR]
+                                           Apply the calserver extension schema built into this
+                                           binary; re-runnable, all or nothing (the deploy runs it)
   version                                  Show version information
 
 Examples:
@@ -177,5 +182,6 @@ Examples:
   calctl contacts import --bundle /var/tmp/contacts-bundle --dry-run
   calctl contacts import --bundle /var/tmp/contacts-bundle --only alice@example.org
   calctl contacts summary
+  calctl schema apply
 `)
 }

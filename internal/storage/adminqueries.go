@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"calserver/scripts/schema"
 )
 
 // AdminQueries bundles the read-only SQL the admin panel needs beyond the
@@ -54,15 +56,17 @@ func (q *AdminQueries) Counts() (*AdminCounts, error) {
 	return &c, nil
 }
 
-// SchemaPresent verifies every table the admin surface reads exists, via a
-// LIMIT 0 probe per table. Unlike Counts it stays O(1) on large databases,
-// so it is safe in a health check that runs on a monitoring interval.
+// SchemaPresent verifies every sabre table the admin surface reads exists, and
+// every table pgsql.calserver.sql creates, via a LIMIT 0 probe per table.
+// Unlike Counts it stays O(1) on large databases, so it is safe in a health
+// check that runs on a monitoring interval. A missing extension table fails it
+// too: the server starts without one and only fails the requests that need it.
 func (q *AdminQueries) SchemaPresent() error {
-	for _, table := range []string{
+	for _, table := range append([]string{
 		"principals", "users", "calendars", "calendarinstances",
 		"calendarobjects", "addressbooks", "cards", "schedulingobjects",
 		"propertystorage", "groupmembers", "calendarchanges", "addressbookchanges",
-	} {
+	}, schema.Tables()...) {
 		rows, err := q.DB.Query("SELECT 1 FROM " + table + " LIMIT 0")
 		if err != nil {
 			return fmt.Errorf("table %s: %w", table, err)
