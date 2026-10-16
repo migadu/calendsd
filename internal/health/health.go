@@ -17,11 +17,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -178,23 +178,45 @@ func Failed(results []Result) bool {
 // PrintTable renders the report as calctl/mqctl/rcptctl do, coloring the
 // status only when w is a terminal so piped output stays plain.
 func PrintTable(w io.Writer, results []Result) {
-	color := isTerminal(w)
+	printTable(w, results, isTerminal(w))
+}
+
+func printTable(w io.Writer, results []Result, color bool) {
 	fmt.Fprintln(w, "Health Check")
 	fmt.Fprintln(w, strings.Repeat("=", 70))
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "COMPONENT\tSTATUS\tENDPOINT\tMESSAGE\tDURATION")
+
+	// Columns are padded here rather than by text/tabwriter, which counts the
+	// ANSI color codes as width and so shifts every colored row against the
+	// plain header.
+	rows := [][]string{{"COMPONENT", "STATUS", "ENDPOINT", "MESSAGE", "DURATION"}}
 	for _, r := range results {
 		endpoint := r.Endpoint
 		if endpoint == "" {
 			endpoint = "-"
 		}
-		status := r.Status
-		if color {
-			status = colorStatus(status)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Component, status, endpoint, r.Message, r.Duration)
+		rows = append(rows, []string{r.Component, r.Status, endpoint, r.Message, r.Duration})
 	}
-	tw.Flush()
+	widths := make([]int, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			widths[i] = max(widths[i], len(cell))
+		}
+	}
+	for n, row := range rows {
+		var b strings.Builder
+		for i, cell := range row {
+			if i == len(row)-1 {
+				b.WriteString(cell)
+				break
+			}
+			padded := fmt.Sprintf("%-*s  ", widths[i], cell)
+			if i == 1 && n > 0 && color {
+				padded = colorStatus(cell) + strings.Repeat(" ", widths[i]-len(cell)+2)
+			}
+			b.WriteString(padded)
+		}
+		fmt.Fprintln(w, b.String())
+	}
 }
 
 func isTerminal(w io.Writer) bool {
@@ -207,17 +229,15 @@ func isTerminal(w io.Writer) bool {
 }
 
 func colorStatus(status string) string {
-	// Pad to a fixed visible width so the ANSI codes don't break alignment.
-	padded := fmt.Sprintf("%-9s", status)
 	switch status {
 	case Healthy:
-		return "\033[32m" + padded + "\033[0m"
+		return "\033[32m" + status + "\033[0m"
 	case Unhealthy:
-		return "\033[31m" + padded + "\033[0m"
+		return "\033[31m" + status + "\033[0m"
 	case Degraded:
-		return "\033[33m" + padded + "\033[0m"
+		return "\033[33m" + status + "\033[0m"
 	default:
-		return padded
+		return status
 	}
 }
 
@@ -561,6 +581,11 @@ SELECT count(*) FILTER (WHERE state = 'available' AND scheduled_at <= now()),
 	return t.result("jobs", Healthy, "", msg)
 }
 
+// rcptdProbeAddress is valid in form, which rcptd checks before any lookup
+// (the domain needs a dot: a bare "@invalid" is a 400), and can never exist:
+// .invalid is reserved (RFC 2606), so the healthy answer is a 404.
+const rcptdProbeAddress = "calctl-health-probe@health.invalid"
+
 // checkRcptd probes the /auth endpoint calserver's rcptd backend calls, with
 // an address that cannot exist, and maps the statuses the way the backend
 // does: 404 proves a working service as well as 200; 401 is our token
@@ -571,7 +596,7 @@ func checkRcptd(ctx context.Context, o Options) Result {
 	if o.RcptdToken != "" {
 		hdr.Set("Authorization", "Bearer "+o.RcptdToken)
 	}
-	resp, err := o.get(ctx, http.MethodGet, o.RcptdURL+"/auth?email=calctl-health-probe%40invalid", hdr)
+	resp, err := o.get(ctx, http.MethodGet, o.RcptdURL+"/auth?email="+url.QueryEscape(rcptdProbeAddress), hdr)
 	if err != nil {
 		return t.result("rcptd", Unhealthy, o.RcptdURL, err.Error())
 	}
@@ -584,6 +609,8 @@ func checkRcptd(ctx context.Context, o Options) Result {
 			"bearer token rejected — check [server.rcptd] token / $RCPTD_AUTH_TOKEN")
 	case http.StatusServiceUnavailable:
 		return t.result("rcptd", Degraded, o.RcptdURL, "temporarily unavailable (transient table fault)")
+	case http.StatusBadRequest:
+		return t.result("rcptd", Unhealthy, o.RcptdURL, "rejected the probe address as malformed (HTTP 400)")
 	default:
 		return t.result("rcptd", Unhealthy, o.RcptdURL, fmt.Sprintf("unexpected HTTP %d from /auth", resp.StatusCode))
 	}

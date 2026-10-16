@@ -1,7 +1,9 @@
 package health
 
 import (
+	"bytes"
 	"context"
+	"regexp"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -184,4 +186,48 @@ func deadAddr(t *testing.T) string {
 	addr := ln.Addr().String()
 	ln.Close()
 	return addr
+}
+
+// Colored output must line up exactly like plain output: the escape codes
+// take no columns on a terminal, so stripping them has to give the plain
+// table back, header included.
+func TestPrintTableColorKeepsAlignment(t *testing.T) {
+	results := []Result{
+		{Component: "calserver", Status: Healthy, Endpoint: "http://127.0.0.1:8080/", Message: "ok", Duration: "1ms"},
+		{Component: "database[10.10.3.50:5433]", Status: Unhealthy, Message: "refused", Duration: "2s"},
+		{Component: "jobs", Status: Degraded, Message: "1 due", Duration: "0s"},
+	}
+	var plain, colored bytes.Buffer
+	printTable(&plain, results, false)
+	printTable(&colored, results, true)
+	if !strings.Contains(colored.String(), "\033[") {
+		t.Fatal("no color codes in colored output")
+	}
+	stripped := regexp.MustCompile("\033\\[[0-9;]*m").ReplaceAllString(colored.String(), "")
+	if stripped != plain.String() {
+		t.Errorf("colored table misaligns:\n%s\nwant:\n%s", stripped, plain.String())
+	}
+	lines := strings.Split(plain.String(), "\n")
+	if col := strings.Index(lines[2], "STATUS"); col != strings.Index(lines[3], Healthy) {
+		t.Errorf("STATUS header at %d, first status at %d:\n%s", col, strings.Index(lines[3], Healthy), plain.String())
+	}
+}
+
+// rcptd validates the address before looking it up and answers 400 to one
+// whose domain has no dot. The probe must pass that and get the 404.
+func TestCheckRcptdProbeAddressIsWellFormed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.URL.Query().Get("email")
+		_, domain, _ := strings.Cut(email, "@")
+		if !strings.Contains(domain, ".") || r.Header.Get("Authorization") != "Bearer tok" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	o := Options{RcptdURL: srv.URL, RcptdToken: "tok", Timeout: time.Second, HTTP: &http.Client{}}
+	if r := checkRcptd(context.Background(), o); r.Status != Healthy {
+		t.Errorf("probe against a validating rcptd: %+v", r)
+	}
 }
