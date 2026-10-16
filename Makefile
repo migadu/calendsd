@@ -17,8 +17,8 @@ LDFLAGS    = -ldflags "-X calserver/internal/version.Version=$(VERSION) \
 # DSN for the shared dev Postgres started by scripts/dev-db.sh.
 DB    ?= postgres://$(USER)@/calserver?host=$(CURDIR)/.dev/pg
 
-# Admin panel (calserver-admin) dev settings.
-ADMIN_ADDR ?= 127.0.0.1:8081
+# Admin panel (calctl panel) dev settings.
+ADMIN_ADDR ?= 127.0.0.1:8092
 ADMIN_AUTH ?= .dev/admin-auth.htpasswd
 ADMIN_USER ?= root
 ADMIN_PASS ?= root
@@ -35,13 +35,13 @@ CLIENT_ADDR ?= 127.0.0.1:8091
 
 dev: build db-start $(ADMIN_AUTH) ## Start the dev DB and all three servers: CalDAV/CardDAV + admin panel + demo client (default)
 	@echo "calserver (CalDAV/CardDAV) → http://$(ADDR)"
-	@echo "calserver-admin (panel)    → http://$(ADMIN_ADDR)  (login $(ADMIN_USER) / $(ADMIN_PASS))"
+	@echo "calctl panel (admin)       → http://$(ADMIN_ADDR)  (login $(ADMIN_USER) / $(ADMIN_PASS))"
 	@echo "calweb (end-user UI)       → http://$(CLIENT_ADDR)/cal/  (login admin / admin; 'make seed' adds demo data)"
 	@echo "calclient (protocol UI)    → http://$(CLIENT_ADDR)/app/"
 	@echo "Ctrl-C stops all servers."
 	@trap 'kill 0' EXIT INT TERM; \
 	 ./bin/calserver -addr $(ADDR) -db "$(DB)" -realm $(REALM) & \
-	 ./bin/calserver-admin -addr $(ADMIN_ADDR) -db "$(DB)" -realm $(REALM) \
+	 ./bin/calctl panel -addr $(ADMIN_ADDR) -db "$(DB)" -realm $(REALM) \
 	   -admin-auth $(ADMIN_AUTH) & \
 	 ./bin/calclient -addr $(CLIENT_ADDR) -target http://127.0.0.1:8080 & \
 	 wait
@@ -66,15 +66,13 @@ help: ## Show available targets
 
 all: vet test ## Vet then run the full Go test suite
 
-build: ## Build the server, admin, demo-client, and CLI binaries into bin/
+build: ## Build the server, demo-client, and CLI (incl. admin panel) binaries into bin/
 	$(GO) build $(LDFLAGS) -o bin/calserver ./cmd/calserver
-	$(GO) build $(LDFLAGS) -o bin/calserver-admin ./cmd/calserver-admin
 	$(GO) build $(LDFLAGS) -o bin/calclient ./cmd/calclient
 	$(GO) build $(LDFLAGS) -o bin/calctl ./cmd/calctl
 
 freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64, consumed by the ansible calserver role)
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calserver-freebsd-amd64 ./cmd/calserver
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calserver-admin-freebsd-amd64 ./cmd/calserver-admin
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calclient-freebsd-amd64 ./cmd/calclient
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calctl-freebsd-amd64 ./cmd/calctl
 

@@ -7,7 +7,7 @@ import (
 )
 
 // TestBasicAuthGuardsEveryEndpoint verifies that the production handler
-// constructor (App.AuthenticatedHandler — the exact call cmd/calserver-admin
+// constructor (App.AuthenticatedHandler — the exact call `calctl panel`
 // uses) leaves no route — read page, JSON API, or write action — reachable
 // without valid credentials. A 401 uniquely proves the auth wrapper blocked
 // the request: the handlers themselves never return 401, so any other status

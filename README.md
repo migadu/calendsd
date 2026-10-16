@@ -32,7 +32,7 @@ PARITY=1 go test ./internal/storage/ -run TestParity -v
 
 ## Admin panel
 
-`calserver-admin` is a standalone debugging UI over the same shared database
+`calctl panel` serves a debugging UI over the same shared database
 (see [ADMIN-PLAN.md](ADMIN-PLAN.md)): principal/calendar/object inspectors, a
 privilege simulator that answers "what can user X do on path Y" through the
 production plugin chain, a scheduling/sync debugger, a consistency doctor,
@@ -41,12 +41,12 @@ JSON endpoint under `/api/`.
 
 ```sh
 htpasswd -cB admin-auth.htpasswd root   # bcrypt admin credentials
-go run ./cmd/calserver-admin -db "postgres:///calserver?host=$PGHOST" \
-  -admin-auth admin-auth.htpasswd       # binds 127.0.0.1:8081
+go run ./cmd/calctl panel -db "postgres:///calserver?host=$PGHOST" \
+  -admin-auth admin-auth.htpasswd       # binds 127.0.0.1:8092
 ```
 
 Run it with the **same config file / Calendar-Server flags as calserver**
-(both binaries resolve them through the same code and log an identical
+(both processes resolve them through the same code and log an identical
 `effective config` line — the dashboard echoes it so drift is a string
 diff). Basic auth resends the password on every request: keep the listener
 on loopback/LAN or behind TLS. Write actions are off by default, need the
@@ -61,8 +61,8 @@ sibling services). It reads the server's `config.toml` (falling back to
 line:
 
 ```sh
-calctl health                 # OPTIONS-probe the DAV listener + DB ping/schema check
-                              # (+ rcptd /auth probe when [server.rcptd] url is set)
+calctl health                 # every dependency, probed concurrently (see below)
+calctl panel                  # serve the admin panel (127.0.0.1:8092)
 calctl stats                  # dashboard row counts + recent change-log activity
 calctl doctor                 # §3.7 consistency checks; exit 1 on any finding
 calctl principal list         # principals with email/displayname/login capability
@@ -74,8 +74,24 @@ calctl health --json          # every command takes --json for scripts/monitorin
 calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
 ```
 
-`health` exits 1 on an unhealthy component, `doctor` on any finding, so both
-slot straight into monitoring. The `principal` writes go through the same
+`health` reports one row per component, all derived from `config.toml`:
+
+| Component | Probe | Not healthy when |
+|---|---|---|
+| `calserver` | unauthenticated `OPTIONS` on the DAV listener | no HTTP answer |
+| `contacts-api` | unauthenticated `GET /api/v1/health` on `api_addr` (401 is healthy) | no answer, or no auth backend |
+| `database` | a pool opened the way calserver opens it, plus the schema check | unreachable or schema missing; degraded when no DSN |
+| `database[host:port]` | each host of a multi-host DSN on its own (only when there are several) | degraded when some nodes fail, unhealthy when all do |
+| `db-pool` | the running daemon's `go_sql_*` gauges from `metrics_addr` | degraded when in-use reaches the cap |
+| `jobs` | due, stuck-executing and discarded rows in the job queue | degraded when due work is >10m old or a claim is >15m old |
+| `rcptd` | `/auth` with a probe address (404 is healthy) | token rejected or no answer; degraded on 503 |
+
+The per-node rows exist because calserver tries a multi-host DSN in order:
+a node that silently drops traffic costs each new connection a full
+`connect_timeout`, which the `database` row (some host answered) hides.
+
+`health` exits 1 on an unhealthy component (degraded only warns), `doctor` on
+any finding, so both slot straight into monitoring. The `principal` writes go through the same
 `storage.AdminWrites` carve-out as the admin panel (digesta1 computed under
 the configured realm; override with `--realm`).
 

@@ -157,8 +157,8 @@ type PushConfig struct {
 }
 
 // Canonical renders the effective configuration as one deterministic line.
-// Both calserver and calserver-admin log it at startup, and the admin
-// dashboard echoes its own copy, so config drift between the two processes
+// Both calserver and the admin panel (`calctl panel`) log it at startup, and
+// the dashboard echoes its own copy, so config drift between the two processes
 // (which would make the admin privilege simulator lie) reduces to comparing
 // two strings (ADMIN-PLAN.md §2). Values are normalized the way the server
 // applies them (base-URI slashes, realm default), so equivalent configs

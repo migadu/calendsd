@@ -78,6 +78,8 @@ func main() {
 	switch command {
 	case "health":
 		handleHealth(subArgs)
+	case "panel":
+		handlePanel(subArgs, configPath)
 	case "stats":
 		handleStats(subArgs)
 	case "doctor":
@@ -116,7 +118,13 @@ Global Options:
                    built-in defaults when none exists)
 
 Commands:
-  health [--json] [--url URL] [--db DSN]   Check DAV server and database connectivity
+  health [--json] [--url URL] [--db DSN] [--timeout D]
+                                           Check calserver and everything it depends on: DAV and
+                                           contacts-API listeners, the database (each node of a
+                                           multi-host DSN), the daemon's pool, the job queue, rcptd
+  panel [-addr A] [-admin-auth FILE] [-readonly=false] [calserver flags]
+                                           Serve the admin panel (default 127.0.0.1:8092; Basic auth
+                                           from [admin].auth_file, an htpasswd -B file)
   stats [--json] [--db DSN] [--changes N]  Show row counts and recent change-log activity
   doctor [--json] [--db DSN] [--scan-cap N] Run read-only consistency checks (exit 1 on findings)
   principal list [--json]                  List principals with email/displayname and login capability

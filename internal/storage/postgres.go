@@ -47,7 +47,7 @@ type Pool struct {
 
 // DefaultPool is the conservative bound applied when a field is left zero.
 // Sized to leave headroom under a shared Postgres's max_connections for the
-// live sabre instance, calserver-admin, and calctl.
+// live sabre instance, the admin panel, and calctl.
 var DefaultPool = Pool{MaxOpen: 20, MaxIdle: 5, ConnMaxLifetime: 5 * time.Minute}
 
 // Open connects to the shared Postgres database with DefaultPool bounds —

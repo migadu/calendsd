@@ -44,7 +44,7 @@ func (a *App) writeGate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if a.ReadOnly {
-		http.Error(w, "read-only mode: restart calserver-admin with -readonly=false to enable write actions", http.StatusForbidden)
+		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
 		return false
 	}
 	if a.Writes == nil {
@@ -218,7 +218,7 @@ func (a *App) propPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.ReadOnly {
-		http.Error(w, "read-only mode: restart calserver-admin with -readonly=false to enable write actions", http.StatusForbidden)
+		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
 		return
 	}
 	if a.NewSimulator == nil {
@@ -293,7 +293,7 @@ func (a *App) provision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.ReadOnly {
-		http.Error(w, "read-only mode: restart calserver-admin with -readonly=false to enable write actions", http.StatusForbidden)
+		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
 		return
 	}
 	if a.NewProvisioner == nil {

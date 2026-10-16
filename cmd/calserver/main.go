@@ -89,7 +89,7 @@ func main() {
 		}
 		set.RegisterDBStats(db)
 		set.RegisterJobDepth(db)
-		// Same line calserver-admin logs: drift shows as a string diff.
+		// Same line `calctl panel` logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
 		built := server.Build(db, m.Server, m.DSN)
 		srv, pushWorker, jobQueue = built.Handler, built.Worker, built.Queue

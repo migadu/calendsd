@@ -87,8 +87,8 @@ func (m *Merged) Bool(name string, flagVal, fileVal bool) bool {
 
 // SharedServerFlags registers the flags that define the DAV server's
 // effective configuration on the default FlagSet. calserver and
-// calserver-admin both resolve through this one function, so the two
-// binaries can never drift in how they turn identical inputs into a
+// `calctl panel` both resolve through this one function, so the two
+// processes can never drift in how they turn identical inputs into a
 // server.Config — the property the Canonical() config echo depends on
 // (ADMIN-PLAN.md §2). The returned resolver must run after flag.Parse.
 func SharedServerFlags(dbUsage string) func() (*Merged, error) {
@@ -119,7 +119,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
 		// An explicit -config wins; otherwise fall back to the well-known
-		// locations so `calserver`/`calserver-admin` pick up an installed
+		// locations so `calserver`/`calctl panel` pick up an installed
 		// config without repeating -config on every invocation.
 		path := *configPath
 		if path == "" {

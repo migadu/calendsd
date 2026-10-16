@@ -201,14 +201,14 @@ auto_schedule_prefixes = []  # e.g. ["resource", "location"]
 
 # ADMIN PANEL
 # =============================================================================
-# Settings read only by calserver-admin (the read-first debugging UI); the
+# Settings read only by `calctl panel` (the read-first debugging UI); the
 # calserver daemon ignores this section. The panel reuses this file's [database]
 # DSN, so running it on the server host needs only the admin credentials here.
 # Command-line flags (-admin-auth, -addr) override these values.
 [admin]
 auth_file = ""              # htpasswd file with bcrypt entries (htpasswd -B) of
                             # admin logins. Required for the panel to start.
-addr = ""                   # Listen address (empty uses 127.0.0.1:8081). Basic
+addr = ""                   # Listen address (empty uses 127.0.0.1:8092). Basic
                             # auth resends the password: loopback/LAN or TLS only.
 
 

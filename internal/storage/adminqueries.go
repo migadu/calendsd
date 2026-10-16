@@ -6,6 +6,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -62,12 +63,17 @@ func (q *AdminQueries) Counts() (*AdminCounts, error) {
 // check that runs on a monitoring interval. A missing extension table fails it
 // too: the server starts without one and only fails the requests that need it.
 func (q *AdminQueries) SchemaPresent() error {
+	return q.SchemaPresentContext(context.Background())
+}
+
+// SchemaPresentContext is SchemaPresent bounded by ctx.
+func (q *AdminQueries) SchemaPresentContext(ctx context.Context) error {
 	for _, table := range append([]string{
 		"principals", "users", "calendars", "calendarinstances",
 		"calendarobjects", "addressbooks", "cards", "schedulingobjects",
 		"propertystorage", "groupmembers", "calendarchanges", "addressbookchanges",
 	}, schema.Tables()...) {
-		rows, err := q.DB.Query("SELECT 1 FROM " + table + " LIMIT 0")
+		rows, err := q.DB.QueryContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
 		if err != nil {
 			return fmt.Errorf("table %s: %w", table, err)
 		}

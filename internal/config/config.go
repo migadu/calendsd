@@ -141,7 +141,7 @@ type Config struct {
 		PrincipalsReadable   bool
 		AutoSchedulePrefixes []string
 	}
-	// Admin holds calserver-admin panel settings. Only that binary reads them;
+	// Admin holds admin panel (`calctl panel`) settings. Only the panel reads them;
 	// calserver ignores the section. Command-line flags override these.
 	Admin struct {
 		// AuthFile is the htpasswd file (bcrypt entries, htpasswd -B) of admin
@@ -183,8 +183,8 @@ type Config struct {
 // when [retention].deleted_days is unset or non-positive.
 const DefaultRetentionDays = 30
 
-// RetentionDays applies the DefaultRetentionDays fallback so calserver-admin
-// and calctl default identically.
+// RetentionDays applies the DefaultRetentionDays fallback so the admin panel
+// and the calctl commands default identically.
 func RetentionDays(days int) int {
 	if days <= 0 {
 		return DefaultRetentionDays

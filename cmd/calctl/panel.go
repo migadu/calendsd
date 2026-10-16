@@ -1,14 +1,7 @@
-// Command calserver-admin runs the admin panel (ADMIN-PLAN.md): a
-// standalone read-first debugging UI over the same shared sabre Postgres
-// database calserver serves. It accepts the same config file and
-// Calendar-Server flags as calserver — resolved through the same
-// config.SharedServerFlags code — so the effective-config echo on the
-// dashboard matches the server's startup log line by construction.
 package main
 
 import (
 	"flag"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,26 +16,30 @@ import (
 	"calserver/internal/version"
 )
 
-func main() {
-	// Subcommand dispatch: `calserver-admin health` checks database connectivity
-	// and exits (no -admin-auth needed). It must be handled before the server
-	// flag set is parsed, since that set stops at the first positional argument.
-	if len(os.Args) > 1 && os.Args[1] == "health" {
-		handleHealth(os.Args[2:])
-		return
-	}
+// defaultPanelAddr is loopback and clear of calserver's own listeners: 8080
+// DAV, 8081 the contacts API, 8090 rcptd, 8091 calclient.
+const defaultPanelAddr = "127.0.0.1:8092"
 
+// handlePanel runs `calctl panel`, the admin panel (ADMIN-PLAN.md): a
+// read-first debugging UI over the same shared sabre database calserver
+// serves. It takes the same config file and Calendar-Server flags as
+// calserver — resolved through the same config.SharedServerFlags code — so
+// the effective-config echo on the dashboard matches the server's startup log
+// line by construction.
+//
+// SharedServerFlags registers on the default FlagSet, so the panel parses its
+// arguments there rather than on a subcommand set of its own. calctl's global
+// --config has already been consumed by main; it is handed back as -config.
+func handlePanel(args []string, configPath string) {
+	flag.CommandLine = flag.NewFlagSet("calctl panel", flag.ExitOnError)
 	resolve := config.SharedServerFlags("Postgres DSN of the shared sabre database (required)")
-	addr := flag.String("addr", "127.0.0.1:8081", "listen address (Basic auth resends the password: loopback/LAN or behind TLS only)")
+	addr := flag.String("addr", defaultPanelAddr, "listen address (Basic auth resends the password: loopback/LAN or behind TLS only)")
 	authFile := flag.String("admin-auth", "", "htpasswd file with bcrypt entries (htpasswd -B) for admin logins (required)")
 	readonly := flag.Bool("readonly", true, "disable write actions (Phase C); reads only")
-	showVersion := version.Flags()
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println(version.String("calserver-admin"))
-		return
+	if configPath != "" {
+		args = append([]string{"-config", configPath}, args...)
 	}
+	flag.CommandLine.Parse(args)
 
 	m, err := resolve()
 	if err != nil {
