@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -196,10 +197,12 @@ func printTable(w io.Writer, results []Result, color bool) {
 		}
 		rows = append(rows, []string{r.Component, r.Status, endpoint, r.Message, r.Duration})
 	}
+	// Widths count runes, as fmt's padding does: messages carry non-ASCII
+	// (the em dash in rcptd's token error).
 	widths := make([]int, len(rows[0]))
 	for _, row := range rows {
 		for i, cell := range row {
-			widths[i] = max(widths[i], len(cell))
+			widths[i] = max(widths[i], utf8.RuneCountInString(cell))
 		}
 	}
 	for n, row := range rows {
@@ -211,7 +214,7 @@ func printTable(w io.Writer, results []Result, color bool) {
 			}
 			padded := fmt.Sprintf("%-*s  ", widths[i], cell)
 			if i == 1 && n > 0 && color {
-				padded = colorStatus(cell) + strings.Repeat(" ", widths[i]-len(cell)+2)
+				padded = colorStatus(cell) + strings.Repeat(" ", widths[i]-utf8.RuneCountInString(cell)+2)
 			}
 			b.WriteString(padded)
 		}

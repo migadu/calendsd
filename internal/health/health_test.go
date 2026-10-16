@@ -3,13 +3,14 @@ package health
 import (
 	"bytes"
 	"context"
-	"regexp"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"calserver/internal/config"
 )
@@ -196,6 +197,7 @@ func TestPrintTableColorKeepsAlignment(t *testing.T) {
 		{Component: "calserver", Status: Healthy, Endpoint: "http://127.0.0.1:8080/", Message: "ok", Duration: "1ms"},
 		{Component: "database[10.10.3.50:5433]", Status: Unhealthy, Message: "refused", Duration: "2s"},
 		{Component: "jobs", Status: Degraded, Message: "1 due", Duration: "0s"},
+		{Component: "rcptd", Status: Unhealthy, Message: "bearer token rejected — check the token", Duration: "1ms"},
 	}
 	var plain, colored bytes.Buffer
 	printTable(&plain, results, false)
@@ -207,9 +209,18 @@ func TestPrintTableColorKeepsAlignment(t *testing.T) {
 	if stripped != plain.String() {
 		t.Errorf("colored table misaligns:\n%s\nwant:\n%s", stripped, plain.String())
 	}
-	lines := strings.Split(plain.String(), "\n")
-	if col := strings.Index(lines[2], "STATUS"); col != strings.Index(lines[3], Healthy) {
-		t.Errorf("STATUS header at %d, first status at %d:\n%s", col, strings.Index(lines[3], Healthy), plain.String())
+	// Every row's last column starts where the header's does, counted in
+	// runes: a multi-byte message must not push DURATION right.
+	lines := strings.Split(strings.TrimRight(plain.String(), "\n"), "\n")[2:]
+	runeCol := func(line, sub string) int { return utf8.RuneCountInString(line[:strings.LastIndex(line, sub)]) }
+	want := runeCol(lines[0], "DURATION")
+	for i, r := range results {
+		if got := runeCol(lines[i+1], r.Duration); got != want {
+			t.Errorf("%s: DURATION at column %d, header at %d:\n%s", r.Component, got, want, plain.String())
+		}
+	}
+	if col := strings.Index(lines[0], "STATUS"); col != strings.Index(lines[1], Healthy) {
+		t.Errorf("STATUS header at %d, first status at %d:\n%s", col, strings.Index(lines[1], Healthy), plain.String())
 	}
 }
 
