@@ -45,8 +45,9 @@ type RcptdBackend struct {
 	HTTP *http.Client
 	// Provision, when set, is called after a successful verification with the
 	// resolved principal path and the login (an email). It must be idempotent
-	// — it runs on every cache-missed login.
-	Provision func(principal, email string) error
+	// — it runs on every cache-missed login. ctx is the request's, so a
+	// stalled provisioning write ends with the request.
+	Provision func(ctx context.Context, principal, email string) error
 	// Logger records unusable stored hashes (a user whose only hash uses an
 	// unsupported scheme can never authenticate). Nil disables logging.
 	Logger *slog.Logger
@@ -118,7 +119,7 @@ func (b *RcptdBackend) Check(r *http.Request) (string, bool, string) {
 	}
 	principal := b.prefix() + username
 	if b.Provision != nil {
-		if err := b.Provision(principal, username); err != nil {
+		if err := b.Provision(r.Context(), principal, username); err != nil {
 			// Fail closed: an authenticated user with no principal would hit
 			// confusing downstream errors, so surface it as an auth failure.
 			// Operationally nothing like bad_credentials: a first-login DB
@@ -129,6 +130,21 @@ func (b *RcptdBackend) Check(r *http.Request) (string, bool, string) {
 	}
 	b.Metrics.AuthAttempt("rcptd", "ok")
 	return principal, true, ""
+}
+
+// The reasons Check returns when rcptd could not give an answer, as opposed
+// to answering no. DAV clients get them as a 401 like any failed login; a
+// caller that can say "try again" instead (the contacts API's 503) tells them
+// apart with Unavailable.
+const (
+	ReasonUnreachable = "authentication service is unreachable"
+	ReasonUnavailable = "authentication service is temporarily unavailable"
+)
+
+// Unavailable reports whether a Check failure reason means the credential
+// could not be verified at all, rather than that it was wrong.
+func Unavailable(reason string) bool {
+	return reason == ReasonUnreachable || reason == ReasonUnavailable
 }
 
 func (b *RcptdBackend) Challenge(h http.Header) {
@@ -156,7 +172,7 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 
 	hashes, status, err := b.lookup(ctx, username)
 	if err != nil {
-		return false, "unavailable", "authentication service is unreachable"
+		return false, "unavailable", ReasonUnreachable
 	}
 	switch status {
 	case http.StatusOK:
@@ -165,7 +181,7 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 		return false, "bad_credentials", bad
 	case http.StatusServiceUnavailable:
 		// Transient CDB fault on rcptd's side; retryable, not a definitive no.
-		return false, "unavailable", "authentication service is temporarily unavailable"
+		return false, "unavailable", ReasonUnavailable
 	case http.StatusUnauthorized:
 		// Our own bearer token is wrong — an operator misconfiguration.
 		return false, "error", "authentication service rejected this server's credentials"

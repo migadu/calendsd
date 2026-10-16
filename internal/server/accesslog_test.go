@@ -94,3 +94,17 @@ func TestAccessLogPanicLoggedAs500(t *testing.T) {
 		t.Errorf("panic not logged as 500 error: %q", got)
 	}
 }
+
+// The contacts API's queries are what users type; its access log keeps the
+// path and drops them.
+func TestAccessLogPathOnlyDropsQuery(t *testing.T) {
+	var buf bytes.Buffer
+	withCapturedLog(&buf, func() {
+		h := WrapAccessLogPathOnly(echoHandler(200, ""), true)
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/v1/suggestions?q=secret+typing", nil))
+	})
+	got := buf.String()
+	if strings.Contains(got, "secret") || !strings.Contains(got, "path=/api/v1/suggestions ") {
+		t.Errorf("path-only access log = %q", got)
+	}
+}

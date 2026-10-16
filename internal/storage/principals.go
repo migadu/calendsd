@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/xml"
 	"strconv"
@@ -39,7 +40,12 @@ func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) 
 }
 
 func (p *Principals) PrincipalByPath(path string) (*acl.Principal, error) {
-	rows, err := p.DB.Query(
+	return p.PrincipalByPathContext(context.Background(), path)
+}
+
+// PrincipalByPathContext is PrincipalByPath bounded by ctx.
+func (p *Principals) PrincipalByPathContext(ctx context.Context, path string) (*acl.Principal, error) {
+	rows, err := p.DB.QueryContext(ctx,
 		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path)
 	if err != nil {
 		return nil, err

@@ -7,6 +7,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -32,10 +33,15 @@ type AdminWrites struct {
 // seed convention so delegation works). digestA1 is the precomputed
 // md5(user:realm:pass); the caller owns the realm.
 func (w *AdminWrites) CreateUser(username, digestA1, email, displayName string) error {
+	return w.CreateUserContext(context.Background(), username, digestA1, email, displayName)
+}
+
+// CreateUserContext is CreateUser bounded by ctx.
+func (w *AdminWrites) CreateUserContext(ctx context.Context, username, digestA1, email, displayName string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	return withTx(w.DB, func(tx *sql.Tx) error {
+	return withTxContext(ctx, w.DB, func(tx *sql.Tx) error {
 		return createUserRows(tx, username, digestA1, email, displayName)
 	})
 }

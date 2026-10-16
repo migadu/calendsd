@@ -5,6 +5,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/xml"
@@ -237,23 +238,28 @@ type Built struct {
 	// Auth is the backend DAV authenticates with: the rcptd backend when
 	// [server.rcptd] is configured, else the users-table Basic backend.
 	Auth auth.Backend
-	// Tombstoned mirrors the DAV auth gate's soft-delete check.
-	Tombstoned func(principal string) bool
+	// Tombstoned mirrors the DAV auth gate's soft-delete check, bounded by
+	// the caller's ctx.
+	Tombstoned func(ctx context.Context, principal string) bool
+	// accessLog carries [logging].access_log to the contacts API listener,
+	// which has its own handler chain and would otherwise log nothing.
+	accessLog bool
 }
 
 // ContactsAPI builds the webmail contacts API over the same database and the
 // same credential backend as the DAV server this Built holds. Serve it on its
 // own loopback listener ([server] api_addr); never mount it on the DAV one.
 func (b *Built) ContactsAPI(db *sql.DB) http.Handler {
-	return contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
+	return WrapAccessLogPathOnly(contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
 		MaxBodyBytes: dav.DefaultMaxRequestBodySize,
 		Logger:       slog.Default(),
-	})
+	}), b.accessLog)
 }
 
 // Build is NewWithBackground returning everything it assembled; see Built.
 func Build(db *sql.DB, cfg Config, dsn string) *Built {
-	srv, backend, tombstoned := newDAVServer(db, cfg)
+	srv, backend, _ := newDAVServer(db, cfg)
+	users := &storage.Users{DB: db}
 	var worker *push.Worker
 	if cfg.Push.Enabled && dsn != "" {
 		store := &push.Store{DB: db}
@@ -274,11 +280,16 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
 	return &Built{
-		Handler:    WrapMetrics(h, cfg.Metrics, srv.BaseURI),
-		Worker:     worker,
-		Queue:      queue,
-		Auth:       backend,
-		Tombstoned: tombstoned,
+		Handler: WrapMetrics(h, cfg.Metrics, srv.BaseURI),
+		Worker:  worker,
+		Queue:   queue,
+		Auth:    backend,
+		Tombstoned: func(ctx context.Context, principal string) bool {
+			// Fails open on a DB error, like the DAV gate (see newDAVServer).
+			ok, _ := users.IsDeletedContext(ctx, principal)
+			return ok
+		},
+		accessLog: cfg.AccessLog,
 	}
 }
 

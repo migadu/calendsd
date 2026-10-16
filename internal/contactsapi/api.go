@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"calserver/internal/auth"
 	"calserver/internal/storage"
@@ -48,6 +49,11 @@ type Options struct {
 	// keystroke. p99 is 446 cards; the largest book is 20,782, which would cost
 	// ~100 ms of CPU per keystroke on a shared host.
 	SuggestionScanLimit int
+	// RequestTimeout bounds each request, authentication included: past it
+	// the database and rcptd calls are cancelled and the client gets a 503
+	// rather than silence. It sits under webmail's own 10 s curl timeout so
+	// the answer arrives before the client gives up. Zero takes 8 s.
+	RequestTimeout time.Duration
 	// Logger receives request errors. Nil uses slog.Default().
 	Logger *slog.Logger
 }
@@ -65,6 +71,9 @@ func (o Options) withDefaults() Options {
 	if o.SuggestionScanLimit <= 0 {
 		o.SuggestionScanLimit = 5000
 	}
+	if o.RequestTimeout <= 0 {
+		o.RequestTimeout = 8 * time.Second
+	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
@@ -74,7 +83,7 @@ func (o Options) withDefaults() Options {
 // Handler serves the API. Build it with New.
 type Handler struct {
 	auth       auth.Backend
-	tombstoned func(principal string) bool
+	tombstoned func(ctx context.Context, principal string) bool
 	cards      *storage.CardDAV
 	contacts   *storage.Contacts
 	frecency   *storage.Frecency
@@ -86,7 +95,7 @@ type Handler struct {
 // backend (see the package comment for why it must be shared). tombstoned
 // mirrors the DAV auth gate's soft-delete check; nil disables it, which is
 // only right in tests.
-func New(db *sql.DB, backend auth.Backend, tombstoned func(string) bool, opts Options) *Handler {
+func New(db *sql.DB, backend auth.Backend, tombstoned func(context.Context, string) bool, opts Options) *Handler {
 	h := &Handler{
 		auth:       backend,
 		tombstoned: tombstoned,
@@ -134,13 +143,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no authentication backend configured")
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), h.opts.RequestTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	principal, ok, reason := h.auth.Check(r)
 	if !ok {
+		switch {
+		case ctx.Err() != nil:
+			// The rcptd lookup or first-login provisioning ran out of time:
+			// a server-side stall, not bad credentials, so no challenge.
+			h.timedOut(w, r, "authentication")
+			return
+		case auth.Unavailable(reason):
+			// rcptd is down or faulting. A 401 here would have webmail ask
+			// the user for a password that is fine.
+			h.opts.Logger.Warn("contacts api: authentication unavailable", "reason", reason,
+				"method", r.Method, "path", r.URL.Path)
+			writeError(w, http.StatusServiceUnavailable, reason)
+			return
+		}
 		h.auth.Challenge(w.Header())
 		writeError(w, http.StatusUnauthorized, reason)
 		return
 	}
-	if h.tombstoned != nil && h.tombstoned(principal) {
+	if h.tombstoned != nil && h.tombstoned(ctx, principal) {
 		// Valid credentials, account scheduled for deletion: the same 403 the
 		// DAV gate gives, so nothing runs as them (SOFT-DELETE-PLAN.md §5).
 		writeError(w, http.StatusForbidden, "this account is scheduled for deletion")
@@ -169,9 +195,22 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // fail logs a storage error with the request that hit it and answers 500.
 // The message stays generic: a database error is not the client's to see.
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		h.timedOut(w, r, "storage")
+		return
+	}
 	h.opts.Logger.Error("contacts api", "method", r.Method, "path", r.URL.Path,
 		"principal", principalOf(r), "err", err)
 	writeError(w, http.StatusInternalServerError, "internal error")
+}
+
+// timedOut answers a request that hit RequestTimeout with a 503, logging which
+// stage stalled so the cause is findable after the fact.
+func (h *Handler) timedOut(w http.ResponseWriter, r *http.Request, stage string) {
+	h.opts.Logger.Warn("contacts api: request timed out", "stage", stage,
+		"method", r.Method, "path", r.URL.Path, "principal", principalOf(r),
+		"timeout", h.opts.RequestTimeout)
+	writeError(w, http.StatusServiceUnavailable, "timed out waiting for "+stage)
 }
 
 // readJSON decodes a JSON body into v, distinguishing a body over the cap

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"sync"
 
@@ -15,32 +16,69 @@ import (
 // deletes all their calendars still gets one back.
 //
 // It memoizes principals seen this process and serializes the check-and-create
-// under one mutex, so concurrent first requests for the same user can't race
-// into a duplicate-key error.
+// per principal, so concurrent first requests for the same user can't race
+// into a duplicate-key error. The serialization is deliberately per principal
+// and the database work runs outside the shared lock: after a restart every
+// user's first request comes through here, and one stalled lookup must not
+// queue every other user's login behind it.
 type provisioner struct {
 	principals *storage.Principals
 	writes     *storage.AdminWrites
 	realm      string
 
-	mu   sync.Mutex
-	seen map[string]bool
+	mu       sync.Mutex
+	seen     map[string]bool
+	inflight map[string]chan struct{}
 }
 
 // ensure makes sure principal exists, creating it (and its users row) when this
 // is the login's first sighting. email seeds the principal's address and
-// display name. Idempotent and safe under concurrency.
-func (p *provisioner) ensure(principal, email string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.seen[principal] {
-		return nil
+// display name. Idempotent and safe under concurrency; ctx bounds both the
+// database work and the wait for a concurrent ensure of the same principal.
+func (p *provisioner) ensure(ctx context.Context, principal, email string) error {
+	for {
+		p.mu.Lock()
+		if p.seen[principal] {
+			p.mu.Unlock()
+			return nil
+		}
+		if wait, busy := p.inflight[principal]; busy {
+			p.mu.Unlock()
+			select {
+			case <-wait:
+				continue // re-check: the other attempt may have failed
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		if p.inflight == nil {
+			p.inflight = map[string]chan struct{}{}
+		}
+		p.inflight[principal] = done
+		p.mu.Unlock()
+
+		err := p.create(ctx, principal, email)
+
+		p.mu.Lock()
+		delete(p.inflight, principal)
+		if err == nil {
+			p.seen[principal] = true
+		}
+		p.mu.Unlock()
+		close(done)
+		return err
 	}
-	existing, err := p.principals.PrincipalByPath(principal)
+}
+
+// create looks principal up and inserts it when absent. Callers hold the
+// principal's in-flight slot, so no other ensure races it in this process.
+func (p *provisioner) create(ctx context.Context, principal, email string) error {
+	existing, err := p.principals.PrincipalByPathContext(ctx, principal)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
-		p.seen[principal] = true
 		return nil
 	}
 
@@ -48,15 +86,14 @@ func (p *provisioner) ensure(principal, email string) error {
 	// The users.digesta1 column is unused for rcptd logins (rcptd owns the
 	// password), but it's NOT NULL, so store an unguessable random value that
 	// no md5(user:realm:pass) can equal — Digest auth simply never matches.
-	if err := p.writes.CreateUser(username, storage.BlockedDigestA1(), email, email); err != nil {
-		// A racing request may have created it between our check and insert;
-		// treat "now exists" as success rather than a hard error.
-		if again, e2 := p.principals.PrincipalByPath(principal); e2 == nil && again != nil {
-			p.seen[principal] = true
+	if err := p.writes.CreateUserContext(ctx, username, storage.BlockedDigestA1(), email, email); err != nil {
+		// Another process (or a racing first login on another host) may have
+		// created it between our check and insert; treat "now exists" as
+		// success rather than a hard error.
+		if again, e2 := p.principals.PrincipalByPathContext(ctx, principal); e2 == nil && again != nil {
 			return nil
 		}
 		return err
 	}
-	p.seen[principal] = true
 	return nil
 }

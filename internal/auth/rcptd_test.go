@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -86,7 +87,7 @@ func TestRcptdCheckSuccess(t *testing.T) {
 	b, _ := newBackend(t, f, 0)
 
 	var provPrincipal, provEmail string
-	b.Provision = func(principal, email string) error {
+	b.Provision = func(_ context.Context, principal, email string) error {
 		provPrincipal, provEmail = principal, email
 		return nil
 	}
@@ -203,7 +204,7 @@ func TestRcptdProvisionErrorFailsClosed(t *testing.T) {
 		"user@example.com": {bcryptHashT(t, "s3cret")},
 	}}
 	b, _ := newBackend(t, f, 0)
-	b.Provision = func(principal, email string) error {
+	b.Provision = func(_ context.Context, principal, email string) error {
 		return errProvision
 	}
 	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "s3cret")); ok {

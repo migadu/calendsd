@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 )
 
@@ -25,8 +26,14 @@ func (u *Users) HashA1(realm, username string) (string, bool) {
 // (soft-deleted, not yet purged). It is a single primary-key lookup, cheap
 // enough to call on every authenticated request from the auth gate.
 func (u *Users) IsDeleted(principal string) (bool, error) {
+	return u.IsDeletedContext(context.Background(), principal)
+}
+
+// IsDeletedContext is IsDeleted bounded by ctx, so a stalled database cannot
+// hold a request past its deadline.
+func (u *Users) IsDeletedContext(ctx context.Context, principal string) (bool, error) {
 	var exists bool
-	err := u.DB.QueryRow(
+	err := u.DB.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM deleted_principals WHERE principal = $1)`,
 		principal).Scan(&exists)
 	return exists, err

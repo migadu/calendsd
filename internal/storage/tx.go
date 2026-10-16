@@ -1,13 +1,23 @@
 // Transaction plumbing shared by every backend in this package.
 package storage
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 // withTx runs fn inside a transaction: commit when fn returns nil, roll back
 // when it errors. Every multi-statement write in this package goes through
 // here so no path can forget the rollback.
 func withTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
-	tx, err := db.Begin()
+	return withTxContext(context.Background(), db, fn)
+}
+
+// withTxContext is withTx bounded by ctx: the BEGIN, including any connection
+// the pool has to dial for it, honours ctx, and database/sql rolls the
+// transaction back when ctx ends, so the statements fn runs stop with it.
+func withTxContext(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

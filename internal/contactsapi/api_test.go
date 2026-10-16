@@ -13,6 +13,7 @@ package contactsapi_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -97,7 +98,7 @@ func newEnv(t *testing.T, dbName string, opts contactsapi.Options) *env {
 	t.Helper()
 	db := openScratchDB(t, dbName)
 	users := &storage.Users{DB: db}
-	tomb := func(p string) bool { ok, _ := users.IsDeleted(p); return ok }
+	tomb := func(ctx context.Context, p string) bool { ok, _ := users.IsDeletedContext(ctx, p); return ok }
 	return &env{t: t, db: db, h: contactsapi.New(db, fakeAuth{}, tomb, opts), opts: opts}
 }
 

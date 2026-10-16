@@ -21,6 +21,17 @@ import (
 // other 4xx at Warn, and a bare 401 stays at Info because it is the routine
 // first half of the Basic/Digest challenge, not a failure.
 func WrapAccessLog(next http.Handler, enabled bool) http.Handler {
+	return wrapAccessLog(next, enabled, func(r *http.Request) string { return r.URL.RequestURI() })
+}
+
+// WrapAccessLogPathOnly is WrapAccessLog without the query string, for the
+// contacts API: its queries are what the user typed (search terms, an address
+// per suggestion keystroke), which an always-on access log must not collect.
+func WrapAccessLogPathOnly(next http.Handler, enabled bool) http.Handler {
+	return wrapAccessLog(next, enabled, func(r *http.Request) string { return r.URL.EscapedPath() })
+}
+
+func wrapAccessLog(next http.Handler, enabled bool, path func(*http.Request) string) http.Handler {
 	if !enabled {
 		return next
 	}
@@ -32,16 +43,16 @@ func WrapAccessLog(next http.Handler, enabled bool) http.Handler {
 		defer func() {
 			status := rec.status
 			if p := recover(); p != nil {
-				logAccess(r, http.StatusInternalServerError, rec.written, time.Since(start))
+				logAccess(r, path(r), http.StatusInternalServerError, rec.written, time.Since(start))
 				panic(p)
 			}
-			logAccess(r, status, rec.written, time.Since(start))
+			logAccess(r, path(r), status, rec.written, time.Since(start))
 		}()
 		next.ServeHTTP(rec, r)
 	})
 }
 
-func logAccess(r *http.Request, status, bytes int, dur time.Duration) {
+func logAccess(r *http.Request, path string, status, bytes int, dur time.Duration) {
 	level := slog.LevelInfo
 	switch {
 	case status >= 500:
@@ -53,7 +64,7 @@ func logAccess(r *http.Request, status, bytes int, dur time.Duration) {
 	}
 	slog.LogAttrs(r.Context(), level, "http request",
 		slog.String("method", r.Method),
-		slog.String("path", r.URL.RequestURI()),
+		slog.String("path", path),
 		slog.Int("status", status),
 		slog.Int("bytes", bytes),
 		slog.Duration("dur", dur),
