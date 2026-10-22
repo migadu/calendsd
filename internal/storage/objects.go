@@ -4,6 +4,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,7 +12,14 @@ import (
 	"calserver/internal/caldav/ical"
 )
 
-const objectColumns = `id, uri, lastmodified, etag, calendardata, size, componenttype`
+// objectColumns surfaces a legacy row's NULL etag as the md5 of its data, the
+// value a write would have stored, so no client ever sees an empty etag.
+const objectColumns = `id, uri, lastmodified, coalesce(etag, md5(calendardata)), calendardata, size, componenttype`
+
+// rowScanner is what *sql.Row and *sql.Rows have in common.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
 
 func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
 	rows, err := b.DB.Query(
@@ -71,27 +79,23 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 }
 
 func (b *CalDAV) CalendarObject(id caldav.CalendarID, objectURI string) (*caldav.ObjectInfo, error) {
-	rows, err := b.DB.Query(
+	obj, err := scanObject(b.DB.QueryRow(
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
-		id.Calendar, objectURI)
-	if err != nil {
-		return nil, err
+		id.Calendar, objectURI), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
-	}
-	return scanObject(rows, id)
+	return obj, err
 }
 
-func scanObject(rows *sql.Rows, id caldav.CalendarID) (*caldav.ObjectInfo, error) {
+func scanObject(row rowScanner, id caldav.CalendarID) (*caldav.ObjectInfo, error) {
 	var (
 		rowID, lastmodified, size sql.NullInt64
 		uri, componenttype        sql.NullString
 		etag                      sql.NullString
 		data                      []byte
 	)
-	if err := rows.Scan(&rowID, &uri, &lastmodified, &etag, &data, &size, &componenttype); err != nil {
+	if err := row.Scan(&rowID, &uri, &lastmodified, &etag, &data, &size, &componenttype); err != nil {
 		return nil, err
 	}
 	return &caldav.ObjectInfo{

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/xml"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -51,22 +52,18 @@ func (p *Principals) PrincipalByPath(path string) (*acl.Principal, error) {
 
 // PrincipalByPathContext is PrincipalByPath bounded by ctx.
 func (p *Principals) PrincipalByPathContext(ctx context.Context, path string) (*acl.Principal, error) {
-	rows, err := p.DB.QueryContext(ctx,
-		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path)
-	if err != nil {
-		return nil, err
+	principal, err := scanPrincipal(p.DB.QueryRowContext(ctx,
+		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
-	}
-	return scanPrincipal(rows)
+	return principal, err
 }
 
-func scanPrincipal(rows *sql.Rows) (*acl.Principal, error) {
+func scanPrincipal(row rowScanner) (*acl.Principal, error) {
 	var uri string
 	var email, displayname sql.NullString
-	if err := rows.Scan(&uri, &email, &displayname); err != nil {
+	if err := row.Scan(&uri, &email, &displayname); err != nil {
 		return nil, err
 	}
 	principal := acl.Principal{URI: uri, Props: map[xml.Name]any{}}

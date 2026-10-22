@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -144,7 +145,9 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 	})
 }
 
-const cardColumns = `uri, carddata, etag, size`
+// cardColumns surfaces a legacy row's NULL etag as the md5 of its data, like
+// objectColumns and the contacts API's cardETagExpr.
+const cardColumns = `uri, carddata, coalesce(etag, md5(carddata)), size`
 
 func (b *CardDAV) Cards(addressBookID string) ([]carddav.CardInfo, error) {
 	rows, err := b.DB.Query(`SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1`, addressBookID)
@@ -164,24 +167,21 @@ func (b *CardDAV) Cards(addressBookID string) ([]carddav.CardInfo, error) {
 }
 
 func (b *CardDAV) Card(addressBookID, uri string) (*carddav.CardInfo, error) {
-	rows, err := b.DB.Query(
-		`SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri)
-	if err != nil {
-		return nil, err
+	c, err := scanCard(b.DB.QueryRow(
+		`SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri),
+		addressBookID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
-	}
-	return scanCard(rows, addressBookID)
+	return c, err
 }
 
-func scanCard(rows *sql.Rows, addressBookID string) (*carddav.CardInfo, error) {
+func scanCard(row rowScanner, addressBookID string) (*carddav.CardInfo, error) {
 	var uri string
 	var etag sql.NullString
 	var size sql.NullInt64
 	var data []byte
-	if err := rows.Scan(&uri, &data, &etag, &size); err != nil {
+	if err := row.Scan(&uri, &data, &etag, &size); err != nil {
 		return nil, err
 	}
 	return &carddav.CardInfo{

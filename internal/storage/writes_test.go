@@ -108,6 +108,62 @@ func TestPropertyMoveRenamesSubtree(t *testing.T) {
 	}
 }
 
+// TestNullETagReadsAsDataMD5 covers legacy rows with a NULL etag column
+// (written by something other than this server or sabre) reaching clients as
+// the empty etag `""`. Reads now surface md5 of the data, the value a write
+// would have stored. A missing row is still nil, nil.
+func TestNullETagReadsAsDataMD5(t *testing.T) {
+	db := openCardDAVScratchDB(t, "calserver_d_nulletag")
+	cal := &storage.CalDAV{DB: db}
+	card := &storage.CardDAV{DB: db}
+	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookID, err := card.CreateAddressBook("principals/admin", "contacts", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ics := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	vcf := []byte("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:x\r\nFN:X\r\nEND:VCARD\r\n")
+	objETag, err := cal.CreateCalendarObject(calID, "x.ics", ics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardETag, err := card.CreateCard(bookID, "x.vcf", vcf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE calendarobjects SET etag = NULL; UPDATE cards SET etag = NULL`); err != nil {
+		t.Fatal(err)
+	}
+
+	obj, err := cal.CalendarObject(calID, "x.ics")
+	if err != nil || obj == nil || obj.ETag != objETag {
+		t.Errorf("CalendarObject etag = %+v, %v; want %s", obj, err, objETag)
+	}
+	if objs, err := cal.CalendarObjects(calID); err != nil || len(objs) != 1 || objs[0].ETag != objETag {
+		t.Errorf("CalendarObjects = %+v, %v; want etag %s", objs, err, objETag)
+	}
+	c, err := card.Card(bookID, "x.vcf")
+	if err != nil || c == nil || c.ETag != cardETag {
+		t.Errorf("Card etag = %+v, %v; want %s", c, err, cardETag)
+	}
+	if cards, err := card.Cards(bookID); err != nil || len(cards) != 1 || cards[0].ETag != cardETag {
+		t.Errorf("Cards = %+v, %v; want etag %s", cards, err, cardETag)
+	}
+
+	if obj, err := cal.CalendarObject(calID, "missing.ics"); obj != nil || err != nil {
+		t.Errorf("CalendarObject(missing) = %+v, %v; want nil, nil", obj, err)
+	}
+	if c, err := card.Card(bookID, "missing.vcf"); c != nil || err != nil {
+		t.Errorf("Card(missing) = %+v, %v; want nil, nil", c, err)
+	}
+	if p, err := (&storage.Principals{DB: db}).PrincipalByPath("principals/missing"); p != nil || err != nil {
+		t.Errorf("PrincipalByPath(missing) = %+v, %v; want nil, nil", p, err)
+	}
+}
+
 // TestWritesToMissingRowsAreNotFound covers updates and deletes that matched
 // no row (the object vanished between the caller's lookup and the write)
 // still succeeding and logging a change: sync clients were told to fetch a
