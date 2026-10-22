@@ -99,7 +99,7 @@ func TestAuthLogWrongDigestUser(t *testing.T) {
 	cap := &captureHandler{}
 	p := NewPlugin(&DigestBackend{
 		Realm:  "SabreDAV",
-		HashA1: func(string, string) (string, bool) { return "", false },
+		HashA1: func(string, string) (string, error) { return "", nil },
 	})
 	p.Logger = slog.New(cap)
 

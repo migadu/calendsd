@@ -62,11 +62,11 @@ func TestBasicBackend(t *testing.T) {
 func digestBackend() *DigestBackend {
 	return &DigestBackend{
 		Realm: "SabreDAV",
-		HashA1: func(r, u string) (string, bool) {
+		HashA1: func(r, u string) (string, error) {
 			if u == "admin" {
-				return DigestA1("admin", r, "admin"), true
+				return DigestA1("admin", r, "admin"), nil
 			}
-			return "", false
+			return "", nil
 		},
 	}
 }
@@ -154,11 +154,11 @@ func TestDigestReplayProtection(t *testing.T) {
 func TestDigestBackendRejections(t *testing.T) {
 	b := &DigestBackend{
 		Realm: "SabreDAV",
-		HashA1: func(r, u string) (string, bool) {
+		HashA1: func(r, u string) (string, error) {
 			if u == "admin" {
-				return DigestA1("admin", r, "admin"), true
+				return DigestA1("admin", r, "admin"), nil
 			}
-			return "", false
+			return "", nil
 		},
 	}
 

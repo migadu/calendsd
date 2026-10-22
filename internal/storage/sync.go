@@ -1,15 +1,30 @@
-// Sync/change tracking over the sabre calendarchanges table.
+// Sync/change tracking over the sabre calendarchanges and addressbookchanges
+// tables. Calendars and address books keep the same shape of change log, so
+// one implementation serves both.
 
 package storage
 
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strconv"
 
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
+)
+
+// changeLog names the tables behind one kind of synced collection.
+type changeLog struct {
+	collections string // the table holding synctoken, keyed by id
+	changes     string // the change log
+	members     string // the member objects, listed by an initial sync
+	idColumn    string // the collection id column in changes and members
+	notify      string // pg_notify payload prefix for WebDAV-Push
+}
+
+var (
+	calendarLog    = changeLog{"calendars", "calendarchanges", "calendarobjects", "calendarid", "calendar:"}
+	addressBookLog = changeLog{"addressbooks", "addressbookchanges", "cards", "addressbookid", "addressbook:"}
 )
 
 // ChangesForCalendar transcribes sabre's PDO getChangesForCalendar: the
@@ -17,23 +32,33 @@ import (
 // the full object list for an initial sync.
 func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	defer b.Metrics.DBOpTimer("changes_for_calendar")()
+	return changesSince(b.DB, calendarLog, id.Calendar, syncToken, limit)
+}
+
+// ChangesForAddressBook is ChangesForCalendar for an address book.
+func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+	defer b.Metrics.DBOpTimer("changes_for_addressbook")()
+	return changesSince(b.DB, addressBookLog, addressBookID, syncToken, limit)
+}
+
+// changesSince answers a sync REPORT for one collection. An empty token is an
+// initial sync (every member as added, at the current token); nil, nil means
+// an unknown collection or an unparseable token.
+func changesSince(db *sql.DB, log changeLog, collectionID, syncToken string, limit int) (*dav.ChangeSet, error) {
 	if syncToken == "" {
-		var currentToken sql.NullInt64
-		err := b.DB.QueryRow(`SELECT synctoken FROM calendars WHERE id = $1`, id.Calendar).Scan(&currentToken)
-		// A missing calendar (no row / null token) means "no sync info";
-		// any other error is a real failure that must surface, not be
-		// masked as an empty change set.
+		var currentToken int64
+		err := db.QueryRow(`SELECT synctoken FROM `+log.collections+` WHERE id = $1`, collectionID).Scan(&currentToken)
+		// A missing collection means "no sync info"; any other error is a
+		// real failure that must surface, not be masked as an empty change
+		// set.
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		if !currentToken.Valid {
-			return nil, nil
-		}
-		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(currentToken.Int64, 10)}
-		rows, err := b.DB.Query(`SELECT uri FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
+		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(currentToken, 10)}
+		rows, err := db.Query(`SELECT uri FROM `+log.members+` WHERE `+log.idColumn+` = $1`, collectionID)
 		if err != nil {
 			return nil, err
 		}
@@ -52,13 +77,13 @@ func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, sync
 	if err != nil {
 		return nil, nil // invalid token
 	}
-	query := `SELECT uri, operation, synctoken FROM calendarchanges
-	           WHERE synctoken >= $1 AND calendarid = $2 ORDER BY synctoken`
+	query := `SELECT uri, operation, synctoken FROM ` + log.changes + `
+	           WHERE synctoken >= $1 AND ` + log.idColumn + ` = $2 ORDER BY synctoken`
 	if limit > 0 {
 		// One extra row detects truncation, like sabre.
-		query += fmt.Sprintf(" LIMIT %d", limit+1)
+		query += " LIMIT " + strconv.Itoa(limit+1)
 	}
-	rows, err := b.DB.Query(query, since, id.Calendar)
+	rows, err := db.Query(query, since, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,31 +136,27 @@ func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, sync
 	return out, nil
 }
 
-// addChange transcribes sabre's addChange (record at the current synctoken,
-// then increment) but locks the calendars row first: two concurrent writers
-// must not stamp two changes with the same token, or sync clients past that
-// token skip one forever. Sabre's unwrapped statements race here; the lock
-// serializes all Go-side writers and any sabre writer that reaches its
-// UPDATE while we hold the row.
-func addChange(tx *sql.Tx, calendarID, objectURI string, operation int) error {
+// recordChange transcribes sabre's addChange (record at the current
+// synctoken, then increment) as one UPDATE … RETURNING, which takes the
+// collection's row lock for the rest of the transaction: two concurrent
+// writers must not stamp two changes with the same token, or sync clients
+// past that token skip one forever. Sabre's unwrapped statements race here;
+// the lock serializes all Go-side writers and any sabre writer that reaches
+// its UPDATE while we hold the row.
+func recordChange(tx *sql.Tx, log changeLog, collectionID, uri string, operation int) error {
 	var token int64
-	if err := tx.QueryRow(
-		`SELECT synctoken FROM calendars WHERE id = $1 FOR UPDATE`, calendarID).Scan(&token); err != nil {
+	if err := tx.QueryRow(`UPDATE `+log.collections+` SET synctoken = synctoken + 1
+ WHERE id = $1 RETURNING synctoken - 1`, collectionID).Scan(&token); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`
-INSERT INTO calendarchanges (uri, synctoken, calendarid, operation)
-VALUES ($1, $2, $3, $4)`,
-		objectURI, token, calendarID, operation); err != nil {
+	if _, err := tx.Exec(`INSERT INTO `+log.changes+` (uri, synctoken, `+log.idColumn+`, operation)
+VALUES ($1, $2, $3, $4)`, uri, token, collectionID, operation); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE calendars SET synctoken = $1 WHERE id = $2`, token+1, calendarID); err != nil {
-		return err
-	}
-	// Notify the WebDAV-Push dispatcher (internal/push) that this calendar
+	// Notify the WebDAV-Push dispatcher (internal/push) that this collection
 	// changed. pg_notify delivers on COMMIT only, so a rolled-back write emits
 	// nothing; with no LISTENer (push disabled) it is a cheap no-op. The
 	// payload is the collection key the worker maps to subscriptions/topic.
-	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, "calendar:"+calendarID)
+	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, log.notify+collectionID)
 	return err
 }

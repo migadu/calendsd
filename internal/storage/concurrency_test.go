@@ -2,7 +2,7 @@ package storage_test
 
 // Sync-token serialization test (PLAN.md §5): many writers hammering one
 // calendar must produce unique, contiguous sync-tokens. A lost-update on the
-// synctoken counter — the race the FOR UPDATE lock in addChange prevents —
+// synctoken counter — the race the row lock in recordChange prevents —
 // would duplicate a token and skip a value, silently losing a change from a
 // client's sync. Postgres-only (no php/sabre needed):
 //

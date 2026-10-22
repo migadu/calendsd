@@ -6,10 +6,12 @@ package storage
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/emersion/go-vcard"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"calserver/internal/caldav/ical"
 )
@@ -212,9 +214,12 @@ type orphanedPropRow struct {
 // left alone rather than guessed at. Shared by the doctor (reporting) and
 // AdminWrites.DeleteOrphans (deleting) so they always agree. Four fixed
 // queries total: the rows plus three reference sets loaded once, so the
-// check stays flat no matter how many property rows exist.
-func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
-	rows, err := q.DB.Query(`SELECT id, path FROM propertystorage ORDER BY id`)
+// check stays flat no matter how many property rows exist. q is the pool for
+// the doctor and the deleting transaction for DeleteOrphans.
+func orphanedPropertyRows(q interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}) ([]orphanedPropRow, error) {
+	rows, err := q.Query(`SELECT id, path FROM propertystorage ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +240,7 @@ func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
 	}
 
 	loadSet := func(query string) (map[string]bool, error) {
-		rows, err := q.DB.Query(query)
+		rows, err := q.Query(query)
 		if err != nil {
 			return nil, err
 		}
@@ -308,7 +313,7 @@ func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
 }
 
 func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
-	orphans, err := q.orphanedPropertyRows()
+	orphans, err := orphanedPropertyRows(q.DB)
 	if err != nil {
 		return err
 	}
@@ -323,12 +328,14 @@ func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
 
 // doctorObjects re-derives every calendarobjects row's denormalized columns
 // with the production ical.Denormalize and reports parse failures and stale
-// columns (§3.4 as a sweep).
+// columns (§3.4 as a sweep). The query stops one row past the cap, which is
+// enough to report truncation: closing a cursor mid-way still drains the rest
+// of the table over the wire.
 func (q *AdminQueries) doctorObjects(report *AdminDoctorReport, scanCap int) error {
 	rows, err := q.DB.Query(`
 SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype, ''),
        coalesce(o.etag, ''), o.size, o.firstoccurence, o.lastoccurence, o.calendardata
-  FROM calendarobjects o ORDER BY o.id`)
+  FROM calendarobjects o ORDER BY o.id LIMIT $1`, scanCap+1)
 	if err != nil {
 		return err
 	}
@@ -402,7 +409,7 @@ SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype,
 	// (a write-back that never landed, a manually removed job). Objects still
 	// awaiting a queued send have a job and are skipped.
 	if len(pending) > 0 {
-		q.flagStaleIMipPending(report, pending)
+		return q.flagStaleIMipPending(report, pending)
 	}
 	return nil
 }
@@ -414,21 +421,30 @@ const imipPendingMarker = "Scheduling message is queued for delivery"
 // flagStaleIMipPending reports each pending object whose UID has no live
 // (available|executing) imip_send job. When the jobs table is absent (a
 // sabre-only or queue-less database) it skips silently — pending-at-1.0 can't be
-// reconciled against a queue that doesn't exist.
-func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) {
+// reconciled against a queue that doesn't exist. Any other failure is an
+// error: reporting every pending object as stale, or none, off a half-read
+// job list would be wrong either way.
+func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) error {
 	rows, err := q.DB.Query(`SELECT DISTINCT coalesce(args->>'uid','')
 	  FROM jobs WHERE worker='imip_send' AND state IN ('available','executing')`)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
+		return nil
+	}
 	if err != nil {
-		return
+		return fmt.Errorf("imip-pending-stale: %w", err)
 	}
 	defer rows.Close()
 	live := map[string]bool{}
 	for rows.Next() {
 		var u string
 		if err := rows.Scan(&u); err != nil {
-			return
+			return err
 		}
 		live[u] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	for _, p := range pending {
 		if !live[p[0]] {
@@ -439,13 +455,15 @@ func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [
 			})
 		}
 	}
+	return nil
 }
 
 // doctorCards checks every cards row: parseable vCard, correct etag/size.
+// Capped in SQL like doctorObjects.
 func (q *AdminQueries) doctorCards(report *AdminDoctorReport, scanCap int) error {
 	rows, err := q.DB.Query(`
 SELECT c.id, c.addressbookid, c.uri, coalesce(c.etag, ''), c.size, c.carddata
-  FROM cards c ORDER BY c.id`)
+  FROM cards c ORDER BY c.id LIMIT $1`, scanCap+1)
 	if err != nil {
 		return err
 	}

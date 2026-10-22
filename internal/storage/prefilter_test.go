@@ -57,6 +57,7 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 
 	d := func(mon int) time.Time { return time.Date(2026, time.Month(mon), 1, 0, 0, 0, 0, time.UTC) }
 	var zero time.Time
+	far := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	cases := []struct {
 		name       string
@@ -69,6 +70,10 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 		{"todo by type, no range", "VTODO", zero, zero, []string{"todo.ics"}},
 		{"todo passes range via NULL bounds", "VTODO", d(7), d(8), []string{"todo.ics"}},
 		{"no component constraint", "", zero, zero, []string{"event.ics", "todo.ics"}},
+		// Bounds past the int4 occurrence columns' range must compare, not
+		// fail the query.
+		{"range ending past 2038", "VEVENT", d(7), far, []string{"event.ics"}},
+		{"range starting past 2038", "VEVENT", far, far.AddDate(1, 0, 0), nil},
 	}
 	for _, tc := range cases {
 		got, err := backend.CalendarQuery(id, tc.comp, tc.start, tc.end)
@@ -78,6 +83,17 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 		if !equalStrings(got, tc.want) {
 			t.Errorf("%s: CalendarQuery = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+
+	// The admin object browser takes the same bounds.
+	farUnix := far.Unix()
+	objs, _, err := (&storage.AdminQueries{DB: db}).Objects(storage.AdminObjectQuery{
+		CalendarID: id.Calendar, End: &farUnix})
+	if err != nil {
+		t.Fatalf("Objects with a bound past 2038: %v", err)
+	}
+	if len(objs) != 2 {
+		t.Errorf("Objects with a bound past 2038 = %d rows, want 2", len(objs))
 	}
 }
 

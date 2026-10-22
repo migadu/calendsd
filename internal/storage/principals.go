@@ -6,12 +6,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/xml"
+	"errors"
 	"strconv"
 	"strings"
 
 	"calserver/internal/acl"
 	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
 )
 
 // Principals is the principal backend over the sabre schema. Port of
@@ -20,8 +20,17 @@ type Principals struct {
 	DB *sql.DB
 }
 
+// PrincipalsByPrefix lists the principals directly under prefix (one more
+// path segment, so not the proxy sub-principals), filtered in SQL rather
+// than by reading the whole table.
 func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
-	rows, err := p.DB.Query(`SELECT uri, email, displayname FROM principals`)
+	under, deeper := "%", "%/%" // prefix "": URIs with no slash at all
+	if prefix != "" {
+		under = escapeLike(prefix) + "/%"
+		deeper = under + "/%"
+	}
+	rows, err := p.DB.Query(`SELECT uri, email, displayname FROM principals
+ WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'`, under, deeper)
 	if err != nil {
 		return nil, err
 	}
@@ -32,9 +41,7 @@ func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) 
 		if err != nil {
 			return nil, err
 		}
-		if parent, _ := pathutil.Split(principal.URI); parent == prefix {
-			out = append(out, *principal)
-		}
+		out = append(out, *principal)
 	}
 	return out, rows.Err()
 }
@@ -45,22 +52,18 @@ func (p *Principals) PrincipalByPath(path string) (*acl.Principal, error) {
 
 // PrincipalByPathContext is PrincipalByPath bounded by ctx.
 func (p *Principals) PrincipalByPathContext(ctx context.Context, path string) (*acl.Principal, error) {
-	rows, err := p.DB.QueryContext(ctx,
-		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path)
-	if err != nil {
-		return nil, err
+	principal, err := scanPrincipal(p.DB.QueryRowContext(ctx,
+		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
-	}
-	return scanPrincipal(rows)
+	return principal, err
 }
 
-func scanPrincipal(rows *sql.Rows) (*acl.Principal, error) {
+func scanPrincipal(row rowScanner) (*acl.Principal, error) {
 	var uri string
 	var email, displayname sql.NullString
-	if err := rows.Scan(&uri, &email, &displayname); err != nil {
+	if err := row.Scan(&uri, &email, &displayname); err != nil {
 		return nil, err
 	}
 	principal := acl.Principal{URI: uri, Props: map[xml.Name]any{}}

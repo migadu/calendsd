@@ -5,6 +5,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // Users reads the shared users table for authentication. Port of
@@ -14,12 +15,17 @@ type Users struct {
 	DB *sql.DB
 }
 
-// HashA1 returns the stored digesta1 hash for a user.
-func (u *Users) HashA1(realm, username string) (string, bool) {
-	var hash string
+// HashA1 returns the stored digesta1 hash for a user, or "" when there is no
+// such user. A database failure is an error, not an unknown user, so callers
+// can tell an outage from bad credentials.
+func (u *Users) HashA1(realm, username string) (string, error) {
+	var hash sql.NullString
 	err := u.DB.QueryRow(
 		`SELECT digesta1 FROM users WHERE username = $1`, username).Scan(&hash)
-	return hash, err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hash.String, err
 }
 
 // IsDeleted reports whether a principal has a pending-deletion tombstone

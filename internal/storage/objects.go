@@ -4,6 +4,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,7 +12,14 @@ import (
 	"calserver/internal/caldav/ical"
 )
 
-const objectColumns = `id, uri, lastmodified, etag, calendardata, size, componenttype`
+// objectColumns surfaces a legacy row's NULL etag as the md5 of its data, the
+// value a write would have stored, so no client ever sees an empty etag.
+const objectColumns = `id, uri, lastmodified, coalesce(etag, md5(calendardata)), calendardata, size, componenttype`
+
+// rowScanner is what *sql.Row and *sql.Rows have in common.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
 
 func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
 	rows, err := b.DB.Query(
@@ -43,13 +51,16 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 		args = append(args, componentType)
 		q += fmt.Sprintf(" AND componenttype = $%d", len(args))
 	}
+	// The occurrence columns are int4 but a client's time-range can lie past
+	// 2038; binding the bounds as bigint compares them instead of failing the
+	// query with an int4 overflow.
 	if !end.IsZero() {
-		args = append(args, int(end.Unix()))
-		q += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d)", len(args))
+		args = append(args, end.Unix())
+		q += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d::bigint)", len(args))
 	}
 	if !start.IsZero() {
-		args = append(args, int(start.Unix()))
-		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d)", len(args))
+		args = append(args, start.Unix())
+		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d::bigint)", len(args))
 	}
 	rows, err := b.DB.Query(q, args...)
 	if err != nil {
@@ -68,27 +79,23 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 }
 
 func (b *CalDAV) CalendarObject(id caldav.CalendarID, objectURI string) (*caldav.ObjectInfo, error) {
-	rows, err := b.DB.Query(
+	obj, err := scanObject(b.DB.QueryRow(
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
-		id.Calendar, objectURI)
-	if err != nil {
-		return nil, err
+		id.Calendar, objectURI), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
-	}
-	return scanObject(rows, id)
+	return obj, err
 }
 
-func scanObject(rows *sql.Rows, id caldav.CalendarID) (*caldav.ObjectInfo, error) {
+func scanObject(row rowScanner, id caldav.CalendarID) (*caldav.ObjectInfo, error) {
 	var (
 		rowID, lastmodified, size sql.NullInt64
 		uri, componenttype        sql.NullString
 		etag                      sql.NullString
 		data                      []byte
 	)
-	if err := rows.Scan(&rowID, &uri, &lastmodified, &etag, &data, &size, &componenttype); err != nil {
+	if err := row.Scan(&rowID, &uri, &lastmodified, &etag, &data, &size, &componenttype); err != nil {
 		return nil, err
 	}
 	return &caldav.ObjectInfo{
@@ -119,7 +126,7 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
 			d.FirstOccurrence, d.LastOccurrence, d.UID); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 1)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 1)
 	})
 	if err != nil {
 		return "", err
@@ -134,17 +141,20 @@ func (b *CalDAV) UpdateCalendarObject(id caldav.CalendarID, objectURI string, da
 		return "", err
 	}
 	err = withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`
+		// A vanished object is ErrNotFound, with no change row: logging a
+		// modify for a uri that no longer exists would tell sync clients to
+		// fetch something that 404s.
+		if err := affectedOne(tx.Exec(`
 UPDATE calendarobjects
    SET calendardata = $1, lastmodified = extract(epoch from now())::int,
        etag = $2, size = $3, componenttype = $4,
        firstoccurence = $5, lastoccurence = $6, uid = $7
  WHERE calendarid = $8 AND uri = $9`,
 			data, d.ETag, d.Size, d.ComponentType, d.FirstOccurrence, d.LastOccurrence,
-			d.UID, id.Calendar, objectURI); err != nil {
+			d.UID, id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 2)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 2)
 	})
 	if err != nil {
 		return "", err
@@ -154,11 +164,11 @@ UPDATE calendarobjects
 
 func (b *CalDAV) DeleteCalendarObject(id caldav.CalendarID, objectURI string) error {
 	return withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(
+		if err := affectedOne(tx.Exec(
 			`DELETE FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
-			id.Calendar, objectURI); err != nil {
+			id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 3)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 3)
 	})
 }
