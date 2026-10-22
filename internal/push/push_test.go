@@ -125,6 +125,13 @@ func TestBuildPushMessage(t *testing.T) {
 	}
 }
 
+func TestWebPushTransport(t *testing.T) {
+	want := `<web-push xmlns="` + NS + `"><vapid-public-key type="p256ecdsa">K&lt;&amp;</vapid-public-key></web-push>`
+	if got := webPushTransport("K<&"); got != want {
+		t.Errorf("webPushTransport = %s, want %s", got, want)
+	}
+}
+
 func TestSplitKey(t *testing.T) {
 	cases := []struct {
 		in       string

@@ -58,11 +58,43 @@ func parseRegister(body []byte) (*registerRequest, error) {
 // fragment is self-namespaced (default xmlns) so it does not depend on the
 // transport that carries it.
 func buildPushMessage(topic, syncToken string) []byte {
-	return []byte(xml.Header +
-		`<push-message xmlns="` + NS + `" xmlns:D="DAV:">` +
-		`<topic>` + escapeText(topic) + `</topic>` +
-		`<content-update><D:sync-token>` + escapeText(syncToken) + `</D:sync-token></content-update>` +
-		`</push-message>`)
+	var msg struct {
+		XMLName       xml.Name `xml:"https://bitfire.at/webdav-push push-message"`
+		Topic         string   `xml:"topic"`
+		ContentUpdate struct {
+			SyncToken string `xml:"DAV: sync-token"`
+		} `xml:"content-update"`
+	}
+	msg.Topic = topic
+	msg.ContentUpdate.SyncToken = syncToken
+	return []byte(xml.Header + marshalXML(msg))
+}
+
+// webPushTransport renders the web-push transport advertised in the
+// transports property, carrying our VAPID public key. It declares its own
+// default xmlns so it is self-contained (the marshaller declares NS on the
+// multistatus root for the property name but does not rewrite Raw content).
+func webPushTransport(vapidPublicKey string) string {
+	var t struct {
+		XMLName xml.Name `xml:"https://bitfire.at/webdav-push web-push"`
+		Key     struct {
+			Type  string `xml:"type,attr"`
+			Value string `xml:",chardata"`
+		} `xml:"vapid-public-key"`
+	}
+	t.Key.Type = "p256ecdsa"
+	t.Key.Value = vapidPublicKey
+	return marshalXML(t)
+}
+
+// marshalXML marshals one of this file's fixed-shape documents, which cannot
+// fail.
+func marshalXML(v any) string {
+	out, err := xml.Marshal(v)
+	if err != nil {
+		panic("push: marshalling XML: " + err.Error())
+	}
+	return string(out)
 }
 
 // rootElementName returns the qualified name of a document's root element,
@@ -78,8 +110,4 @@ func rootElementName(body []byte) (xml.Name, error) {
 			return start.Name, nil
 		}
 	}
-}
-
-func escapeText(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }

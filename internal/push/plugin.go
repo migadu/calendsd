@@ -85,14 +85,9 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	}
 	name := func(local string) xml.Name { return xml.Name{Space: NS, Local: local} }
 
-	// transports: the Web Push transport plus our VAPID public key. The inner
-	// fragment carries its own default xmlns so it is self-contained (the
-	// marshaller declares NS on the multistatus root for the property name but
-	// does not rewrite Raw content).
+	// transports: the Web Push transport plus our VAPID public key.
 	pf.Handle(name("transports"), func() any {
-		return davxml.Raw(`<web-push xmlns="` + NS + `">` +
-			`<vapid-public-key type="p256ecdsa">` + escapeText(p.cfg.VAPIDPublicKey) + `</vapid-public-key>` +
-			`</web-push>`)
+		return davxml.Raw(webPushTransport(p.cfg.VAPIDPublicKey))
 	})
 	pf.Handle(name("topic"), func() any { return p.cfg.Topic(kind, id) })
 	pf.Handle(name("supported-triggers"), func() any {
