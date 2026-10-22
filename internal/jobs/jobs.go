@@ -202,13 +202,7 @@ func WithDelay(d time.Duration) Opt {
 // coalesces per (uid, recipient, method): a newer revision supersedes a pending
 // job, an older/equal re-issue is a no-op (D10).
 func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Opt) error {
-	o := enqueueOpts{queue: "default", maxAttempts: 6}
-	for _, fn := range opts {
-		fn(&o)
-	}
-	if o.scheduledAt.IsZero() {
-		o.scheduledAt = time.Now()
-	}
+	o := applyOpts(opts)
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("jobs: marshal args: %w", err)
@@ -224,12 +218,30 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 	if err := q.store.enqueue(ctx, o.queue, worker, raw, o.maxAttempts, o.scheduledAt, cred); err != nil {
 		return fmt.Errorf("jobs: enqueue: %w", err)
 	}
+	q.wakeAll(ctx)
+	return nil
+}
+
+// applyOpts resolves an Enqueue's options over the defaults.
+func applyOpts(opts []Opt) enqueueOpts {
+	o := enqueueOpts{queue: "default", maxAttempts: 6}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	if o.scheduledAt.IsZero() {
+		o.scheduledAt = time.Now()
+	}
+	return o
+}
+
+// wakeAll wakes this process's idle workers and, through NOTIFY, other
+// nodes'. The NOTIFY is best-effort; a failure just means peers rely on their
+// tick.
+func (q *Queue) wakeAll(ctx context.Context) {
 	q.signalWake()
-	// Best-effort cross-node wake; a failure just means peers rely on their tick.
 	if _, err := q.store.db.ExecContext(ctx, `SELECT pg_notify($1, '')`, notifyChannel); err != nil {
 		q.log.Debug("jobs: pg_notify failed", "err", err)
 	}
-	return nil
 }
 
 // EnqueueLatest persists a relay-identity job that coalesces latest-wins per
@@ -244,18 +256,12 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 // store.reschedule and store.reclaimOrphans) rather than violating the index.
 // WithCredential is refused — these jobs never carry a secret.
 func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generation int64, args any, opts ...Opt) error {
-	o := enqueueOpts{queue: "default", maxAttempts: 6}
-	for _, fn := range opts {
-		fn(&o)
-	}
+	o := applyOpts(opts)
 	if o.credential != nil {
 		return errors.New("jobs: EnqueueLatest does not take a credential")
 	}
 	if key == "" {
 		return errors.New("jobs: EnqueueLatest needs a coalesce key")
-	}
-	if o.scheduledAt.IsZero() {
-		o.scheduledAt = time.Now()
 	}
 	raw, err := json.Marshal(args)
 	if err != nil {
@@ -267,10 +273,7 @@ func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generatio
 	if err := q.store.enqueueLatest(ctx, o.queue, worker, key, generation, raw, o.maxAttempts, o.scheduledAt); err != nil {
 		return fmt.Errorf("jobs: enqueue: %w", err)
 	}
-	q.signalWake()
-	if _, err := q.store.db.ExecContext(ctx, `SELECT pg_notify($1, '')`, notifyChannel); err != nil {
-		q.log.Debug("jobs: pg_notify failed", "err", err)
-	}
+	q.wakeAll(ctx)
 	return nil
 }
 
@@ -353,7 +356,7 @@ func (q *Queue) process(ctx context.Context, c *claimed) {
 			return
 		}
 		j.Credential = pt
-		defer zero(pt)
+		defer clear(pt)
 	}
 
 	err := runHandler(ctx, h, j)
@@ -511,11 +514,5 @@ func (q *Queue) sleep(ctx context.Context, d time.Duration) bool {
 		return false
 	case <-t.C:
 		return false
-	}
-}
-
-func zero(b []byte) {
-	for i := range b {
-		b[i] = 0
 	}
 }

@@ -1,8 +1,10 @@
 package jobs
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -114,7 +116,7 @@ SELECT id, queue, worker, state, args,
 		&r.ID, &r.Queue, &r.Worker, &r.State, &raw,
 		&r.Recipient, &r.Method, &r.UID, &r.Username, &r.Attempt, &r.MaxAttempts,
 		&r.ScheduledAt, &r.InsertedAt, &done, &r.LastError, &r.HasCred, &keyID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -133,15 +135,15 @@ SELECT id, queue, worker, state, args,
 // ErrJobCompleted is returned by mutations that refuse to touch a job that has
 // already been delivered — resending it would duplicate the send; re-enqueue via
 // the app instead.
-var ErrJobCompleted = fmt.Errorf("job already completed")
+var ErrJobCompleted = errors.New("job already completed")
 
 // ErrNoJob is returned when the id does not exist.
-var ErrNoJob = fmt.Errorf("no such job")
+var ErrNoJob = errors.New("no such job")
 
 // ErrJobExecuting is returned by re-queues of a job a worker is running now:
 // a second copy would send twice. Wait for it to settle (or for the reclaim
 // sweep, if its worker died).
-var ErrJobExecuting = fmt.Errorf("job is executing; wait for it to settle")
+var ErrJobExecuting = errors.New("job is executing; wait for it to settle")
 
 // Retry resets a job to run immediately: state='available', due now, attempt
 // count cleared. It refuses a completed job (ErrJobCompleted) and a running one
@@ -158,14 +160,14 @@ UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=N
 // with Queue.EnqueueLatest) whose key already has a pending job of the same or
 // a newer generation: that job supersedes this one, and only one may be
 // pending (jobs_latest_ix).
-var ErrNewerPending = fmt.Errorf("a newer job for the same key is already pending and supersedes this one")
+var ErrNewerPending = errors.New("a newer job for the same key is already pending and supersedes this one")
 
 // requeue runs a re-queue UPDATE ($1 = id) in a transaction that first locks
 // the row, refuses a completed or executing job (ErrJobCompleted /
 // ErrJobExecuting), and reconciles a latest-wins job with its key's pending
-// sibling, the way
-// the queue's own retry does: a sibling of the same or a newer generation
-// wins (ErrNewerPending); an older one is retired as superseded.
+// sibling the way the queue's own retry does (reconcileSibling): a sibling of
+// the same or a newer generation wins (ErrNewerPending); an older one is
+// retired as superseded.
 func (o *Ops) requeue(id int64, update string) error {
 	tx, err := o.DB.Begin()
 	if err != nil {
@@ -178,7 +180,7 @@ func (o *Ops) requeue(id int64, update string) error {
 	err = tx.QueryRow(`
 SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
 		id).Scan(&worker, &state, &key, &gen)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNoJob
 	}
 	if err != nil {
@@ -191,24 +193,13 @@ SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM 
 		return ErrJobExecuting
 	}
 	if key.Valid {
-		var otherID, otherGen int64
-		err := tx.QueryRow(`
-SELECT id, (args->>'generation')::bigint FROM jobs
- WHERE worker = $1 AND args ? 'coalesce_key' AND args->>'coalesce_key' = $2
-   AND state = 'available' AND id <> $3
-   FOR UPDATE`, worker, key.String, id).Scan(&otherID, &otherGen)
-		switch {
-		case err == sql.ErrNoRows:
-		case err != nil:
+		superseded, err := reconcileSibling(context.Background(), tx, worker, key.String, id, gen.Int64,
+			"superseded by a newer generation re-queued via calctl")
+		if err != nil {
 			return err
-		case otherGen >= gen.Int64:
+		}
+		if superseded {
 			return ErrNewerPending
-		default:
-			if _, err := tx.Exec(`
-UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = 'superseded by a newer generation re-queued via calctl'
-WHERE id = $1`, otherID); err != nil {
-				return err
-			}
 		}
 	}
 	if _, err := tx.Exec(update, id); err != nil {

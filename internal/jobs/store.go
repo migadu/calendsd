@@ -208,29 +208,18 @@ SELECT worker, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs
 		return err
 	}
 	if key.Valid {
-		var otherID, otherGen int64
-		err := tx.QueryRowContext(ctx, `
-SELECT id, (args->>'generation')::bigint FROM jobs
- WHERE worker = $1 AND args ? 'coalesce_key' AND args->>'coalesce_key' = $2
-   AND state = 'available' AND id <> $3
-   FOR UPDATE`, worker, key.String, id).Scan(&otherID, &otherGen)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-		case err != nil:
+		superseded, err := reconcileSibling(ctx, tx, worker, key.String, id, gen.Int64,
+			"superseded by a newer generation awaiting retry")
+		if err != nil {
 			return err
-		case otherGen >= gen.Int64:
+		}
+		if superseded {
 			if _, err := tx.ExecContext(ctx, `
 UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = $2
 WHERE id = $1`, id, "superseded by a newer pending job; last error: "+lastErr); err != nil {
 				return err
 			}
 			return tx.Commit()
-		default:
-			if _, err := tx.ExecContext(ctx, `
-UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = 'superseded by a newer generation awaiting retry'
-WHERE id = $1`, otherID); err != nil {
-				return err
-			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -239,6 +228,32 @@ WHERE id = $1`, id, runAt, lastErr); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// reconcileSibling settles a latest-wins job (id, generation gen) that is about
+// to become pending against its key's pending sibling, if any, since only one
+// may be pending (jobs_latest_ix). A sibling of the same or a newer
+// generation wins — the caller must then not requeue id — and an older one is
+// discarded with siblingErr as its last_error. Run in tx with id locked.
+func reconcileSibling(ctx context.Context, tx *sql.Tx, worker, key string, id, gen int64, siblingErr string) (superseded bool, err error) {
+	var otherID, otherGen int64
+	err = tx.QueryRowContext(ctx, `
+SELECT id, (args->>'generation')::bigint FROM jobs
+ WHERE worker = $1 AND args ? 'coalesce_key' AND args->>'coalesce_key' = $2
+   AND state = 'available' AND id <> $3
+   FOR UPDATE`, worker, key, id).Scan(&otherID, &otherGen)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	case otherGen >= gen:
+		return true, nil
+	}
+	_, err = tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = $2
+WHERE id = $1`, otherID, siblingErr)
+	return false, err
 }
 
 // discard marks a job terminally failed but KEEPS enc_credential: a given-up
