@@ -112,14 +112,19 @@ func handleContactsImport(args []string) {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	defer run.close()
-
-	if err := run.execute(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+	// Closed explicitly, not deferred: os.Exit below skips deferred calls,
+	// and a report that failed to write must reach the exit status.
+	execErr := run.execute(context.Background())
+	reportErr := run.close()
+	if execErr != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", execErr)
 		run.print()
 		os.Exit(1)
 	}
 	run.print()
+	if reportErr != nil {
+		fmt.Fprintf(os.Stderr, "\n%v\n", reportErr)
+	}
 
 	// Exit status: 1 when something went wrong (a principal's transaction
 	// failed, a shard could not be read); 2 when nothing broke but the run did
@@ -135,7 +140,7 @@ func handleContactsImport(args []string) {
 		}
 	}
 	switch {
-	case run.failed > 0 || len(run.shardErrors) > 0:
+	case run.failed > 0 || len(run.shardErrors) > 0 || reportErr != nil:
 		os.Exit(1)
 	case run.counts[storage.ActionRefused] > 0 || len(missing) > 0:
 		os.Exit(2)
@@ -197,7 +202,10 @@ type importRun struct {
 	// the exit status or the run looks clean while missing thousands of people.
 	shardErrors map[string]error
 	report      *os.File
-	started     time.Time
+	// reportErr is the first failure writing the report; later lines are
+	// dropped, since a report with a hole in it is not a usable record.
+	reportErr error
+	started   time.Time
 }
 
 func newImportRun(b *bundle, importer *storage.ContactImport, opts importOptions) (*importRun, error) {
@@ -264,10 +272,22 @@ func shardsFor(principals map[string]bool) []string {
 	return out
 }
 
-func (r *importRun) close() {
-	if r.report != nil {
-		r.report.Close()
+// close closes the report and returns the first error writing or closing
+// it, so a full disk does not leave a silently truncated report behind.
+func (r *importRun) close() error {
+	if r.report == nil {
+		return nil
 	}
+	err := r.report.Close()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reportErr != nil {
+		return r.reportErr
+	}
+	if err != nil {
+		return fmt.Errorf("closing report %s: %w", r.opts.reportPath, err)
+	}
+	return nil
 }
 
 // execute walks the shards, one worker per shard. A shard owns whole
@@ -453,10 +473,13 @@ func (r *importRun) record(res storage.ImportResult, failed bool) {
 			r.refusals = append(r.refusals, res)
 		}
 	}
-	if r.report != nil {
+	if r.report != nil && r.reportErr == nil {
 		line, err := json.Marshal(res)
 		if err == nil {
-			r.report.Write(append(line, '\n'))
+			_, err = r.report.Write(append(line, '\n'))
+		}
+		if err != nil {
+			r.reportErr = fmt.Errorf("writing report %s: %w", r.opts.reportPath, err)
 		}
 	}
 }
