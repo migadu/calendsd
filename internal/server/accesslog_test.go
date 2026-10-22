@@ -108,3 +108,24 @@ func TestAccessLogPathOnlyDropsQuery(t *testing.T) {
 		t.Errorf("path-only access log = %q", got)
 	}
 }
+
+// The recorders sit between net/http and every handler, so they must let
+// http.ResponseController reach the real writer (deadlines, full duplex).
+func TestRecordersUnwrap(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
+			t.Errorf("EnableFullDuplex through the wrappers: %v", err)
+		}
+	})
+	h := WrapAccessLog(WrapRequestLog(inner, t.TempDir()), true)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	var buf bytes.Buffer
+	withCapturedLog(&buf, func() {
+		resp, err := http.Get(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	})
+}

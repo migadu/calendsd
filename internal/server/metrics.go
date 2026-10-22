@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"time"
 
@@ -40,15 +41,17 @@ func WrapMetrics(next http.Handler, set *metrics.Set, baseURI string) http.Handl
 	})
 }
 
-// statusRecorder captures the response status and byte count (the latter for
-// the access log; the metrics wrapper ignores it). The reqlog responseRecorder
-// is not reused here: it buffers bodies and only exists when request logging —
-// a debug aid, off in production — is enabled.
+// statusRecorder captures the response status and byte count for the
+// metrics, access-log and request-log wrappers. When body is non-nil (the
+// request log only, a debug aid) it also keeps the first max bytes of the
+// response body.
 type statusRecorder struct {
 	http.ResponseWriter
 	status  int
 	wrote   bool
-	written int
+	written int // total response bytes, including any past the body cap
+	body    *bytes.Buffer
+	max     int
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
@@ -61,14 +64,24 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 func (r *statusRecorder) Write(p []byte) (int, error) {
 	r.wrote = true // an implicit 200 if WriteHeader was never called
+	if r.body != nil {
+		if room := r.max - r.body.Len(); room > 0 {
+			r.body.Write(p[:min(len(p), room)])
+		}
+	}
 	n, err := r.ResponseWriter.Write(p)
 	r.written += n
 	return n, err
 }
 
-// Flush preserves streaming for clients that rely on it.
+// Flush preserves streaming for clients that rely on it (the real writer is
+// a Flusher); a no-op otherwise.
 func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
+
+// Unwrap lets http.ResponseController reach the real writer through the
+// recorder (deadlines, hijacking, full-duplex).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
