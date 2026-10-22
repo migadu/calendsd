@@ -130,7 +130,7 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	for _, att := range vfb.Props.Values("ATTENDEE") {
 		status := "2.0;Success"
 		var fbData string
-		principal := p.principalForAddress(att.Value)
+		principal := principalForAddress(p.server, att.Value)
 		if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {

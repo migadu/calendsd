@@ -286,7 +286,7 @@ func (p *IMipPlugin) Init(s *dav.Server) { p.server = s }
 func (p *IMipPlugin) UseScheduler(s *SchedulePlugin) {
 	p.SenderAddresses = s.addressesForPrincipal
 	p.IsResourceSender = func(address string) bool {
-		uri := s.principalForAddress(address)
+		uri := principalForAddress(s.server, address)
 		return uri != "" && s.AutoSchedule != nil && s.AutoSchedule(uri)
 	}
 	// Both the durable worker and the synchronous fallback write terminal

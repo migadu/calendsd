@@ -183,6 +183,61 @@ func TestShareNotificationClock(t *testing.T) {
 	}
 }
 
+// resolvingPrincipals is a principal backend with an indexed address lookup;
+// it counts full listings, which the lookup must make unnecessary.
+type resolvingPrincipals struct {
+	*acl.MemoryBackend
+	listings, lookups int
+}
+
+func (b *resolvingPrincipals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
+	b.listings++
+	return b.MemoryBackend.PrincipalsByPrefix(prefix)
+}
+
+func (b *resolvingPrincipals) PrincipalByAddress(prefix, address string) (string, error) {
+	b.lookups++
+	if prefix == "principals" && strings.EqualFold(address, "mailto:user2@example.org") {
+		return "principals/user2", nil
+	}
+	return "", nil
+}
+
+// TestShareResolvesThroughAddressResolver: a principal backend with an
+// address lookup resolves sharees without listing every principal.
+func TestShareResolvesThroughAddressResolver(t *testing.T) {
+	email := xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}
+	principals := &resolvingPrincipals{MemoryBackend: &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{email: "user1@example.org"}},
+		{URI: "principals/user2", Props: map[xmlNM]any{email: "user2@example.org"}},
+	}}}
+	backend := &caldav.MockSharingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "cal1", PrincipalURI: "principals/user1",
+	}}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+	srv.AddPlugin(&caldav.SharingPlugin{})
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:User2@example.org</d:href></cs:set>
+	</cs:share>`
+	if w := req(t, srv, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	if got := backend.Shares[caldav.CalendarID{Calendar: "1"}]; len(got) != 1 || got[0].Principal != "principals/user2" {
+		t.Fatalf("shares = %+v, want user2 resolved", got)
+	}
+	if principals.lookups == 0 || principals.listings != 0 {
+		t.Errorf("lookups = %d, listings = %d; want the lookup and no listing", principals.lookups, principals.listings)
+	}
+}
+
 // TestInvitePropertyListsSharees: after sharing a calendar read-write with one
 // person and read-only with another, a PROPFIND of {cs}invite on the owner's
 // calendar must return a <cs:user> per sharee with the right access level, so

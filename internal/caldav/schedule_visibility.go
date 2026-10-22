@@ -202,7 +202,7 @@ func (p *SchedulePlugin) allowedEntry(href, ownerDomain string) string {
 		if at <= 0 || at == len(addr)-1 || strings.ContainsAny(addr, " <>") {
 			return ""
 		}
-		if uri := p.principalForAddress("mailto:" + addr); uri != "" && ownerDomain != "" &&
+		if uri := principalForAddress(p.server, "mailto:" + addr); uri != "" && ownerDomain != "" &&
 			p.principalDomain(uri) == ownerDomain {
 			return uri
 		}

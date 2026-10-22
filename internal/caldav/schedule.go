@@ -328,7 +328,7 @@ func (p *SchedulePlugin) AfterWrite(r *http.Request, path string) {
 // Local delivery is likewise cheap and stays synchronous.
 func (p *SchedulePlugin) deferrableSend(msg *ical.Message) bool {
 	return msg.SignificantChange &&
-		p.principalForAddress(msg.Recipient) == "" &&
+		principalForAddress(p.server, msg.Recipient) == "" &&
 		strings.HasPrefix(msg.Recipient, "mailto:") &&
 		strings.HasPrefix(msg.Sender, "mailto:")
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
 )
@@ -233,7 +232,7 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	}
 	// Resolve local principals by calendar user address.
 	for i := range sharees {
-		sharees[i].Principal = p.principalForAddress(sharees[i].Href)
+		sharees[i].Principal = principalForAddress(p.server, sharees[i].Href)
 	}
 	changes, err := sharing.UpdateInvites(calNode.Info.ID, sharees)
 	if err != nil {
@@ -422,35 +421,6 @@ func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path str
 		w.WriteHeader(http.StatusOK)
 	}
 	return true, nil
-}
-
-// principalForAddress finds a principal by calendar user address (shared
-// with the scheduling plugin's logic).
-func (p *SharingPlugin) principalForAddress(address string) string {
-	principals, err := p.server.Tree.NodeForPath("principals")
-	if err != nil {
-		return ""
-	}
-	coll, ok := principals.(dav.Collection)
-	if !ok {
-		return ""
-	}
-	children, err := coll.Children()
-	if err != nil {
-		return ""
-	}
-	for _, child := range children {
-		ph, isPrincipal := child.(acl.PrincipalHolder)
-		if !isPrincipal {
-			continue
-		}
-		for _, candidate := range ph.AlternateURISet() {
-			if strings.EqualFold(candidate, address) {
-				return ph.PrincipalURL()
-			}
-		}
-	}
-	return ""
 }
 
 type shareXML struct {

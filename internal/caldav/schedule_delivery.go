@@ -61,7 +61,7 @@ func (p *SchedulePlugin) asyncSendsOffloaded() bool {
 // once the send settles; local delivery stays synchronous either way (it is a
 // fast storage write, and a local attendee should see the change at once).
 func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, objectPath string) {
-	if p.principalForAddress(msg.Recipient) != "" {
+	if principalForAddress(p.server, msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
 	} else {
 		for _, plugin := range p.server.Plugins() {
@@ -94,7 +94,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool,
 // scheduleLocalDelivery drops the message into the recipient's inbox and
 // updates their calendar copy. Port of sabre's scheduleLocalDelivery.
 func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Message) {
-	principalURI := p.principalForAddress(msg.Recipient)
+	principalURI := principalForAddress(p.server, msg.Recipient)
 	if principalURI == "" {
 		msg.ScheduleStatus = "3.7;Could not find principal."
 		return
