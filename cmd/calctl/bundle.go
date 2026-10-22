@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -381,7 +382,9 @@ func newNDJSONScanner(r io.Reader) *ndjsonScanner {
 func (s *ndjsonScanner) Scan() bool {
 	for s.Scanner.Scan() {
 		s.line++
-		if len(strings.TrimSpace(s.Text())) > 0 {
+		// Bytes, not Text: Text copies the whole line (up to the 64 MiB cap)
+		// just to test it for blankness.
+		if len(bytes.TrimSpace(s.Bytes())) > 0 {
 			return true
 		}
 	}
