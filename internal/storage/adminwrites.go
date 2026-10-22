@@ -162,50 +162,56 @@ func (w *AdminWrites) DeleteUserCascade(username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	principal := "principals/" + username
 	return withTx(w.DB, func(tx *sql.Tx) error {
-		// Owned calendars (access=1): capture ids first, since the deletes below
-		// remove the very instance rows that mark ownership.
-		ownedCals, err := scanIDs(tx,
-			`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
-		if err != nil {
-			return err
-		}
-		for _, id := range ownedCals {
-			if err := deleteCalendarRows(tx, id); err != nil {
-				return err
-			}
-		}
-		// Any remaining instance rows are shares into this principal; drop them.
-		if _, err := tx.Exec(
-			`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
-			return err
-		}
-
-		ownedBooks, err := scanIDs(tx,
-			`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
-		if err != nil {
-			return err
-		}
-		for _, id := range ownedBooks {
-			if err := deleteAddressBookRows(tx, id); err != nil {
-				return err
-			}
-		}
-
-		// Webmail's address suggestions. Not reachable through any collection
-		// above and not protected by a foreign key, so the purge has to name it:
-		// the rows hold correspondents' names and addresses, which must not
-		// outlive the deleted account. The contact_import ledger is deliberately
-		// NOT purged here — it is evidence about a migration run and is meant to
-		// survive the principal (see scripts/schema/pgsql.calserver.sql).
-		if _, err := tx.Exec(
-			`DELETE FROM contact_frecency WHERE principal = $1`, principal); err != nil {
-			return err
-		}
-
-		return deletePrincipalRows(tx, principal, username)
+		return deleteUserCascadeRows(tx, username)
 	})
+}
+
+// deleteUserCascadeRows is DeleteUserCascade inside a caller-owned
+// transaction, so PurgeExpired can claim the tombstone and cascade in one.
+func deleteUserCascadeRows(tx *sql.Tx, username string) error {
+	principal := "principals/" + username
+	// Owned calendars (access=1): capture ids first, since the deletes below
+	// remove the very instance rows that mark ownership.
+	ownedCals, err := scanIDs(tx,
+		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
+	if err != nil {
+		return err
+	}
+	for _, id := range ownedCals {
+		if err := deleteCalendarRows(tx, id); err != nil {
+			return err
+		}
+	}
+	// Any remaining instance rows are shares into this principal; drop them.
+	if _, err := tx.Exec(
+		`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
+		return err
+	}
+
+	ownedBooks, err := scanIDs(tx,
+		`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
+	if err != nil {
+		return err
+	}
+	for _, id := range ownedBooks {
+		if err := deleteAddressBookRows(tx, id); err != nil {
+			return err
+		}
+	}
+
+	// Webmail's address suggestions. Not reachable through any collection
+	// above and not protected by a foreign key, so the purge has to name it:
+	// the rows hold correspondents' names and addresses, which must not
+	// outlive the deleted account. The contact_import ledger is deliberately
+	// NOT purged here — it is evidence about a migration run and is meant to
+	// survive the principal (see scripts/schema/pgsql.calserver.sql).
+	if _, err := tx.Exec(
+		`DELETE FROM contact_frecency WHERE principal = $1`, principal); err != nil {
+		return err
+	}
+
+	return deletePrincipalRows(tx, principal, username)
 }
 
 // deletePrincipalRows removes the rows shared by both delete paths: the
@@ -346,11 +352,13 @@ func (w *AdminWrites) ExpiredDeletions() ([]DeletedPrincipal, error) {
 
 // PurgeExpired runs the retention sweep: it permanently removes every account
 // whose window has elapsed and returns what it purged. For each expired
-// tombstone it CLAIMS the row first (delete … WHERE purge_after <= now()
-// RETURNING) and only cascades if the claim won — so a concurrent CancelDelete
-// (restore) that removed the tombstone means the account is left intact. A
-// cascade that finds the principal already gone (ErrNoPrincipal) still counts
-// as purged, since the tombstone is cleared by the claim.
+// tombstone it CLAIMS the row first (delete … WHERE purge_after <= now()) and
+// only cascades if the claim won — so a concurrent CancelDelete (restore) that
+// removed the tombstone means the account is left intact. The claim and the
+// cascade share one transaction: a cascade that fails rolls the claim back
+// too, so the account keeps its tombstone (login stays disabled) and the next
+// sweep retries it. A cascade that finds the principal already gone
+// (ErrNoPrincipal) still counts as purged, and commits the claim.
 func (w *AdminWrites) PurgeExpired() ([]DeletedPrincipal, error) {
 	expired, err := w.ExpiredDeletions()
 	if err != nil {
@@ -358,23 +366,35 @@ func (w *AdminWrites) PurgeExpired() ([]DeletedPrincipal, error) {
 	}
 	var purged []DeletedPrincipal
 	for _, d := range expired {
-		// Claim: decide ownership by the delete, not the earlier read. If a
-		// restore already removed the tombstone, RowsAffected is 0 and we skip.
-		res, err := w.DB.Exec(
-			`DELETE FROM deleted_principals WHERE principal = $1 AND purge_after <= now()`,
-			d.Principal)
+		claimed := false
+		err := withTx(w.DB, func(tx *sql.Tx) error {
+			// Claim: decide ownership by the delete, not the earlier read. If a
+			// restore already removed the tombstone, RowsAffected is 0 and we
+			// skip. The delete also locks the tombstone against a concurrent
+			// restore until the cascade commits.
+			res, err := tx.Exec(
+				`DELETE FROM deleted_principals WHERE principal = $1 AND purge_after <= now()`,
+				d.Principal)
+			if err != nil {
+				return err
+			}
+			if n, err := res.RowsAffected(); err != nil {
+				return err
+			} else if n == 0 {
+				return nil // lost the race to a restore; leave the account intact
+			}
+			claimed = true
+			if err := deleteUserCascadeRows(tx, d.Username); err != nil && !errors.Is(err, ErrNoPrincipal) {
+				return err
+			}
+			return nil
+		})
 		if err != nil {
-			return purged, err
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return purged, err
-		} else if n == 0 {
-			continue // lost the race to a restore; leave the account intact
-		}
-		if err := w.DeleteUserCascade(d.Username); err != nil && !errors.Is(err, ErrNoPrincipal) {
 			return purged, fmt.Errorf("purging %s: %w", d.Username, err)
 		}
-		purged = append(purged, d)
+		if claimed {
+			purged = append(purged, d)
+		}
 	}
 	return purged, nil
 }
