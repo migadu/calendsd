@@ -1,7 +1,6 @@
 package caldav
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -189,7 +188,7 @@ func (s *SchedulingObject) ETag() string {
 }
 
 func (s *SchedulingObject) Get(ctx context.Context) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(s.info.CalendarData)), nil
+	return dav.BytesBody(s.info.CalendarData), nil
 }
 
 func (s *SchedulingObject) Put(context.Context, io.Reader) (string, error) {

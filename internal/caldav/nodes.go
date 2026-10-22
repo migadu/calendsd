@@ -576,7 +576,7 @@ func (o *CalendarObject) Delete(ctx context.Context) error {
 func (o *CalendarObject) LastModified() time.Time { return time.Time{} }
 
 func (o *CalendarObject) Get(ctx context.Context) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(o.viewData())), nil
+	return dav.BytesBody(o.viewData()), nil
 }
 
 // viewData is the object as served for this particular view. On a read-only

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -241,105 +240,12 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 		http.ServeContent(w, r, "", file.LastModified(), rs)
 		return true, nil
 	}
-
-	start, end, hasRange, err := parseRange(r.Header.Get("Range"), size)
-	if err != nil {
-		return true, err
-	}
-	if hasRange && ignoreRange(r.Header.Get("If-Range"), h) {
-		hasRange = false
-	}
-
-	if hasRange {
-		h.Set("Content-Length", strconv.FormatInt(end-start+1, 10))
-		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
-		w.WriteHeader(http.StatusPartialContent)
-		if _, err := io.CopyN(io.Discard, body, start); err != nil {
-			return true, err
-		}
-		_, err = io.CopyN(w, body, end-start+1)
-		return true, err
-	}
+	// A body that cannot seek is served whole: Range is optional for a
+	// server (RFC 7233 §3.1).
 	h.Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
 	_, err = io.Copy(w, body)
 	return true, err
-}
-
-// parseRange interprets a single-range Range header against the entity size,
-// mirroring sabre's getHTTPRange + httpGet checks (including 416 semantics).
-func parseRange(header string, size int64) (start, end int64, ok bool, err error) {
-	if header == "" || size == 0 {
-		return 0, 0, false, nil
-	}
-	var s, e string
-	if n, _ := fmt.Sscanf(header, "bytes=%s", &s); n != 1 {
-		return 0, 0, false, nil
-	}
-	parts := strings.SplitN(s, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false, nil
-	}
-	s, e = parts[0], parts[1]
-	switch {
-	case s != "":
-		start, err = strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return 0, 0, false, nil
-		}
-		end = size - 1
-		if e != "" {
-			end, err = strconv.ParseInt(e, 10, 64)
-			if err != nil {
-				return 0, 0, false, nil
-			}
-		}
-		if start >= size {
-			return 0, 0, false, davError(http.StatusRequestedRangeNotSatisfiable,
-				"RequestedRangeNotSatisfiable",
-				"The start offset (%d) exceeded the size of the entity (%d)", start, size)
-		}
-		if end < start {
-			return 0, 0, false, davError(http.StatusRequestedRangeNotSatisfiable,
-				"RequestedRangeNotSatisfiable",
-				"The end offset (%s) is lower than the start offset (%s)", e, s)
-		}
-		if end >= size {
-			end = size - 1
-		}
-	case e != "":
-		var suffix int64
-		suffix, err = strconv.ParseInt(e, 10, 64)
-		if err != nil {
-			return 0, 0, false, nil
-		}
-		start = size - suffix
-		if start < 0 {
-			start = 0
-		}
-		end = size - 1
-	default:
-		return 0, 0, false, nil
-	}
-	return start, end, true, nil
-}
-
-// ignoreRange implements If-Range: serve the full entity when the validator
-// doesn't match. h carries the already-computed ETag/Last-Modified.
-func ignoreRange(ifRange string, h http.Header) bool {
-	if ifRange == "" {
-		return false
-	}
-	if strings.HasPrefix(ifRange, `"`) || strings.HasPrefix(ifRange, `W/`) {
-		return h.Get("ETag") == "" || h.Get("ETag") != ifRange
-	}
-	lm := h.Get("Last-Modified")
-	if lm == "" {
-		return true
-	}
-	modified, err1 := http.ParseTime(lm)
-	limit, err2 := http.ParseTime(ifRange)
-	return err1 != nil || err2 != nil || modified.After(limit)
 }
 
 // head runs GET without a body; 501 (no handler) converts to an empty 200

@@ -1,7 +1,6 @@
 package carddav
 
 import (
-	"bytes"
 	"context"
 	"encoding/xml"
 	"io"
@@ -302,7 +301,7 @@ func (c *Card) Delete(ctx context.Context) error {
 func (c *Card) LastModified() time.Time { return time.Time{} }
 
 func (c *Card) Get(ctx context.Context) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(c.info.CardData)), nil
+	return dav.BytesBody(c.info.CardData), nil
 }
 
 func (c *Card) Put(ctx context.Context, data io.Reader) (string, error) {
