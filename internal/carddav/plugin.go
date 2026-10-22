@@ -184,6 +184,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 	}
 
 	var matches []string
+	truncated := false
 	switch n := node.(type) {
 	case *AddressBook:
 		cards, err := n.Children(r.Context())
@@ -192,19 +193,31 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 		}
 		for _, child := range cards {
 			c := child.(*Card)
-			if query.match(c.Data()) {
-				matches = append(matches, path+"/"+c.Name())
-				if query.limit > 0 && len(matches) >= query.limit {
-					break
-				}
+			if !query.match(c.Data()) {
+				continue
 			}
+			if query.limit > 0 && len(matches) == query.limit {
+				truncated = true // a match past the limit exists
+				break
+			}
+			matches = append(matches, path+"/"+c.Name())
 		}
 	case *Card:
 		if query.match(n.Data()) {
 			matches = append(matches, path)
 		}
 	}
-	return p.writeCardResponses(r.Context(), w, matches, query.props, query.addrData)
+	var extra []davxml.Response
+	if truncated {
+		// RFC 6352 §8.6.1: a result cut at the client's limit says so with
+		// a 507 response for the request URI.
+		extra = append(extra, davxml.Response{
+			Href:   p.server.Href(path) + "/",
+			Status: http.StatusInsufficientStorage,
+			Error:  xml.Name{Space: davxml.NSDav, Local: "number-of-matches-within-limits"},
+		})
+	}
+	return p.writeCardResponses(r.Context(), w, matches, query.props, query.addrData, extra...)
 }
 
 func (p *Plugin) multigetReport(body []byte, w http.ResponseWriter, r *http.Request) error {
@@ -254,7 +267,7 @@ func convertResponseAddressData(resp *davxml.Response, spec *addressDataSpec) er
 	return nil
 }
 
-func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, spec *addressDataSpec) error {
+func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, spec *addressDataSpec, extra ...davxml.Response) error {
 	ms := &davxml.MultiStatus{}
 	for _, cardPath := range paths {
 		responses, err := p.server.PropertiesForPath(ctx, cardPath, props, 0)
@@ -277,6 +290,7 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 			ms.Responses = append(ms.Responses, resp)
 		}
 	}
+	ms.Responses = append(ms.Responses, extra...)
 	w.Header().Set("Vary", "Brief,Prefer")
 	return p.server.WriteMultiStatus(w, ms)
 }

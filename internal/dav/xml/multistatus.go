@@ -85,6 +85,10 @@ type Response struct {
 	Propstats []Propstat
 	// Status is set for status-only responses (e.g. 404 in sync reports).
 	Status int
+	// Error, when set, names the precondition element emitted in the
+	// response's {DAV:}error (RFC 4918 §14.24), e.g.
+	// {DAV:}number-of-matches-within-limits on a truncated report.
+	Error xml.Name
 }
 
 // MultiStatus is a {DAV:}multistatus response document.
@@ -120,6 +124,9 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 	}
 	var collectResponse func(r Response)
 	collectResponse = func(r Response) {
+		if r.Error.Local != "" {
+			collect(r.Error)
+		}
 		for _, ps := range r.Propstats {
 			for _, p := range ps.Props {
 				collect(p.Name)
@@ -201,6 +208,9 @@ func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
 	// serialization.
 	if r.Status != 0 && len(r.Propstats) == 0 {
 		fmt.Fprintf(b, "  <d:status>HTTP/1.1 %s</d:status>\n", statusLine(r.Status))
+	}
+	if r.Error.Local != "" {
+		fmt.Fprintf(b, "  <d:error><%s/></d:error>\n", qualify(r.Error, prefix))
 	}
 	b.WriteString(" </d:response>\n")
 }

@@ -186,8 +186,21 @@ func TestAddressbookQueryLimit(t *testing.T) {
 	if w.Code != 207 {
 		t.Fatalf("query status = %d:\n%s", w.Code, w.Body.String())
 	}
-	if n := strings.Count(w.Body.String(), "<d:response"); n != 1 {
-		t.Errorf("limit nresults=1 returned %d responses, want 1:\n%s", n, w.Body.String())
+	body := w.Body.String()
+	if n := strings.Count(body, "<d:propstat>"); n != 1 {
+		t.Errorf("limit nresults=1 returned %d cards, want 1:\n%s", n, body)
+	}
+	// RFC 6352 §8.6.1: the cut is reported as a 507 for the request URI.
+	if !strings.Contains(body, "<d:href>/addressbooks/admin/book1/</d:href>\n  <d:status>HTTP/1.1 507 Insufficient Storage</d:status>\n  <d:error><d:number-of-matches-within-limits/></d:error>") {
+		t.Errorf("truncated result lacks the 507 number-of-matches-within-limits response:\n%s", body)
+	}
+
+	// A limit that every match fits in is not a truncation.
+	query = strings.Replace(query, "<c:nresults>1<", "<c:nresults>2<", 1)
+	w = do(t, srv, "REPORT", "/addressbooks/admin/book1/", query, "Depth", "1", "Content-Type", "application/xml")
+	if body := w.Body.String(); strings.Count(body, "<d:propstat>") != 2 || strings.Contains(body, "507") {
+		t.Errorf("limit nresults=2 over 2 cards = %d cards, 507 present %v:\n%s",
+			strings.Count(body, "<d:propstat>"), strings.Contains(body, "507"), body)
 	}
 }
 
