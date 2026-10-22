@@ -595,7 +595,7 @@ func (v *Validator) componentInTimeRange(comp, parent *goical.Component, start, 
 		return ical.EventInTimeRange(comp, start, end, v.loc())
 	case "VALARM":
 		if parent.Name == goical.CompEvent && v.cal != nil {
-			if roption, _ := parent.Props.RecurrenceRule(); roption != nil {
+			if ical.IsRecurring(parent) {
 				return ical.AlarmsInTimeRangeRecurring(v.cal, parent, start, end, v.loc())
 			}
 		}
