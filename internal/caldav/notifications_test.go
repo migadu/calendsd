@@ -115,6 +115,37 @@ func TestSharingNotificationRoundTrip(t *testing.T) {
 	}
 }
 
+// TestShareNotificationsFollowCommittedResult: a set overridden by a remove
+// in the same POST shares nothing, so it must not notify; a sharee named
+// twice is notified once, with the access that was committed.
+func TestShareNotificationsFollowCommittedResult(t *testing.T) {
+	backend, servers := sharedSharing()
+	user1 := servers["principals/user1"]
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	  <cs:remove><d:href>mailto:user2@example.org</d:href></cs:remove>
+	</cs:share>`
+	if w := req(t, user1, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	if n := backend.Notifications["principals/user2"]; len(n) != 0 {
+		t.Fatalf("set+remove left %d notifications, want 0", len(n))
+	}
+
+	share = `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	  <cs:set><d:href>MAILTO:User2@Example.org</d:href><cs:read-write/></cs:set>
+	</cs:share>`
+	if w := req(t, user1, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	n := backend.Notifications["principals/user2"]
+	if len(n) != 1 || n[0].Access != caldav.AccessReadWrite {
+		t.Fatalf("notifications = %+v, want one read-write invite", n)
+	}
+}
+
 // TestInvitePropertyListsSharees: after sharing a calendar read-write with one
 // person and read-only with another, a PROPFIND of {cs}invite on the owner's
 // calendar must return a <cs:user> per sharee with the right access level, so

@@ -3,6 +3,7 @@ package caldav
 import (
 	"bytes"
 	"encoding/xml"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -236,22 +237,30 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	if err != nil {
 		return err
 	}
-	// Drop an invite-notification into each added local sharee's inbox, so
-	// their client's notification feed surfaces the share (like sabre).
+	// Drop an invite-notification into the inbox of each local sharee the
+	// committed result keeps, so their client's notification feed surfaces
+	// the share (like sabre). The request's raw entries are not used: a set
+	// overridden by a later remove, or a duplicate spelling, did not share
+	// anything. The share has committed, so a failed notification is logged
+	// rather than failing the request.
 	if notif, ok := calNode.backend.(NotificationsBackend); ok {
-		for _, sharee := range sharees {
-			if sharee.Access == AccessNoAccess || sharee.Principal == "" {
+		for _, c := range changes {
+			if c.Principal == "" || c.Principal == calNode.Owner() {
 				continue
 			}
-			_ = notif.AddNotification(sharee.Principal, InviteNotification{
-				ID:           notificationID(calPath, sharee.Href),
+			err := notif.AddNotification(c.Principal, InviteNotification{
+				ID:           notificationID(calPath, c.Href),
 				DTStamp:      requestTime(r),
 				HostURL:      calPath,
 				Organizer:    calNode.Owner(),
-				Access:       sharee.Access,
+				Access:       c.Access,
 				InviteStatus: InviteNoResponse,
-				Summary:      sharee.Comment,
+				Summary:      c.Comment,
 			})
+			if err != nil {
+				slog.Warn("share invite notification not stored",
+					"calendar", calPath, "principal", c.Principal, "err", err)
+			}
 		}
 	}
 	// Email each newly usable local sharee (best effort, never fails the
