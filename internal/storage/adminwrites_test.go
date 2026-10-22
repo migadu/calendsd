@@ -67,6 +67,26 @@ CREATE TRIGGER fail_purge BEFORE DELETE ON contact_frecency
 	}
 }
 
+// TestHashA1TellsOutageFromUnknownUser covers Users.HashA1 folding every
+// error into ok=false, so a database outage read as a wrong password.
+func TestHashA1TellsOutageFromUnknownUser(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_d_hasha1")
+	if err := (&storage.AdminWrites{DB: db}).CreateUser("carol", "0123456789abcdef0123456789abcdef", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	users := &storage.Users{DB: db}
+	if hash, err := users.HashA1("SabreDAV", "carol"); err != nil || hash != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("HashA1(carol) = %q, %v", hash, err)
+	}
+	if hash, err := users.HashA1("SabreDAV", "nobody"); err != nil || hash != "" {
+		t.Errorf("HashA1(nobody) = %q, %v; want \"\", nil", hash, err)
+	}
+	db.Close()
+	if _, err := users.HashA1("SabreDAV", "carol"); err == nil {
+		t.Error("HashA1 on a closed database returned no error")
+	}
+}
+
 // TestDeleteUserCascadeDropsNotifications covers the cascade leaving the
 // principal's share-invite notifications behind: nothing else removes them,
 // and a later account with the same name inherited the invites.

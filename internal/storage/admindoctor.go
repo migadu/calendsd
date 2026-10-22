@@ -6,10 +6,12 @@ package storage
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/emersion/go-vcard"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"calserver/internal/caldav/ical"
 )
@@ -404,7 +406,7 @@ SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype,
 	// (a write-back that never landed, a manually removed job). Objects still
 	// awaiting a queued send have a job and are skipped.
 	if len(pending) > 0 {
-		q.flagStaleIMipPending(report, pending)
+		return q.flagStaleIMipPending(report, pending)
 	}
 	return nil
 }
@@ -416,21 +418,30 @@ const imipPendingMarker = "Scheduling message is queued for delivery"
 // flagStaleIMipPending reports each pending object whose UID has no live
 // (available|executing) imip_send job. When the jobs table is absent (a
 // sabre-only or queue-less database) it skips silently — pending-at-1.0 can't be
-// reconciled against a queue that doesn't exist.
-func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) {
+// reconciled against a queue that doesn't exist. Any other failure is an
+// error: reporting every pending object as stale, or none, off a half-read
+// job list would be wrong either way.
+func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) error {
 	rows, err := q.DB.Query(`SELECT DISTINCT coalesce(args->>'uid','')
 	  FROM jobs WHERE worker='imip_send' AND state IN ('available','executing')`)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
+		return nil
+	}
 	if err != nil {
-		return
+		return fmt.Errorf("imip-pending-stale: %w", err)
 	}
 	defer rows.Close()
 	live := map[string]bool{}
 	for rows.Next() {
 		var u string
 		if err := rows.Scan(&u); err != nil {
-			return
+			return err
 		}
 		live[u] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	for _, p := range pending {
 		if !live[p[0]] {
@@ -441,6 +452,7 @@ func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [
 			})
 		}
 	}
+	return nil
 }
 
 // doctorCards checks every cards row: parseable vCard, correct etag/size.

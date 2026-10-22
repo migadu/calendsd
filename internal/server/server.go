@@ -427,8 +427,12 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		basic := &auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(username, password string) bool {
 			// Basic verifies against the same digesta1 hash, compared in
 			// constant time so verification does not leak the stored hash.
-			hash, ok := users.HashA1(cfg.Realm, username)
-			return ok && subtle.ConstantTimeCompare(
+			hash, err := users.HashA1(cfg.Realm, username)
+			if err != nil {
+				slog.Error("basic auth: reading digesta1", "user", username, "err", err)
+				return false
+			}
+			return hash != "" && subtle.ConstantTimeCompare(
 				[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
 		}}
 		ap := auth.NewPlugin(

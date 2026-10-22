@@ -69,3 +69,60 @@ func TestDoctorScanCapInSQL(t *testing.T) {
 		t.Errorf("CardsSearch in-data = %d rows, truncated=%t, err=%v; want %d, false", len(cards), truncated, err, n)
 	}
 }
+
+// TestDoctorIMipPendingErrors covers the stale-iMIP check swallowing every
+// error from the jobs query, including a failed scan or read: the doctor then
+// reported nothing stale and a clean run. Only a missing jobs table (a
+// queue-less database) may be skipped.
+func TestDoctorIMipPendingErrors(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_d_doctorimip")
+	cal := &storage.CalDAV{DB: db}
+	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:pending-1\r\nDTSTART:20260101T100000Z\r\n" +
+		"ORGANIZER:mailto:admin@example.org\r\n" +
+		"ATTENDEE;SCHEDULE-STATUS=\"1.0;Scheduling message is queued for delivery\":mailto:bob@example.org\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	if _, err := cal.CreateCalendarObject(calID, "pending.ics", []byte(ics)); err != nil {
+		t.Fatal(err)
+	}
+	q := &storage.AdminQueries{DB: db}
+	stale := func(r *storage.AdminDoctorReport) (n int) {
+		for _, f := range r.Findings {
+			if f.Check == "imip-pending-stale" {
+				n++
+			}
+		}
+		return n
+	}
+
+	report, err := q.Doctor(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale(report) != 1 {
+		t.Fatalf("pending object with no job: %d imip-pending-stale findings, want 1", stale(report))
+	}
+
+	// A broken jobs query is an error, not a clean report.
+	if _, err := db.Exec(`ALTER TABLE jobs RENAME COLUMN args TO args_gone`); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := q.Doctor(0); err == nil {
+		t.Fatalf("Doctor with a broken jobs query succeeded (%d stale findings); want an error", stale(report))
+	}
+
+	// No jobs table at all: skipped silently.
+	if _, err := db.Exec(`DROP TABLE jobs CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	report, err = q.Doctor(0)
+	if err != nil {
+		t.Fatalf("Doctor without a jobs table: %v", err)
+	}
+	if stale(report) != 0 {
+		t.Fatalf("Doctor without a jobs table flagged %d object(s)", stale(report))
+	}
+}
