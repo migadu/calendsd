@@ -507,9 +507,9 @@ func subtract(cover interval, holes []interval) []interval {
 
 // availabilityZoneSet maps the TZIDs of embedded VTIMEZONEs that
 // time.LoadLocation cannot resolve (Outlook-style names) to their parsed
-// transitions. Unlike resolveNonIANATZIDs, which flattens such times to fixed
-// UTC values, availability keeps them as wall-clock times so a recurring rule
-// follows the zone's DST changes.
+// transitions. Availability keeps them as wall-clock times on the embedded
+// definition, so a recurring rule follows the zone's DST changes even when
+// resolveNonIANATZIDs would find no IANA zone for it.
 type availabilityZoneSet map[string]*vtimezone
 
 func availabilityZones(cal *goical.Calendar) availabilityZoneSet {
