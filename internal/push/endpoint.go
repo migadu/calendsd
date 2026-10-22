@@ -1,6 +1,7 @@
 package push
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -33,14 +34,14 @@ func publicAddr(addr netip.Addr) bool {
 func validatePushResource(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-		return fmt.Errorf("push-resource must be an https URL")
+		return errors.New("push-resource must be an https URL")
 	}
 	host := u.Hostname()
 	if addr, err := netip.ParseAddr(host); err == nil && !publicAddr(addr) {
-		return fmt.Errorf("push-resource must not point at an internal address")
+		return errors.New("push-resource must not point at an internal address")
 	}
 	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") {
-		return fmt.Errorf("push-resource must not point at an internal address")
+		return errors.New("push-resource must not point at an internal address")
 	}
 	return nil
 }

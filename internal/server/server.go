@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -184,7 +185,7 @@ func (c Config) Canonical() string {
 // rather than a crash.
 func (c Config) Validate() error {
 	if c.Push.Enabled && !c.pushConfig().Valid() {
-		return fmt.Errorf("[push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+		return errors.New("[push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
 	}
 	return nil
 }

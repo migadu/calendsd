@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -118,7 +119,7 @@ func openBundle(dir string) (*bundle, error) {
 	}
 	switch {
 	case b.manifest.ExporterVersion == "":
-		return nil, fmt.Errorf("bundle manifest has no exporterVersion; the ledger cannot pin the serializer without it")
+		return nil, errors.New("bundle manifest has no exporterVersion; the ledger cannot pin the serializer without it")
 	case b.manifest.Shards <= 0:
 		return nil, fmt.Errorf("bundle manifest declares %d shards", b.manifest.Shards)
 	case b.manifest.Compression != "gzip" && b.manifest.Compression != "none":

@@ -3,7 +3,7 @@ package caldav
 import (
 	"bytes"
 	"encoding/xml"
-	"fmt"
+	"errors"
 	"io"
 	"strings"
 	"time"
@@ -182,7 +182,7 @@ func ParseCalendarQuery(body []byte) (*CalendarQuery, error) {
 		return nil, err
 	}
 	if len(q.Filter.CompFilters) != 1 {
-		return nil, fmt.Errorf("the {urn:ietf:params:xml:ns:caldav}filter element must have exactly one comp-filter")
+		return nil, errors.New("the {urn:ietf:params:xml:ns:caldav}filter element must have exactly one comp-filter")
 	}
 	filter, err := convertCompFilter(q.Filter.CompFilters[0])
 	if err != nil {

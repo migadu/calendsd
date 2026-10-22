@@ -98,7 +98,7 @@ func (w *AdminWrites) UpdatePrincipal(ctx context.Context, uri string, email, di
 		sets = append(sets, fmt.Sprintf("displayname = nullif($%d, '')", len(args)))
 	}
 	if len(sets) == 0 {
-		return fmt.Errorf("nothing to update")
+		return errors.New("nothing to update")
 	}
 	res, err := w.DB.ExecContext(ctx,
 		`UPDATE principals SET `+strings.Join(sets, ", ")+` WHERE uri = $1`, args...)

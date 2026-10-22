@@ -3,6 +3,7 @@ package ical
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,11 +48,11 @@ func decodeJCalComponent(node []any, depth int) (*goical.Component, error) {
 		return nil, fmt.Errorf("jCal component nesting exceeds %d levels", maxJCalDepth)
 	}
 	if len(node) != 3 {
-		return nil, fmt.Errorf("jCal component must be a 3-element array")
+		return nil, errors.New("jCal component must be a 3-element array")
 	}
 	name, ok := node[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("jCal component name must be a string")
+		return nil, errors.New("jCal component name must be a string")
 	}
 	comp := &goical.Component{Name: strings.ToUpper(name), Props: goical.Props{}}
 
@@ -62,7 +63,7 @@ func decodeJCalComponent(node []any, depth int) (*goical.Component, error) {
 	for _, p := range props {
 		pa, ok := p.([]any)
 		if !ok {
-			return nil, fmt.Errorf("jCal property must be an array")
+			return nil, errors.New("jCal property must be an array")
 		}
 		prop, err := decodeJCalProp(pa)
 		if err != nil {
@@ -78,7 +79,7 @@ func decodeJCalComponent(node []any, depth int) (*goical.Component, error) {
 	for _, c := range comps {
 		ca, ok := c.([]any)
 		if !ok {
-			return nil, fmt.Errorf("jCal subcomponent must be an array")
+			return nil, errors.New("jCal subcomponent must be an array")
 		}
 		child, err := decodeJCalComponent(ca, depth+1)
 		if err != nil {
@@ -91,11 +92,11 @@ func decodeJCalComponent(node []any, depth int) (*goical.Component, error) {
 
 func decodeJCalProp(node []any) (*goical.Prop, error) {
 	if len(node) < 4 {
-		return nil, fmt.Errorf("jCal property must have at least 4 elements")
+		return nil, errors.New("jCal property must have at least 4 elements")
 	}
 	name, ok := node[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("jCal property name must be a string")
+		return nil, errors.New("jCal property name must be a string")
 	}
 	prop := &goical.Prop{Name: strings.ToUpper(name), Params: goical.Params{}}
 
@@ -154,7 +155,7 @@ func decodeJCalScalar(jType string, v any) (string, error) {
 	case "date-time":
 		s, ok := v.(string)
 		if !ok {
-			return "", fmt.Errorf("date-time value must be a string")
+			return "", errors.New("date-time value must be a string")
 		}
 		return icalDateTime(s), nil
 	case "time", "utc-offset":
@@ -167,19 +168,19 @@ func decodeJCalScalar(jType string, v any) (string, error) {
 	case "date":
 		s, ok := v.(string)
 		if !ok {
-			return "", fmt.Errorf("date value must be a string")
+			return "", errors.New("date value must be a string")
 		}
 		return strings.ReplaceAll(s, "-", ""), nil
 	case "period":
 		// [start, end or duration]; the start is a jCal date-time.
 		pair, ok := v.([]any)
 		if !ok || len(pair) != 2 {
-			return "", fmt.Errorf("period value must be a [start, end] array")
+			return "", errors.New("period value must be a [start, end] array")
 		}
 		start, ok1 := pair[0].(string)
 		end, ok2 := pair[1].(string)
 		if !ok1 || !ok2 {
-			return "", fmt.Errorf("period value must be a [start, end] array of strings")
+			return "", errors.New("period value must be a [start, end] array of strings")
 		}
 		if !strings.HasPrefix(strings.TrimLeft(end, "+-"), "P") {
 			end = icalDateTime(end)
@@ -198,7 +199,7 @@ func decodeJCalScalar(jType string, v any) (string, error) {
 	case "boolean":
 		b, ok := v.(bool)
 		if !ok {
-			return "", fmt.Errorf("boolean value must be true or false")
+			return "", errors.New("boolean value must be true or false")
 		}
 		if b {
 			return "TRUE", nil
@@ -209,13 +210,13 @@ func decodeJCalScalar(jType string, v any) (string, error) {
 	case "recur":
 		m, ok := v.(map[string]any)
 		if !ok {
-			return "", fmt.Errorf("recur value must be an object")
+			return "", errors.New("recur value must be an object")
 		}
 		return icalRecur(m), nil
 	case "text":
 		s, ok := v.(string)
 		if !ok {
-			return "", fmt.Errorf("text value must be a string")
+			return "", errors.New("text value must be a string")
 		}
 		return escapeICalText(s), nil
 	default:

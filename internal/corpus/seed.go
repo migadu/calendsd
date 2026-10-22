@@ -3,6 +3,7 @@ package corpus
 import (
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -291,7 +292,7 @@ func seedPrincipals(raw json.RawMessage) ([]acl.Principal, error) {
 // runner reports those records as pending.
 func seedTree(t *Tree, backends *seedBackends) (dav.Collection, error) {
 	if t == nil {
-		return nil, fmt.Errorf("record has no tree fixture")
+		return nil, errors.New("record has no tree fixture")
 	}
 	if t.Type == "roots" {
 		// sabre wraps a node array in a root SimpleCollection named "root".
@@ -382,12 +383,12 @@ func seedNode(t *Tree, backends *seedBackends) (dav.Node, error) {
 			return acl.NewPrincipalCollection(backends.principals, t.Name), nil
 		case `Sabre\CalDAV\CalendarRoot`:
 			if backends.caldav == nil {
-				return nil, fmt.Errorf("CalendarRoot fixture without caldav setup")
+				return nil, errors.New("CalendarRoot fixture without caldav setup")
 			}
 			return caldav.NewCalendarRoot(backends.principals, backends.caldav, t.Name), nil
 		case `Sabre\CardDAV\AddressBookRoot`:
 			if backends.carddav == nil {
-				return nil, fmt.Errorf("AddressBookRoot fixture without carddav setup")
+				return nil, errors.New("AddressBookRoot fixture without carddav setup")
 			}
 			return carddav.NewAddressBookRoot(backends.principals, backends.carddav, t.Name), nil
 		}

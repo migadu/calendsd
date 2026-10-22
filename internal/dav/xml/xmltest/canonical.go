@@ -5,6 +5,7 @@ package xmltest
 import (
 	davxml "calserver/internal/dav/xml"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -82,7 +83,7 @@ func parseTree(r io.Reader) (*xnode, error) {
 			}
 			if len(stack) == 0 {
 				if root != nil {
-					return nil, fmt.Errorf("multiple root elements")
+					return nil, errors.New("multiple root elements")
 				}
 				root = n
 			} else {
@@ -99,7 +100,7 @@ func parseTree(r io.Reader) (*xnode, error) {
 		}
 	}
 	if root == nil {
-		return nil, fmt.Errorf("no root element")
+		return nil, errors.New("no root element")
 	}
 	return root, nil
 }
