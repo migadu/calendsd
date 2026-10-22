@@ -141,6 +141,19 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 		return nil, err
 	}
 	exportAll := start.IsZero() && end.IsZero() && componentType == ""
+	var filter CompFilter
+	var validator *Validator
+	if !exportAll {
+		name := componentType
+		if name == "" {
+			name = "VEVENT"
+		}
+		filter = CompFilter{Name: "VCALENDAR", CompFilters: []CompFilter{{
+			Name:      name,
+			TimeRange: &TimeRange{Start: start, End: end},
+		}}}
+		validator = &Validator{Loc: p.calendarTimeZone(path)}
+	}
 	var out [][]byte
 	for _, obj := range objects {
 		// Serve each object as this view sees it, so a read-only sharee's
@@ -152,20 +165,11 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 				maxExportObjects)
 		}
 		if !exportAll {
-			name := componentType
-			if name == "" {
-				name = "VEVENT"
-			}
-			filter := CompFilter{Name: "VCALENDAR", CompFilters: []CompFilter{{
-				Name:      name,
-				TimeRange: &TimeRange{Start: start, End: end},
-			}}}
 			cal, err := ical.Decode(data)
 			if err != nil {
 				continue
 			}
-			v := &Validator{Loc: p.calendarTimeZone(path)}
-			match, err := v.Validate(cal, filter)
+			match, err := validator.Validate(cal, filter)
 			if err != nil || !match {
 				continue
 			}
