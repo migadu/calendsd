@@ -30,8 +30,7 @@ import (
 
 func handleContacts(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: calctl contacts <import|summary> [options]")
-		os.Exit(1)
+		fatalf("Usage: calctl contacts <import|summary> [options]")
 	}
 	switch sub, rest := args[0], args[1:]; sub {
 	case "import":
@@ -39,8 +38,7 @@ func handleContacts(args []string) {
 	case "summary":
 		handleContactsSummary(rest)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown contacts subcommand: %s (want import or summary)\n", sub)
-		os.Exit(1)
+		fatalf("Unknown contacts subcommand: %s (want import or summary)", sub)
 	}
 }
 
@@ -73,7 +71,7 @@ func handleContactsImport(args []string) {
 	var opts importOptions
 	flags := flag.NewFlagSet("contacts import", flag.ExitOnError)
 	flags.StringVar(&opts.bundleDir, "bundle", "", "Path to the export bundle directory (required)")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Var(&opts.only, "only", "Import just this principal; repeatable (the canary)")
 	flags.Var(&opts.shards, "shard", "Import just this shard, e.g. 07f; repeatable")
 	flags.StringVar(&opts.bookURI, "book-uri", "webmail", "Address book uri every migrated card lands in")
@@ -90,8 +88,7 @@ func handleContactsImport(args []string) {
 	flags.Parse(args)
 
 	if opts.bundleDir == "" {
-		fmt.Fprintln(os.Stderr, "A bundle is required: pass --bundle DIR.")
-		os.Exit(1)
+		fatalf("A bundle is required: pass --bundle DIR.")
 	}
 	if opts.workers < 1 {
 		opts.workers = 1
@@ -99,8 +96,7 @@ func handleContactsImport(args []string) {
 
 	b, err := openBundle(opts.bundleDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		fatalf("%v", err)
 	}
 
 	db := openImportDB(*dsnOverride, opts.workers)
@@ -109,17 +105,21 @@ func handleContactsImport(args []string) {
 
 	run, err := newImportRun(b, importer, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		fatalf("%v", err)
 	}
-	defer run.close()
-
-	if err := run.execute(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+	// Closed explicitly, not deferred: os.Exit below skips deferred calls,
+	// and a report that failed to write must reach the exit status.
+	execErr := run.execute(context.Background())
+	reportErr := run.close()
+	if execErr != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", execErr)
 		run.print()
 		os.Exit(1)
 	}
 	run.print()
+	if reportErr != nil {
+		fmt.Fprintf(os.Stderr, "\n%v\n", reportErr)
+	}
 
 	// Exit status: 1 when something went wrong (a principal's transaction
 	// failed, a shard could not be read); 2 when nothing broke but the run did
@@ -135,7 +135,7 @@ func handleContactsImport(args []string) {
 		}
 	}
 	switch {
-	case run.failed > 0 || len(run.shardErrors) > 0:
+	case run.failed > 0 || len(run.shardErrors) > 0 || reportErr != nil:
 		os.Exit(1)
 	case run.counts[storage.ActionRefused] > 0 || len(missing) > 0:
 		os.Exit(2)
@@ -149,20 +149,17 @@ func handleContactsImport(args []string) {
 func openImportDB(dsnOverride string, workers int) *sql.DB {
 	dsn := dsnFor(dsnOverride)
 	if dsn == "" {
-		fmt.Fprintln(os.Stderr, "A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
-		os.Exit(1)
+		fatalf("A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
 	}
 	maxOpen := min(workers+2, storage.DefaultPool.MaxOpen)
 	db, err := storage.OpenPool(dsn, storage.Pool{MaxOpen: maxOpen, MaxIdle: workers})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to open database: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to connect to database: %v", err)
 	}
 	return db
 }
@@ -197,7 +194,10 @@ type importRun struct {
 	// the exit status or the run looks clean while missing thousands of people.
 	shardErrors map[string]error
 	report      *os.File
-	started     time.Time
+	// reportErr is the first failure writing the report; later lines are
+	// dropped, since a report with a hole in it is not a usable record.
+	reportErr error
+	started   time.Time
 }
 
 func newImportRun(b *bundle, importer *storage.ContactImport, opts importOptions) (*importRun, error) {
@@ -264,10 +264,22 @@ func shardsFor(principals map[string]bool) []string {
 	return out
 }
 
-func (r *importRun) close() {
-	if r.report != nil {
-		r.report.Close()
+// close closes the report and returns the first error writing or closing
+// it, so a full disk does not leave a silently truncated report behind.
+func (r *importRun) close() error {
+	if r.report == nil {
+		return nil
 	}
+	err := r.report.Close()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reportErr != nil {
+		return r.reportErr
+	}
+	if err != nil {
+		return fmt.Errorf("closing report %s: %w", r.opts.reportPath, err)
+	}
+	return nil
 }
 
 // execute walks the shards, one worker per shard. A shard owns whole
@@ -453,12 +465,31 @@ func (r *importRun) record(res storage.ImportResult, failed bool) {
 			r.refusals = append(r.refusals, res)
 		}
 	}
-	if r.report != nil {
+	if r.report != nil && r.reportErr == nil {
 		line, err := json.Marshal(res)
 		if err == nil {
-			r.report.Write(append(line, '\n'))
+			_, err = r.report.Write(append(line, '\n'))
+		}
+		if err != nil {
+			r.reportErr = fmt.Errorf("writing report %s: %w", r.opts.reportPath, err)
 		}
 	}
+}
+
+// importSummary is the --json run summary, a stable shape for cutover
+// scripts.
+type importSummary struct {
+	RunID            string            `json:"runId"`
+	DryRun           bool              `json:"dryRun"`
+	Principals       int               `json:"principals"`
+	Cards            int               `json:"cards"`
+	CardsWritten     int               `json:"cardsWritten"`
+	CardsSkipped     int               `json:"cardsSkipped"`
+	Orphans          int               `json:"orphans"`
+	Errors           int               `json:"errors"`
+	ElapsedSeconds   float64           `json:"elapsedSeconds"`
+	Actions          map[string]int    `json:"actions"`
+	UnreadableShards map[string]string `json:"unreadableShards"`
 }
 
 func (r *importRun) print() {
@@ -466,18 +497,16 @@ func (r *importRun) print() {
 	defer r.mu.Unlock()
 
 	if r.opts.jsonOutput {
-		out := map[string]any{
-			"runId": r.runID, "dryRun": r.opts.dryRun,
-			"principals": r.visited, "cards": r.cards,
-			"cardsWritten": r.written, "cardsSkipped": r.skipped,
-			"orphans": r.orphans, "errors": r.failed,
-			"elapsedSeconds":   time.Since(r.started).Seconds(),
-			"actions":          actionCounts(r.counts),
-			"unreadableShards": shardErrorStrings(r.shardErrors),
+		out := importSummary{
+			RunID: r.runID, DryRun: r.opts.dryRun,
+			Principals: r.visited, Cards: r.cards,
+			CardsWritten: r.written, CardsSkipped: r.skipped,
+			Orphans: r.orphans, Errors: r.failed,
+			ElapsedSeconds:   time.Since(r.started).Seconds(),
+			Actions:          actionCounts(r.counts),
+			UnreadableShards: shardErrorStrings(r.shardErrors),
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(out)
+		printJSON(out)
 		return
 	}
 
@@ -558,7 +587,7 @@ func sortedActions(counts map[storage.ImportAction]int) []string {
 func handleContactsSummary(args []string) {
 	flags := flag.NewFlagSet("contacts summary", flag.ExitOnError)
 	runID := flags.String("run-id", "", "Restrict the totals to one run")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
 	flags.Parse(args)
 
@@ -569,19 +598,15 @@ func handleContactsSummary(args []string) {
 
 	summary, err := importer.Summary(ctx, *runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read the ledger: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to read the ledger: %v", err)
 	}
 	orphans, err := importer.OrphanBooks(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to check for orphaned address books: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to check for orphaned address books: %v", err)
 	}
 
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(map[string]any{"summary": summary, "orphanedAddressBooks": orphans})
+		printJSON(map[string]any{"summary": summary, "orphanedAddressBooks": orphans})
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		if *runID != "" {

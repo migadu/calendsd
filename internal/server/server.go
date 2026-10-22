@@ -29,6 +29,11 @@ import (
 	"calserver/internal/storage"
 )
 
+// DefaultRealm is the auth realm when none is configured. It must never
+// change: users.digesta1 bakes the realm into every stored hash, and Basic
+// verifies against that same hash, so a different realm breaks every login.
+const DefaultRealm = "SabreDAV"
+
 // Config carries server composition options.
 type Config struct {
 	BaseURI string
@@ -112,8 +117,8 @@ type Config struct {
 	RetentionDays int
 	// Push holds WebDAV-Push settings (PUSH-PLAN.md). When Enabled, compose()
 	// registers the push plugin and asserts the VAPID keys / topic secret are
-	// present (fail closed). The worker that delivers notifications is started
-	// separately via NewWithBackground.
+	// present (fail closed). The worker that delivers notifications is
+	// returned by Build and started separately.
 	Push PushConfig
 	// WebURL is the calclient origin emails link to. Empty disables the
 	// share-invite email (docs/share-invite-email.md); so does a recipient
@@ -121,7 +126,7 @@ type Config struct {
 	// Not part of Canonical(): it changes no DAV semantics.
 	WebURL string
 	// IMipQueue holds the durable iMIP job-queue settings (JOB-QUEUE-PLAN.md).
-	// The queue is constructed and started separately (NewWithBackground); its
+	// The queue is constructed by Build and started separately; its
 	// CredentialKey gates the metered per-user durable retry.
 	IMipQueue IMipQueueConfig
 }
@@ -163,19 +168,10 @@ type PushConfig struct {
 // applies them (base-URI slashes, realm default), so equivalent configs
 // always render the same line. No secrets: DSN and SMTP host stay out.
 func (c Config) Canonical() string {
-	base := c.BaseURI
-	if base == "" {
-		base = "/"
-	}
-	if !strings.HasPrefix(base, "/") {
-		base = "/" + base
-	}
-	if !strings.HasSuffix(base, "/") {
-		base += "/"
-	}
+	base := normalizeBase(c.BaseURI)
 	realm := c.Realm
 	if realm == "" {
-		realm = "SabreDAV"
+		realm = DefaultRealm
 	}
 	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t imip-durable=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
 		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", len(c.IMipQueue.CredentialKey) > 0, c.AutoProvision, c.PerUserProps,
@@ -183,19 +179,32 @@ func (c Config) Canonical() string {
 		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
 
-// pushConfig projects the server config onto the push package's config,
-// filling in the mount prefix the plugin needs for absolute Location URLs.
-func (c Config) pushConfig() push.Config {
-	base := c.BaseURI
-	if base == "" {
-		base = "/"
+// Validate reports a configuration the server cannot run with. [push]
+// enabled without its keys must fail closed at startup, as a config error
+// rather than a crash.
+func (c Config) Validate() error {
+	if c.Push.Enabled && !c.pushConfig().Valid() {
+		return fmt.Errorf("[push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
 	}
+	return nil
+}
+
+// normalizeBase gives a base URI the leading and trailing slash the DAV
+// server mounts it with ("" is "/"), matching dav.NewServer.
+func normalizeBase(base string) string {
 	if !strings.HasPrefix(base, "/") {
 		base = "/" + base
 	}
 	if !strings.HasSuffix(base, "/") {
 		base += "/"
 	}
+	return base
+}
+
+// pushConfig projects the server config onto the push package's config,
+// filling in the mount prefix the plugin needs for absolute Location URLs.
+func (c Config) pushConfig() push.Config {
+	base := normalizeBase(c.BaseURI)
 	return push.Config{
 		VAPIDSubject:    c.Push.VAPIDSubject,
 		VAPIDPublicKey:  c.Push.VAPIDPublicKey,
@@ -205,24 +214,10 @@ func (c Config) pushConfig() push.Config {
 	}
 }
 
-// New builds the storage-backed server, wrapped with the /.well-known/caldav
-// redirect real clients use for discovery (RFC 6764).
+// New builds the storage-backed server with no background services, for
+// in-process use (tests).
 func New(db *sql.DB, cfg Config) http.Handler {
-	h, _, _ := NewWithBackground(db, cfg, "")
-	return h
-}
-
-// NewWithBackground is New plus any long-running background services the config
-// enables. When [push] is on and dsn is non-empty, worker is non-nil and the
-// caller MUST run worker.Run(ctx) to deliver notifications. When iMIP is
-// configured and dsn is non-empty, queue is non-nil and the caller MUST run
-// queue.Start(ctx) to process durable scheduling sends (per-user retries and
-// relay-native sends); without it those jobs never run and their objects stay
-// pending. dsn is the Postgres DSN both background services open. A dsn of ""
-// (the in-process New/tests path) leaves both nil — external iMIP sends are then synchronous.
-func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.Worker, *jobs.Queue) {
-	b := Build(db, cfg, dsn)
-	return b.Handler, b.Worker, b.Queue
+	return Build(db, cfg, "").Handler
 }
 
 // Built is everything Build assembles: the DAV handler to serve, the
@@ -232,8 +227,15 @@ func NewWithBackground(db *sql.DB, cfg Config, dsn string) (http.Handler, *push.
 // provisioning are per instance, and the soft-delete gate.
 type Built struct {
 	Handler http.Handler
-	Worker  *push.Worker
-	Queue   *jobs.Queue
+	// Worker is non-nil when [push] is on and a dsn was given; the caller
+	// MUST run Worker.Run(ctx) to deliver notifications.
+	Worker *push.Worker
+	// Queue is non-nil when iMIP is configured and a dsn was given; the
+	// caller MUST run Queue.Start(ctx) to process durable scheduling sends
+	// (per-user retries and relay-native sends), or those jobs never run and
+	// their objects stay pending. Without a dsn, external iMIP sends are
+	// synchronous.
+	Queue *jobs.Queue
 	// Auth is the backend DAV authenticates with: the rcptd backend when
 	// [server.rcptd] is configured, else the users-table Basic backend.
 	Auth auth.Backend
@@ -255,9 +257,12 @@ func (b *Built) ContactsAPI(db *sql.DB) http.Handler {
 	}), b.accessLog)
 }
 
-// Build is NewWithBackground returning everything it assembled; see Built.
+// Build composes the storage-backed server, wrapped with the
+// /.well-known/caldav redirect real clients use for discovery (RFC 6764),
+// plus the background services the config enables; see Built. dsn is the
+// Postgres DSN those services open; "" leaves them nil.
 func Build(db *sql.DB, cfg Config, dsn string) *Built {
-	srv, backend, _ := newDAVServer(db, cfg)
+	srv, backend := compose(db, cfg, nil)
 	users := &storage.Users{DB: db}
 	var worker *push.Worker
 	if cfg.Push.Enabled && dsn != "" {
@@ -284,7 +289,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 		Queue:   queue,
 		Auth:    backend,
 		Tombstoned: func(ctx context.Context, principal string) bool {
-			// Fails open on a DB error, like the DAV gate (see newDAVServer).
+			// Fails open on a DB error, like the DAV gate (see compose).
 			ok, _ := users.IsDeletedContext(ctx, principal)
 			return ok
 		},
@@ -359,21 +364,16 @@ func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 // The admin privilege simulator uses it to answer "what would user X see on
 // path Y" through the identical composition (ADMIN-PLAN.md §3.5).
 func NewLoggedIn(db *sql.DB, cfg Config, principal string) *dav.Server {
-	srv, _, _ := compose(db, cfg, auth.NewLoggedInPlugin(principal))
+	srv, _ := compose(db, cfg, auth.NewLoggedInPlugin(principal))
 	return srv
-}
-
-func newDAVServer(db *sql.DB, cfg Config) (*dav.Server, auth.Backend, func(string) bool) {
-	return compose(db, cfg, nil)
 }
 
 // compose builds the full server; authOverride nil means real Digest/Basic
 // authentication against the users table. It also returns the credential
-// backend it wired (nil under authOverride) and the soft-delete gate, for the
-// contacts API to share.
-func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, auth.Backend, func(string) bool) {
+// backend it wired (nil under authOverride), for the contacts API to share.
+func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, auth.Backend) {
 	if cfg.Realm == "" {
-		cfg.Realm = "SabreDAV"
+		cfg.Realm = DefaultRealm
 	}
 
 	principals := &storage.Principals{DB: db}
@@ -465,8 +465,10 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	// first and a non-push body is passed on intact). Enabled-but-unconfigured
 	// fails closed at startup, mirroring the ACL assertion below.
 	if cfg.Push.Enabled {
-		if !cfg.pushConfig().Valid() {
-			panic("server: [push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+		if err := cfg.Validate(); err != nil {
+			// Config resolution (config.SharedServerFlags) already reports
+			// this to the operator; reaching here is a caller that skipped it.
+			panic("server: " + err.Error())
 		}
 		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), &push.Store{DB: db}))
 	}
@@ -560,5 +562,5 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	if _, err := caldav.RequirePrivilegeChecker(srv); err != nil {
 		panic(fmt.Sprintf("server: no ACL privilege checker registered: %v", err))
 	}
-	return srv, backend, tombstoned
+	return srv, backend
 }

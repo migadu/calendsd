@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// Every stored digesta1 bakes in the realm, so changing the default would
+// lock every user out.
+func TestDefaultRealmIsPinned(t *testing.T) {
+	if DefaultRealm != "SabreDAV" {
+		t.Fatalf("DefaultRealm = %q; stored hashes were minted under SabreDAV", DefaultRealm)
+	}
+}
+
 // Canonical is compared as a string across two processes (ADMIN-PLAN.md
 // §2); equivalent configurations must render identical lines.
 func TestCanonicalNormalizes(t *testing.T) {

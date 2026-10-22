@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"calserver/internal/acl"
 	"calserver/internal/auth"
 	"calserver/internal/storage"
 )
@@ -46,11 +47,36 @@ func (a *App) dashboardData(r *http.Request) (any, error) {
 
 // --- Principals (§3.2) ---
 
+// PrincipalRow is one principal in a listing: its principals columns plus
+// whether a users row exists (groups and resources have none and cannot log
+// in). The panel and `calctl principal list` share it.
 type PrincipalRow struct {
 	URI         string `json:"uri"`
 	DisplayName string `json:"displayName"`
 	Email       string `json:"email"`
 	HasUser     bool   `json:"hasUser"`
+	// Deletion is the purge date (YYYY-MM-DD) when this principal is
+	// soft-deleted, empty otherwise. Only calctl fills it in.
+	Deletion string `json:"deletion,omitempty"`
+}
+
+// PrincipalRows builds the listing rows for principals, marking those that
+// diags reports as having no users row.
+func PrincipalRows(principals []acl.Principal, diags *storage.AdminAuthDiagnostics) []PrincipalRow {
+	noUser := map[string]bool{}
+	for _, p := range diags.PrincipalsWithoutUser {
+		noUser[p] = true
+	}
+	rows := make([]PrincipalRow, 0, len(principals))
+	for _, p := range principals {
+		rows = append(rows, PrincipalRow{
+			URI:         p.URI,
+			DisplayName: propString(p.Props, "DAV:", "displayname"),
+			Email:       propString(p.Props, "http://sabredav.org/ns", "email-address"),
+			HasUser:     !noUser[p.URI],
+		})
+	}
+	return rows
 }
 
 type PrincipalsData struct {
@@ -69,20 +95,10 @@ func (a *App) principalsData(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	noUser := map[string]bool{}
-	for _, p := range diags.PrincipalsWithoutUser {
-		noUser[p] = true
-	}
-	out := &PrincipalsData{UsersWithoutPrincipal: diags.UsersWithoutPrincipal}
-	for _, p := range list {
-		out.Principals = append(out.Principals, PrincipalRow{
-			URI:         p.URI,
-			DisplayName: propString(p.Props, "DAV:", "displayname"),
-			Email:       propString(p.Props, "http://sabredav.org/ns", "email-address"),
-			HasUser:     !noUser[p.URI],
-		})
-	}
-	return out, nil
+	return &PrincipalsData{
+		Principals:            PrincipalRows(list, diags),
+		UsersWithoutPrincipal: diags.UsersWithoutPrincipal,
+	}, nil
 }
 
 // CollectionRef links an inspector page to one collection of a principal.
@@ -145,7 +161,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if d.User != nil {
-		d.DigestWellFormed = wellFormedDigest(d.User.DigestA1)
+		d.DigestWellFormed = WellFormedDigest(d.User.DigestA1)
 		if d.DigestWellFormed {
 			// A well-formed digesta1 is a reusable HTTP-Digest credential;
 			// don't ship it to the browser/JSON. A malformed value is no
@@ -230,7 +246,9 @@ func splitProxy(group string) (owner, kind string) {
 	return group, ""
 }
 
-func wellFormedDigest(digest string) bool {
+// WellFormedDigest reports whether digest looks like a stored digesta1: 32
+// lowercase hex characters. Anything else can never match a login.
+func WellFormedDigest(digest string) bool {
 	if len(digest) != 32 {
 		return false
 	}
@@ -272,23 +290,30 @@ func (a *App) checkCredentials(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	writeJSON(w, CheckCredentials(user, username, password, a.Config.Realm))
+}
+
+// CheckCredentials checks password against user's stored digesta1 (user nil
+// means no users row) by recomputing the hash under realm. The panel and
+// `calctl principal auth` share it.
+func CheckCredentials(user *storage.AdminUserRow, username, password, realm string) CheckCredentialsResult {
 	res := CheckCredentialsResult{}
 	switch {
 	case user == nil:
 		res.Note = "no users row — this account cannot log in"
-	case !wellFormedDigest(user.DigestA1):
+	case !WellFormedDigest(user.DigestA1):
 		res.Found = true
 		res.Note = "digesta1 is not a 32-char md5 hex — auth always fails"
 	default:
 		res.Found, res.DigestWellFormed = true, true
 		res.Match = subtle.ConstantTimeCompare(
-			[]byte(auth.DigestA1(username, a.Config.Realm, password)), []byte(user.DigestA1)) == 1
+			[]byte(auth.DigestA1(username, realm, password)), []byte(user.DigestA1)) == 1
 		if res.Match {
-			res.Note = "credentials valid under realm " + a.Config.Realm
+			res.Note = "credentials valid under realm " + realm
 		} else {
-			res.Note = "no match under realm " + a.Config.Realm +
+			res.Note = "no match under realm " + realm +
 				" — wrong password, or the hash was minted under a different realm"
 		}
 	}
-	writeJSON(w, res)
+	return res
 }

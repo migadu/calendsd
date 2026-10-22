@@ -48,7 +48,7 @@ func WrapRequestLog(next http.Handler, dir string) http.Handler {
 		if r.Body != nil {
 			r.Body = &capturingBody{rc: r.Body, buf: &reqBody, max: maxLoggedBody}
 		}
-		rec := &responseRecorder{ResponseWriter: w, status: http.StatusOK, max: maxLoggedBody}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, body: &bytes.Buffer{}, max: maxLoggedBody}
 		start := time.Now()
 		// Deferred so a panicking handler is still logged before it unwinds.
 		defer func() { l.write(r, &reqBody, rec, time.Since(start)) }()
@@ -56,7 +56,7 @@ func WrapRequestLog(next http.Handler, dir string) http.Handler {
 	})
 }
 
-func (l *requestLogger) write(r *http.Request, reqBody *bytes.Buffer, rec *responseRecorder, dur time.Duration) {
+func (l *requestLogger) write(r *http.Request, reqBody *bytes.Buffer, rec *statusRecorder, dur time.Duration) {
 	n := l.seq.Add(1)
 	name := fmt.Sprintf("%s-%06d-%s.log",
 		time.Now().UTC().Format("20060102-150405.000"), n, sanitizeMethod(r.Method))
@@ -151,44 +151,3 @@ func (c *capturingBody) Read(p []byte) (int, error) {
 }
 
 func (c *capturingBody) Close() error { return c.rc.Close() }
-
-// responseRecorder captures the status and a bounded copy of the response body
-// while passing writes straight through to the real ResponseWriter.
-type responseRecorder struct {
-	http.ResponseWriter
-	status  int
-	wrote   bool
-	body    bytes.Buffer
-	written int // total response bytes, including any past the body cap
-	max     int
-}
-
-func (r *responseRecorder) WriteHeader(code int) {
-	if !r.wrote {
-		r.status = code
-		r.wrote = true
-	}
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *responseRecorder) Write(p []byte) (int, error) {
-	r.wrote = true // an implicit 200 if WriteHeader was never called
-	if room := r.max - r.body.Len(); room > 0 {
-		capd := len(p)
-		if capd > room {
-			capd = room
-		}
-		r.body.Write(p[:capd])
-	}
-	n, err := r.ResponseWriter.Write(p)
-	r.written += n
-	return n, err
-}
-
-// Flush preserves streaming for clients that rely on it (the real writer is a
-// Flusher); a no-op otherwise.
-func (r *responseRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}

@@ -12,17 +12,17 @@ import (
 )
 
 // DefaultConfigPaths are the locations searched, in order, for a config file
-// when -config is not given explicitly. Kept in sync with calctl so every
-// binary that reads calserver's config discovers it the same way.
+// when -config is not given explicitly. Every binary that reads calserver's
+// config (calserver, calctl) discovers it through FindDefaultConfig.
 var DefaultConfigPaths = []string{
 	"/etc/calserver/config.toml",
 	"/usr/local/etc/calserver/config.toml",
 	"config.toml",
 }
 
-// findDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
+// FindDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
 // when none is present (so an unconfigured in-memory server still starts).
-func findDefaultConfig() string {
+func FindDefaultConfig() string {
 	for _, p := range DefaultConfigPaths {
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -95,7 +95,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calserver/config.toml, /usr/local/etc/calserver/config.toml, ./config.toml is used")
 	dsn := flag.String("db", "", dbUsage)
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
-	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
+	realm := flag.String("realm", server.DefaultRealm, "auth realm; must match the realm baked into users.digesta1")
 	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	imipSendAsOrganizer := flag.Bool("imip-send-as-organizer", false, "put the scheduling sender's own address (organizer for invitations, attendee for replies) in the From header of iMip emails (imip-sender stays the envelope sender); only safe when the relay can DKIM-sign for those local domains")
@@ -123,7 +123,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 		// config without repeating -config on every invocation.
 		path := *configPath
 		if path == "" {
-			path = findDefaultConfig()
+			path = FindDefaultConfig()
 		}
 		if path != "" {
 			c, err := Load(path)
@@ -224,6 +224,9 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 				Retention:     imipRetention,
 				Workers:       m.File.Scheduling.IMip.Queue.Workers,
 			},
+		}
+		if err := m.Server.Validate(); err != nil {
+			return nil, err
 		}
 		return m, nil
 	}

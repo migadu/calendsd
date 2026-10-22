@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -49,14 +50,16 @@ func LoadHTPasswd(path string) (map[string]string, error) {
 }
 
 // dummyHash is compared against when the username is unknown, so a request
-// for a missing user costs the same bcrypt work as a wrong password.
-var dummyHash = func() string {
+// for a missing user costs the same bcrypt work as a wrong password. It is
+// made on first use, so calctl commands other than the panel do not pay a
+// bcrypt hash at startup just for importing this package.
+var dummyHash = sync.OnceValue(func() string {
 	h, err := bcrypt.GenerateFromPassword([]byte("calserver-admin-dummy"), bcrypt.DefaultCost)
 	if err != nil {
 		panic(err)
 	}
 	return string(h)
-}()
+})
 
 // actorContextKey carries the authenticated admin username so write
 // endpoints can attribute their audit log lines.
@@ -79,7 +82,7 @@ func BasicAuth(creds map[string]string, next http.Handler) http.Handler {
 		user, pass, ok := r.BasicAuth()
 		hash, known := creds[user]
 		if !known {
-			hash = dummyHash
+			hash = dummyHash()
 		}
 		err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass))
 		if !ok || !known || err != nil {

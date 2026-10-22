@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // DecodeIMipCredentialKey decodes the base64 iMIP durable-queue credential key
@@ -211,7 +212,12 @@ func Load(path string) (*Config, error) {
 	badType := func(key, want string, got any) {
 		typeErrs = append(typeErrs, fmt.Sprintf("config key %q must be %s, not %s", key, want, describeValue(got)))
 	}
+	// Every accessor records the key it reads, so the keys it reads are the
+	// recognised ones: anything else in the file is a typo worth reporting
+	// rather than silently ignoring, with no separate list to keep in step.
+	consumed := map[string]bool{}
 	str := func(key string) string {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return ""
@@ -223,6 +229,7 @@ func Load(path string) (*Config, error) {
 		return s
 	}
 	boolean := func(key string) bool {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return false
@@ -234,6 +241,7 @@ func Load(path string) (*Config, error) {
 		return b
 	}
 	integer := func(key string) int {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return 0
@@ -245,6 +253,7 @@ func Load(path string) (*Config, error) {
 		return i
 	}
 	list := func(key string) []string {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return nil
@@ -301,7 +310,7 @@ func Load(path string) (*Config, error) {
 	cfg.Push.TopicSecret = str("push.topic_secret")
 
 	for key := range flat {
-		if !known[key] {
+		if !consumed[key] {
 			return nil, fmt.Errorf("%s: unknown config key %q", path, key)
 		}
 	}
@@ -326,45 +335,6 @@ func describeValue(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
-}
-
-// known is the set of recognised "section.key" paths; anything else is a typo
-// worth reporting rather than silently ignoring.
-var known = map[string]bool{
-	"server.addr": true, "server.metrics_addr": true, "server.api_addr": true,
-	"server.base_uri": true, "server.realm": true,
-	"server.tls.cert": true, "server.tls.key": true,
-	"server.rcptd.url": true, "server.rcptd.token": true,
-	"server.temp_file_filter": true, "server.temp_file_dir": true,
-	"server.web_url":             true,
-	"database.dsn":               true,
-	"database.max_open_conns":    true,
-	"database.max_idle_conns":    true,
-	"database.conn_max_lifetime": true,
-	"logging.level":              true,
-	"logging.request_dir":        true,
-	"logging.access_log":         true,
-	"scheduling.imip.smtp":       true, "scheduling.imip.sender": true,
-	"scheduling.imip.send_as_organizer":       true,
-	"scheduling.imip.submission":              true,
-	"scheduling.imip.submission_implicit_tls": true,
-	"scheduling.imip.credential_key":          true,
-	"scheduling.imip.queue.reclaim_after":     true,
-	"scheduling.imip.queue.credential_ttl":    true,
-	"scheduling.imip.queue.retention":         true,
-	"scheduling.imip.queue.workers":           true,
-	"calendarserver.browser":                  true, "calendarserver.auto_provision": true,
-	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
-	"calendarserver.principals_readable":    true,
-	"calendarserver.auto_schedule_prefixes": true,
-	"admin.auth_file":                       true,
-	"admin.addr":                            true,
-	"retention.deleted_days":                true,
-	"push.enabled":                          true,
-	"push.vapid_subject":                    true,
-	"push.vapid_public_key":                 true,
-	"push.vapid_private_key":                true,
-	"push.topic_secret":                     true,
 }
 
 // parse reads the TOML subset into a flat map keyed by "section.key".
@@ -402,11 +372,15 @@ func parse(text string) (map[string]any, error) {
 }
 
 // stripComment removes a trailing "# comment", honouring quoted strings so a
-// '#' inside a value is left alone.
+// '#' inside a value is left alone, including after an escaped quote.
 func stripComment(line string) string {
 	inQuote := false
 	for i := 0; i < len(line); i++ {
 		switch line[i] {
+		case '\\':
+			if inQuote {
+				i++ // skip the escaped character
+			}
 		case '"':
 			inQuote = !inQuote
 		case '#':
@@ -436,11 +410,72 @@ func parseValue(s string) (any, error) {
 	}
 }
 
+// unquote reads s as exactly one TOML basic string.
 func unquote(s string) (string, error) {
-	if len(s) < 2 || !strings.HasPrefix(s, `"`) || !strings.HasSuffix(s, `"`) {
-		return "", fmt.Errorf("unterminated string %q", s)
+	v, rest, err := scanString(s)
+	if err != nil {
+		return "", err
 	}
-	return s[1 : len(s)-1], nil
+	if rest != "" {
+		return "", fmt.Errorf("unexpected %q after string", rest)
+	}
+	return v, nil
+}
+
+// scanString reads the TOML basic string ("...") at the start of s, decoding
+// its escapes, and returns the rest of s after the closing quote. A secret
+// or path containing a quote or backslash must be written escaped, so the
+// escapes have to be decoded rather than kept verbatim.
+func scanString(s string) (value, rest string, err error) {
+	if !strings.HasPrefix(s, `"`) {
+		return "", "", fmt.Errorf("expected a quoted string, got %q", s)
+	}
+	var b strings.Builder
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"':
+			return b.String(), strings.TrimSpace(s[i+1:]), nil
+		case c != '\\':
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		if i == len(s) {
+			break
+		}
+		switch e := s[i]; e {
+		case '"', '\\':
+			b.WriteByte(e)
+		case 'b':
+			b.WriteByte('\b')
+		case 't':
+			b.WriteByte('\t')
+		case 'n':
+			b.WriteByte('\n')
+		case 'f':
+			b.WriteByte('\f')
+		case 'r':
+			b.WriteByte('\r')
+		case 'u', 'U':
+			n := 4
+			if e == 'U' {
+				n = 8
+			}
+			if i+n >= len(s) {
+				return "", "", fmt.Errorf("short \\%c escape in %q", e, s)
+			}
+			code, err := strconv.ParseUint(s[i+1:i+1+n], 16, 32)
+			if err != nil || !utf8.ValidRune(rune(code)) {
+				return "", "", fmt.Errorf("invalid \\%c escape %q in %q", e, s[i+1:i+1+n], s)
+			}
+			b.WriteRune(rune(code))
+			i += n
+		default:
+			return "", "", fmt.Errorf("invalid escape \\%c in %q", e, s)
+		}
+	}
+	return "", "", fmt.Errorf("unterminated string %q", s)
 }
 
 // parseArray reads a single-line array of quoted strings, e.g.
@@ -449,21 +484,24 @@ func parseArray(s string) ([]string, error) {
 	if !strings.HasSuffix(s, "]") {
 		return nil, fmt.Errorf("unterminated array %q (arrays must be single-line)", s)
 	}
-	inner := strings.TrimSpace(s[1 : len(s)-1])
-	if inner == "" {
-		return []string{}, nil
-	}
-	var out []string
-	for _, part := range strings.Split(inner, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		v, err := unquote(part)
+	// Scan element by element rather than splitting on commas: a quoted
+	// element may itself contain a comma.
+	rest := strings.TrimSpace(s[1 : len(s)-1])
+	out := []string{}
+	for rest != "" {
+		v, after, err := scanString(rest)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, v)
+		switch {
+		case after == "":
+			rest = ""
+		case strings.HasPrefix(after, ","):
+			rest = strings.TrimSpace(after[1:])
+		default:
+			return nil, fmt.Errorf("expected , between array elements, got %q", after)
+		}
 	}
 	return out, nil
 }

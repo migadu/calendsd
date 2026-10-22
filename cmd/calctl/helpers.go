@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
@@ -15,19 +17,47 @@ import (
 func openAdminQueries(dsnOverride string) *storage.AdminQueries {
 	dsn := dsnFor(dsnOverride)
 	if dsn == "" {
-		fmt.Fprintln(os.Stderr, "A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
-		os.Exit(1)
+		fatalf("A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
 	}
 	db, err := storage.Open(dsn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to open database: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to connect to database: %v", err)
 	}
 	return &storage.AdminQueries{DB: db}
+}
+
+// fatalf prints an error line to stderr and exits 1, the failure path of
+// every calctl command.
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
+// printJSON writes v to stdout as indented JSON, the --json output of every
+// command.
+func printJSON(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fatalf("Failed to write JSON: %v", err)
+	}
+}
+
+// dbFlag registers the --db override every database command takes; resolve
+// it with dsnFor.
+func dbFlag(flags *flag.FlagSet) *string {
+	return flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+}
+
+// dash stands in for an empty table cell.
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

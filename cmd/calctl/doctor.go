@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -15,21 +14,18 @@ import (
 func handleDoctor(args []string) {
 	flags := flag.NewFlagSet("doctor", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	scanCap := flags.Int("scan-cap", 0, "Max objects/cards to deep-scan per table (0 = default 5000)")
 	flags.Parse(args)
 
 	q := openAdminQueries(*dsnOverride)
 	report, err := q.Doctor(*scanCap)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Doctor run failed: %v\n", err)
-		os.Exit(1)
+		fatalf("Doctor run failed: %v", err)
 	}
 
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(report)
+		printJSON(report)
 	} else {
 		fmt.Println("Doctor Report")
 		fmt.Println(strings.Repeat("=", 70))
