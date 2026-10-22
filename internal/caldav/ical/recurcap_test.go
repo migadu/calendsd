@@ -73,3 +73,38 @@ func TestRecurrenceCapPreventsDoS(t *testing.T) {
 		t.Fatal("recurrence iteration did not terminate within 5s — the DoS cap is not working")
 	}
 }
+
+// Expand used to count every occurrence it stepped over against
+// maxRecurrences, so a daily event since 2000 had no instances in 2025.
+func TestExpandBeyondOldCap(t *testing.T) {
+	cal, err := Decode(event(
+		"DTSTART:20000101T090000Z", "DTEND:20000101T100000Z", "RRULE:FREQ=DAILY",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Expand(cal, utc("20250101T000000Z"), utc("20250108T000000Z"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(out.Children); n != 7 {
+		t.Errorf("expanded %d instances, want 7", n)
+	}
+}
+
+// A finite rule with more than maxRecurrences instances used to end at the
+// cap's instance, so time-range prefilters dropped everything after it.
+func TestDenormalizePastCap(t *testing.T) {
+	t.Run("until", func(t *testing.T) {
+		checkBounds(t, event(
+			"DTSTART:20000101T090000Z", "DTEND:20000101T100000Z",
+			"RRULE:FREQ=DAILY;UNTIL=20300101T090000Z",
+		), ts(t, 2000, 1, 1, 9, 0), ts(t, 2030, 1, 1, 10, 0))
+	})
+	t.Run("count", func(t *testing.T) {
+		checkBounds(t, event(
+			"DTSTART:20000101T090000Z", "DTEND:20000101T100000Z",
+			"RRULE:FREQ=DAILY;COUNT=5000",
+		), ts(t, 2000, 1, 1, 9, 0), maxDate.Unix())
+	})
+}

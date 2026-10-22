@@ -145,7 +145,11 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	// emitted afterward when their new DTSTART lands in [start, end).
 	consumed := make(map[int64]bool, len(overrides))
 	next := set.Iterator()
-	for i := 0; i < maxRecurrences; i++ {
+	// maxRecurrences caps the instances returned, not the ones stepped over
+	// to reach the window, which would leave a long-running series (a daily
+	// event from 2010) with no instances at all; the walk itself is bounded
+	// by end, with maxTimeRangeScan as the backstop (see EventInTimeRange).
+	for i := 0; i < maxTimeRangeScan && len(out) < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
 			break

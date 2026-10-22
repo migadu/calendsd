@@ -181,9 +181,14 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 	var occs []occurrence
 	consumed := make(map[int64]bool, len(ovByRID))
 	next := set.Iterator()
-	for i := 0; i < maxRecurrences; i++ {
+	capped := false
+	for i := 0; ; i++ {
 		start, ok := next()
 		if !ok {
+			break
+		}
+		if i == maxRecurrences {
+			capped = true
 			break
 		}
 		if ov, has := ovByRID[start.Unix()]; has {
@@ -217,6 +222,20 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 		last = o.end
 		if !last.Before(maxDate) {
 			break
+		}
+	}
+	// The series goes on past the cap, so the walk above stopped short of
+	// its real end: bound it by UNTIL instead, or by maxDate for a COUNT,
+	// as for an infinite rule.
+	if capped {
+		bound := maxDate
+		if !roption.Until.IsZero() {
+			if u := roption.Until.Add(dur); u.Before(maxDate) {
+				bound = u
+			}
+		}
+		if bound.After(last) {
+			last = bound
 		}
 	}
 	return dtstart, last, nil
