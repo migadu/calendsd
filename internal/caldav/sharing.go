@@ -384,12 +384,13 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 		// /calendars/user1 yields /calendars/<returned-path>. The request path
 		// already carries the BaseURI, so a request-relative return keeps the
 		// prefix — an absolute (leading-slash) return would drop it.
-		resolved := resolveHref(r.URL.Path, url)
+		body, err := xml.Marshal(sharedAsXML{Href: resolveHref(r.URL.Path, url)})
+		if err != nil {
+			return err
+		}
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
-		_, err = w.Write([]byte(xml.Header +
-			`<cs:shared-as xmlns:d="DAV:" xmlns:cs="` + davxml.NSCalendarServer + `">` +
-			`<d:href>` + xmlEscapeText(resolved) + `</d:href></cs:shared-as>`))
+		_, err = w.Write(append([]byte(xml.Header), body...))
 		return err
 	}
 	w.WriteHeader(http.StatusOK)
@@ -421,6 +422,50 @@ func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path str
 		w.WriteHeader(http.StatusOK)
 	}
 	return true, nil
+}
+
+// sharedAsXML is the {cs}shared-as answer to an accepted invite.
+type sharedAsXML struct {
+	XMLName xml.Name `xml:"http://calendarserver.org/ns/ shared-as"`
+	Href    string   `xml:"DAV: href"`
+}
+
+// hrefXML is an element whose only child is a {DAV:}href.
+type hrefXML struct {
+	Href string `xml:"DAV: href"`
+}
+
+// shareAccessXML is a {cs}access element: read-write or read.
+type shareAccessXML struct {
+	ReadWrite *struct{} `xml:"http://calendarserver.org/ns/ read-write"`
+	Read      *struct{} `xml:"http://calendarserver.org/ns/ read"`
+}
+
+func accessXML(access int) shareAccessXML {
+	if access == AccessReadWrite {
+		return shareAccessXML{ReadWrite: &struct{}{}}
+	}
+	return shareAccessXML{Read: &struct{}{}}
+}
+
+// inviteStatusXML holds the one {cs}invite-* element naming an invite status.
+type inviteStatusXML struct {
+	Accepted   *struct{} `xml:"http://calendarserver.org/ns/ invite-accepted"`
+	Declined   *struct{} `xml:"http://calendarserver.org/ns/ invite-declined"`
+	Invalid    *struct{} `xml:"http://calendarserver.org/ns/ invite-invalid"`
+	NoResponse *struct{} `xml:"http://calendarserver.org/ns/ invite-noresponse"`
+}
+
+func statusXML(status int) inviteStatusXML {
+	switch status {
+	case InviteAccepted:
+		return inviteStatusXML{Accepted: &struct{}{}}
+	case InviteDeclined:
+		return inviteStatusXML{Declined: &struct{}{}}
+	case InviteInvalid:
+		return inviteStatusXML{Invalid: &struct{}{}}
+	}
+	return inviteStatusXML{NoResponse: &struct{}{}}
 }
 
 type shareXML struct {

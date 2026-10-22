@@ -1,6 +1,8 @@
 package caldav_test
 
 import (
+	"encoding/xml"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -109,7 +111,7 @@ func TestSharingNotificationRoundTrip(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(item, "invite-notification") {
 		t.Fatalf("notification GET = %d:\n%s", w.Code, item)
 	}
-	for _, want := range []string{"<cs:read-write/>", "Join my calendar", "/calendars/user1/cal1", "principals/user1"} {
+	for _, want := range []string{`<read-write xmlns="http://calendarserver.org/ns/">`, "Join my calendar", "/calendars/user1/cal1", "principals/user1"} {
 		if !strings.Contains(item, want) {
 			t.Errorf("notification body missing %q:\n%s", want, item)
 		}
@@ -262,15 +264,40 @@ func TestInvitePropertyListsSharees(t *testing.T) {
 		t.Fatalf("invite PROPFIND = %d:\n%s", w.Code, body)
 	}
 	for _, want := range []string{
-		"<cs:invite>", "mailto:user2@example.org", "User Two", "<cs:read-write/>",
-		"mailto:guest@example.org", "<cs:read/>", "<cs:invite-noresponse/>",
+		"<cs:invite>", "mailto:user2@example.org", "User Two",
+		`<read-write xmlns="http://calendarserver.org/ns/">`,
+		"mailto:guest@example.org", `<read xmlns="http://calendarserver.org/ns/">`,
+		`<invite-noresponse xmlns="http://calendarserver.org/ns/">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("invite property missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Count(body, "<cs:user>") != 2 {
-		t.Errorf("want 2 <cs:user> entries, got:\n%s", body)
+	if strings.Count(body, `<user xmlns="http://calendarserver.org/ns/">`) != 2 {
+		t.Errorf("want 2 {cs}user entries, got:\n%s", body)
+	}
+}
+
+// TestInvitePropertyIsWellFormed: a stored sharee name with characters XML
+// cannot carry still yields a parseable multistatus.
+func TestInvitePropertyIsWellFormed(t *testing.T) {
+	backend, servers := sharedSharing()
+	backend.Shares[caldav.CalendarID{Calendar: "1"}] = []caldav.Sharee{{
+		Href: "mailto:x@example.org", CommonName: "A & <B>\x01", Access: caldav.AccessRead,
+	}}
+	w := req(t, servers["principals/user1"], "PROPFIND", "/calendars/user1/cal1",
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:invite/></d:prop></d:propfind>`,
+		"Depth", "0")
+	if w.Code != 207 {
+		t.Fatalf("invite PROPFIND = %d:\n%s", w.Code, w.Body.String())
+	}
+	dec := xml.NewDecoder(strings.NewReader(w.Body.String()))
+	for {
+		if _, err := dec.Token(); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("multistatus is not well-formed: %v\n%s", err, w.Body.String())
+		}
 	}
 }
 
@@ -294,7 +321,7 @@ func TestInviteReplySharedAsBaseURI(t *testing.T) {
 	body := w.Body.String()
 	// The mock returns "calendars/blabla/calendar", resolved against the
 	// request path /dav/calendars/user2/ — so the href must start with /dav/.
-	if !strings.Contains(body, "<d:href>/dav/calendars/user2/calendars/blabla/calendar</d:href>") {
+	if !strings.Contains(body, `<href xmlns="DAV:">/dav/calendars/user2/calendars/blabla/calendar</href>`) {
 		t.Errorf("shared-as href did not carry the BaseURI:\n%s", body)
 	}
 }

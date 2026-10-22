@@ -118,9 +118,7 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		idProps = appendPropLine(idProps, org)
 	}
 
-	var b strings.Builder
-	b.WriteString(xml.Header)
-	b.WriteString(`<cal:schedule-response xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">` + "\n")
+	var resp scheduleResponseXML
 	// The per-recipient aggregation below skips calendars the requester
 	// holds no read-free-busy on, so it needs the same checker.
 	checker, err := RequirePrivilegeChecker(p.server)
@@ -148,20 +146,31 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 				fbData = string(fb)
 			}
 		}
-		b.WriteString(" <cal:response>\n")
-		b.WriteString("  <cal:recipient><d:href>" + xmlEscapeText(att.Value) + "</d:href></cal:recipient>\n")
-		b.WriteString("  <cal:request-status>" + xmlEscapeText(status) + "</cal:request-status>\n")
-		if fbData != "" {
-			b.WriteString("  <cal:calendar-data>" + xmlEscapeText(fbData) + "</cal:calendar-data>\n")
-		}
-		b.WriteString(" </cal:response>\n")
+		resp.Responses = append(resp.Responses, scheduleResponseItemXML{
+			Recipient: hrefXML{Href: att.Value}, RequestStatus: status, CalendarData: fbData,
+		})
 	}
-	b.WriteString("</cal:schedule-response>\n")
+	body, err := xml.Marshal(resp)
+	if err != nil {
+		return err
+	}
 
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(http.StatusOK)
-	_, err = io.WriteString(w, b.String())
+	_, err = w.Write(append([]byte(xml.Header), body...))
 	return err
+}
+
+// scheduleResponseXML is the RFC 6638 §5 answer to an outbox POST.
+type scheduleResponseXML struct {
+	XMLName   xml.Name                  `xml:"urn:ietf:params:xml:ns:caldav schedule-response"`
+	Responses []scheduleResponseItemXML `xml:"urn:ietf:params:xml:ns:caldav response"`
+}
+
+type scheduleResponseItemXML struct {
+	Recipient     hrefXML `xml:"urn:ietf:params:xml:ns:caldav recipient"`
+	RequestStatus string  `xml:"urn:ietf:params:xml:ns:caldav request-status"`
+	CalendarData  string  `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
 }
 
 // freeBusyForPrincipal aggregates free-busy across the principal's calendars
@@ -269,9 +278,4 @@ func appendPropLine(lines []string, prop *goical.Prop) []string {
 	line := strings.TrimPrefix(buf.String(), "BEGIN:X\r\n")
 	line = strings.TrimSuffix(line, "\r\nEND:X\r\n")
 	return append(lines, line)
-}
-
-func xmlEscapeText(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
 }
