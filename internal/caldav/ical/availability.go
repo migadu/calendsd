@@ -326,11 +326,11 @@ func (z availabilityZoneSet) componentUnavailable(comp *goical.Component, start,
 			covStart = t
 		}
 		if d := comp.Props.Get(goical.PropDuration); d != nil && comp.Props.Get(goical.PropDateTimeEnd) == nil {
-			dur, err := d.Duration()
+			e, err := AddDuration(t, d.Value)
 			if err != nil {
 				return interval{}, nil, false, invalidAvailability("VAVAILABILITY DURATION: %v", err)
 			}
-			if e := t.Add(dur); e.Before(covEnd) {
+			if e.Before(covEnd) {
 				covEnd = e
 			}
 		}
@@ -580,8 +580,8 @@ func (z availabilityZoneSet) span(comp *goical.Component) (time.Time, time.Time,
 		return s, e, err
 	}
 	if dp := comp.Props.Get(goical.PropDuration); dp != nil {
-		dur, err := dp.Duration()
-		return s, s.Add(dur), err
+		e, err := AddDuration(s, dp.Value)
+		return s, e, err
 	}
 	return time.Time{}, time.Time{}, errors.New("missing DTEND or DURATION")
 }

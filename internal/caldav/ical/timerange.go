@@ -83,11 +83,11 @@ func eventEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Tim
 		return dtend, nil
 	}
 	if durProp := comp.Props.Get(goical.PropDuration); durProp != nil {
-		dur, err := durProp.Duration()
+		end, err := AddDuration(dtstart, durProp.Value)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("parsing DURATION: %w", err)
 		}
-		return dtstart.Add(dur), nil
+		return end, nil
 	}
 	if dtstartProp.ValueType() == goical.ValueDate {
 		return dtstart.AddDate(0, 0, 1), nil
@@ -147,11 +147,10 @@ func TodoInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Loc
 
 	if hasStart {
 		if durProp := comp.Props.Get(goical.PropDuration); durProp != nil {
-			dur, err := durProp.Duration()
+			effectiveEnd, err := AddDuration(dtstart, durProp.Value)
 			if err != nil {
 				return false, err
 			}
-			effectiveEnd := dtstart.Add(dur)
 			return !start.After(effectiveEnd) && end.After(dtstart), nil
 		}
 		if hasDue {
@@ -260,11 +259,7 @@ func todoAlarmAnchor(todo *goical.Component, relatedEnd bool, loc *time.Location
 		return due, nil
 	case sp != nil:
 		if durProp := todo.Props.Get(goical.PropDuration); durProp != nil {
-			dur, err := durProp.Duration()
-			if err != nil {
-				return time.Time{}, err
-			}
-			return start.Add(dur), nil
+			return AddDuration(start, durProp.Value)
 		}
 		return start, nil
 	}
