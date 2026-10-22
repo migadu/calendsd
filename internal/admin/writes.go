@@ -37,14 +37,24 @@ type Writes interface {
 
 var _ Writes = (*storage.AdminWrites)(nil)
 
-// writeGate enforces the CSRF header and the read-only default on every
+// mutationGate enforces the CSRF header and the read-only default on every
 // mutating endpoint.
-func (a *App) writeGate(w http.ResponseWriter, r *http.Request) bool {
+func (a *App) mutationGate(w http.ResponseWriter, r *http.Request) bool {
 	if !requireMutationHeader(w, r) {
 		return false
 	}
 	if a.ReadOnly {
 		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+// writeGate is mutationGate for the endpoints that write through Writes,
+// which must also be wired. proppatch and provision write through the DAV
+// stack instead and check their own factories.
+func (a *App) writeGate(w http.ResponseWriter, r *http.Request) bool {
+	if !a.mutationGate(w, r) {
 		return false
 	}
 	if a.Writes == nil {
@@ -214,11 +224,7 @@ func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) propPatch(w http.ResponseWriter, r *http.Request) {
-	if !requireMutationHeader(w, r) {
-		return
-	}
-	if a.ReadOnly {
-		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
+	if !a.mutationGate(w, r) {
 		return
 	}
 	if a.NewSimulator == nil {
@@ -289,11 +295,7 @@ func propstatsOK(body []byte) bool {
 }
 
 func (a *App) provision(w http.ResponseWriter, r *http.Request) {
-	if !requireMutationHeader(w, r) {
-		return
-	}
-	if a.ReadOnly {
-		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
+	if !a.mutationGate(w, r) {
 		return
 	}
 	if a.NewProvisioner == nil {
@@ -335,6 +337,8 @@ func (a *App) deleteOrphans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, writeResult{OK: true, Detail: fmt.Sprintf("deleted %d row(s) for %s", n, check)})
 }
 
+// davRequest runs one in-process DAV request against h, as the simulator
+// and the DAV-backed write actions do.
 func davRequest(h http.Handler, method, path, body, depth string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Depth", depth)

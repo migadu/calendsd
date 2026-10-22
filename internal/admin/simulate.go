@@ -11,7 +11,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 
 	"calserver/internal/acl"
@@ -70,7 +69,7 @@ func (a *App) simulateData(r *http.Request) (any, error) {
 	}
 
 	// As the target principal: what privileges do they hold here?
-	w := propfind(a.NewSimulator(d.Principal), d.Path, cupsBody)
+	w := davRequest(a.NewSimulator(d.Principal), "PROPFIND", d.Path, cupsBody, "0")
 	d.Status = w.Code
 	d.RawBody = w.Body.String()
 	if w.Code == http.StatusMultiStatus {
@@ -102,15 +101,6 @@ func (a *App) simulateData(r *http.Request) (any, error) {
 			Principal: ace.Principal, Privilege: ace.Privilege, Protected: ace.Protected})
 	}
 	return d, nil
-}
-
-func propfind(h http.Handler, path, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest("PROPFIND", path, strings.NewReader(body))
-	req.Header.Set("Depth", "0")
-	req.Header.Set("Content-Type", "application/xml")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	return w
 }
 
 // Multistatus subset for the privilege PROPFIND. Privileges arrive as
