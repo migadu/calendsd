@@ -212,7 +212,12 @@ func Load(path string) (*Config, error) {
 	badType := func(key, want string, got any) {
 		typeErrs = append(typeErrs, fmt.Sprintf("config key %q must be %s, not %s", key, want, describeValue(got)))
 	}
+	// Every accessor records the key it reads, so the keys it reads are the
+	// recognised ones: anything else in the file is a typo worth reporting
+	// rather than silently ignoring, with no separate list to keep in step.
+	consumed := map[string]bool{}
 	str := func(key string) string {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return ""
@@ -224,6 +229,7 @@ func Load(path string) (*Config, error) {
 		return s
 	}
 	boolean := func(key string) bool {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return false
@@ -235,6 +241,7 @@ func Load(path string) (*Config, error) {
 		return b
 	}
 	integer := func(key string) int {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return 0
@@ -246,6 +253,7 @@ func Load(path string) (*Config, error) {
 		return i
 	}
 	list := func(key string) []string {
+		consumed[key] = true
 		v, present := flat[key]
 		if !present {
 			return nil
@@ -302,7 +310,7 @@ func Load(path string) (*Config, error) {
 	cfg.Push.TopicSecret = str("push.topic_secret")
 
 	for key := range flat {
-		if !known[key] {
+		if !consumed[key] {
 			return nil, fmt.Errorf("%s: unknown config key %q", path, key)
 		}
 	}
@@ -327,45 +335,6 @@ func describeValue(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
-}
-
-// known is the set of recognised "section.key" paths; anything else is a typo
-// worth reporting rather than silently ignoring.
-var known = map[string]bool{
-	"server.addr": true, "server.metrics_addr": true, "server.api_addr": true,
-	"server.base_uri": true, "server.realm": true,
-	"server.tls.cert": true, "server.tls.key": true,
-	"server.rcptd.url": true, "server.rcptd.token": true,
-	"server.temp_file_filter": true, "server.temp_file_dir": true,
-	"server.web_url":             true,
-	"database.dsn":               true,
-	"database.max_open_conns":    true,
-	"database.max_idle_conns":    true,
-	"database.conn_max_lifetime": true,
-	"logging.level":              true,
-	"logging.request_dir":        true,
-	"logging.access_log":         true,
-	"scheduling.imip.smtp":       true, "scheduling.imip.sender": true,
-	"scheduling.imip.send_as_organizer":       true,
-	"scheduling.imip.submission":              true,
-	"scheduling.imip.submission_implicit_tls": true,
-	"scheduling.imip.credential_key":          true,
-	"scheduling.imip.queue.reclaim_after":     true,
-	"scheduling.imip.queue.credential_ttl":    true,
-	"scheduling.imip.queue.retention":         true,
-	"scheduling.imip.queue.workers":           true,
-	"calendarserver.browser":                  true, "calendarserver.auto_provision": true,
-	"calendarserver.per_user_props": true, "calendarserver.expand_groups": true,
-	"calendarserver.principals_readable":    true,
-	"calendarserver.auto_schedule_prefixes": true,
-	"admin.auth_file":                       true,
-	"admin.addr":                            true,
-	"retention.deleted_days":                true,
-	"push.enabled":                          true,
-	"push.vapid_subject":                    true,
-	"push.vapid_public_key":                 true,
-	"push.vapid_private_key":                true,
-	"push.topic_secret":                     true,
 }
 
 // parse reads the TOML subset into a flat map keyed by "section.key".
