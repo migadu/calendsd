@@ -10,7 +10,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,14 +43,6 @@ func (m *Message) ScheduleStatusCode() string {
 	return code
 }
 
-// attendeeInfo captures one ATTENDEE property.
-type attendeeInfo struct {
-	href     string
-	name     string
-	partStat string
-	prop     goical.Prop
-}
-
 // eventSummary captures the scheduling-relevant view of an object, including
 // the per-instance (RECURRENCE-ID) attendee matrix sabre's broker needs.
 type eventSummary struct {
@@ -60,7 +52,7 @@ type eventSummary struct {
 	// orgScheduleAgent is the ORGANIZER's SCHEDULE-AGENT (RFC 6638 §7.1),
 	// uppercased; SERVER when absent. CLIENT suppresses server-side REPLYs.
 	orgScheduleAgent string
-	sequence         string
+	sequence         int
 	status           string
 	exdate           []goical.Prop // every EXDATE value, one per prop, sorted
 	master           *goical.Component
@@ -68,13 +60,12 @@ type eventSummary struct {
 	// VEVENT; instOrder preserves calendar order.
 	instances map[string]*goical.Component
 	instOrder []string
-	// attendees is the flat, first-seen list (the reply applier reads it);
-	// perAtt/attOrder carry the per-instance participation matrix.
-	attendees []attendeeInfo
-	perAtt    map[string]*attendeeState
-	attOrder  []string
-	sigHash   string // significant-change fingerprint
-	cal       *goical.Calendar
+	// perAtt/attOrder carry the per-instance participation matrix, attOrder
+	// in first-seen order.
+	perAtt   map[string]*attendeeState
+	attOrder []string
+	sigHash  string // significant-change fingerprint
+	cal      *goical.Calendar
 }
 
 // attendeeState is one attendee's participation across instances.
@@ -104,11 +95,10 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 		return nil
 	}
 	out := &eventSummary{
-		cal: cal, sequence: "0", orgScheduleAgent: "SERVER",
+		cal: cal, orgScheduleAgent: "SERVER",
 		instances: map[string]*goical.Component{},
 		perAtt:    map[string]*attendeeState{},
 	}
-	flatSeen := map[string]bool{}
 	var eventHashes []string
 	for _, comp := range cal.Children {
 		if comp.Name != goical.CompEvent {
@@ -130,8 +120,8 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 				out.orgScheduleAgent = strings.ToUpper(agent)
 			}
 		}
-		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == "0" {
-			out.sequence = p.Value
+		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == 0 {
+			out.sequence, _ = strconv.Atoi(strings.TrimSpace(p.Value))
 		}
 		for _, ex := range comp.Props.Values("EXDATE") {
 			for _, v := range splitList(ex.Value) {
@@ -171,12 +161,6 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 			if strings.EqualFold(att.Params.Get("SCHEDULE-FORCE-SEND"), "REQUEST") {
 				st.forceSend = true
 			}
-			if !flatSeen[href] {
-				flatSeen[href] = true
-				out.attendees = append(out.attendees, attendeeInfo{
-					href: href, name: att.Params.Get("CN"), partStat: partStat, prop: att,
-				})
-			}
 		}
 		// Per-event significant-change hash.
 		var h strings.Builder
@@ -200,8 +184,8 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 	if p := out.master.Props.Get("STATUS"); p != nil {
 		out.status = strings.ToUpper(p.Value)
 	}
-	sort.Slice(out.exdate, func(i, j int) bool { return out.exdate[i].Value < out.exdate[j].Value })
-	sort.Strings(eventHashes)
+	slices.SortFunc(out.exdate, func(a, b goical.Prop) int { return strings.Compare(a.Value, b.Value) })
+	slices.Sort(eventHashes)
 	out.sigHash = strings.Join(eventHashes, "")
 	return out
 }
@@ -616,7 +600,7 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 		}
 		ev := goical.NewComponent(goical.CompEvent)
 		setPlainProp(ev.Props, goical.PropUID, base.uid)
-		setPlainProp(ev.Props, "SEQUENCE", base.sequence)
+		setPlainProp(ev.Props, "SEQUENCE", strconv.Itoa(base.sequence))
 		setPlainProp(ev.Props, "DTSTAMP", nowStamp())
 		src := instanceOf(newInfo, id)
 		if src == nil {
@@ -826,7 +810,7 @@ func itipPayload(cal *goical.Calendar, method string) *goical.Calendar {
 	return out
 }
 
-// incSequence returns s+1 — the SEQUENCE a CANCEL carries so it reliably
+// incSequence returns n+1 — the SEQUENCE a CANCEL carries so it reliably
 // supersedes the last REQUEST an attendee received. RFC 5546 treats a
 // cancellation as a significant change: bumping SEQUENCE (not just DTSTAMP)
 // keeps the CANCEL "newer" even for recipients that collate on SEQUENCE alone.
@@ -834,8 +818,7 @@ func itipPayload(cal *goical.Calendar, method string) *goical.Calendar {
 // to stay in sync with — unlike a REQUEST, whose SEQUENCE the organizer's own
 // client owns and the server only echoes (bumping it here would desync the
 // stored event from what attendees hold and break REPLY matching).
-func incSequence(s string) string {
-	n, _ := strconv.Atoi(s)
+func incSequence(n int) string {
 	return strconv.Itoa(n + 1)
 }
 
@@ -862,17 +845,17 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 			return nil, nil
 		}
 		replyInfo := summarize(msg.Calendar, false)
-		if replyInfo == nil || len(replyInfo.attendees) == 0 {
+		if replyInfo == nil || len(replyInfo.attOrder) == 0 {
 			return nil, nil
 		}
-		replier := replyInfo.attendees[0]
+		replier := replyInfo.attOrder[0]
 		// SCHEDULE-STATUS comes from the reply's REQUEST-STATUS, defaulting
 		// to 2.0, and a reply clears RSVP (Broker::processMessageReply).
 		requestStatus := "2.0"
 		if p := replyInfo.master.Props.Get("REQUEST-STATUS"); p != nil {
 			requestStatus, _, _ = strings.Cut(p.Value, ";")
 		}
-		st := replyInfo.perAtt[replier.href]
+		st := replyInfo.perAtt[replier]
 		if st == nil {
 			return existing, nil
 		}
@@ -912,7 +895,7 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 			}
 			atts := target.Props.Values("ATTENDEE")
 			for i := range atts {
-				if strings.EqualFold(atts[i].Value, replier.href) {
+				if strings.EqualFold(atts[i].Value, replier) {
 					atts[i].Params.Set("PARTSTAT", st.instances[id])
 					atts[i].Params.Set("SCHEDULE-STATUS", requestStatus)
 					atts[i].Params.Del("RSVP")

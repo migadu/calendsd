@@ -2,7 +2,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	goical "github.com/emersion/go-ical"
@@ -95,7 +95,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		for k := range overrides {
 			keys = append(keys, k)
 		}
-		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		slices.Sort(keys)
 		for _, k := range keys {
 			inst, ok, err := utcInstance(overrides[k], start, end, loc, true)
 			if err != nil {
@@ -198,7 +198,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 			movedKeys = append(movedKeys, k)
 		}
 	}
-	sort.Slice(movedKeys, func(i, j int) bool { return movedKeys[i] < movedKeys[j] })
+	slices.Sort(movedKeys)
 	for _, k := range movedKeys {
 		inst, ok, err := utcInstance(overrides[k], start, end, loc, true)
 		if err != nil {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	goical "github.com/emersion/go-ical"
@@ -262,7 +262,7 @@ func icalRecur(m map[string]any) string {
 		}
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		out = append(out, part(k, m[k]))
 	}

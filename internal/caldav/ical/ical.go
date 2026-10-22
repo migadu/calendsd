@@ -7,7 +7,7 @@ package ical
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -165,7 +165,7 @@ func encodeComponent(buf *bytes.Buffer, comp *goical.Component) {
 	for name := range comp.Props {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		for _, prop := range comp.Props[name] {
 			writeContentLine(buf, formatProp(&prop))
@@ -184,7 +184,7 @@ func formatProp(prop *goical.Prop) string {
 	for name := range prop.Params {
 		paramNames = append(paramNames, name)
 	}
-	sort.Strings(paramNames)
+	slices.Sort(paramNames)
 	for _, name := range paramNames {
 		b.WriteString(";" + name + "=")
 		for i, v := range prop.Params[name] {

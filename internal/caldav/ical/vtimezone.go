@@ -2,7 +2,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,7 +121,7 @@ var candidateZones = sync.OnceValue(func() []*time.Location {
 	for name := range names {
 		sorted = append(sorted, name)
 	}
-	sort.Strings(sorted)
+	slices.Sort(sorted)
 	var out []*time.Location
 	for _, name := range sorted {
 		if loc, err := time.LoadLocation(name); err == nil {
@@ -331,7 +331,7 @@ func parseVTimezone(comp *goical.Component) *vtimezone {
 	if !haveFirst {
 		return nil
 	}
-	sort.Slice(raw, func(i, j int) bool { return raw[i].at.Before(raw[j].at) })
+	slices.SortFunc(raw, func(a, b tzTransition) int { return a.at.Compare(b.at) })
 	return &vtimezone{transitions: raw, firstOffset: firstOffset}
 }
 

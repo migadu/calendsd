@@ -30,7 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -173,11 +173,16 @@ func GenerateVTimezone(tzid string, cov Coverage) (*goical.Component, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unknown time zone %q", tzid)
 	}
-	print := fingerprint(loc)
 	want := Coverage{Start: time.Date(cov.Start.Year(), 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1), Unbounded: true}
 	vtzCache.Lock()
 	e, ok := vtzCache.m[tzid]
 	vtzCache.Unlock()
+	// The fingerprint walks the zone's transitions, so it is only taken to
+	// compare with a cached entry or to store a new one.
+	var print string
+	if ok {
+		print = fingerprint(loc)
+	}
 	if ok && e.print == print {
 		if e.cov.contains(cov) {
 			return e.comp, nil
@@ -195,6 +200,9 @@ func GenerateVTimezone(tzid string, cov Coverage) (*goical.Component, error) {
 		// definition for a bounded object — not cached, as it is specific to
 		// this object's dates.
 		return generateChecked(tzid, loc, cov)
+	}
+	if print == "" {
+		print = fingerprint(loc)
 	}
 	vtzCache.Lock()
 	vtzCache.m[tzid] = vtzCacheEntry{cov: want, comp: comp, print: print}
@@ -815,7 +823,7 @@ func AddMissingVTimezones(data []byte, cal *goical.Calendar) ([]byte, error) {
 	if len(order) == 0 {
 		return data, nil
 	}
-	sort.Strings(order)
+	slices.Sort(order)
 	var block bytes.Buffer
 	for _, tzid := range order {
 		vtz, err := generateVTimezone(tzid, *covs[tzid])

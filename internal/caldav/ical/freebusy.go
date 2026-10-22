@@ -2,7 +2,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,7 +119,7 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 	}
 	var out []busyPeriod
 	for _, group := range byType {
-		sort.Slice(group, func(i, j int) bool { return group[i].start.Before(group[j].start) })
+		slices.SortFunc(group, func(a, b busyPeriod) int { return a.start.Compare(b.start) })
 		var merged []busyPeriod
 		for _, p := range group {
 			if n := len(merged); n > 0 && !p.start.After(merged[n-1].end) {
@@ -132,7 +132,7 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 		}
 		out = append(out, merged...)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].start.Before(out[j].start) })
+	slices.SortFunc(out, func(a, b busyPeriod) int { return a.start.Compare(b.start) })
 	return out
 }
 

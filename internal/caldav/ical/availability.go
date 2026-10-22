@@ -3,7 +3,7 @@ package ical
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -277,7 +277,8 @@ func unavailablePeriods(data []byte, start, end time.Time) ([]busyPeriod, error)
 		priorities = append(priorities, pr)
 	}
 	// Lowest priority first, so each higher layer overwrites what it covers.
-	sort.Sort(sort.Reverse(sort.IntSlice(priorities)))
+	slices.Sort(priorities)
+	slices.Reverse(priorities)
 	var unavailable []interval
 	for _, pr := range priorities {
 		l := layers[pr]
@@ -481,7 +482,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 
 // subtract returns cover minus the union of holes, in order.
 func subtract(cover interval, holes []interval) []interval {
-	sort.Slice(holes, func(i, j int) bool { return holes[i].start.Before(holes[j].start) })
+	slices.SortFunc(holes, func(a, b interval) int { return a.start.Compare(b.start) })
 	var out []interval
 	cur := cover.start
 	for _, h := range holes {

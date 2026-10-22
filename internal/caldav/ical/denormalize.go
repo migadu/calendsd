@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	goical "github.com/emersion/go-ical"
@@ -185,7 +185,7 @@ func eventOccurrenceBounds(comp *goical.Component, ovByRID map[int64]*goical.Com
 
 	// Walk occurrences in start order, taking each end until one reaches
 	// maxDate — sabre's getDtEnd loop.
-	sort.Slice(occs, func(i, j int) bool { return occs[i].start.Before(occs[j].start) })
+	slices.SortFunc(occs, func(a, b occurrence) int { return a.start.Compare(b.start) })
 	last = occs[0].end
 	for _, o := range occs {
 		last = o.end
