@@ -34,7 +34,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if err != nil {
 			return false, err
 		}
-		dur, err := masterDurationIn(comp, dtstartProp, dtstart)
+		endOf, err := occurrenceEnd(comp, dtstartProp, dtstart)
 		if err != nil {
 			return false, err
 		}
@@ -55,7 +55,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 			if !ok || !occStart.Before(end) {
 				return false, nil
 			}
-			if occStart.Add(dur).After(start) {
+			if endOf(occStart).After(start) {
 				return true, nil
 			}
 		}
@@ -100,6 +100,27 @@ func masterDurationIn(comp *goical.Component, dtstartProp *goical.Prop, dtstart 
 		return 0, err
 	}
 	return end.Sub(dtstart), nil
+}
+
+// occurrenceEnd returns the function from an occurrence's start to its end,
+// following the master's DTEND/DURATION. An all-day (DATE) series spans whole
+// days: a fixed duration would end an occurrence on the far side of a DST
+// change in the start's location an hour early or late, which for a one-day
+// event is the wrong date.
+func occurrenceEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time) (func(time.Time) time.Time, error) {
+	end, err := eventEnd(comp, dtstartProp, dtstart, dtstart.Location())
+	if err != nil {
+		return nil, err
+	}
+	if dtstartProp.ValueType() != goical.ValueDate {
+		dur := end.Sub(dtstart)
+		return func(t time.Time) time.Time { return t.Add(dur) }, nil
+	}
+	y1, m1, d1 := dtstart.Date()
+	y2, m2, d2 := end.Date()
+	days := int(time.Date(y2, m2, d2, 0, 0, 0, 0, time.UTC).Sub(time.Date(y1, m1, d1, 0, 0, 0, 0, time.UTC)) / (24 * time.Hour))
+	rest := end.Sub(dtstart.AddDate(0, 0, days))
+	return func(t time.Time) time.Time { return t.AddDate(0, 0, days).Add(rest) }, nil
 }
 
 // TodoInTimeRange ports vobject VTodo::isInTimeRange: DTSTART/DURATION/DUE
@@ -249,7 +270,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	if err != nil {
 		return false, err
 	}
-	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
 	if err != nil {
 		return false, err
 	}
@@ -267,7 +288,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 			return false, nil
 		}
 		instance := master
-		instStart, instEnd := occStart, occStart.Add(dur)
+		instStart, instEnd := occStart, endOf(occStart)
 		if override, exists := overrides[occStart.Unix()]; exists {
 			instance = override
 			if sp := override.Props.Get(goical.PropDateTimeStart); sp != nil {

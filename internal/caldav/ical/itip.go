@@ -259,7 +259,7 @@ func newOverride(master *goical.Component, rid *goical.Prop) *goical.Component {
 	if occ.IsZero() {
 		return nil
 	}
-	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
 	if err != nil {
 		return nil
 	}
@@ -270,7 +270,7 @@ func newOverride(master *goical.Component, rid *goical.Prop) *goical.Component {
 	ov.Props.Set(occurrenceProp(goical.PropRecurrenceID, dtstartProp, occ))
 	ov.Props.Set(occurrenceProp(goical.PropDateTimeStart, dtstartProp, occ))
 	if dtend := master.Props.Get(goical.PropDateTimeEnd); dtend != nil {
-		ov.Props.Set(occurrenceProp(goical.PropDateTimeEnd, dtend, occ.Add(dur)))
+		ov.Props.Set(occurrenceProp(goical.PropDateTimeEnd, dtend, endOf(occ)))
 	}
 	return ov
 }

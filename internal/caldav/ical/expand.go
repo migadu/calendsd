@@ -130,7 +130,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	if err != nil {
 		return nil, err
 	}
-	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		if !more || !occStart.Before(end) {
 			break
 		}
-		occEnd := occStart.Add(dur)
+		occEnd := endOf(occStart)
 		if !occEnd.After(start) {
 			continue
 		}

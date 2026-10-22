@@ -212,7 +212,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 	if err != nil {
 		return nil, err
 	}
-	dur, err := masterDurationIn(comp, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(comp, dtstartProp, dtstart)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return nil, err
 	}
 	if roption == nil {
-		if p := clamp(dtstart, dtstart.Add(dur)); p != nil {
+		if p := clamp(dtstart, endOf(dtstart)); p != nil {
 			return []busyPeriod{*p}, nil
 		}
 		return nil, nil
@@ -255,7 +255,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if !more || !occStart.Before(end) {
 			break
 		}
-		if p := clamp(occStart, occStart.Add(dur)); p != nil {
+		if p := clamp(occStart, endOf(occStart)); p != nil {
 			out = append(out, *p)
 		}
 	}
