@@ -95,7 +95,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calserver/config.toml, /usr/local/etc/calserver/config.toml, ./config.toml is used")
 	dsn := flag.String("db", "", dbUsage)
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
-	realm := flag.String("realm", "SabreDAV", "auth realm; must match the realm baked into users.digesta1")
+	realm := flag.String("realm", server.DefaultRealm, "auth realm; must match the realm baked into users.digesta1")
 	imipSMTP := flag.String("imip-smtp", "", "SMTP host:port for emailing invites to external attendees (empty disables iMip)")
 	imipSender := flag.String("imip-sender", "", "From address for iMip invitation emails")
 	imipSendAsOrganizer := flag.Bool("imip-send-as-organizer", false, "put the scheduling sender's own address (organizer for invitations, attendee for replies) in the From header of iMip emails (imip-sender stays the envelope sender); only safe when the relay can DKIM-sign for those local domains")

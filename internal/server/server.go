@@ -29,6 +29,11 @@ import (
 	"calserver/internal/storage"
 )
 
+// DefaultRealm is the auth realm when none is configured. It must never
+// change: users.digesta1 bakes the realm into every stored hash, and Basic
+// verifies against that same hash, so a different realm breaks every login.
+const DefaultRealm = "SabreDAV"
+
 // Config carries server composition options.
 type Config struct {
 	BaseURI string
@@ -163,19 +168,10 @@ type PushConfig struct {
 // applies them (base-URI slashes, realm default), so equivalent configs
 // always render the same line. No secrets: DSN and SMTP host stay out.
 func (c Config) Canonical() string {
-	base := c.BaseURI
-	if base == "" {
-		base = "/"
-	}
-	if !strings.HasPrefix(base, "/") {
-		base = "/" + base
-	}
-	if !strings.HasSuffix(base, "/") {
-		base += "/"
-	}
+	base := normalizeBase(c.BaseURI)
 	realm := c.Realm
 	if realm == "" {
-		realm = "SabreDAV"
+		realm = DefaultRealm
 	}
 	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t imip-durable=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
 		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", len(c.IMipQueue.CredentialKey) > 0, c.AutoProvision, c.PerUserProps,
@@ -193,19 +189,22 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// pushConfig projects the server config onto the push package's config,
-// filling in the mount prefix the plugin needs for absolute Location URLs.
-func (c Config) pushConfig() push.Config {
-	base := c.BaseURI
-	if base == "" {
-		base = "/"
-	}
+// normalizeBase gives a base URI the leading and trailing slash the DAV
+// server mounts it with ("" is "/"), matching dav.NewServer.
+func normalizeBase(base string) string {
 	if !strings.HasPrefix(base, "/") {
 		base = "/" + base
 	}
 	if !strings.HasSuffix(base, "/") {
 		base += "/"
 	}
+	return base
+}
+
+// pushConfig projects the server config onto the push package's config,
+// filling in the mount prefix the plugin needs for absolute Location URLs.
+func (c Config) pushConfig() push.Config {
+	base := normalizeBase(c.BaseURI)
 	return push.Config{
 		VAPIDSubject:    c.Push.VAPIDSubject,
 		VAPIDPublicKey:  c.Push.VAPIDPublicKey,
@@ -374,7 +373,7 @@ func NewLoggedIn(db *sql.DB, cfg Config, principal string) *dav.Server {
 // backend it wired (nil under authOverride), for the contacts API to share.
 func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, auth.Backend) {
 	if cfg.Realm == "" {
-		cfg.Realm = "SabreDAV"
+		cfg.Realm = DefaultRealm
 	}
 
 	principals := &storage.Principals{DB: db}

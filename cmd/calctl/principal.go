@@ -12,6 +12,7 @@ import (
 	"calserver/internal/admin"
 	"calserver/internal/auth"
 	"calserver/internal/config"
+	"calserver/internal/server"
 	"calserver/internal/storage"
 )
 
@@ -322,7 +323,7 @@ func realmDefault() string {
 	if globalConfig.Server.Realm != "" {
 		return globalConfig.Server.Realm
 	}
-	return "SabreDAV"
+	return server.DefaultRealm
 }
 
 func resolvePassword(flagValue string, fromStdin bool) string {

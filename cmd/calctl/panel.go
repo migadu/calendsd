@@ -55,7 +55,7 @@ func handlePanel(args []string, configPath string) {
 	}
 	cfg := m.Server
 	if cfg.Realm == "" {
-		cfg.Realm = "SabreDAV"
+		cfg.Realm = server.DefaultRealm
 	}
 
 	if m.DSN == "" {
