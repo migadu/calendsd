@@ -201,8 +201,7 @@ func JournalInTimeRange(comp *goical.Component, start, end time.Time, loc *time.
 }
 
 // EffectiveTriggerTime resolves a VALARM's trigger, relative to its parent
-// event. Port of vobject VAlarm::getEffectiveTriggerTime (VEVENT parents;
-// VTODO alarms come with the todo port).
+// VEVENT or VTODO. Port of vobject VAlarm::getEffectiveTriggerTime.
 func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (time.Time, error) {
 	trigger := alarm.Props.Get("TRIGGER")
 	if trigger == nil {
@@ -214,6 +213,13 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 	triggerDur, err := trigger.Duration()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing TRIGGER duration: %w", err)
+	}
+	if parent.Name == goical.CompToDo {
+		anchor, err := todoAlarmAnchor(parent, strings.EqualFold(trigger.Params.Get("RELATED"), "END"), loc)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return anchor.Add(triggerDur), nil
 	}
 
 	dtstartProp := parent.Props.Get(goical.PropDateTimeStart)
@@ -233,6 +239,42 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 		return end.Add(triggerDur), nil
 	}
 	return dtstart.Add(triggerDur), nil
+}
+
+// todoAlarmAnchor is the time a VTODO's relative trigger counts from: its
+// DTSTART, or for RELATED=END its DUE, else DTSTART+DURATION (RFC 5545
+// §3.8.6.3). A todo without DTSTART anchors a START-related trigger on DUE,
+// so the alarm of a todo with only a due date still fires.
+func todoAlarmAnchor(todo *goical.Component, relatedEnd bool, loc *time.Location) (time.Time, error) {
+	var start, due time.Time
+	var err error
+	sp, dp := todo.Props.Get(goical.PropDateTimeStart), todo.Props.Get("DUE")
+	if sp != nil {
+		if start, err = sp.DateTime(loc); err != nil {
+			return time.Time{}, err
+		}
+	}
+	if dp != nil {
+		if due, err = dp.DateTime(loc); err != nil {
+			return time.Time{}, err
+		}
+	}
+	switch {
+	case sp != nil && !relatedEnd:
+		return start, nil
+	case dp != nil:
+		return due, nil
+	case sp != nil:
+		if durProp := todo.Props.Get(goical.PropDuration); durProp != nil {
+			dur, err := durProp.Duration()
+			if err != nil {
+				return time.Time{}, err
+			}
+			return start.Add(dur), nil
+		}
+		return start, nil
+	}
+	return time.Time{}, errors.New("VALARM parent VTODO has neither DTSTART nor DUE")
 }
 
 // AlarmsInTimeRangeRecurring evaluates the VALARMs of a recurring VEVENT,
