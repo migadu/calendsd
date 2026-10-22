@@ -2,6 +2,7 @@ package dav
 
 import (
 	"context"
+	"encoding/xml"
 	"slices"
 )
 
@@ -26,7 +27,7 @@ type PerUserPropsPlugin struct {
 	// Calendar Server scopes it to the personal presentation properties
 	// (calendar-color, calendar-order); everything else a delegate writes
 	// is a shared property, visible to the owner too.
-	Names []xmlname
+	Names []xml.Name
 	// Exempt principals (admins) keep writing shared properties: harness
 	// provisioning PROPPATCHes resource calendars as admin and expects the
 	// values to be globally visible.
@@ -78,7 +79,7 @@ func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node
 	if perUser == "" {
 		return nil
 	}
-	pp.Handle(p.Names, func(values map[xmlname]any) (map[xmlname]int, bool) {
+	pp.Handle(p.Names, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		// Delegate to the storage backend through a single-shot PropPatch
 		// carrying only the claimed values.
 		inner := NewPropPatch(values)

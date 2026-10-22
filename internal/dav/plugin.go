@@ -6,8 +6,6 @@ import (
 	"net/http"
 )
 
-type xmlname = xml.Name
-
 // Plugin extends the server, mirroring sabre's ServerPlugin. The core WebDAV
 // behavior is itself a plugin (CorePlugin), so CalDAV, ACL, Sync and Auth all
 // hang off the same mechanism.
@@ -129,5 +127,5 @@ type ReportSetProvider interface {
 type ReportHandler interface {
 	// Report handles the named report if it can; body is the full request
 	// body. handled=false passes the report to the next plugin.
-	Report(name xmlname, body []byte, path string, w http.ResponseWriter, r *http.Request) (handled bool, err error)
+	Report(name xml.Name, body []byte, path string, w http.ResponseWriter, r *http.Request) (handled bool, err error)
 }

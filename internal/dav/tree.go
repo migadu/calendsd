@@ -3,6 +3,8 @@ package dav
 import (
 	"io"
 	"strings"
+
+	"calserver/internal/pathutil"
 )
 
 // DepthInfinity is the parsed value of "Depth: infinity".
@@ -19,16 +21,6 @@ type Tree struct {
 // NewTree creates a tree over the given root collection.
 func NewTree(root Collection) *Tree {
 	return &Tree{root: root}
-}
-
-// splitPath splits "a/b/c" into parent "a/b" and base "c".
-func splitPath(path string) (parent, base string) {
-	path = strings.Trim(path, "/")
-	i := strings.LastIndexByte(path, '/')
-	if i < 0 {
-		return "", path
-	}
-	return path[:i], path[i+1:]
 }
 
 // NodeForPath resolves a server-relative path ("" is the root).
@@ -60,7 +52,7 @@ func (t *Tree) NodeExists(path string) bool {
 	if strings.Trim(path, "/") == "" {
 		return true
 	}
-	parent, base := splitPath(path)
+	parent, base := pathutil.Split(strings.Trim(path, "/"))
 	parentNode, err := t.NodeForPath(parent)
 	if err != nil {
 		return false
@@ -102,7 +94,7 @@ func (t *Tree) Copy(sourcePath, destinationPath string, depth int) error {
 	if err != nil {
 		return err
 	}
-	destDir, destName := splitPath(destinationPath)
+	destDir, destName := pathutil.Split(strings.Trim(destinationPath, "/"))
 	destParent, err := t.NodeForPath(destDir)
 	if err != nil {
 		return err
@@ -120,8 +112,8 @@ func (t *Tree) Move(sourcePath, destinationPath string) error {
 	if pathContainsOrEquals(sourcePath, destinationPath) {
 		return ErrForbidden("Cannot move a resource into itself or a descendant")
 	}
-	sourceDir, _ := splitPath(sourcePath)
-	destDir, destName := splitPath(destinationPath)
+	sourceDir, _ := pathutil.Split(strings.Trim(sourcePath, "/"))
+	destDir, destName := pathutil.Split(strings.Trim(destinationPath, "/"))
 
 	if sourceDir == destDir {
 		source, err := t.NodeForPath(sourcePath)

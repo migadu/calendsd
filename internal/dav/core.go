@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	davxml "calserver/internal/dav/xml"
+	"calserver/internal/pathutil"
 )
 
 // CorePlugin implements the baseline WebDAV protocol behavior, mirroring
@@ -540,7 +541,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	parentPath, name := splitPath(path)
+	parentPath, name := pathutil.Split(path)
 	if !c.server.Tree.NodeExists(parentPath) {
 		return ErrConflict("Files can not be created in non-existent collections")
 	}
@@ -612,7 +613,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	if c.server.Tree.NodeExists(path) {
 		return ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
-	parentPath, name := splitPath(path)
+	parentPath, name := pathutil.Split(path)
 	parent, err := c.server.Tree.NodeForPath(parentPath)
 	if err != nil {
 		if AsError(err).Status == http.StatusNotFound {
@@ -804,7 +805,7 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 		return nil, ErrBadRequest("The HTTP Overwrite header should be either T or F")
 	}
 
-	destDir, _ := splitPath(destination)
+	destDir, _ := pathutil.Split(destination)
 	destParent, err := c.server.Tree.NodeForPath(destDir)
 	if err != nil {
 		if AsError(err).Status == http.StatusNotFound {
