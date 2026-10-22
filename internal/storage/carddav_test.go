@@ -131,8 +131,8 @@ func TestUpdateAddressBookBumpsSyncToken(t *testing.T) {
 		{Space: "DAV:", Local: "displayname"}: "Renamed Contacts",
 	})
 	backend.UpdateAddressBook(t.Context(), id, pp)
-	if _, ok := pp.Commit(); !ok {
-		t.Fatalf("UpdateAddressBook proppatch failed: %s", pp)
+	if result, ok := pp.Commit(); !ok {
+		t.Fatalf("UpdateAddressBook proppatch failed: %v", result)
 	}
 
 	var name string

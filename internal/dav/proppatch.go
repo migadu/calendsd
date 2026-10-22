@@ -2,7 +2,6 @@ package dav
 
 import (
 	"encoding/xml"
-	"fmt"
 )
 
 // PropPatch collects property mutations from a PROPPATCH request and lets
@@ -155,8 +154,4 @@ func (pp *PropPatch) runCallback(cb patchCallback) {
 			pp.result[n] = 200 // update
 		}
 	}
-}
-
-func (pp *PropPatch) String() string {
-	return fmt.Sprintf("PropPatch(%d mutations)", len(pp.mutations))
 }
