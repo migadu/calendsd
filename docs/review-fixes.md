@@ -153,26 +153,21 @@ Cross-workstream touch points (keep edits minimal and local):
 - `auth.Check` callers outside F's packages are updated by F.
 - `Server.Path` callers in B's and F's packages are updated by A, last.
 
-**Status: workstreams A–F merged** into `review-fixes`. Left over from them
-(fold into phase 2):
-- A: drop the `Bare` multistatus quirk (needs the three `PrincipalMatch*`
-  corpus cases out of `internal/corpus/runner_test.go`); move
-  `davxml.CanonicalizeFunc` to a test helper (corpus runner imports it); drop
-  `PropPatch.String` (a storage test prints it); `principalHrefs`, `proxyFor`
-  and `current-user-principal` should build hrefs with `Server.Href`.
-- A → B/F: serve `CalendarObject`, `SchedulingObject`, `Card` bodies with
-  `dav.BytesBody`, then delete `parseRange`/`ignoreRange`; use
-  `Server.WriteMultiStatus` for their hand-written 207s.
-- B: MKCALENDAR re-encodes into a propertyupdate; an exported per-property
-  parser in davxml would simplify it.
-- C: the time-range Validator still does not resolve non-IANA (Outlook)
-  TZIDs; export `ical.resolveNonIANATZIDs` and call it there. Timed events
-  with `DURATION:P1D` still use 24h.
-- E: `server.New` stays until `internal/storage/parity_test.go` calls `Build`.
-- F: the iMIP-specific `ON CONFLICT` in `jobs.enqueue` needs `IMipPlugin` to
-  opt in first.
+**Status: workstreams A–F merged** into `review-fixes`; their leftovers were
+done in phase 2 except the two kept below.
 
 ## Phase 2 — cross-cutting refactors (sequential, after phase 1 is green)
+
+**Status: done.** Notes against the original items:
+- `ctx` also had to go through the `dav` node and tree interfaces (`Child`,
+  `Children`, `Get`, `Put`, `Delete`, `Create*`, `Props`, `PropPatch`,
+  `Changes`) and the hooks that reach storage; without that the nodes had no
+  request context to pass on. A locked-row test pins the contacts API write
+  timeout.
+- Hook dispatch uses a range-over-func iterator, `dav.Hooks[T]`, rather than a
+  callback `eachHook`.
+- The `QuotedETag` fallback is not dead: the in-memory backends, fixtures and
+  the admin panel's derived-etag check rely on it. Kept, documented.
 
 1. **`context.Context` through storage.** `ctx` is the first parameter of every
    CalDAV / CardDAV / Principals / PropertyStorage / Users method; `withTx`
@@ -204,3 +199,8 @@ Cross-workstream touch points (keep edits minimal and local):
 - The 5-minute positive credential cache, the fail-open tombstone check and the
   per-keystroke card scan, which are documented trade-offs.
 - `internal/corpus` stays (test fixture code); only its unused exports are trimmed.
+- `jobs.enqueue`'s iMIP `ON CONFLICT`: making it opt-in needs a migration of
+  the `jobs_coalesce_ix` partial index for no behaviour change; rows without
+  the iMIP keys never collide.
+- `Server.Path` stays: it pairs `EscapedPath` with base stripping and
+  decoding for ~30 callers.
