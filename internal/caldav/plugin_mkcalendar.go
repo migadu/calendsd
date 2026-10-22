@@ -32,11 +32,11 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		props = parsed
 	}
 
-	if p.server.Tree.NodeExists(path) {
+	if p.server.Tree.NodeExists(r.Context(), path) {
 		return dav.ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
 	parentPath, name := pathutil.Split(path)
-	parent, err := p.server.Tree.NodeForPath(parentPath)
+	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		}
 		delete(props, xml.Name{Space: davxml.NSDav, Local: "resourcetype"})
 	}
-	if err := home.CreateExtendedCollection(name, resourceTypes, props); err != nil {
+	if err := home.CreateExtendedCollection(r.Context(), name, resourceTypes, props); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Length", "0")

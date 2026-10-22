@@ -303,11 +303,11 @@ func TestContactImportLeavesOutCardsHeldElsewhere(t *testing.T) {
 	imp := &storage.ContactImport{DB: db}
 	cardDAV := &storage.CardDAV{DB: db}
 
-	bookID, err := cardDAV.CreateAddressBook("principals/lena@example.org", "addressbook", nil)
+	bookID, err := cardDAV.CreateAddressBook(t.Context(), "principals/lena@example.org", "addressbook", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cardDAV.CreateCard(bookID, "c2.vcf", []byte(fmt.Sprintf(importVCF, "c2", "Two From Sync"))); err != nil {
+	if _, err := cardDAV.CreateCard(t.Context(), bookID, "c2.vcf", []byte(fmt.Sprintf(importVCF, "c2", "Two From Sync"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -323,7 +323,7 @@ func TestContactImportLeavesOutCardsHeldElsewhere(t *testing.T) {
 		t.Errorf("webmail cards = %d, want 2", got.cards)
 	}
 	// The user's own copy is untouched.
-	if info, err := cardDAV.Card(bookID, "c2.vcf"); err != nil || !contains(string(info.CardData), "Two From Sync") {
+	if info, err := cardDAV.Card(t.Context(), bookID, "c2.vcf"); err != nil || !contains(string(info.CardData), "Two From Sync") {
 		t.Errorf("the user's copy changed or vanished: %v", err)
 	}
 
@@ -398,10 +398,10 @@ func TestContactImportRefusals(t *testing.T) {
 
 	t.Run("tombstoned principal", func(t *testing.T) {
 		writes := &storage.AdminWrites{DB: db}
-		if err := writes.CreateUser("erin@example.org", storage.BlockedDigestA1(), "erin@example.org", "Erin"); err != nil {
+		if err := writes.CreateUser(ctx, "erin@example.org", storage.BlockedDigestA1(), "erin@example.org", "Erin"); err != nil {
 			t.Fatal(err)
 		}
-		if err := writes.ScheduleDelete("erin@example.org", 30, "test"); err != nil {
+		if err := writes.ScheduleDelete(ctx, "erin@example.org", 30, "test"); err != nil {
 			t.Fatal(err)
 		}
 		res := mustImport(t, imp, baseRequest("erin@example.org", []storage.ImportCard{card("c1", "One")}))
@@ -426,7 +426,7 @@ func TestContactImportRefusals(t *testing.T) {
 		// ledger row there is nothing to prove the book is ours, so merging
 		// into it is refused rather than attempted.
 		cardDAV := &storage.CardDAV{DB: db}
-		if _, err := cardDAV.CreateAddressBook("principals/frank@example.org", "webmail", nil); err != nil {
+		if _, err := cardDAV.CreateAddressBook(ctx, "principals/frank@example.org", "webmail", nil); err != nil {
 			t.Fatal(err)
 		}
 		res := mustImport(t, imp, baseRequest("frank@example.org", []storage.ImportCard{card("c1", "One")}))
@@ -490,7 +490,7 @@ func TestContactImportSyncTokenMoved(t *testing.T) {
 	bookID := fmt.Sprint(first.BookID)
 
 	// A phone edits a card: synctoken moves, source unchanged.
-	if _, err := cardDAV.UpdateCard(bookID, "c1.vcf", []byte(fmt.Sprintf(importVCF, "c1", "One From Phone"))); err != nil {
+	if _, err := cardDAV.UpdateCard(t.Context(), bookID, "c1.vcf", []byte(fmt.Sprintf(importVCF, "c1", "One From Phone"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -513,11 +513,11 @@ func TestContactImportSyncTokenMoved(t *testing.T) {
 	// The refresh above recorded where the token got to, so as far as the
 	// ledger is concerned the destination is settled again. Move it once more,
 	// so the next run really is "both sides changed since I last looked".
-	if _, err := cardDAV.UpdateCard(bookID, "c2.vcf", []byte(fmt.Sprintf(importVCF, "c2", "Two From Phone"))); err != nil {
+	if _, err := cardDAV.UpdateCard(t.Context(), bookID, "c2.vcf", []byte(fmt.Sprintf(importVCF, "c2", "Two From Phone"))); err != nil {
 		t.Fatal(err)
 	}
 	// ...and deletes one. The bundle still carries it.
-	if err := cardDAV.DeleteCard(bookID, "c3.vcf"); err != nil {
+	if err := cardDAV.DeleteCard(t.Context(), bookID, "c3.vcf"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -19,22 +19,22 @@ func TestDoctorScanCapInSQL(t *testing.T) {
 	db := openContactsScratchDB(t, "calserver_d_doctorcap")
 	cal := &storage.CalDAV{DB: db}
 	card := &storage.CardDAV{DB: db}
-	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	calID, err := cal.CreateCalendar(t.Context(), "principals/admin", "default", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bookID, err := card.CreateAddressBook("principals/admin", "contacts", nil)
+	bookID, err := card.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const n = 3
 	for i := range n {
 		ics := fmt.Sprintf("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e%d\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n", i)
-		if _, err := cal.CreateCalendarObject(calID, fmt.Sprintf("e%d.ics", i), []byte(ics)); err != nil {
+		if _, err := cal.CreateCalendarObject(t.Context(), calID, fmt.Sprintf("e%d.ics", i), []byte(ics)); err != nil {
 			t.Fatal(err)
 		}
 		vcf := fmt.Sprintf("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:c%d\r\nFN:C%d\r\nEND:VCARD\r\n", i, i)
-		if _, err := card.CreateCard(bookID, fmt.Sprintf("c%d.vcf", i), []byte(vcf)); err != nil {
+		if _, err := card.CreateCard(t.Context(), bookID, fmt.Sprintf("c%d.vcf", i), []byte(vcf)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -47,7 +47,7 @@ func TestDoctorScanCapInSQL(t *testing.T) {
 		{n, n, false},
 		{n - 1, n - 1, true},
 	} {
-		report, err := q.Doctor(tc.cap)
+		report, err := q.Doctor(t.Context(), tc.cap)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,12 +59,12 @@ func TestDoctorScanCapInSQL(t *testing.T) {
 	}
 
 	// The in-data searches take the same cap; a small table is never truncated.
-	objs, truncated, err := q.Objects(storage.AdminObjectQuery{
+	objs, truncated, err := q.Objects(t.Context(), storage.AdminObjectQuery{
 		CalendarID: calID.Calendar, Match: "VEVENT", InData: true})
 	if err != nil || len(objs) != n || truncated {
 		t.Errorf("Objects in-data = %d rows, truncated=%t, err=%v; want %d, false", len(objs), truncated, err, n)
 	}
-	cards, truncated, err := q.CardsSearch(bookID, "VCARD", true, 0)
+	cards, truncated, err := q.CardsSearch(t.Context(), bookID, "VCARD", true, 0)
 	if err != nil || len(cards) != n || truncated {
 		t.Errorf("CardsSearch in-data = %d rows, truncated=%t, err=%v; want %d, false", len(cards), truncated, err, n)
 	}
@@ -77,7 +77,7 @@ func TestDoctorScanCapInSQL(t *testing.T) {
 func TestDoctorIMipPendingErrors(t *testing.T) {
 	db := openContactsScratchDB(t, "calserver_d_doctorimip")
 	cal := &storage.CalDAV{DB: db}
-	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	calID, err := cal.CreateCalendar(t.Context(), "principals/admin", "default", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestDoctorIMipPendingErrors(t *testing.T) {
 		"ORGANIZER:mailto:admin@example.org\r\n" +
 		"ATTENDEE;SCHEDULE-STATUS=\"1.0;Scheduling message is queued for delivery\":mailto:bob@example.org\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
-	if _, err := cal.CreateCalendarObject(calID, "pending.ics", []byte(ics)); err != nil {
+	if _, err := cal.CreateCalendarObject(t.Context(), calID, "pending.ics", []byte(ics)); err != nil {
 		t.Fatal(err)
 	}
 	q := &storage.AdminQueries{DB: db}
@@ -98,7 +98,7 @@ func TestDoctorIMipPendingErrors(t *testing.T) {
 		return n
 	}
 
-	report, err := q.Doctor(0)
+	report, err := q.Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestDoctorIMipPendingErrors(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE jobs RENAME COLUMN args TO args_gone`); err != nil {
 		t.Fatal(err)
 	}
-	if report, err := q.Doctor(0); err == nil {
+	if report, err := q.Doctor(t.Context(), 0); err == nil {
 		t.Fatalf("Doctor with a broken jobs query succeeded (%d stale findings); want an error", stale(report))
 	}
 
@@ -118,7 +118,7 @@ func TestDoctorIMipPendingErrors(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE jobs CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	report, err = q.Doctor(0)
+	report, err = q.Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("Doctor without a jobs table: %v", err)
 	}

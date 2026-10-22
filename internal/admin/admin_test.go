@@ -5,6 +5,7 @@ package admin
 // render smoke test — template field mistakes only fail at execute time.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -31,12 +32,12 @@ type fakeStore struct{}
 
 func i64(v int64) *int64 { return &v }
 
-func (fakeStore) Counts() (*storage.AdminCounts, error) {
+func (fakeStore) Counts(ctx context.Context) (*storage.AdminCounts, error) {
 	return &storage.AdminCounts{Principals: 3, Users: 2, Calendars: 1,
 		CalendarInstances: 2, CalendarObjects: 2, AddressBooks: 1, Cards: 1}, nil
 }
 
-func (fakeStore) RecentChanges(limit int) ([]storage.AdminChange, error) {
+func (fakeStore) RecentChanges(ctx context.Context, limit int) ([]storage.AdminChange, error) {
 	return []storage.AdminChange{
 		{Kind: "calendar", CollectionID: "7", CollectionURI: "default",
 			PrincipalURI: "principals/alice", ObjectURI: "a.ics", SyncToken: 4,
@@ -47,14 +48,14 @@ func (fakeStore) RecentChanges(limit int) ([]storage.AdminChange, error) {
 	}, nil
 }
 
-func (fakeStore) AuthDiagnostics() (*storage.AdminAuthDiagnostics, error) {
+func (fakeStore) AuthDiagnostics(ctx context.Context) (*storage.AdminAuthDiagnostics, error) {
 	return &storage.AdminAuthDiagnostics{
 		PrincipalsWithoutUser: []string{"principals/ghost"},
 		UsersWithoutPrincipal: []string{"orphan"},
 	}, nil
 }
 
-func (fakeStore) UserForPrincipal(principalURI string) (*storage.AdminUserRow, error) {
+func (fakeStore) UserForPrincipal(ctx context.Context, principalURI string) (*storage.AdminUserRow, error) {
 	if principalURI == "principals/alice" {
 		return &storage.AdminUserRow{Username: "alice",
 			DigestA1: auth.DigestA1("alice", "SabreDAV", "hunter2")}, nil
@@ -62,14 +63,14 @@ func (fakeStore) UserForPrincipal(principalURI string) (*storage.AdminUserRow, e
 	return nil, nil
 }
 
-func (fakeStore) LookupCalendar(principalURI, uri string) (string, error) {
+func (fakeStore) LookupCalendar(ctx context.Context, principalURI, uri string) (string, error) {
 	if principalURI == "principals/alice" && uri == "default" {
 		return "7", nil
 	}
 	return "", nil
 }
 
-func (fakeStore) CalendarInstances(calendarID string) ([]storage.AdminCalendarInstance, error) {
+func (fakeStore) CalendarInstances(ctx context.Context, calendarID string) ([]storage.AdminCalendarInstance, error) {
 	return []storage.AdminCalendarInstance{
 		{InstanceID: "10", CalendarID: "7", PrincipalURI: "principals/alice",
 			URI: "default", Access: 1, DisplayName: "Alice's calendar", Color: "#ff0000",
@@ -80,7 +81,7 @@ func (fakeStore) CalendarInstances(calendarID string) ([]storage.AdminCalendarIn
 	}, nil
 }
 
-func (fakeStore) CalendarMeta(calendarID string) (*storage.AdminCalendarMeta, error) {
+func (fakeStore) CalendarMeta(ctx context.Context, calendarID string) (*storage.AdminCalendarMeta, error) {
 	if calendarID != "7" {
 		return nil, nil
 	}
@@ -88,7 +89,7 @@ func (fakeStore) CalendarMeta(calendarID string) (*storage.AdminCalendarMeta, er
 		ObjectCount: 2, TotalSize: int64(2 * len(testICS))}, nil
 }
 
-func (fakeStore) PropertyRows(path string) ([]storage.AdminPropRow, error) {
+func (fakeStore) PropertyRows(ctx context.Context, path string) ([]storage.AdminPropRow, error) {
 	return []storage.AdminPropRow{
 		{Path: path, Name: "{DAV:}note", ValueType: 1, Value: "global note"},
 		{Path: path + "/\nprincipals/bob", Name: "{http://apple.com/ns/ical/}calendar-color",
@@ -98,7 +99,7 @@ func (fakeStore) PropertyRows(path string) ([]storage.AdminPropRow, error) {
 	}, nil
 }
 
-func (fakeStore) AddressBook(id string) (*storage.AdminAddressBook, error) {
+func (fakeStore) AddressBook(ctx context.Context, id string) (*storage.AdminAddressBook, error) {
 	if id != "3" {
 		return nil, nil
 	}
@@ -107,7 +108,7 @@ func (fakeStore) AddressBook(id string) (*storage.AdminAddressBook, error) {
 		TotalSize: int64(len(testVCF))}, nil
 }
 
-func (fakeStore) LookupAddressBook(principalURI, uri string) (string, error) {
+func (fakeStore) LookupAddressBook(ctx context.Context, principalURI, uri string) (string, error) {
 	if principalURI == "principals/alice" && uri == "contacts" {
 		return "3", nil
 	}
@@ -125,7 +126,7 @@ func storedRow(uri string, data string) storage.AdminObjectRow {
 		LastOccurrence: den.LastOccurrence}
 }
 
-func (fakeStore) Objects(q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error) {
+func (fakeStore) Objects(ctx context.Context, q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error) {
 	rows := []storage.AdminObjectRow{storedRow("a.ics", testICS)}
 	if q.Match != "" && !strings.Contains("a.ics evt-1", strings.ToLower(q.Match)) {
 		rows = nil
@@ -133,7 +134,7 @@ func (fakeStore) Objects(q storage.AdminObjectQuery) ([]storage.AdminObjectRow, 
 	return rows, false, nil
 }
 
-func (fakeStore) Object(calendarID, uri string) (*storage.AdminObjectDetail, error) {
+func (fakeStore) Object(ctx context.Context, calendarID, uri string) (*storage.AdminObjectDetail, error) {
 	switch uri {
 	case "a.ics":
 		return &storage.AdminObjectDetail{Row: storedRow("a.ics", testICS),
@@ -147,12 +148,12 @@ func (fakeStore) Object(calendarID, uri string) (*storage.AdminObjectDetail, err
 	return nil, nil
 }
 
-func (fakeStore) CardsSearch(bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error) {
+func (fakeStore) CardsSearch(ctx context.Context, bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error) {
 	return []storage.AdminCardRow{{URI: "card1.vcf", ETag: "abc",
 		Size: int64(len(testVCF)), LastModified: i64(1750000000)}}, false, nil
 }
 
-func (fakeStore) Card(bookID, uri string) (*storage.AdminCardDetail, error) {
+func (fakeStore) Card(ctx context.Context, bookID, uri string) (*storage.AdminCardDetail, error) {
 	if uri != "card1.vcf" {
 		return nil, nil
 	}

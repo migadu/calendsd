@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -11,15 +12,15 @@ import (
 // handleDoctor runs the read-only invariant checks (ADMIN-PLAN.md §3.7) and
 // reports every finding. Exit code 1 when anything is wrong, so it can sit
 // in monitoring next to `calctl health`.
-func handleDoctor(args []string) {
+func handleDoctor(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("doctor", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
 	dsnOverride := dbFlag(flags)
 	scanCap := flags.Int("scan-cap", 0, "Max objects/cards to deep-scan per table (0 = default 5000)")
 	flags.Parse(args)
 
-	q := openAdminQueries(*dsnOverride)
-	report, err := q.Doctor(*scanCap)
+	q := openAdminQueries(ctx, *dsnOverride)
+	report, err := q.Doctor(ctx, *scanCap)
 	if err != nil {
 		fatalf("Doctor run failed: %v", err)
 	}

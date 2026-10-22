@@ -48,11 +48,11 @@ func TestAdvisoryLockerSerializesAcrossInstances(t *testing.T) {
 	nodeB := &caldav.AdvisoryLocker{DB: db} // a "second node" — independent in-process locks
 
 	const path = "calendars/alice/home/e1.ics"
-	unlockA := nodeA.Lock(path)
+	unlockA := nodeA.Lock(t.Context(), path)
 
 	acquired := make(chan struct{})
 	go func() {
-		unlockB := nodeB.Lock(path)
+		unlockB := nodeB.Lock(t.Context(), path)
 		close(acquired)
 		unlockB()
 	}()
@@ -72,9 +72,9 @@ func TestAdvisoryLockerSerializesAcrossInstances(t *testing.T) {
 	}
 
 	// A different object is not blocked by an unrelated held lock.
-	other := nodeA.Lock("calendars/alice/home/e2.ics")
+	other := nodeA.Lock(t.Context(), "calendars/alice/home/e2.ics")
 	done := make(chan struct{})
-	go func() { u := nodeB.Lock("calendars/alice/home/e3.ics"); close(done); u() }()
+	go func() { u := nodeB.Lock(t.Context(), "calendars/alice/home/e3.ics"); close(done); u() }()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -92,9 +92,9 @@ func TestAdvisoryLockerWaitIsBounded(t *testing.T) {
 	nodeB := &caldav.AdvisoryLocker{DB: db, Wait: 200 * time.Millisecond}
 
 	const path = "calendars/alice/home/e1.ics"
-	unlockA := nodeA.Lock(path)
+	unlockA := nodeA.Lock(t.Context(), path)
 	acquired := make(chan func())
-	go func() { acquired <- nodeB.Lock(path) }()
+	go func() { acquired <- nodeB.Lock(t.Context(), path) }()
 	select {
 	case unlockB := <-acquired:
 		unlockB()

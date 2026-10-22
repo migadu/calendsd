@@ -53,7 +53,7 @@ type ShareNotice struct {
 // SharePolicy reports a recipient domain's share_notify setting ("off" or
 // "email"). domain is lowercased.
 type SharePolicy interface {
-	ShareNotify(domain string) (string, error)
+	ShareNotify(ctx context.Context, domain string) (string, error)
 }
 
 // SharedInstance is the current state of a sharee's instance of a calendar.
@@ -69,14 +69,14 @@ type SharedInstance struct {
 type ShareLookup interface {
 	// SharedInstance returns principal's instance of calendarID, or nil (and
 	// no error) when they hold none.
-	SharedInstance(calendarID, principal string) (*SharedInstance, error)
+	SharedInstance(ctx context.Context, calendarID, principal string) (*SharedInstance, error)
 }
 
 // PrincipalLookup resolves a principal's properties (displayname, the
 // canonical {http://sabredav.org/ns}email-address). A nil principal with no
 // error means it does not exist.
 type PrincipalLookup interface {
-	PrincipalByPath(path string) (*acl.Principal, error)
+	PrincipalByPath(ctx context.Context, path string) (*acl.Principal, error)
 }
 
 // ShareQueue is the narrow view of internal/jobs.Queue the notifier needs: a
@@ -169,7 +169,7 @@ func (m *ShareMailer) NotifyShare(r *http.Request, n ShareNotice) {
 		Principal: n.Principal, InstanceID: n.InstanceID, InstanceURI: n.InstanceURI,
 		Comment: capComment(n.Comment),
 	}
-	mailbox, err := m.screen(job.Principal, job.Owner)
+	mailbox, err := m.screen(r.Context(), job.Principal, job.Owner)
 	if err != nil {
 		m.record(job, err)
 		return
@@ -178,7 +178,7 @@ func (m *ShareMailer) NotifyShare(r *http.Request, n ShareNotice) {
 
 	if m.Durable == nil {
 		// No queue: the same validation and framing the worker runs, once.
-		m.record(job, m.deliver(job))
+		m.record(job, m.deliver(r.Context(), job))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -195,20 +195,20 @@ func (m *ShareMailer) NotifyShare(r *http.Request, n ShareNotice) {
 // screen applies the checks that don't depend on the instance's current
 // state: exclusions, the canonical mailbox, the recipient domain's policy,
 // and the feature's own configuration. It returns the mailbox to send to.
-func (m *ShareMailer) screen(principal, owner string) (string, error) {
+func (m *ShareMailer) screen(ctx context.Context, principal, owner string) (string, error) {
 	if principal == "" || principal == owner {
 		return "", &shareSkip{outcome: "skipped_excluded"}
 	}
 	if m.IsResource != nil && m.IsResource(principal) {
 		return "", &shareSkip{outcome: "skipped_excluded"}
 	}
-	mailbox, err := m.mailboxOf(principal)
+	mailbox, err := m.mailboxOf(ctx, principal)
 	if err != nil {
 		return "", err
 	}
 	policy := "off"
 	if m.Policy != nil {
-		p, err := m.Policy.ShareNotify(mailboxDomain(mailbox))
+		p, err := m.Policy.ShareNotify(ctx, mailboxDomain(mailbox))
 		if err != nil {
 			return "", &shareRetry{outcome: "policy_error", err: err}
 		}
@@ -228,11 +228,11 @@ func (m *ShareMailer) screen(principal, owner string) (string, error) {
 
 // mailboxOf resolves a principal's canonical mailbox — never the address the
 // sharer typed, nor anything inferred from the principal URI.
-func (m *ShareMailer) mailboxOf(principal string) (string, error) {
+func (m *ShareMailer) mailboxOf(ctx context.Context, principal string) (string, error) {
 	if m.Principals == nil {
 		return "", &shareSkip{outcome: "invalid_recipient"}
 	}
-	p, err := m.Principals.PrincipalByPath(principal)
+	p, err := m.Principals.PrincipalByPath(ctx, principal)
 	if err != nil {
 		return "", &shareRetry{outcome: "lookup_error", err: err}
 	}
@@ -246,11 +246,11 @@ func (m *ShareMailer) mailboxOf(principal string) (string, error) {
 // deliver revalidates job against current state and sends it. nil means sent;
 // a *shareSkip is a terminal decision not to send; a *shareRetry is transient;
 // anything else is a terminal send failure.
-func (m *ShareMailer) deliver(job shareJob) error {
+func (m *ShareMailer) deliver(ctx context.Context, job shareJob) error {
 	if m.Shares == nil {
 		return &shareSkip{outcome: "skipped_obsolete"}
 	}
-	inst, err := m.Shares.SharedInstance(job.CalendarID, job.Principal)
+	inst, err := m.Shares.SharedInstance(ctx, job.CalendarID, job.Principal)
 	if err != nil {
 		return &shareRetry{outcome: "lookup_error", err: err}
 	}
@@ -258,7 +258,7 @@ func (m *ShareMailer) deliver(job shareJob) error {
 		(inst.Access != AccessRead && inst.Access != AccessReadWrite) {
 		return &shareSkip{outcome: "skipped_obsolete"}
 	}
-	mailbox, err := m.screen(job.Principal, inst.OwnerPrincipal)
+	mailbox, err := m.screen(ctx, job.Principal, inst.OwnerPrincipal)
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func (m *ShareMailer) deliver(job shareJob) error {
 	if !strings.EqualFold(mailbox, job.Mailbox) {
 		return &shareSkip{outcome: "skipped_obsolete"}
 	}
-	owner, err := m.Principals.PrincipalByPath(inst.OwnerPrincipal)
+	owner, err := m.Principals.PrincipalByPath(ctx, inst.OwnerPrincipal)
 	if err != nil {
 		return &shareRetry{outcome: "lookup_error", err: err}
 	}
@@ -279,12 +279,12 @@ func (m *ShareMailer) deliver(job shareJob) error {
 }
 
 // DurableHandler is the internal/jobs handler for the share_notify worker.
-func (m *ShareMailer) DurableHandler(_ context.Context, j jobs.Job) error {
+func (m *ShareMailer) DurableHandler(ctx context.Context, j jobs.Job) error {
 	var job shareJob
 	if err := json.Unmarshal(j.Args, &job); err != nil {
 		return jobs.Discard(fmt.Errorf("share_notify: unparseable job args: %w", err))
 	}
-	err := m.deliver(job)
+	err := m.deliver(ctx, job)
 	var skip *shareSkip
 	var retry *shareRetry
 	switch {

@@ -1,6 +1,7 @@
 package caldav
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http"
 	"regexp"
@@ -25,7 +26,7 @@ func (p *Plugin) handleExport(w http.ResponseWriter, r *http.Request) (bool, err
 	if err != nil {
 		return true, err
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return true, err
 	}
@@ -71,7 +72,7 @@ func (p *Plugin) handleExport(w http.ResponseWriter, r *http.Request) (bool, err
 		format = "application/calendar+json"
 	}
 
-	blobs, err := p.exportBlobs(calNode, path, start, end, componentType)
+	blobs, err := p.exportBlobs(r.Context(), calNode, path, start, end, componentType)
 	if err != nil {
 		return true, err
 	}
@@ -80,7 +81,7 @@ func (p *Plugin) handleExport(w http.ResponseWriter, r *http.Request) (bool, err
 		return true, err
 	}
 	if expand {
-		merged, err = ical.Expand(merged, start, end, p.calendarTimeZone(path))
+		merged, err = ical.Expand(merged, start, end, p.calendarTimeZone(r.Context(), path))
 		if err != nil {
 			return true, err
 		}
@@ -135,8 +136,8 @@ const maxExportObjects = 50000
 
 // exportBlobs collects the calendar objects to merge, filtered when
 // start/end/componentType are given.
-func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Time, componentType string) ([][]byte, error) {
-	objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+func (p *Plugin) exportBlobs(ctx context.Context, calNode *Calendar, path string, start, end time.Time, componentType string) ([][]byte, error) {
+	objects, err := calNode.backend.CalendarObjects(ctx, calNode.Info.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +153,7 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 			Name:      name,
 			TimeRange: &TimeRange{Start: start, End: end},
 		}}}
-		validator = &Validator{Loc: p.calendarTimeZone(path)}
+		validator = &Validator{Loc: p.calendarTimeZone(ctx, path)}
 	}
 	var out [][]byte
 	for _, obj := range objects {

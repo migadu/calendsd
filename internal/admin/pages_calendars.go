@@ -32,21 +32,21 @@ func (a *App) calendarData(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	meta, err := a.Store.CalendarMeta(id)
+	meta, err := a.Store.CalendarMeta(r.Context(), id)
 	if err != nil {
 		return nil, err
 	}
 	if meta == nil {
 		return nil, fmt.Errorf("%w: calendar %s", errNotFound, id)
 	}
-	instances, err := a.Store.CalendarInstances(id)
+	instances, err := a.Store.CalendarInstances(r.Context(), id)
 	if err != nil {
 		return nil, err
 	}
 	d := &CalendarDetail{ID: id, Meta: meta}
 	for _, in := range instances {
 		path := collectionPath("calendars", in.PrincipalURI, in.URI)
-		props, err := a.Store.PropertyRows(path)
+		props, err := a.Store.PropertyRows(r.Context(), path)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +66,7 @@ func (a *App) addressBookData(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	book, err := a.Store.AddressBook(id)
+	book, err := a.Store.AddressBook(r.Context(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (a *App) addressBookData(r *http.Request) (any, error) {
 		return nil, fmt.Errorf("%w: address book %s", errNotFound, id)
 	}
 	path := collectionPath("addressbooks", book.PrincipalURI, book.URI)
-	props, err := a.Store.PropertyRows(path)
+	props, err := a.Store.PropertyRows(r.Context(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (a *App) resolveCalendar(r *http.Request) (string, error) {
 	if principal == "" || uri == "" {
 		return "", fmt.Errorf("%w: need ?id= or ?principal=&uri=", errBadRequest)
 	}
-	id, err := a.Store.LookupCalendar(principal, uri)
+	id, err := a.Store.LookupCalendar(r.Context(), principal, uri)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +116,7 @@ func (a *App) resolveAddressBook(r *http.Request) (string, error) {
 	if principal == "" || uri == "" {
 		return "", fmt.Errorf("%w: need ?id= or ?principal=&uri=", errBadRequest)
 	}
-	id, err := a.Store.LookupAddressBook(principal, uri)
+	id, err := a.Store.LookupAddressBook(r.Context(), principal, uri)
 	if err != nil {
 		return "", err
 	}

@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -28,7 +29,7 @@ func (a *App) objectsData(r *http.Request) (any, error) {
 	id := q.Get("calendar")
 	if id == "" {
 		var err error
-		if id, err = a.resolveCalendarParam(q.Get("principal"), q.Get("uri")); err != nil {
+		if id, err = a.resolveCalendarParam(r.Context(), q.Get("principal"), q.Get("uri")); err != nil {
 			return nil, err
 		}
 	}
@@ -49,18 +50,18 @@ func (a *App) objectsData(r *http.Request) (any, error) {
 			return nil, fmt.Errorf("%w: limit: %v", errBadRequest, err)
 		}
 	}
-	objects, truncated, err := a.Store.Objects(query)
+	objects, truncated, err := a.Store.Objects(r.Context(), query)
 	if err != nil {
 		return nil, err
 	}
 	return &ObjectsData{CalendarID: id, Query: query.Match, Objects: objects, Truncated: truncated}, nil
 }
 
-func (a *App) resolveCalendarParam(principal, uri string) (string, error) {
+func (a *App) resolveCalendarParam(ctx context.Context, principal, uri string) (string, error) {
 	if principal == "" || uri == "" {
 		return "", fmt.Errorf("%w: need ?calendar= or ?principal=&uri=", errBadRequest)
 	}
-	id, err := a.Store.LookupCalendar(principal, uri)
+	id, err := a.Store.LookupCalendar(ctx, principal, uri)
 	if err != nil {
 		return "", err
 	}
@@ -115,7 +116,7 @@ func (a *App) objectData(r *http.Request) (any, error) {
 	if id == "" || uri == "" {
 		return nil, fmt.Errorf("%w: need ?calendar=&uri=", errBadRequest)
 	}
-	obj, err := a.Store.Object(id, uri)
+	obj, err := a.Store.Object(r.Context(), id, uri)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +193,7 @@ func (a *App) cardsData(r *http.Request) (any, error) {
 			return nil, fmt.Errorf("%w: limit: %v", errBadRequest, err)
 		}
 	}
-	cards, truncated, err := a.Store.CardsSearch(id, q.Get("match"), q.Get("indata") == "1", limit)
+	cards, truncated, err := a.Store.CardsSearch(r.Context(), id, q.Get("match"), q.Get("indata") == "1", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +217,7 @@ func (a *App) cardData(r *http.Request) (any, error) {
 	if id == "" || uri == "" {
 		return nil, fmt.Errorf("%w: need ?book=&uri=", errBadRequest)
 	}
-	card, err := a.Store.Card(id, uri)
+	card, err := a.Store.Card(r.Context(), id, uri)
 	if err != nil {
 		return nil, err
 	}

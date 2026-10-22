@@ -66,7 +66,7 @@ func (a *App) schedulingData(r *http.Request) (any, error) {
 	if a.Scheduling == nil {
 		d.InboxUnavailable = true
 	} else {
-		objects, err := a.Scheduling.SchedulingObjects(principal)
+		objects, err := a.Scheduling.SchedulingObjects(r.Context(), principal)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +74,7 @@ func (a *App) schedulingData(r *http.Request) (any, error) {
 			d.Inbox = append(d.Inbox, parseInboxItem(o))
 		}
 	}
-	invites, err := a.Store.PendingShareInvites(principal)
+	invites, err := a.Store.PendingShareInvites(r.Context(), principal)
 	if err != nil {
 		return nil, err
 	}
@@ -165,17 +165,17 @@ func (a *App) syncData(r *http.Request) (any, error) {
 	}
 	d := &SyncData{Kind: kind, ID: id, Token: q.Get("token")}
 	var err error
-	if d.Log, err = a.Store.ChangeLog(kind, id, limit); err != nil {
+	if d.Log, err = a.Store.ChangeLog(r.Context(), kind, id, limit); err != nil {
 		return nil, err
 	}
 	// The sync REPORT carries the prefixed token; the backends take the
 	// bare counter. Accept either here.
 	token := strings.TrimPrefix(d.Token, syncTokenPrefix)
 	if kind == "calendar" {
-		d.Preview, err = a.Calendars.ChangesForCalendar(
+		d.Preview, err = a.Calendars.ChangesForCalendar(r.Context(),
 			caldav.CalendarID{Calendar: id}, token, 1, 500)
 	} else {
-		d.Preview, err = a.AddressBooks.ChangesForAddressBook(id, token, 1, 500)
+		d.Preview, err = a.AddressBooks.ChangesForAddressBook(r.Context(), id, token, 1, 500)
 	}
 	if err != nil {
 		return nil, err
@@ -203,7 +203,7 @@ func (a *App) doctorData(r *http.Request) (any, error) {
 			return nil, fmt.Errorf("%w: scancap: %v", errBadRequest, err)
 		}
 	}
-	report, err := a.Store.Doctor(scanCap)
+	report, err := a.Store.Doctor(r.Context(), scanCap)
 	if err != nil {
 		return nil, err
 	}

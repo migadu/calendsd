@@ -44,8 +44,8 @@ func (a *AdvisoryLocker) logger() *slog.Logger {
 
 // Lock takes the same-node stripe, then the cross-node advisory lock, and
 // returns an unlock that releases both.
-func (a *AdvisoryLocker) Lock(path string) func() {
-	localUnlock := a.local.Lock(path)
+func (a *AdvisoryLocker) Lock(ctx context.Context, path string) func() {
+	localUnlock := a.local.Lock(ctx, path)
 	if a.DB == nil {
 		return localUnlock
 	}

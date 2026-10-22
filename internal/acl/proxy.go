@@ -32,28 +32,28 @@ func (u *UserPrincipalNode) proxyChild(name string) (*ProxyPrincipalNode, bool) 
 	return nil, false
 }
 
-func (u *UserPrincipalNode) Child(name string) (dav.Node, error) {
+func (u *UserPrincipalNode) Child(ctx context.Context, name string) (dav.Node, error) {
 	if child, ok := u.proxyChild(name); ok {
 		return child, nil
 	}
 	return nil, dav.ErrNotFound("Principal %s has no child named %s", u.principal.URI, name)
 }
 
-func (u *UserPrincipalNode) Children() ([]dav.Node, error) {
+func (u *UserPrincipalNode) Children(ctx context.Context) ([]dav.Node, error) {
 	read, _ := u.proxyChild(proxyReadName)
 	write, _ := u.proxyChild(proxyWriteName)
 	return []dav.Node{read, write}, nil
 }
 
-func (u *UserPrincipalNode) ChildExists(name string) bool {
+func (u *UserPrincipalNode) ChildExists(ctx context.Context, name string) bool {
 	return name == proxyReadName || name == proxyWriteName
 }
 
-func (u *UserPrincipalNode) CreateFile(string, io.Reader) (string, error) {
+func (u *UserPrincipalNode) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrForbidden("Permission denied to create file")
 }
 
-func (u *UserPrincipalNode) CreateDirectory(string) error {
+func (u *UserPrincipalNode) CreateDirectory(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to create directory")
 }
 
@@ -79,11 +79,11 @@ func (p *ProxyPrincipalNode) Name() string {
 	return name
 }
 
-func (p *ProxyPrincipalNode) SetName(string) error {
+func (p *ProxyPrincipalNode) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
 
-func (p *ProxyPrincipalNode) Delete() error {
+func (p *ProxyPrincipalNode) Delete(ctx context.Context) error {
 	return dav.ErrForbidden("Permission denied to delete node")
 }
 
@@ -92,12 +92,12 @@ func (p *ProxyPrincipalNode) LastModified() time.Time { return time.Time{} }
 func (p *ProxyPrincipalNode) PrincipalURL() string      { return p.uri }
 func (p *ProxyPrincipalNode) AlternateURISet() []string { return nil }
 
-func (p *ProxyPrincipalNode) GroupMemberSet() ([]string, error) {
-	return p.backend.GroupMemberSet(p.uri)
+func (p *ProxyPrincipalNode) GroupMemberSet(ctx context.Context) ([]string, error) {
+	return p.backend.GroupMemberSet(ctx, p.uri)
 }
 
-func (p *ProxyPrincipalNode) GroupMembership() ([]string, error) {
-	return p.backend.GroupMembership(p.uri)
+func (p *ProxyPrincipalNode) GroupMembership(ctx context.Context) ([]string, error) {
+	return p.backend.GroupMembership(ctx, p.uri)
 }
 
 // ProxyResourceType is the calendarserver resourcetype element identifying this
@@ -110,7 +110,7 @@ func (p *ProxyPrincipalNode) ProxyResourceType() xml.Name {
 	return xml.Name{Space: davxml.NSCalendarServer, Local: local}
 }
 
-func (p *ProxyPrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
+func (p *ProxyPrincipalNode) Props(ctx context.Context, names []xml.Name) (map[xml.Name]any, error) {
 	out := map[xml.Name]any{}
 	for _, name := range names {
 		// Calendar Server tags proxy groups with a record-type.
@@ -127,7 +127,7 @@ func (p *ProxyPrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
 
 // PropPatch claims nothing: group-member-set writes need the server to
 // resolve their hrefs, so the acl Plugin handles them (Plugin.PrePropPatch).
-func (p *ProxyPrincipalNode) PropPatch(pp *dav.PropPatch) {}
+func (p *ProxyPrincipalNode) PropPatch(ctx context.Context, pp *dav.PropPatch) {}
 
 // ACL grants the owning user full control of their own proxy settings.
 func (p *ProxyPrincipalNode) ACL() []ACE {
@@ -143,7 +143,7 @@ func (p *ProxyPrincipalNode) Owner() string {
 // PrePropPatch implements dav.PrePropPatchHook for proxy principals: a write
 // of group-member-set is how a client (or the calendar owner) configures who
 // may act as their delegate.
-func (p *Plugin) PrePropPatch(_ context.Context, _ string, node dav.Node, pp *dav.PropPatch) error {
+func (p *Plugin) PrePropPatch(ctx context.Context, _ string, node dav.Node, pp *dav.PropPatch) error {
 	proxy, ok := node.(*ProxyPrincipalNode)
 	if !ok {
 		return nil
@@ -154,7 +154,7 @@ func (p *Plugin) PrePropPatch(_ context.Context, _ string, node dav.Node, pp *da
 		if err != nil {
 			return nil, false
 		}
-		if err := proxy.backend.SetGroupMemberSet(proxy.uri, members); err != nil {
+		if err := proxy.backend.SetGroupMemberSet(ctx, proxy.uri, members); err != nil {
 			return nil, false
 		}
 		return nil, true

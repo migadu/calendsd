@@ -412,7 +412,7 @@ func checkDatabase(ctx context.Context, o Options) []Result {
 	if err := db.PingContext(pctx); err != nil {
 		return []Result{t.result("database", Unhealthy, "", err.Error())}
 	}
-	if err := (&storage.AdminQueries{DB: db}).SchemaPresentContext(pctx); err != nil {
+	if err := (&storage.AdminQueries{DB: db}).SchemaPresent(pctx); err != nil {
 		return []Result{t.result("database", Unhealthy, "", "schema check failed: "+err.Error())}
 	}
 	return []Result{

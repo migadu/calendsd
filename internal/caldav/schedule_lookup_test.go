@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -21,26 +22,26 @@ type indexedBackend struct {
 	fullLoads, uidLookups, rangedQueries int
 }
 
-func (b *indexedBackend) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
+func (b *indexedBackend) CalendarObjects(ctx context.Context, id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
 	b.fullLoads++
-	return b.MockSchedulingBackend.CalendarObjects(id)
+	return b.MockSchedulingBackend.CalendarObjects(ctx, id)
 }
 
-func (b *indexedBackend) CalendarQuery(id caldav.CalendarID, comp string, start, end time.Time) ([]string, error) {
+func (b *indexedBackend) CalendarQuery(ctx context.Context, id caldav.CalendarID, comp string, start, end time.Time) ([]string, error) {
 	if !start.IsZero() && !end.IsZero() {
 		b.rangedQueries++
 	}
-	return b.MockSchedulingBackend.CalendarQuery(id, comp, start, end)
+	return b.MockSchedulingBackend.CalendarQuery(ctx, id, comp, start, end)
 }
 
-func (b *indexedBackend) CalendarObjectByUID(id caldav.CalendarID, uid string) (*caldav.ObjectInfo, error) {
+func (b *indexedBackend) CalendarObjectByUID(ctx context.Context, id caldav.CalendarID, uid string) (*caldav.ObjectInfo, error) {
 	b.uidLookups++
-	uris, err := b.MockSchedulingBackend.CalendarQuery(id, "", time.Time{}, time.Time{})
+	uris, err := b.MockSchedulingBackend.CalendarQuery(context.Background(), id, "", time.Time{}, time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	for _, uri := range uris {
-		obj, err := b.MockSchedulingBackend.CalendarObject(id, uri)
+		obj, err := b.MockSchedulingBackend.CalendarObject(context.Background(), id, uri)
 		if err == nil && obj != nil && strings.Contains(string(obj.CalendarData), "\r\nUID:"+uid+"\r\n") {
 			return obj, nil
 		}

@@ -575,7 +575,7 @@ func ensurePrincipalRows(ctx context.Context, tx *sql.Tx, principalURI, username
 	if exists {
 		return false, nil
 	}
-	if err := createUserRows(tx, username, BlockedDigestA1(), username, username); err != nil {
+	if err := createUserRows(ctx, tx, username, BlockedDigestA1(), username, username); err != nil {
 		return false, fmt.Errorf("creating %s: %w", principalURI, err)
 	}
 	return true, nil
@@ -644,7 +644,7 @@ VALUES ($1, $2, $3, $4, $5, $6)`,
 				bookID, card.URI, card.Data, mtime, etag, len(card.Data)); err != nil {
 				return fmt.Errorf("inserting card %s: %w", card.URI, err)
 			}
-			if err := recordChange(tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 1); err != nil {
+			if err := recordChange(ctx, tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 1); err != nil {
 				return err
 			}
 			res.CardsCreated++
@@ -663,7 +663,7 @@ UPDATE cards SET carddata = $1, lastmodified = $2, etag = $3, size = $4
 				card.Data, mtime, etag, len(card.Data), bookID, card.URI); err != nil {
 				return fmt.Errorf("updating card %s: %w", card.URI, err)
 			}
-			if err := recordChange(tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 2); err != nil {
+			if err := recordChange(ctx, tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 2); err != nil {
 				return err
 			}
 			res.CardsUpdated++

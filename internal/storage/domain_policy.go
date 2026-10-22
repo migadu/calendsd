@@ -8,6 +8,7 @@ package storage
 // for docs/local-attendee-email.md.
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"sync"
@@ -25,9 +26,9 @@ var _ caldav.SharePolicy = (*DomainPolicy)(nil)
 
 // ShareNotify returns the domain's share_notify setting, "off" when the
 // domain has no row.
-func (d *DomainPolicy) ShareNotify(domain string) (string, error) {
+func (d *DomainPolicy) ShareNotify(ctx context.Context, domain string) (string, error) {
 	var v string
-	err := d.DB.QueryRow(
+	err := d.DB.QueryRowContext(ctx,
 		`SELECT share_notify FROM domain_scheduling_policy WHERE domain = $1`,
 		strings.ToLower(domain)).Scan(&v)
 	if err == sql.ErrNoRows {
@@ -54,7 +55,7 @@ type policyEntry struct {
 }
 
 // ShareNotify implements caldav.SharePolicy.
-func (c *CachedSharePolicy) ShareNotify(domain string) (string, error) {
+func (c *CachedSharePolicy) ShareNotify(ctx context.Context, domain string) (string, error) {
 	domain = strings.ToLower(domain)
 	now := time.Now
 	if c.now != nil {
@@ -67,7 +68,7 @@ func (c *CachedSharePolicy) ShareNotify(domain string) (string, error) {
 	}
 	c.mu.Unlock()
 
-	v, err := c.Source.ShareNotify(domain)
+	v, err := c.Source.ShareNotify(ctx, domain)
 	if err != nil {
 		return "", err
 	}

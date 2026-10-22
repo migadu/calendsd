@@ -28,15 +28,15 @@ import (
 	"calserver/internal/storage"
 )
 
-func handleContacts(args []string) {
+func handleContacts(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fatalf("Usage: calctl contacts <import|summary> [options]")
 	}
 	switch sub, rest := args[0], args[1:]; sub {
 	case "import":
-		handleContactsImport(rest)
+		handleContactsImport(ctx, rest)
 	case "summary":
-		handleContactsSummary(rest)
+		handleContactsSummary(ctx, rest)
 	default:
 		fatalf("Unknown contacts subcommand: %s (want import or summary)", sub)
 	}
@@ -67,7 +67,7 @@ type stringList []string
 func (l *stringList) String() string     { return strings.Join(*l, ",") }
 func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
 
-func handleContactsImport(args []string) {
+func handleContactsImport(ctx context.Context, args []string) {
 	var opts importOptions
 	flags := flag.NewFlagSet("contacts import", flag.ExitOnError)
 	flags.StringVar(&opts.bundleDir, "bundle", "", "Path to the export bundle directory (required)")
@@ -99,7 +99,7 @@ func handleContactsImport(args []string) {
 		fatalf("%v", err)
 	}
 
-	db := openImportDB(*dsnOverride, opts.workers)
+	db := openImportDB(ctx, *dsnOverride, opts.workers)
 	defer db.Close()
 	importer := &storage.ContactImport{DB: db}
 
@@ -109,7 +109,7 @@ func handleContactsImport(args []string) {
 	}
 	// Closed explicitly, not deferred: os.Exit below skips deferred calls,
 	// and a report that failed to write must reach the exit status.
-	execErr := run.execute(context.Background())
+	execErr := run.execute(ctx)
 	reportErr := run.close()
 	if execErr != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", execErr)
@@ -146,7 +146,7 @@ func handleContactsImport(args []string) {
 // which is sized for a CLI doing one query. One connection per worker plus a
 // little headroom, and never more than the default cap, so a parallel import
 // cannot crowd out the live calserver on the shared Postgres.
-func openImportDB(dsnOverride string, workers int) *sql.DB {
+func openImportDB(ctx context.Context, dsnOverride string, workers int) *sql.DB {
 	dsn := dsnFor(dsnOverride)
 	if dsn == "" {
 		fatalf("A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
@@ -156,7 +156,7 @@ func openImportDB(dsnOverride string, workers int) *sql.DB {
 	if err != nil {
 		fatalf("Failed to open database: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
+	ctx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		fatalf("Failed to connect to database: %v", err)
@@ -584,17 +584,16 @@ func sortedActions(counts map[storage.ImportAction]int) []string {
 // principal does not exist is silent, because addressbooks.principaluri has no
 // foreign key — webmail serves it correctly while DAV discovery 404s and the
 // user sees nothing on their phone.
-func handleContactsSummary(args []string) {
+func handleContactsSummary(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("contacts summary", flag.ExitOnError)
 	runID := flags.String("run-id", "", "Restrict the totals to one run")
 	dsnOverride := dbFlag(flags)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
 	flags.Parse(args)
 
-	db := openImportDB(*dsnOverride, 1)
+	db := openImportDB(ctx, *dsnOverride, 1)
 	defer db.Close()
 	importer := &storage.ContactImport{DB: db}
-	ctx := context.Background()
 
 	summary, err := importer.Summary(ctx, *runID)
 	if err != nil {

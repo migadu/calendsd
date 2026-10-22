@@ -68,12 +68,12 @@ func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 	out := []string{current}
-	node, err := p.server.Tree.NodeForPath(current)
+	node, err := p.server.Tree.NodeForPath(ctx, current)
 	if err != nil {
 		return out, nil // principal may not be in the tree
 	}
 	if ph, ok := node.(PrincipalHolder); ok {
-		groups, err := ph.GroupMembership()
+		groups, err := ph.GroupMembership(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -117,20 +117,20 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 			return davxml.Href{p.server.BaseURI + ph.PrincipalURL() + "/"}
 		})
 		pf.Handle(davName("group-member-set"), func() any {
-			return p.principalHrefs(ph.GroupMemberSet)
+			return p.principalHrefs(pf.Context(), ph.GroupMemberSet)
 		})
 		pf.Handle(davName("group-membership"), func() any {
-			return p.principalHrefs(ph.GroupMembership)
+			return p.principalHrefs(pf.Context(), ph.GroupMembership)
 		})
 		// User principals advertise which principals' calendars they may
 		// proxy (calendarserver delegation); proxy nodes themselves do not.
 		if _, isProxy := node.(*ProxyPrincipalNode); !isProxy {
 			cs := func(local string) xml.Name { return xml.Name{Space: davxml.NSCalendarServer, Local: local} }
 			pf.Handle(cs("calendar-proxy-read-for"), func() any {
-				return p.proxyFor(ph, proxyReadName)
+				return p.proxyFor(pf.Context(), ph, proxyReadName)
 			})
 			pf.Handle(cs("calendar-proxy-write-for"), func() any {
-				return p.proxyFor(ph, proxyWriteName)
+				return p.proxyFor(pf.Context(), ph, proxyWriteName)
 			})
 		}
 	}
@@ -168,7 +168,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 
 // Methods contributes no methods to the Allow header: sabre registers the ACL
 // handler but does not advertise ACL in OPTIONS, so neither do we.
-func (p *Plugin) Methods(path string) []string { return nil }
+func (p *Plugin) Methods(ctx context.Context, path string) []string { return nil }
 
 // HandleMethod implements the ACL method (RFC 3744 §8.1), mirroring sabre's
 // DAVACL\Plugin::httpAcl.
@@ -200,7 +200,7 @@ func (p *Plugin) httpACL(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err // NodeForPath surfaces a 404 for a missing node
 	}
@@ -297,7 +297,7 @@ func (p *Plugin) principalPropertySearchReport(body []byte, path string, w http.
 	seen := map[string]bool{}
 	ms := &davxml.MultiStatus{}
 	for _, prefix := range prefixes {
-		matches, err := p.backendSearch(prefix, search, test)
+		matches, err := p.backendSearch(r.Context(), prefix, search, test)
 		if err != nil {
 			return err
 		}
@@ -322,8 +322,8 @@ func (p *Plugin) principalPropertySearchReport(body []byte, path string, w http.
 }
 
 // backendSearch runs a principal search against the collection at prefix.
-func (p *Plugin) backendSearch(prefix string, search map[xml.Name]string, test string) ([]string, error) {
-	node, err := p.server.Tree.NodeForPath(prefix)
+func (p *Plugin) backendSearch(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error) {
+	node, err := p.server.Tree.NodeForPath(ctx, prefix)
 	if err != nil {
 		return nil, nil
 	}
@@ -331,7 +331,7 @@ func (p *Plugin) backendSearch(prefix string, search map[xml.Name]string, test s
 	if !ok {
 		return nil, nil
 	}
-	return searcher.SearchPrincipals(search, test)
+	return searcher.SearchPrincipals(ctx, search, test)
 }
 
 // principalCollectionPrefixes returns the known principal collection paths.
@@ -461,14 +461,14 @@ func (e expandPropEntry) xmlName() xml.Name {
 
 // PrincipalSearcher is implemented by principal collections that can search.
 type PrincipalSearcher interface {
-	SearchPrincipals(search map[xml.Name]string, test string) ([]string, error)
+	SearchPrincipals(ctx context.Context, search map[xml.Name]string, test string) ([]string, error)
 }
 
 // proxyFor lists the user principals whose calendars this principal may act as
 // a proxy for: the parents of the proxy groups it belongs to. Backs the
 // calendarserver calendar-proxy-read-for / calendar-proxy-write-for properties.
-func (p *Plugin) proxyFor(ph PrincipalHolder, proxySuffix string) any {
-	groups, err := ph.GroupMembership()
+func (p *Plugin) proxyFor(ctx context.Context, ph PrincipalHolder, proxySuffix string) any {
+	groups, err := ph.GroupMembership(ctx)
 	if err != nil {
 		return nil
 	}
@@ -481,8 +481,8 @@ func (p *Plugin) proxyFor(ph PrincipalHolder, proxySuffix string) any {
 	return hrefs
 }
 
-func (p *Plugin) principalHrefs(fn func() ([]string, error)) any {
-	paths, err := fn()
+func (p *Plugin) principalHrefs(ctx context.Context, fn func(context.Context) ([]string, error)) any {
+	paths, err := fn(ctx)
 	if err != nil {
 		return nil
 	}
@@ -629,7 +629,7 @@ func (p *Plugin) aclPrincipalPropSetReport(body []byte, path string, w http.Resp
 		return dav.ErrBadRequest("%s", err)
 	}
 
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err
 	}

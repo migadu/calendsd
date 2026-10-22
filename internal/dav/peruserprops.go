@@ -62,11 +62,12 @@ func (p *PerUserPropsPlugin) perUserFor(ctx context.Context, path string, node N
 // values and globally stored ones; properties without a per-user value fall
 // through to the shared view.
 func (p *PerUserPropsPlugin) PropFindLate(pf *PropFind, node Node) error {
+	ctx := pf.Context()
 	perUser := p.perUserFor(pf.Context(), pf.Path(), node)
 	if perUser == "" {
 		return nil
 	}
-	return p.Backend.PropFind(perUser, pf)
+	return p.Backend.PropFind(ctx, perUser, pf)
 }
 
 // PrePropPatch implements PrePropPatchHook: for a non-owner it claims the
@@ -83,7 +84,7 @@ func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node
 		// Delegate to the storage backend through a single-shot PropPatch
 		// carrying only the claimed values.
 		inner := NewPropPatch(values)
-		if err := p.Backend.PropPatch(perUser, inner); err != nil {
+		if err := p.Backend.PropPatch(ctx, perUser, inner); err != nil {
 			return nil, false
 		}
 		result, ok := inner.Commit()

@@ -2,6 +2,7 @@ package push
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/xml"
@@ -60,7 +61,7 @@ func (p *Plugin) Init(s *dav.Server) {
 func (p *Plugin) Features() []string { return []string{"webdav-push"} }
 
 // Methods advertises POST (registration) in the Allow header.
-func (p *Plugin) Methods(path string) []string { return []string{"POST"} }
+func (p *Plugin) Methods(ctx context.Context, path string) []string { return []string{"POST"} }
 
 // collectionKey type-switches a node to its (kind, numeric id); ok is false
 // for any node that is not a push-capable collection.
@@ -126,7 +127,7 @@ func (p *Plugin) register(w http.ResponseWriter, r *http.Request, body []byte) e
 	if err != nil {
 		return err
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err
 	}

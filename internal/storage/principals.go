@@ -23,13 +23,13 @@ type Principals struct {
 // PrincipalsByPrefix lists the principals directly under prefix (one more
 // path segment, so not the proxy sub-principals), filtered in SQL rather
 // than by reading the whole table.
-func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
+func (p *Principals) PrincipalsByPrefix(ctx context.Context, prefix string) ([]acl.Principal, error) {
 	under, deeper := "%", "%/%" // prefix "": URIs with no slash at all
 	if prefix != "" {
 		under = escapeLike(prefix) + "/%"
 		deeper = under + "/%"
 	}
-	rows, err := p.DB.Query(`SELECT uri, email, displayname FROM principals
+	rows, err := p.DB.QueryContext(ctx, `SELECT uri, email, displayname FROM principals
  WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'`, under, deeper)
 	if err != nil {
 		return nil, err
@@ -46,12 +46,7 @@ func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) 
 	return out, rows.Err()
 }
 
-func (p *Principals) PrincipalByPath(path string) (*acl.Principal, error) {
-	return p.PrincipalByPathContext(context.Background(), path)
-}
-
-// PrincipalByPathContext is PrincipalByPath bounded by ctx.
-func (p *Principals) PrincipalByPathContext(ctx context.Context, path string) (*acl.Principal, error) {
+func (p *Principals) PrincipalByPath(ctx context.Context, path string) (*acl.Principal, error) {
 	principal, err := scanPrincipal(p.DB.QueryRowContext(ctx,
 		`SELECT uri, email, displayname FROM principals WHERE uri = $1`, path))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -76,8 +71,8 @@ func scanPrincipal(row rowScanner) (*acl.Principal, error) {
 	return &principal, nil
 }
 
-func (p *Principals) GroupMemberSet(principal string) ([]string, error) {
-	return p.groupQuery(`
+func (p *Principals) GroupMemberSet(ctx context.Context, principal string) ([]string, error) {
+	return p.groupQuery(ctx, `
 SELECT members.uri
   FROM groupmembers
   JOIN principals AS groups ON groupmembers.principal_id = groups.id
@@ -85,8 +80,8 @@ SELECT members.uri
  WHERE groups.uri = $1`, principal)
 }
 
-func (p *Principals) GroupMembership(principal string) ([]string, error) {
-	return p.groupQuery(`
+func (p *Principals) GroupMembership(ctx context.Context, principal string) ([]string, error) {
+	return p.groupQuery(ctx, `
 SELECT groups.uri
   FROM groupmembers
   JOIN principals AS groups ON groupmembers.principal_id = groups.id
@@ -97,21 +92,21 @@ SELECT groups.uri
 // SetGroupMemberSet replaces a group's members, transcribing sabre's PDO
 // setGroupMemberSet: resolve principal ids, delete the old rows, insert the new
 // ones. The group and every member must already exist as principals.
-func (p *Principals) SetGroupMemberSet(principal string, members []string) error {
-	return withTx(p.DB, func(tx *sql.Tx) error {
+func (p *Principals) SetGroupMemberSet(ctx context.Context, principal string, members []string) error {
+	return withTx(ctx, p.DB, func(tx *sql.Tx) error {
 		var groupID int64
-		if err := tx.QueryRow(`SELECT id FROM principals WHERE uri = $1`, principal).Scan(&groupID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM principals WHERE uri = $1`, principal).Scan(&groupID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DELETE FROM groupmembers WHERE principal_id = $1`, groupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM groupmembers WHERE principal_id = $1`, groupID); err != nil {
 			return err
 		}
 		for _, member := range members {
 			var memberID int64
-			if err := tx.QueryRow(`SELECT id FROM principals WHERE uri = $1`, member).Scan(&memberID); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM principals WHERE uri = $1`, member).Scan(&memberID); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO groupmembers (principal_id, member_id) VALUES ($1, $2)`,
 				groupID, memberID); err != nil {
 				return err
@@ -129,7 +124,7 @@ var searchColumns = map[xml.Name]string{
 
 // SearchPrincipals implements a substring search over the searchable
 // principal columns. Port of PrincipalBackend\PDO::searchPrincipals.
-func (p *Principals) SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error) {
+func (p *Principals) SearchPrincipals(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error) {
 	if len(search) == 0 {
 		return nil, nil
 	}
@@ -155,7 +150,7 @@ func (p *Principals) SearchPrincipals(prefix string, search map[xml.Name]string,
 	if test == "anyof" {
 		joiner = " OR "
 	}
-	rows, err := p.DB.Query(
+	rows, err := p.DB.QueryContext(ctx,
 		"SELECT uri FROM principals WHERE uri LIKE $1 AND ("+strings.Join(clauses, joiner)+")", args...)
 	if err != nil {
 		return nil, err
@@ -172,8 +167,8 @@ func (p *Principals) SearchPrincipals(prefix string, search map[xml.Name]string,
 	return out, rows.Err()
 }
 
-func (p *Principals) groupQuery(query, principal string) ([]string, error) {
-	rows, err := p.DB.Query(query, principal)
+func (p *Principals) groupQuery(ctx context.Context, query, principal string) ([]string, error) {
+	rows, err := p.DB.QueryContext(ctx, query, principal)
 	if err != nil {
 		return nil, err
 	}

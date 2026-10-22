@@ -189,7 +189,7 @@ func (p *Plugin) inFreeBusyAudience(ctx context.Context, node dav.Node, principa
 	if p.FreeBusyPolicy == nil {
 		return p.sameDomainAsOwner(ctx, node)
 	}
-	vis, err := p.FreeBusyPolicy.FreeBusyVisibility(owner)
+	vis, err := p.FreeBusyPolicy.FreeBusyVisibility(ctx, owner)
 	if err != nil {
 		slog.Warn("reading free-busy visibility; denying", "owner", owner, "err", err)
 		return false
@@ -204,7 +204,7 @@ func (p *Plugin) inFreeBusyAudience(ctx context.Context, node dav.Node, principa
 		}
 		if addresses == nil {
 			addresses = []string{}
-			if n, err := p.server.Tree.NodeForPath(dav.Principal(ctx)); err == nil {
+			if n, err := p.server.Tree.NodeForPath(ctx, dav.Principal(ctx)); err == nil {
 				if ph, ok := n.(PrincipalHolder); ok {
 					for _, a := range ph.AlternateURISet() {
 						addresses = append(addresses, strings.ToLower(a))
@@ -233,8 +233,8 @@ func (p *Plugin) sameDomainAsOwner(ctx context.Context, node dav.Node) bool {
 	if owner == current {
 		return true
 	}
-	ownerDomain := p.principalEmailDomain(owner)
-	return ownerDomain != "" && ownerDomain == p.principalEmailDomain(current)
+	ownerDomain := p.principalEmailDomain(ctx, owner)
+	return ownerDomain != "" && ownerDomain == p.principalEmailDomain(ctx, current)
 }
 
 // FilterChildren scopes the top-level principal and home-collection listings
@@ -259,7 +259,7 @@ func (p *Plugin) FilterChildren(ctx context.Context, parentPath string, children
 	if slices.Contains(p.AdminPrincipals, current) {
 		return children
 	}
-	myDomain := p.principalEmailDomain(current)
+	myDomain := p.principalEmailDomain(ctx, current)
 	kept := make([]dav.Node, 0, len(children))
 	for _, child := range children {
 		owned, ok := child.(interface{ Owner() string })
@@ -272,7 +272,7 @@ func (p *Plugin) FilterChildren(ctx context.Context, parentPath string, children
 			kept = append(kept, child)
 			continue
 		}
-		if myDomain != "" && p.principalEmailDomain(owner) == myDomain {
+		if myDomain != "" && p.principalEmailDomain(ctx, owner) == myDomain {
 			kept = append(kept, child)
 		}
 	}
@@ -288,10 +288,10 @@ func (p *Plugin) sameDomainPrincipals(ctx context.Context, principals []string) 
 	if current == "" || slices.Contains(p.AdminPrincipals, current) {
 		return principals
 	}
-	myDomain := p.principalEmailDomain(current)
+	myDomain := p.principalEmailDomain(ctx, current)
 	out := make([]string, 0, len(principals))
 	for _, pr := range principals {
-		if pr == current || (myDomain != "" && p.principalEmailDomain(pr) == myDomain) {
+		if pr == current || (myDomain != "" && p.principalEmailDomain(ctx, pr) == myDomain) {
 			out = append(out, pr)
 		}
 	}
@@ -300,8 +300,8 @@ func (p *Plugin) sameDomainPrincipals(ctx context.Context, principals []string) 
 
 // principalEmailDomain returns the lowercased domain of a principal's
 // {sabredav}email-address property, or "" when there is none.
-func (p *Plugin) principalEmailDomain(principalPath string) string {
-	node, err := p.server.Tree.NodeForPath(principalPath)
+func (p *Plugin) principalEmailDomain(ctx context.Context, principalPath string) string {
+	node, err := p.server.Tree.NodeForPath(ctx, principalPath)
 	if err != nil {
 		return ""
 	}
@@ -310,7 +310,7 @@ func (p *Plugin) principalEmailDomain(principalPath string) string {
 		return ""
 	}
 	emailName := xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}
-	props, err := pn.Props([]xml.Name{emailName})
+	props, err := pn.Props(ctx, []xml.Name{emailName})
 	if err != nil {
 		return ""
 	}
@@ -325,7 +325,7 @@ func (p *Plugin) principalEmailDomain(principalPath string) string {
 // privilege on path. Port of sabre's checkPrivileges (throwExceptions
 // variant).
 func (p *Plugin) CheckPrivileges(ctx context.Context, path string, privileges ...string) error {
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -372,7 +372,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	if err != nil {
 		return true, nil // URI errors surface in the method handler
 	}
-	exists := p.server.Tree.NodeExists(path)
+	exists := p.server.Tree.NodeExists(ctx, path)
 	parent := func() string {
 		parentPath, _ := pathutil.Split(path)
 		return parentPath
@@ -432,7 +432,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 			return true, nil // handler reports the bad destination
 		}
 		destParent, _ := pathutil.Split(dest)
-		if p.server.Tree.NodeExists(dest) {
+		if p.server.Tree.NodeExists(ctx, dest) {
 			if ok, err := check(destParent, "{DAV:}unbind"); !ok {
 				return ok, err
 			}

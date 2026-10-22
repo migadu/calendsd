@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"io"
@@ -21,10 +22,10 @@ type SchedulingObjectInfo struct {
 // SchedulingBackend stores schedule inbox messages (the schedulingobjects
 // table). Port of sabre's Backend\SchedulingSupport.
 type SchedulingBackend interface {
-	SchedulingObjects(principalURI string) ([]SchedulingObjectInfo, error)
-	SchedulingObject(principalURI, objectURI string) (*SchedulingObjectInfo, error)
-	CreateSchedulingObject(principalURI, objectURI string, data []byte) error
-	DeleteSchedulingObject(principalURI, objectURI string) error
+	SchedulingObjects(ctx context.Context, principalURI string) ([]SchedulingObjectInfo, error)
+	SchedulingObject(ctx context.Context, principalURI, objectURI string) (*SchedulingObjectInfo, error)
+	CreateSchedulingObject(ctx context.Context, principalURI, objectURI string, data []byte) error
+	DeleteSchedulingObject(ctx context.Context, principalURI, objectURI string) error
 }
 
 // AvailabilityBackend stores a principal's working hours: the RFC 7953
@@ -32,9 +33,9 @@ type SchedulingBackend interface {
 // (VAVAILABILITY-PLAN.md §3.1). A scheduling backend that implements it turns
 // the property on; Availability returns nil data when none is set.
 type AvailabilityBackend interface {
-	Availability(principalURI string) ([]byte, error)
-	SetAvailability(principalURI string, data []byte) error
-	DeleteAvailability(principalURI string) error
+	Availability(ctx context.Context, principalURI string) ([]byte, error)
+	SetAvailability(ctx context.Context, principalURI string, data []byte) error
+	DeleteAvailability(ctx context.Context, principalURI string) error
 }
 
 // FreeBusyVisibilityBackend stores who may see a principal's free-busy
@@ -44,8 +45,8 @@ type AvailabilityBackend interface {
 // value (the default) when nothing is set.
 type FreeBusyVisibilityBackend interface {
 	acl.FreeBusyPolicy
-	SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error
-	DeleteFreeBusyVisibility(principalURI string) error
+	SetFreeBusyVisibility(ctx context.Context, principalURI string, v acl.FreeBusyVisibility) error
+	DeleteFreeBusyVisibility(ctx context.Context, principalURI string) error
 }
 
 // Inbox is a principal's schedule inbox. Port of Schedule\Inbox.
@@ -73,15 +74,19 @@ func NewInbox(backend SchedulingBackend, principalURI string) *Inbox {
 	return &Inbox{backend: backend, principalURI: principalURI}
 }
 
-func (i *Inbox) Name() string            { return "inbox" }
-func (i *Inbox) SetName(string) error    { return dav.ErrForbidden("Permission denied to rename node") }
-func (i *Inbox) Delete() error           { return dav.ErrForbidden("Permission denied to delete node") }
+func (i *Inbox) Name() string { return "inbox" }
+func (i *Inbox) SetName(context.Context, string) error {
+	return dav.ErrForbidden("Permission denied to rename node")
+}
+func (i *Inbox) Delete(ctx context.Context) error {
+	return dav.ErrForbidden("Permission denied to delete node")
+}
 func (i *Inbox) LastModified() time.Time { return time.Time{} }
 func (i *Inbox) Owner() string           { return i.principalURI }
 func (i *Inbox) PrincipalURI() string    { return i.principalURI }
 
-func (i *Inbox) Children() ([]dav.Node, error) {
-	objs, err := i.backend.SchedulingObjects(i.principalURI)
+func (i *Inbox) Children(ctx context.Context) ([]dav.Node, error) {
+	objs, err := i.backend.SchedulingObjects(ctx, i.principalURI)
 	if err != nil {
 		return nil, err
 	}
@@ -92,8 +97,8 @@ func (i *Inbox) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (i *Inbox) Child(name string) (dav.Node, error) {
-	obj, err := i.backend.SchedulingObject(i.principalURI, name)
+func (i *Inbox) Child(ctx context.Context, name string) (dav.Node, error) {
+	obj, err := i.backend.SchedulingObject(ctx, i.principalURI, name)
 	if err != nil {
 		return nil, err
 	}
@@ -103,20 +108,20 @@ func (i *Inbox) Child(name string) (dav.Node, error) {
 	return &SchedulingObject{backend: i.backend, info: *obj}, nil
 }
 
-func (i *Inbox) ChildExists(name string) bool {
-	obj, err := i.backend.SchedulingObject(i.principalURI, name)
+func (i *Inbox) ChildExists(ctx context.Context, name string) bool {
+	obj, err := i.backend.SchedulingObject(ctx, i.principalURI, name)
 	return err == nil && obj != nil
 }
 
-func (i *Inbox) CreateFile(name string, data io.Reader) (string, error) {
+func (i *Inbox) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
 	raw, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
 	}
-	return "", i.backend.CreateSchedulingObject(i.principalURI, name, raw)
+	return "", i.backend.CreateSchedulingObject(ctx, i.principalURI, name, raw)
 }
 
-func (i *Inbox) CreateDirectory(string) error {
+func (i *Inbox) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in the inbox is not allowed")
 }
 
@@ -168,11 +173,11 @@ func (s *SchedulingObject) ACL() []acl.ACE {
 	}
 }
 
-func (s *SchedulingObject) SetName(string) error {
+func (s *SchedulingObject) SetName(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Renaming scheduling objects is not allowed")
 }
-func (s *SchedulingObject) Delete() error {
-	return s.backend.DeleteSchedulingObject(s.info.PrincipalURI, s.info.URI)
+func (s *SchedulingObject) Delete(ctx context.Context) error {
+	return s.backend.DeleteSchedulingObject(ctx, s.info.PrincipalURI, s.info.URI)
 }
 func (s *SchedulingObject) LastModified() time.Time { return time.Time{} }
 func (s *SchedulingObject) ContentType() string     { return "text/calendar; charset=utf-8" }
@@ -183,11 +188,11 @@ func (s *SchedulingObject) ETag() string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-func (s *SchedulingObject) Get() (io.ReadCloser, error) {
+func (s *SchedulingObject) Get(ctx context.Context) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(s.info.CalendarData)), nil
 }
 
-func (s *SchedulingObject) Put(io.Reader) (string, error) {
+func (s *SchedulingObject) Put(context.Context, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Updating scheduling objects is not allowed")
 }
 
@@ -202,15 +207,19 @@ func NewOutbox(principalURI string) *Outbox {
 	return &Outbox{principalURI: principalURI}
 }
 
-func (o *Outbox) Name() string            { return "outbox" }
-func (o *Outbox) SetName(string) error    { return dav.ErrForbidden("Permission denied to rename node") }
-func (o *Outbox) Delete() error           { return dav.ErrForbidden("Permission denied to delete node") }
+func (o *Outbox) Name() string { return "outbox" }
+func (o *Outbox) SetName(context.Context, string) error {
+	return dav.ErrForbidden("Permission denied to rename node")
+}
+func (o *Outbox) Delete(ctx context.Context) error {
+	return dav.ErrForbidden("Permission denied to delete node")
+}
 func (o *Outbox) LastModified() time.Time { return time.Time{} }
 func (o *Outbox) Owner() string           { return o.principalURI }
 func (o *Outbox) PrincipalURI() string    { return o.principalURI }
 
-func (o *Outbox) Children() ([]dav.Node, error) { return nil, nil }
-func (o *Outbox) Child(name string) (dav.Node, error) {
+func (o *Outbox) Children(ctx context.Context) ([]dav.Node, error) { return nil, nil }
+func (o *Outbox) Child(ctx context.Context, name string) (dav.Node, error) {
 	return nil, dav.ErrNotFound("File not found: %s in 'outbox'", name)
 }
 
@@ -237,11 +246,11 @@ func (o *Outbox) SupportedPrivileges() *acl.Privilege {
 		}},
 	}}
 }
-func (o *Outbox) ChildExists(string) bool { return false }
-func (o *Outbox) CreateFile(string, io.Reader) (string, error) {
+func (o *Outbox) ChildExists(context.Context, string) bool { return false }
+func (o *Outbox) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in the outbox is not allowed")
 }
-func (o *Outbox) CreateDirectory(string) error {
+func (o *Outbox) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in the outbox is not allowed")
 }
 
@@ -257,13 +266,13 @@ type MockSchedulingBackend struct {
 	Visibilities map[string]acl.FreeBusyVisibility
 }
 
-func (m *MockSchedulingBackend) FreeBusyVisibility(principalURI string) (acl.FreeBusyVisibility, error) {
+func (m *MockSchedulingBackend) FreeBusyVisibility(ctx context.Context, principalURI string) (acl.FreeBusyVisibility, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Visibilities[principalURI], nil
 }
 
-func (m *MockSchedulingBackend) SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error {
+func (m *MockSchedulingBackend) SetFreeBusyVisibility(ctx context.Context, principalURI string, v acl.FreeBusyVisibility) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.Visibilities == nil {
@@ -273,20 +282,20 @@ func (m *MockSchedulingBackend) SetFreeBusyVisibility(principalURI string, v acl
 	return nil
 }
 
-func (m *MockSchedulingBackend) DeleteFreeBusyVisibility(principalURI string) error {
+func (m *MockSchedulingBackend) DeleteFreeBusyVisibility(ctx context.Context, principalURI string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Visibilities, principalURI)
 	return nil
 }
 
-func (m *MockSchedulingBackend) Availability(principalURI string) ([]byte, error) {
+func (m *MockSchedulingBackend) Availability(ctx context.Context, principalURI string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Availabilities[principalURI], nil
 }
 
-func (m *MockSchedulingBackend) SetAvailability(principalURI string, data []byte) error {
+func (m *MockSchedulingBackend) SetAvailability(ctx context.Context, principalURI string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.Availabilities == nil {
@@ -296,14 +305,14 @@ func (m *MockSchedulingBackend) SetAvailability(principalURI string, data []byte
 	return nil
 }
 
-func (m *MockSchedulingBackend) DeleteAvailability(principalURI string) error {
+func (m *MockSchedulingBackend) DeleteAvailability(ctx context.Context, principalURI string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Availabilities, principalURI)
 	return nil
 }
 
-func (m *MockSchedulingBackend) SchedulingObjects(principalURI string) ([]SchedulingObjectInfo, error) {
+func (m *MockSchedulingBackend) SchedulingObjects(ctx context.Context, principalURI string) ([]SchedulingObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []SchedulingObjectInfo
@@ -313,7 +322,7 @@ func (m *MockSchedulingBackend) SchedulingObjects(principalURI string) ([]Schedu
 	return out, nil
 }
 
-func (m *MockSchedulingBackend) SchedulingObject(principalURI, objectURI string) (*SchedulingObjectInfo, error) {
+func (m *MockSchedulingBackend) SchedulingObject(ctx context.Context, principalURI, objectURI string) (*SchedulingObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	data, exists := m.Scheduling[principalURI][objectURI]
@@ -323,7 +332,7 @@ func (m *MockSchedulingBackend) SchedulingObject(principalURI, objectURI string)
 	return &SchedulingObjectInfo{URI: objectURI, PrincipalURI: principalURI, CalendarData: data}, nil
 }
 
-func (m *MockSchedulingBackend) CreateSchedulingObject(principalURI, objectURI string, data []byte) error {
+func (m *MockSchedulingBackend) CreateSchedulingObject(ctx context.Context, principalURI, objectURI string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.Scheduling == nil {
@@ -336,7 +345,7 @@ func (m *MockSchedulingBackend) CreateSchedulingObject(principalURI, objectURI s
 	return nil
 }
 
-func (m *MockSchedulingBackend) DeleteSchedulingObject(principalURI, objectURI string) error {
+func (m *MockSchedulingBackend) DeleteSchedulingObject(ctx context.Context, principalURI, objectURI string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Scheduling[principalURI], objectURI)

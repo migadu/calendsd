@@ -13,7 +13,7 @@ import (
 // (stats, doctor, contacts), the same budget a health check gets.
 const healthTimeout = health.DefaultTimeout
 
-func handleHealth(args []string) {
+func handleHealth(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("health", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
 	urlOverride := flags.String("url", "", "Server base URL to probe (default: derived from [server] addr/base_uri)")
@@ -30,7 +30,7 @@ func handleHealth(args []string) {
 
 	// Checks run concurrently, each under its own timeout; the outer bound
 	// only guards against a check that ignores its context.
-	ctx, cancel := context.WithTimeout(context.Background(), 3**timeout+5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3**timeout+5*time.Second)
 	defer cancel()
 	results := health.Run(ctx, opts)
 

@@ -21,8 +21,8 @@ func TestCopyMoveIntoSelfForbidden(t *testing.T) {
 				label string
 				run   func() error
 			}{
-				{"Copy", func() error { return NewTree(testRoot()).Copy(tc.src, tc.dst, DepthInfinity) }},
-				{"Move", func() error { return NewTree(testRoot()).Move(tc.src, tc.dst) }},
+				{"Copy", func() error { return NewTree(testRoot()).Copy(t.Context(), tc.src, tc.dst, DepthInfinity) }},
+				{"Move", func() error { return NewTree(testRoot()).Move(t.Context(), tc.src, tc.dst) }},
 			} {
 				de, ok := op.run().(*Error)
 				if !ok || de.Status != 403 {
@@ -34,7 +34,7 @@ func TestCopyMoveIntoSelfForbidden(t *testing.T) {
 
 	// A copy to a sibling must not trip the guard (it fails later only because
 	// testRoot has no children, i.e. not with 403).
-	if de, ok := NewTree(testRoot()).Copy("calendars", "backup", DepthInfinity).(*Error); ok && de.Status == 403 {
+	if de, ok := NewTree(testRoot()).Copy(t.Context(), "calendars", "backup", DepthInfinity).(*Error); ok && de.Status == 403 {
 		t.Fatalf("Copy to sibling wrongly forbidden: %v", de)
 	}
 }

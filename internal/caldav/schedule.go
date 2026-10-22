@@ -66,7 +66,7 @@ type SchedulePlugin struct {
 // WriteBackLocker serializes the per-object SCHEDULE-STATUS read-modify-write.
 // Lock returns the unlock func. path names the object being patched.
 type WriteBackLocker interface {
-	Lock(path string) (unlock func())
+	Lock(ctx context.Context, path string) (unlock func())
 }
 
 // pendingWork is one request's deferred scheduling work plus the handle that
@@ -90,7 +90,7 @@ type pendingSend struct {
 // per-path map to grow unbounded over the life of the process.
 type objectLocks [64]sync.Mutex
 
-func (l *objectLocks) Lock(path string) (unlock func()) {
+func (l *objectLocks) Lock(ctx context.Context, path string) (unlock func()) {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(path))
 	mu := &l[h.Sum32()%uint32(len(l))]
@@ -115,14 +115,16 @@ func (p *SchedulePlugin) Features() []string {
 	return f
 }
 
-func (p *SchedulePlugin) Methods(path string) []string { return []string{"POST"} }
+func (p *SchedulePlugin) Methods(ctx context.Context, path string) []string { return []string{"POST"} }
 
 // availabilitySupported reports whether the calendar backend stores working
 // hours, so the DAV header only advertises calendar-availability where an
 // inbox can actually hold it.
 func (p *SchedulePlugin) availabilitySupported() bool {
 	p.availabilityOnce.Do(func() {
-		node, err := p.server.Tree.NodeForPath("calendars")
+		// A one-time type probe of the in-memory calendar root: no request
+		// and no storage behind it, so no request context either.
+		node, err := p.server.Tree.NodeForPath(context.Background(), "calendars")
 		if err != nil {
 			return
 		}
@@ -136,11 +138,12 @@ func (p *SchedulePlugin) availabilitySupported() bool {
 // PropFind provides the scheduling properties on principals, and
 // calendar-availability and free-busy-visibility on schedule inboxes.
 func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
+	ctx := pf.Context()
 	cal := func(local string) xml.Name { return xml.Name{Space: davxml.NSCalDAV, Local: local} }
 
 	if inbox, ok := node.(*Inbox); ok {
-		p.inboxPropFind(pf, inbox)
-		p.inboxVisibilityPropFind(pf, inbox)
+		p.inboxPropFind(ctx, pf, inbox)
+		p.inboxVisibilityPropFind(ctx, pf, inbox)
 		return nil
 	}
 
@@ -175,13 +178,13 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		// A principal carrying a non-empty {DAV:}group-member-set is a schedulable
 		// group (the same test groupMembers uses for expansion), so report GROUP —
 		// a client can then flag it in the attendee picker.
-		if set, err := ph.GroupMemberSet(); err == nil && len(set) > 0 {
+		if set, err := ph.GroupMemberSet(ctx); err == nil && len(set) > 0 {
 			return "GROUP"
 		}
 		return "INDIVIDUAL"
 	})
 	pf.Handle(cal("schedule-default-calendar-URL"), func() any {
-		if path := p.defaultCalendarPath(ph.PrincipalURL()); path != "" {
+		if path := p.defaultCalendarPath(ctx, ph.PrincipalURL()); path != "" {
 			return davxml.Href{p.server.BaseURI + path + "/"}
 		}
 		return nil
@@ -197,7 +200,7 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		return data, nil
 	}
 	parentPath, _ := pathutil.Split(path)
-	parent, err := p.server.Tree.NodeForPath(parentPath)
+	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		return data, nil // not our concern; PUT will surface the error
 	}
@@ -212,7 +215,7 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 	}
 	var oldCal *goical.Calendar
 	if !isNew {
-		if node, err := p.server.Tree.NodeForPath(path); err == nil {
+		if node, err := p.server.Tree.NodeForPath(r.Context(), path); err == nil {
 			if obj, isObj := node.(*CalendarObject); isObj {
 				oldCal, _ = ical.Decode(obj.Data())
 			}
@@ -221,10 +224,10 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 
 	expanded := false
 	if p.ExpandGroups {
-		expanded = p.expandGroupAttendees(newCal)
+		expanded = p.expandGroupAttendees(r.Context(), newCal)
 	}
 
-	addresses := p.addressesForPrincipal(calNode.Owner())
+	addresses := p.addressesForPrincipal(r.Context(), calNode.Owner())
 	messages, err := ical.ParseEvent(newCal, addresses, oldCal)
 	if err != nil || len(messages) == 0 {
 		// Re-encode only when group expansion rewrote the object; a plain
@@ -236,7 +239,7 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 	}
 	canDefer := p.asyncSendsOffloaded()
 	for _, msg := range messages {
-		if canDefer && p.deferrableSend(msg) {
+		if canDefer && p.deferrableSend(r.Context(), msg) {
 			// A significant invitation/cancellation to an external attendee: don't
 			// block the PUT on SMTP. Store it pending now; AfterWrite enqueues the
 			// send once the object exists and patches the final status back onto
@@ -263,7 +266,7 @@ func (p *SchedulePlugin) BeforeUnbind(r *http.Request, path string) error {
 	if r.Method == "MOVE" || strings.EqualFold(r.Header.Get("Schedule-Reply"), "F") {
 		return nil
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return nil
 	}
@@ -275,7 +278,7 @@ func (p *SchedulePlugin) BeforeUnbind(r *http.Request, path string) error {
 	if err != nil {
 		return nil
 	}
-	addresses := p.addressesForPrincipal(obj.Owner())
+	addresses := p.addressesForPrincipal(r.Context(), obj.Owner())
 	messages, err := ical.ParseEvent(nil, addresses, oldCal)
 	if err != nil {
 		return nil
@@ -326,9 +329,9 @@ func (p *SchedulePlugin) AfterWrite(r *http.Request, path string) {
 // be skipped as insignificant or unsupported must stay synchronous, or its
 // deferred object would be stored pending with nothing to ever resolve it.
 // Local delivery is likewise cheap and stays synchronous.
-func (p *SchedulePlugin) deferrableSend(msg *ical.Message) bool {
+func (p *SchedulePlugin) deferrableSend(ctx context.Context, msg *ical.Message) bool {
 	return msg.SignificantChange &&
-		principalForAddress(p.server, msg.Recipient) == "" &&
+		principalForAddress(ctx, p.server, msg.Recipient) == "" &&
 		strings.HasPrefix(msg.Recipient, "mailto:") &&
 		strings.HasPrefix(msg.Sender, "mailto:")
 }
@@ -375,10 +378,10 @@ func (p *SchedulePlugin) writeBackLocker() WriteBackLocker {
 // concurrent per-attendee write-backs don't clobber one another: across nodes
 // when WriteBackLocker is an AdvisoryLocker, otherwise only within this process
 // (writeBackLocks), which suffices for a single instance.
-func (p *SchedulePlugin) patchScheduleStatus(path, method, recipient, status string) {
-	unlock := p.writeBackLocker().Lock(path)
+func (p *SchedulePlugin) patchScheduleStatus(ctx context.Context, path, method, recipient, status string) {
+	unlock := p.writeBackLocker().Lock(ctx, path)
 	defer unlock()
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(ctx, path)
 	if err != nil {
 		return
 	}
@@ -391,7 +394,7 @@ func (p *SchedulePlugin) patchScheduleStatus(path, method, recipient, status str
 		return
 	}
 	applyScheduleStatus(cal, []*ical.Message{{Method: method, Recipient: recipient, ScheduleStatus: status}})
-	if _, err := obj.Put(strings.NewReader(string(ical.EncodeLenient(cal)))); err != nil {
+	if _, err := obj.Put(ctx, strings.NewReader(string(ical.EncodeLenient(cal)))); err != nil {
 		slog.Default().Warn("imip schedule-status write-back failed",
 			"path", path, "recipient", recipient, "status", status, "err", err)
 	}

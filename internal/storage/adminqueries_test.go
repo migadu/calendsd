@@ -75,13 +75,13 @@ func TestAdminQueries(t *testing.T) {
 	}
 	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt-1\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20260301T100000Z\r\nDTEND:20260301T110000Z\r\nSUMMARY:Standup\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	id := caldav.CalendarID{Calendar: calID}
-	if _, err := calendars.CreateCalendarObject(id, "evt.ics", []byte(ics)); err != nil {
+	if _, err := calendars.CreateCalendarObject(t.Context(), id, "evt.ics", []byte(ics)); err != nil {
 		t.Fatal(err)
 	}
 
 	q := &storage.AdminQueries{DB: db}
 
-	counts, err := q.Counts()
+	counts, err := q.Counts(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("counts = %+v", counts)
 	}
 
-	diags, err := q.AuthDiagnostics()
+	diags, err := q.AuthDiagnostics(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,18 +105,18 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("malformed digests = %v, want [orphan]", diags.MalformedDigestA1)
 	}
 
-	user, err := q.UserForPrincipal("principals/alice")
+	user, err := q.UserForPrincipal(t.Context(), "principals/alice")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if user == nil || user.Username != "alice" {
 		t.Fatalf("user for alice = %+v", user)
 	}
-	if user, err := q.UserForPrincipal("principals/bob"); err != nil || user != nil {
+	if user, err := q.UserForPrincipal(t.Context(), "principals/bob"); err != nil || user != nil {
 		t.Fatalf("user for bob = %+v err=%v, want nil", user, err)
 	}
 
-	gotID, err := q.LookupCalendar("principals/alice", "default")
+	gotID, err := q.LookupCalendar(t.Context(), "principals/alice", "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("LookupCalendar = %q, want %q", gotID, calID)
 	}
 
-	instances, err := q.CalendarInstances(calID)
+	instances, err := q.CalendarInstances(t.Context(), calID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("share instance = %+v", instances[1])
 	}
 
-	meta, err := q.CalendarMeta(calID)
+	meta, err := q.CalendarMeta(t.Context(), calID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("meta = %+v", meta)
 	}
 
-	props, err := q.PropertyRows("calendars/alice/default")
+	props, err := q.PropertyRows(t.Context(), "calendars/alice/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("prop layers: overlays=%d sabreOnly=%d in %+v", overlays, sabreOnly, props)
 	}
 
-	changes, err := q.RecentChanges(10)
+	changes, err := q.RecentChanges(t.Context(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("changes = %+v", changes)
 	}
 
-	objects, truncated, err := q.Objects(storage.AdminObjectQuery{CalendarID: calID, Match: "standup", InData: true})
+	objects, truncated, err := q.Objects(t.Context(), storage.AdminObjectQuery{CalendarID: calID, Match: "standup", InData: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("denormalized occurrences missing: %+v", objects[0])
 	}
 	// uri/uid-only search must not match summary text.
-	objects, _, err = q.Objects(storage.AdminObjectQuery{CalendarID: calID, Match: "standup"})
+	objects, _, err = q.Objects(t.Context(), storage.AdminObjectQuery{CalendarID: calID, Match: "standup"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("uri/uid search matched calendardata: %+v", objects)
 	}
 
-	detail, err := q.Object(calID, "evt.ics")
+	detail, err := q.Object(t.Context(), calID, "evt.ics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,11 +201,11 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("object detail = %+v", detail)
 	}
 
-	bookID, err := q.LookupAddressBook("principals/alice", "contacts")
+	bookID, err := q.LookupAddressBook(t.Context(), "principals/alice", "contacts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	book, err := q.AddressBook(bookID)
+	book, err := q.AddressBook(t.Context(), bookID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("address book = %+v", book)
 	}
 
-	log, err := q.ChangeLog("calendar", calID, 10)
+	log, err := q.ChangeLog(t.Context(), "calendar", calID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,18 +241,18 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	invites, err := q.PendingShareInvites("principals/bob")
+	invites, err := q.PendingShareInvites(t.Context(), "principals/bob")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(invites) != 1 || invites[0].PrincipalURI != "principals/bob" || invites[0].InviteStatus != 1 {
 		t.Fatalf("pending invites = %+v", invites)
 	}
-	if none, err := q.PendingShareInvites("principals/alice"); err != nil || len(none) != 0 {
+	if none, err := q.PendingShareInvites(t.Context(), "principals/alice"); err != nil || len(none) != 0 {
 		t.Fatalf("alice pending invites = %+v err=%v, want none", none, err)
 	}
 
-	report, err := q.Doctor(0)
+	report, err := q.Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,13 +286,13 @@ func TestAdminQueries(t *testing.T) {
 	// Phase C: the AdminWrites carve-out.
 	writes := &storage.AdminWrites{DB: db}
 	carolDigest := auth.DigestA1("carol", "SabreDAV", "pw1")
-	if err := writes.CreateUser("carol", carolDigest, "carol@example.org", "Carol"); err != nil {
+	if err := writes.CreateUser(t.Context(), "carol", carolDigest, "carol@example.org", "Carol"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if err := writes.CreateUser("carol", carolDigest, "", ""); err == nil {
+	if err := writes.CreateUser(t.Context(), "carol", carolDigest, "", ""); err == nil {
 		t.Fatal("duplicate CreateUser succeeded; want error")
 	}
-	carol, err := q.UserForPrincipal("principals/carol")
+	carol, err := q.UserForPrincipal(t.Context(), "principals/carol")
 	if err != nil || carol == nil || carol.DigestA1 != carolDigest {
 		t.Fatalf("carol user = %+v err=%v", carol, err)
 	}
@@ -305,19 +305,19 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("carol principal rows = %d, want 3 (principal + read/write proxies)", principalRows)
 	}
 	newDigest := auth.DigestA1("carol", "SabreDAV", "pw2")
-	if err := writes.SetPassword("carol", newDigest); err != nil {
+	if err := writes.SetPassword(t.Context(), "carol", newDigest); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
-	if carol, _ := q.UserForPrincipal("principals/carol"); carol.DigestA1 != newDigest {
+	if carol, _ := q.UserForPrincipal(t.Context(), "principals/carol"); carol.DigestA1 != newDigest {
 		t.Fatalf("password not updated: %+v", carol)
 	}
-	if err := writes.SetPassword("no-such-user", newDigest); err == nil {
+	if err := writes.SetPassword(t.Context(), "no-such-user", newDigest); err == nil {
 		t.Fatal("SetPassword for a missing user succeeded; want error")
 	}
 
 	// UpdatePrincipal: set both fields, then clear one; nil leaves alone.
 	newEmail, newName, empty := "carol2@example.org", "Carol II", ""
-	if err := writes.UpdatePrincipal("principals/carol", &newEmail, &newName); err != nil {
+	if err := writes.UpdatePrincipal(t.Context(), "principals/carol", &newEmail, &newName); err != nil {
 		t.Fatalf("UpdatePrincipal: %v", err)
 	}
 	var email, displayname string
@@ -328,7 +328,7 @@ func TestAdminQueries(t *testing.T) {
 	if email != newEmail || displayname != newName {
 		t.Fatalf("after update: email=%q displayname=%q", email, displayname)
 	}
-	if err := writes.UpdatePrincipal("principals/carol", &empty, nil); err != nil {
+	if err := writes.UpdatePrincipal(t.Context(), "principals/carol", &empty, nil); err != nil {
 		t.Fatalf("UpdatePrincipal clear: %v", err)
 	}
 	if err := db.QueryRow(`SELECT coalesce(email, ''), coalesce(displayname, '')
@@ -338,16 +338,16 @@ func TestAdminQueries(t *testing.T) {
 	if email != "" || displayname != newName {
 		t.Fatalf("after clear: email=%q displayname=%q, want cleared email only", email, displayname)
 	}
-	if err := writes.UpdatePrincipal("principals/carol", nil, nil); err == nil {
+	if err := writes.UpdatePrincipal(t.Context(), "principals/carol", nil, nil); err == nil {
 		t.Fatal("UpdatePrincipal with nothing to change succeeded; want error")
 	}
-	if err := writes.UpdatePrincipal("principals/no-such", &newEmail, nil); err == nil {
+	if err := writes.UpdatePrincipal(t.Context(), "principals/no-such", &newEmail, nil); err == nil {
 		t.Fatal("UpdatePrincipal for a missing principal succeeded; want error")
 	}
 
 	// DeleteUser: refuses while collections exist, otherwise removes the
 	// users row, principal triple, and group-membership rows.
-	if err := writes.DeleteUser("alice"); err == nil {
+	if err := writes.DeleteUser(t.Context(), "alice"); err == nil {
 		t.Fatal("DeleteUser for alice (owns a calendar and address book) succeeded; want refusal")
 	}
 	if _, err := db.Exec(`INSERT INTO groupmembers (principal_id, member_id)
@@ -359,7 +359,7 @@ func TestAdminQueries(t *testing.T) {
 	if err := db.QueryRow(`SELECT id FROM principals WHERE uri = 'principals/carol'`).Scan(&carolID); err != nil {
 		t.Fatal(err)
 	}
-	if err := writes.DeleteUser("carol"); err != nil {
+	if err := writes.DeleteUser(t.Context(), "carol"); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 	var leftover int
@@ -373,13 +373,13 @@ func TestAdminQueries(t *testing.T) {
 	if leftover != 0 {
 		t.Fatalf("carol left %d row(s) behind", leftover)
 	}
-	if err := writes.DeleteUser("carol"); err == nil {
+	if err := writes.DeleteUser(t.Context(), "carol"); err == nil {
 		t.Fatal("DeleteUser for a deleted user succeeded; want error")
 	}
 
 	// Deleting the doctor's orphans must clear exactly those findings.
 	for _, check := range []string{"orphaned-instance", "dangling-groupmember", "orphaned-property"} {
-		n, err := writes.DeleteOrphans(check)
+		n, err := writes.DeleteOrphans(t.Context(), check)
 		if err != nil {
 			t.Fatalf("DeleteOrphans(%s): %v", check, err)
 		}
@@ -399,10 +399,10 @@ func TestAdminQueries(t *testing.T) {
 	if liveInbox != 1 {
 		t.Fatalf("DeleteOrphans removed a live user's inbox property")
 	}
-	if _, err := writes.DeleteOrphans("stale-denormalized-columns"); err == nil {
+	if _, err := writes.DeleteOrphans(t.Context(), "stale-denormalized-columns"); err == nil {
 		t.Fatal("non-deletable check accepted; want error")
 	}
-	report, err = q.Doctor(0)
+	report, err = q.Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,15 +416,15 @@ func TestAdminQueries(t *testing.T) {
 	// Truncation honesty (evt.ics + broken.ics exist at this point): a hit
 	// limit only counts as truncation when further MATCHES exist, not
 	// merely further rows.
-	objs, trunc, err := q.Objects(storage.AdminObjectQuery{CalendarID: calID, Limit: 1})
+	objs, trunc, err := q.Objects(t.Context(), storage.AdminObjectQuery{CalendarID: calID, Limit: 1})
 	if err != nil || len(objs) != 1 || !trunc {
 		t.Fatalf("unfiltered limit=1: %d rows trunc=%t err=%v, want 1/true", len(objs), trunc, err)
 	}
-	objs, trunc, err = q.Objects(storage.AdminObjectQuery{CalendarID: calID, Match: "evt", Limit: 1})
+	objs, trunc, err = q.Objects(t.Context(), storage.AdminObjectQuery{CalendarID: calID, Match: "evt", Limit: 1})
 	if err != nil || len(objs) != 1 || trunc {
 		t.Fatalf("uri match limit=1: %d rows trunc=%t err=%v, want 1/false (only one match exists)", len(objs), trunc, err)
 	}
-	objs, trunc, err = q.Objects(storage.AdminObjectQuery{CalendarID: calID, Match: "standup", InData: true, Limit: 1})
+	objs, trunc, err = q.Objects(t.Context(), storage.AdminObjectQuery{CalendarID: calID, Match: "standup", InData: true, Limit: 1})
 	if err != nil || len(objs) != 1 || trunc {
 		t.Fatalf("in-data match limit=1: %d rows trunc=%t err=%v, want 1/false", len(objs), trunc, err)
 	}
@@ -434,18 +434,18 @@ func TestAdminQueries(t *testing.T) {
 	// and PurgeExpired claims-then-cascades only the expired ones.
 	users := &storage.Users{DB: db}
 	for _, u := range []string{"dave", "eve", "frank", "grace"} {
-		if err := writes.CreateUser(u, auth.DigestA1(u, "SabreDAV", "pw"), "", ""); err != nil {
+		if err := writes.CreateUser(t.Context(), u, auth.DigestA1(u, "SabreDAV", "pw"), "", ""); err != nil {
 			t.Fatalf("CreateUser(%s): %v", u, err)
 		}
 	}
 
-	if err := writes.ScheduleDelete("ghostuser", 30, ""); !errors.Is(err, storage.ErrNoPrincipal) {
+	if err := writes.ScheduleDelete(t.Context(), "ghostuser", 30, ""); !errors.Is(err, storage.ErrNoPrincipal) {
 		t.Fatalf("ScheduleDelete for a missing user = %v, want ErrNoPrincipal", err)
 	}
-	if err := writes.ScheduleDelete("dave", 0, ""); err == nil {
+	if err := writes.ScheduleDelete(t.Context(), "dave", 0, ""); err == nil {
 		t.Fatal("ScheduleDelete with 0 days succeeded; want error")
 	}
-	if err := writes.ScheduleDelete("dave", 30, "cleanup"); err != nil {
+	if err := writes.ScheduleDelete(t.Context(), "dave", 30, "cleanup"); err != nil {
 		t.Fatalf("ScheduleDelete(dave): %v", err)
 	}
 	// Tombstone recorded with the reason and a ~30-day window; account data
@@ -471,15 +471,15 @@ func TestAdminQueries(t *testing.T) {
 	if daveRows != 4 { // users row + 3 principal rows, untouched
 		t.Fatalf("dave has %d account rows after soft-delete, want 4 (data must be intact)", daveRows)
 	}
-	if del, err := users.IsDeleted("principals/dave"); err != nil || !del {
+	if del, err := users.IsDeleted(t.Context(), "principals/dave"); err != nil || !del {
 		t.Fatalf("IsDeleted(dave) = %v, %v; want true", del, err)
 	}
-	if del, err := users.IsDeleted("principals/alice"); err != nil || del {
+	if del, err := users.IsDeleted(t.Context(), "principals/alice"); err != nil || del {
 		t.Fatalf("IsDeleted(alice) = %v, %v; want false", del, err)
 	}
 
 	// Idempotent re-schedule updates the window/reason, never duplicates.
-	if err := writes.ScheduleDelete("dave", 7, "changed"); err != nil {
+	if err := writes.ScheduleDelete(t.Context(), "dave", 7, "changed"); err != nil {
 		t.Fatalf("re-ScheduleDelete(dave): %v", err)
 	}
 	var daveTombstones int
@@ -492,31 +492,31 @@ func TestAdminQueries(t *testing.T) {
 	}
 
 	// CancelDelete restores: tombstone gone, account still fully present.
-	if err := writes.CancelDelete("dave"); err != nil {
+	if err := writes.CancelDelete(t.Context(), "dave"); err != nil {
 		t.Fatalf("CancelDelete(dave): %v", err)
 	}
-	if del, _ := users.IsDeleted("principals/dave"); del {
+	if del, _ := users.IsDeleted(t.Context(), "principals/dave"); del {
 		t.Fatal("dave still tombstoned after CancelDelete")
 	}
-	if err := writes.CancelDelete("dave"); err == nil {
+	if err := writes.CancelDelete(t.Context(), "dave"); err == nil {
 		t.Fatal("CancelDelete for a non-scheduled user succeeded; want error")
 	}
 
 	// ExpiredDeletions returns only windows that have elapsed. Schedule eve and
 	// frank in the past (backdated), grace in the future.
 	for _, u := range []string{"eve", "frank"} {
-		if err := writes.ScheduleDelete(u, 1, ""); err != nil {
+		if err := writes.ScheduleDelete(t.Context(), u, 1, ""); err != nil {
 			t.Fatalf("ScheduleDelete(%s): %v", u, err)
 		}
 	}
-	if err := writes.ScheduleDelete("grace", 30, ""); err != nil {
+	if err := writes.ScheduleDelete(t.Context(), "grace", 30, ""); err != nil {
 		t.Fatalf("ScheduleDelete(grace): %v", err)
 	}
 	if _, err := db.Exec(`UPDATE deleted_principals SET purge_after = now() - interval '1 hour'
 		WHERE username IN ('eve', 'frank')`); err != nil {
 		t.Fatal(err)
 	}
-	expired, err := writes.ExpiredDeletions()
+	expired, err := writes.ExpiredDeletions(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestAdminQueries(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM principals WHERE uri LIKE 'principals/frank%'`); err != nil {
 		t.Fatal(err)
 	}
-	purged, err := writes.PurgeExpired()
+	purged, err := writes.PurgeExpired(t.Context())
 	if err != nil {
 		t.Fatalf("PurgeExpired: %v", err)
 	}
@@ -575,10 +575,10 @@ func TestAdminQueries(t *testing.T) {
 	// the owned collections and their data — including bob's sharee instance
 	// of alice's calendar — then removes the principal triple and users row.
 	// Run last: it destroys the fixture alice everything above relies on.
-	if err := writes.DeleteUser("alice"); err == nil {
+	if err := writes.DeleteUser(t.Context(), "alice"); err == nil {
 		t.Fatal("DeleteUser for alice (owns collections) succeeded; cascade must be explicit")
 	}
-	if err := writes.DeleteUserCascade("alice"); err != nil {
+	if err := writes.DeleteUserCascade(t.Context(), "alice"); err != nil {
 		t.Fatalf("DeleteUserCascade: %v", err)
 	}
 	var aliceLeft int
@@ -610,10 +610,10 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("cascade removed bob's principal (%d); it must only drop alice's own rows", bobPrincipal)
 	}
 	// A second cascade of the now-absent alice must error, like DeleteUser.
-	if err := writes.DeleteUserCascade("alice"); err == nil {
+	if err := writes.DeleteUserCascade(t.Context(), "alice"); err == nil {
 		t.Fatal("DeleteUserCascade for a deleted user succeeded; want error")
 	}
-	if err := writes.DeleteUserCascade("bad/name"); err == nil {
+	if err := writes.DeleteUserCascade(t.Context(), "bad/name"); err == nil {
 		t.Fatal("DeleteUserCascade accepted an invalid username; want error")
 	}
 }

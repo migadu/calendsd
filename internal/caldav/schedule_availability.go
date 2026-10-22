@@ -24,7 +24,7 @@ var (
 // PropFind.Handle only resolves names the request asked for, so the
 // property stays out of allprop (like CalendarServer) and the backend is only
 // read when it is wanted.
-func (p *SchedulePlugin) inboxPropFind(pf *dav.PropFind, inbox *Inbox) {
+func (p *SchedulePlugin) inboxPropFind(ctx context.Context, pf *dav.PropFind, inbox *Inbox) {
 	ab := inbox.availability()
 	if ab == nil {
 		return
@@ -37,7 +37,7 @@ func (p *SchedulePlugin) inboxPropFind(pf *dav.PropFind, inbox *Inbox) {
 		if !loaded {
 			loaded = true
 			var err error
-			if data, err = ab.Availability(inbox.principalURI); err != nil {
+			if data, err = ab.Availability(ctx, inbox.principalURI); err != nil {
 				slog.Warn("reading calendar-availability", "principal", inbox.principalURI, "err", err)
 			}
 		}
@@ -61,7 +61,7 @@ func (p *SchedulePlugin) PrePropPatch(ctx context.Context, path string, node dav
 	if !ok {
 		return nil
 	}
-	p.prePropPatchVisibility(inbox, pp)
+	p.prePropPatchVisibility(ctx, inbox, pp)
 	var changed []xml.Name
 	var value any
 	for _, name := range availabilityNames {
@@ -108,9 +108,9 @@ func (p *SchedulePlugin) PrePropPatch(ctx context.Context, path string, node dav
 	pp.Handle(changed, func(map[xml.Name]any) (map[xml.Name]int, bool) {
 		var err error
 		if data == nil {
-			err = ab.DeleteAvailability(inbox.principalURI)
+			err = ab.DeleteAvailability(ctx, inbox.principalURI)
 		} else {
-			err = ab.SetAvailability(inbox.principalURI, data)
+			err = ab.SetAvailability(ctx, inbox.principalURI, data)
 		}
 		if err != nil {
 			slog.Error("storing calendar-availability", "principal", inbox.principalURI, "err", err)

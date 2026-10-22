@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -30,7 +31,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 	}
 
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
-		node, err = s.Tree.NodeForPath(path)
+		node, err = s.Tree.NodeForPath(r.Context(), path)
 		if err != nil {
 			if AsError(err).Status == http.StatusNotFound {
 				return false, ErrPreconditionFailed("An If-Match header was specified and the resource did not exist")
@@ -65,7 +66,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
 		exists := node != nil
 		if !exists {
-			node, err = s.Tree.NodeForPath(path)
+			node, err = s.Tree.NodeForPath(r.Context(), path)
 			switch {
 			case err == nil:
 				exists = true
@@ -103,7 +104,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 	// what a missing target means).
 	lastModified := func() (time.Time, error) {
 		if node == nil {
-			node, err = s.Tree.NodeForPath(path)
+			node, err = s.Tree.NodeForPath(r.Context(), path)
 			if err != nil {
 				if AsError(err).Status == http.StatusNotFound {
 					return time.Time{}, nil
@@ -196,7 +197,7 @@ type IfToken struct {
 // TokenValidator lets plugins mark state tokens in If conditions as valid.
 // Replaces sabre's validateTokens event.
 type TokenValidator interface {
-	ValidateTokens(conditions []IfCondition)
+	ValidateTokens(ctx context.Context, conditions []IfCondition)
 }
 
 // checkIfConditions evaluates the If header: for each condition, at least
@@ -208,7 +209,7 @@ func (s *Server) checkIfConditions(r *http.Request, path string) error {
 	}
 	for _, p := range s.plugins {
 		if tv, ok := p.(TokenValidator); ok {
-			tv.ValidateTokens(conditions)
+			tv.ValidateTokens(r.Context(), conditions)
 		}
 	}
 
@@ -218,7 +219,7 @@ nextCondition:
 			tokenValid := token.Valid || token.Token == ""
 			etagValid := token.ETag == ""
 			if token.ETag != "" && tokenValid {
-				if node, err := s.Tree.NodeForPath(cond.URI); err == nil {
+				if node, err := s.Tree.NodeForPath(r.Context(), cond.URI); err == nil {
 					if file, isFile := node.(File); isFile && file.ETag() == token.ETag {
 						etagValid = true
 					}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,34 +20,34 @@ import (
 // list/show and the guarded state mutations retry/cancel/reschedule/delete. It
 // operates on the durable job table (JOB-QUEUE-PLAN.md) by id and never touches
 // the encryption key or the credential — only queue state (redacted to presence).
-func handleJobs(args []string) {
+func handleJobs(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fatalf("Usage: calctl jobs <list|show|retry|cancel|reschedule|delete> [options]")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "list", "ls":
-		jobsList(rest)
+		jobsList(ctx, rest)
 	case "show":
-		jobsShow(rest)
+		jobsShow(ctx, rest)
 	case "retry":
-		jobsRetry(rest)
+		jobsRetry(ctx, rest)
 	case "cancel":
-		jobsCancel(rest)
+		jobsCancel(ctx, rest)
 	case "reschedule":
-		jobsReschedule(rest)
+		jobsReschedule(ctx, rest)
 	case "delete", "rm":
-		jobsDelete(rest)
+		jobsDelete(ctx, rest)
 	default:
 		fatalf("Unknown jobs subcommand: %s (want list, show, retry, cancel, reschedule, or delete)", sub)
 	}
 }
 
-func jobsOps(dsnOverride string) *jobs.Ops {
-	return &jobs.Ops{DB: openAdminQueries(dsnOverride).DB}
+func jobsOps(ctx context.Context, dsnOverride string) *jobs.Ops {
+	return &jobs.Ops{DB: openAdminQueries(ctx, dsnOverride).DB}
 }
 
-func jobsList(args []string) {
+func jobsList(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("jobs list", flag.ExitOnError)
 	state := flags.String("state", "", "Filter by state (available|executing|completed|discarded)")
 	worker := flags.String("worker", "", "Filter by worker (e.g. imip_send)")
@@ -58,7 +59,7 @@ func jobsList(args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(args)
 
-	rows, err := jobsOps(*dsn).List(jobs.ListFilter{
+	rows, err := jobsOps(ctx, *dsn).List(jobs.ListFilter{
 		State: *state, Worker: *worker, Queue: *queue,
 		Recipient: *recipient, Failed: *failed, Limit: *limit,
 	})
@@ -83,7 +84,7 @@ func jobsList(args []string) {
 	w.Flush()
 }
 
-func jobsShow(args []string) {
+func jobsShow(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("jobs show", flag.ExitOnError)
 	jsonOut := flags.Bool("json", false, "Output as JSON")
@@ -91,7 +92,7 @@ func jobsShow(args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	j, err := jobsOps(*dsn).Get(id)
+	j, err := jobsOps(ctx, *dsn).Get(id)
 	if err != nil {
 		fatalf("Failed to load job %d: %v", id, err)
 	}
@@ -127,31 +128,31 @@ func jobsShow(args []string) {
 	printArgs(j.Args, *fullBody)
 }
 
-func jobsRetry(args []string) {
+func jobsRetry(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("jobs retry", flag.ExitOnError)
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	if err := jobsOps(*dsn).Retry(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Retry(id); err != nil {
 		reportMutationErr("retry", id, err)
 	}
 	fmt.Printf("Job %d reset to run now (state=available, attempt cleared).\n", id)
 }
 
-func jobsCancel(args []string) {
+func jobsCancel(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("jobs cancel", flag.ExitOnError)
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	if err := jobsOps(*dsn).Cancel(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Cancel(id); err != nil {
 		reportMutationErr("cancel", id, err)
 	}
 	fmt.Printf("Job %d cancelled (state=discarded); any retained credential was dropped.\n", id)
 }
 
-func jobsReschedule(args []string) {
+func jobsReschedule(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("jobs reschedule", flag.ExitOnError)
 	at := flags.String("at", "", "New run time (RFC3339, e.g. 2026-08-10T15:04:05Z), or a +duration (e.g. +30m)")
@@ -162,13 +163,13 @@ func jobsReschedule(args []string) {
 	}
 	when := parseAt(*at)
 
-	if err := jobsOps(*dsn).Reschedule(id, when); err != nil {
+	if err := jobsOps(ctx, *dsn).Reschedule(id, when); err != nil {
 		reportMutationErr("reschedule", id, err)
 	}
 	fmt.Printf("Job %d rescheduled for %s.\n", id, when.Format(time.RFC3339))
 }
 
-func jobsDelete(args []string) {
+func jobsDelete(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("jobs delete", flag.ExitOnError)
 	confirm := flags.Bool("confirm", false, "Actually delete the row (required — this is irreversible)")
@@ -177,7 +178,7 @@ func jobsDelete(args []string) {
 	if !*confirm {
 		fatalf("This hard-deletes job %d (and any retained credential). Re-run with --confirm.", id)
 	}
-	if err := jobsOps(*dsn).Delete(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Delete(id); err != nil {
 		reportMutationErr("delete", id, err)
 	}
 	fmt.Printf("Job %d deleted.\n", id)
@@ -187,16 +188,16 @@ func jobsDelete(args []string) {
 
 // handleImip dispatches the iMIP-semantic recovery commands, which sit above the
 // generic jobs layer.
-func handleImip(args []string) {
+func handleImip(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fatalf("Usage: calctl imip <pending|resend> [options]")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "pending":
-		imipPending(rest)
+		imipPending(ctx, rest)
 	case "resend":
-		imipResend(rest)
+		imipResend(ctx, rest)
 	default:
 		fatalf("Unknown imip subcommand: %s (want pending or resend)", sub)
 	}
@@ -205,14 +206,14 @@ func handleImip(args []string) {
 // imipPending surfaces the iMIP sends an operator cares about: failed or
 // still-retrying jobs. A per-user job with no credential (cred=no) can only be
 // recovered by the organizer re-sending from their client.
-func imipPending(args []string) {
+func imipPending(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("imip pending", flag.ExitOnError)
 	jsonOut := flags.Bool("json", false, "Output as JSON")
 	limit := flags.Int("limit", 100, "Max rows")
 	dsn := dbFlag(flags)
 	flags.Parse(args)
 
-	rows, err := jobsOps(*dsn).List(jobs.ListFilter{Worker: "imip_send", Failed: true, Limit: *limit})
+	rows, err := jobsOps(ctx, *dsn).List(jobs.ListFilter{Worker: "imip_send", Failed: true, Limit: *limit})
 	if err != nil {
 		fatalf("Failed to list pending iMIP sends: %v", err)
 	}
@@ -239,14 +240,14 @@ func imipPending(args []string) {
 // send. For a per-user send (username set) it needs a still-decryptable
 // credential — the worker would only fail-safe discard otherwise — so it refuses
 // when none survives, pointing the operator at the organizer's own client.
-func imipResend(args []string) {
+func imipResend(ctx context.Context, args []string) {
 	id, rest := takeID(args)
 	flags := flag.NewFlagSet("imip resend", flag.ExitOnError)
 	relay := flags.Bool("relay", false, "Override: deliver via the server relay, UNMETERED (drops the credential). For a per-user send whose credential is gone.")
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	ops := jobsOps(*dsn)
+	ops := jobsOps(ctx, *dsn)
 	j, err := ops.Get(id)
 	if err != nil {
 		fatalf("Failed to load job %d: %v", id, err)

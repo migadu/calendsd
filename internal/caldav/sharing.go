@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
 	"log/slog"
@@ -44,8 +45,8 @@ type SharingSupport interface {
 	// result: at most one ShareChange per sharee instance the request leaves
 	// in place (removals report nothing). It returns changes only after the
 	// write committed.
-	UpdateInvites(id CalendarID, sharees []Sharee) ([]ShareChange, error)
-	Invites(id CalendarID) ([]Sharee, error)
+	UpdateInvites(ctx context.Context, id CalendarID, sharees []Sharee) ([]ShareChange, error)
+	Invites(ctx context.Context, id CalendarID) ([]Sharee, error)
 }
 
 // ShareChange is one sharee instance UpdateInvites created or updated.
@@ -64,7 +65,7 @@ type ShareChange struct {
 
 // PublishSupport marks backends supporting calendar publishing.
 type PublishSupport interface {
-	SetPublishStatus(id CalendarID, value bool) error
+	SetPublishStatus(ctx context.Context, id CalendarID, value bool) error
 }
 
 // ReplySupport marks backends handling share invite replies.
@@ -74,7 +75,7 @@ type ReplySupport interface {
 	// calendar's path relative to the request (the replying principal's
 	// calendar home) — a bare segment, no leading slash, which the caller
 	// resolves against the base-carrying request URL — or "" on decline.
-	ShareReply(principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error)
+	ShareReply(ctx context.Context, principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error)
 }
 
 // MockSharingBackend ports sabre's Backend\MockSharing (with notification
@@ -85,7 +86,7 @@ type MockSharingBackend struct {
 	Shares map[CalendarID][]Sharee
 }
 
-func (m *MockSharingBackend) UpdateInvites(id CalendarID, sharees []Sharee) ([]ShareChange, error) {
+func (m *MockSharingBackend) UpdateInvites(ctx context.Context, id CalendarID, sharees []Sharee) ([]ShareChange, error) {
 	if m.Shares == nil {
 		m.Shares = map[CalendarID][]Sharee{}
 	}
@@ -130,14 +131,16 @@ func (m *MockSharingBackend) change(id CalendarID, s Sharee, created bool) Share
 	}
 }
 
-func (m *MockSharingBackend) Invites(id CalendarID) ([]Sharee, error) {
+func (m *MockSharingBackend) Invites(ctx context.Context, id CalendarID) ([]Sharee, error) {
 	return m.Shares[id], nil
 }
 
-func (m *MockSharingBackend) SetPublishStatus(id CalendarID, value bool) error { return nil }
+func (m *MockSharingBackend) SetPublishStatus(ctx context.Context, id CalendarID, value bool) error {
+	return nil
+}
 
 // ShareReply mirrors sabre's mock: accepting yields a fixed calendar path.
-func (m *MockSharingBackend) ShareReply(principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
+func (m *MockSharingBackend) ShareReply(ctx context.Context, principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
 	if status == InviteAccepted {
 		return "calendars/blabla/calendar", nil
 	}
@@ -164,7 +167,7 @@ func (p *SharingPlugin) Features() []string {
 	return []string{"calendarserver-sharing"}
 }
 
-func (p *SharingPlugin) Methods(path string) []string { return []string{"POST"} }
+func (p *SharingPlugin) Methods(ctx context.Context, path string) []string { return []string{"POST"} }
 
 func (p *SharingPlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	if r.Method != "POST" {
@@ -178,7 +181,7 @@ func (p *SharingPlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bo
 	if err != nil {
 		return false, nil
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return false, nil
 	}
@@ -244,9 +247,9 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	}
 	// Resolve local principals by calendar user address.
 	for i := range sharees {
-		sharees[i].Principal = principalForAddress(p.server, sharees[i].Href)
+		sharees[i].Principal = principalForAddress(r.Context(), p.server, sharees[i].Href)
 	}
-	changes, err := sharing.UpdateInvites(calNode.Info.ID, sharees)
+	changes, err := sharing.UpdateInvites(r.Context(), calNode.Info.ID, sharees)
 	if err != nil {
 		return err
 	}
@@ -261,7 +264,7 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 			if c.Principal == "" || c.Principal == calNode.Owner() {
 				continue
 			}
-			err := notif.AddNotification(c.Principal, InviteNotification{
+			err := notif.AddNotification(r.Context(), c.Principal, InviteNotification{
 				ID:           notificationID(calPath, c.Href),
 				DTStamp:      p.now(),
 				HostURL:      calPath,
@@ -385,7 +388,7 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 	if !supported {
 		return dav.ErrNotImplemented("Sharing is not implemented on this backend")
 	}
-	url, err := replies.ShareReply(home.principalURI, reply.href, reply.status, reply.calendarURI, reply.inReplyTo, reply.summary)
+	url, err := replies.ShareReply(r.Context(), home.principalURI, reply.href, reply.status, reply.calendarURI, reply.inReplyTo, reply.summary)
 	if err != nil {
 		return err
 	}
@@ -423,7 +426,7 @@ func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path str
 	if !supported {
 		return false, nil
 	}
-	if err := publisher.SetPublishStatus(calNode.Info.ID, value); err != nil {
+	if err := publisher.SetPublishStatus(r.Context(), calNode.Info.ID, value); err != nil {
 		return true, err
 	}
 	w.Header().Set("X-Sabre-Status", "everything-went-well")

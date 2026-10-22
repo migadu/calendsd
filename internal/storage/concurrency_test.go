@@ -67,7 +67,7 @@ func TestSyncTokenConcurrency(t *testing.T) {
 			defer wg.Done()
 			<-start // release all writers at once to maximize contention
 			ics := fmt.Sprintf("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:c-%d\r\nDTSTART:20260101T120000Z\r\nDTEND:20260101T130000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n", i)
-			_, errs[i] = backend.CreateCalendarObject(id, fmt.Sprintf("obj%d.ics", i), []byte(ics))
+			_, errs[i] = backend.CreateCalendarObject(t.Context(), id, fmt.Sprintf("obj%d.ics", i), []byte(ics))
 		}(i)
 	}
 	close(start)

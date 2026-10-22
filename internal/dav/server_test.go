@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -107,17 +108,17 @@ func testRoot() Collection { return emptyColl{} }
 
 type emptyColl struct{}
 
-func (emptyColl) Name() string                 { return "root" }
-func (emptyColl) SetName(string) error         { return nil }
-func (emptyColl) Delete() error                { return nil }
-func (emptyColl) LastModified() time.Time      { return time.Time{} }
-func (emptyColl) Children() ([]Node, error)    { return nil, nil }
-func (emptyColl) ChildExists(string) bool      { return false }
-func (emptyColl) CreateDirectory(string) error { return nil }
-func (emptyColl) Child(name string) (Node, error) {
+func (emptyColl) Name() string                                  { return "root" }
+func (emptyColl) SetName(context.Context, string) error         { return nil }
+func (emptyColl) Delete(ctx context.Context) error              { return nil }
+func (emptyColl) LastModified() time.Time                       { return time.Time{} }
+func (emptyColl) Children(ctx context.Context) ([]Node, error)  { return nil, nil }
+func (emptyColl) ChildExists(context.Context, string) bool      { return false }
+func (emptyColl) CreateDirectory(context.Context, string) error { return nil }
+func (emptyColl) Child(ctx context.Context, name string) (Node, error) {
 	return nil, ErrNotFound("File not found: %s", name)
 }
-func (emptyColl) CreateFile(string, io.Reader) (string, error) { return "", nil }
+func (emptyColl) CreateFile(context.Context, string, io.Reader) (string, error) { return "", nil }
 
 type fakePlugin struct{ features []string }
 

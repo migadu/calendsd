@@ -6,6 +6,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 
 	"calserver/internal/acl"
@@ -19,24 +20,24 @@ import (
 // Store is the read-only aggregate access the panel needs beyond the
 // backend interfaces; *storage.AdminQueries implements it, tests fake it.
 type Store interface {
-	Counts() (*storage.AdminCounts, error)
-	RecentChanges(limit int) ([]storage.AdminChange, error)
-	AuthDiagnostics() (*storage.AdminAuthDiagnostics, error)
-	UserForPrincipal(principalURI string) (*storage.AdminUserRow, error)
-	LookupCalendar(principalURI, uri string) (string, error)
-	CalendarInstances(calendarID string) ([]storage.AdminCalendarInstance, error)
-	CalendarMeta(calendarID string) (*storage.AdminCalendarMeta, error)
-	PropertyRows(path string) ([]storage.AdminPropRow, error)
-	AddressBook(id string) (*storage.AdminAddressBook, error)
-	LookupAddressBook(principalURI, uri string) (string, error)
-	Objects(q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error)
-	Object(calendarID, uri string) (*storage.AdminObjectDetail, error)
-	CardsSearch(bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error)
-	Card(bookID, uri string) (*storage.AdminCardDetail, error)
+	Counts(ctx context.Context) (*storage.AdminCounts, error)
+	RecentChanges(ctx context.Context, limit int) ([]storage.AdminChange, error)
+	AuthDiagnostics(ctx context.Context) (*storage.AdminAuthDiagnostics, error)
+	UserForPrincipal(ctx context.Context, principalURI string) (*storage.AdminUserRow, error)
+	LookupCalendar(ctx context.Context, principalURI, uri string) (string, error)
+	CalendarInstances(ctx context.Context, calendarID string) ([]storage.AdminCalendarInstance, error)
+	CalendarMeta(ctx context.Context, calendarID string) (*storage.AdminCalendarMeta, error)
+	PropertyRows(ctx context.Context, path string) ([]storage.AdminPropRow, error)
+	AddressBook(ctx context.Context, id string) (*storage.AdminAddressBook, error)
+	LookupAddressBook(ctx context.Context, principalURI, uri string) (string, error)
+	Objects(ctx context.Context, q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error)
+	Object(ctx context.Context, calendarID, uri string) (*storage.AdminObjectDetail, error)
+	CardsSearch(ctx context.Context, bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error)
+	Card(ctx context.Context, bookID, uri string) (*storage.AdminCardDetail, error)
 
-	ChangeLog(kind, collectionID string, limit int) ([]storage.AdminChange, error)
-	PendingShareInvites(principalURI string) ([]storage.AdminCalendarInstance, error)
-	Doctor(scanCap int) (*storage.AdminDoctorReport, error)
+	ChangeLog(ctx context.Context, kind, collectionID string, limit int) ([]storage.AdminChange, error)
+	PendingShareInvites(ctx context.Context, principalURI string) ([]storage.AdminCalendarInstance, error)
+	Doctor(ctx context.Context, scanCap int) (*storage.AdminDoctorReport, error)
 }
 
 var _ Store = (*storage.AdminQueries)(nil)

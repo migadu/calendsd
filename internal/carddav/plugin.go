@@ -86,7 +86,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 // inspected; anything else is left to other handlers.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
 	parentPath, _ := pathutil.Split(path)
-	parent, err := p.server.Tree.NodeForPath(parentPath)
+	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		return data, nil // not an address-book object write
 	}
@@ -127,7 +127,7 @@ func (p *Plugin) Report(name xml.Name, body []byte, path string, w http.Response
 }
 
 // HandleMethod serves the ?export VCF download (GET on an address book).
-func (p *Plugin) Methods(path string) []string { return nil }
+func (p *Plugin) Methods(ctx context.Context, path string) []string { return nil }
 
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	if r.Method != "GET" || !r.URL.Query().Has("export") {
@@ -137,7 +137,7 @@ func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	if err != nil {
 		return false, nil
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return false, nil
 	}
@@ -145,7 +145,7 @@ func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	if !isBook {
 		return false, nil
 	}
-	cards, err := book.backend.Cards(book.Info.ID)
+	cards, err := book.backend.Cards(r.Context(), book.Info.ID)
 	if err != nil {
 		return true, err
 	}
@@ -178,7 +178,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 	if err != nil {
 		return dav.ErrBadRequest("%s", err)
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 	var matches []string
 	switch n := node.(type) {
 	case *AddressBook:
-		cards, err := n.Children()
+		cards, err := n.Children(r.Context())
 		if err != nil {
 			return err
 		}

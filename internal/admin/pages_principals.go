@@ -24,15 +24,15 @@ type DashboardData struct {
 }
 
 func (a *App) dashboardData(r *http.Request) (any, error) {
-	counts, err := a.Store.Counts()
+	counts, err := a.Store.Counts(r.Context())
 	if err != nil {
 		return nil, fmt.Errorf("counts: %w", err)
 	}
-	changes, err := a.Store.RecentChanges(30)
+	changes, err := a.Store.RecentChanges(r.Context(), 30)
 	if err != nil {
 		return nil, fmt.Errorf("recent changes: %w", err)
 	}
-	diags, err := a.Store.AuthDiagnostics()
+	diags, err := a.Store.AuthDiagnostics(r.Context())
 	if err != nil {
 		return nil, fmt.Errorf("auth diagnostics: %w", err)
 	}
@@ -87,11 +87,11 @@ type PrincipalsData struct {
 }
 
 func (a *App) principalsData(r *http.Request) (any, error) {
-	list, err := a.Principals.PrincipalsByPrefix("principals")
+	list, err := a.Principals.PrincipalsByPrefix(r.Context(), "principals")
 	if err != nil {
 		return nil, err
 	}
-	diags, err := a.Store.AuthDiagnostics()
+	diags, err := a.Store.AuthDiagnostics(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 	if path == "" {
 		return nil, fmt.Errorf("%w: missing ?path=principals/<name>", errBadRequest)
 	}
-	p, err := a.Principals.PrincipalByPath(path)
+	p, err := a.Principals.PrincipalByPath(r.Context(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 		DisplayName: propString(p.Props, "DAV:", "displayname"),
 		Email:       propString(p.Props, "http://sabredav.org/ns", "email-address"),
 	}
-	if d.User, err = a.Store.UserForPrincipal(path); err != nil {
+	if d.User, err = a.Store.UserForPrincipal(r.Context(), path); err != nil {
 		return nil, err
 	}
 	if d.User != nil {
@@ -171,7 +171,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 		}
 	}
 
-	groups, err := a.Principals.GroupMembership(path)
+	groups, err := a.Principals.GroupMembership(r.Context(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -185,14 +185,14 @@ func (a *App) principalData(r *http.Request) (any, error) {
 			d.Groups = append(d.Groups, g)
 		}
 	}
-	if d.ReadDelegates, err = a.Principals.GroupMemberSet(path + "/calendar-proxy-read"); err != nil {
+	if d.ReadDelegates, err = a.Principals.GroupMemberSet(r.Context(), path+"/calendar-proxy-read"); err != nil {
 		return nil, err
 	}
-	if d.WriteDelegates, err = a.Principals.GroupMemberSet(path + "/calendar-proxy-write"); err != nil {
+	if d.WriteDelegates, err = a.Principals.GroupMemberSet(r.Context(), path+"/calendar-proxy-write"); err != nil {
 		return nil, err
 	}
 
-	cals, err := a.Calendars.CalendarsForUser(path)
+	cals, err := a.Calendars.CalendarsForUser(r.Context(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 			ID:          c.ID.Calendar,
 		})
 	}
-	books, err := a.AddressBooks.AddressBooksForUser(path)
+	books, err := a.AddressBooks.AddressBooksForUser(r.Context(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (a *App) principalData(r *http.Request) (any, error) {
 	// Pending soft-delete, if any (read through the writes carve-out; nil in a
 	// deployment with no writes wired, where the danger-zone forms 403 anyway).
 	if a.Writes != nil {
-		dels, err := a.Writes.Deletions()
+		dels, err := a.Writes.Deletions(r.Context())
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +285,7 @@ func (a *App) checkCredentials(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing username", http.StatusBadRequest)
 		return
 	}
-	user, err := a.Store.UserForPrincipal("principals/" + username)
+	user, err := a.Store.UserForPrincipal(r.Context(), "principals/"+username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

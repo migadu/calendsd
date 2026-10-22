@@ -37,7 +37,7 @@ type SyncCollection interface {
 	SyncToken() string
 	// Changes returns changes since the given bare token ("" = initial
 	// sync). A nil ChangeSet means the token is invalid or unknown.
-	Changes(syncToken string, syncLevel, limit int) (*ChangeSet, error)
+	Changes(ctx context.Context, syncToken string, syncLevel, limit int) (*ChangeSet, error)
 }
 
 // SyncPlugin implements the sync-collection REPORT and sync-token property.
@@ -74,14 +74,14 @@ func (p *SyncPlugin) SupportedReports(node Node, path string) []xml.Name {
 
 // ValidateTokens implements the If-header token validation for sync tokens,
 // mirroring sabre's validateTokens listener.
-func (p *SyncPlugin) ValidateTokens(conditions []IfCondition) {
+func (p *SyncPlugin) ValidateTokens(ctx context.Context, conditions []IfCondition) {
 	for ci := range conditions {
 		for ti := range conditions[ci].Tokens {
 			token := conditions[ci].Tokens[ti].Token
 			if !strings.HasPrefix(token, SyncTokenPrefix) {
 				continue
 			}
-			node, err := p.server.Tree.NodeForPath(conditions[ci].URI)
+			node, err := p.server.Tree.NodeForPath(ctx, conditions[ci].URI)
 			if err != nil {
 				continue
 			}
@@ -125,7 +125,7 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 		return true, ErrBadRequest("The {DAV:}prop element is required")
 	}
 
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return true, err
 	}
@@ -165,7 +165,7 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 		limit = req.Limit.NResults
 	}
 
-	changes, err := sc.Changes(syncToken, syncLevel, limit)
+	changes, err := sc.Changes(r.Context(), syncToken, syncLevel, limit)
 	if err != nil {
 		return true, err
 	}

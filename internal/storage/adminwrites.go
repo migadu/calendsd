@@ -32,17 +32,12 @@ type AdminWrites struct {
 // plus its calendar-proxy-read/-write sub-principals, matching sabre's
 // seed convention so delegation works). digestA1 is the precomputed
 // md5(user:realm:pass); the caller owns the realm.
-func (w *AdminWrites) CreateUser(username, digestA1, email, displayName string) error {
-	return w.CreateUserContext(context.Background(), username, digestA1, email, displayName)
-}
-
-// CreateUserContext is CreateUser bounded by ctx.
-func (w *AdminWrites) CreateUserContext(ctx context.Context, username, digestA1, email, displayName string) error {
+func (w *AdminWrites) CreateUser(ctx context.Context, username, digestA1, email, displayName string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	return withTxContext(ctx, w.DB, func(tx *sql.Tx) error {
-		return createUserRows(tx, username, digestA1, email, displayName)
+	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
+		return createUserRows(ctx, tx, username, digestA1, email, displayName)
 	})
 }
 
@@ -54,14 +49,14 @@ func (w *AdminWrites) CreateUserContext(ctx context.Context, username, digestA1,
 // the proxy sub-principals, which fails silently as broken delegation.
 //
 // It inserts blind: callers that may meet an existing principal check first.
-func createUserRows(tx *sql.Tx, username, digestA1, email, displayName string) error {
-	if _, err := tx.Exec(
+func createUserRows(ctx context.Context, tx *sql.Tx, username, digestA1, email, displayName string) error {
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
 		username, digestA1); err != nil {
 		return fmt.Errorf("creating users row (already exists?): %w", err)
 	}
 	principal := "principals/" + username
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO principals (uri, email, displayname) VALUES
 	($1, nullif($2, ''), nullif($3, '')),
 	($1 || '/calendar-proxy-read', NULL, NULL),
@@ -91,7 +86,7 @@ func BlockedDigestA1() string {
 // matching CreateUser's nullif convention. Same carve-out rationale as
 // CreateUser: the principals columns carry no sync state and no backend
 // exposes a write path for them.
-func (w *AdminWrites) UpdatePrincipal(uri string, email, displayName *string) error {
+func (w *AdminWrites) UpdatePrincipal(ctx context.Context, uri string, email, displayName *string) error {
 	var sets []string
 	args := []any{uri}
 	if email != nil {
@@ -105,7 +100,7 @@ func (w *AdminWrites) UpdatePrincipal(uri string, email, displayName *string) er
 	if len(sets) == 0 {
 		return fmt.Errorf("nothing to update")
 	}
-	res, err := w.DB.Exec(
+	res, err := w.DB.ExecContext(ctx,
 		`UPDATE principals SET `+strings.Join(sets, ", ")+` WHERE uri = $1`, args...)
 	if err != nil {
 		return err
@@ -128,14 +123,14 @@ func (w *AdminWrites) UpdatePrincipal(uri string, email, displayName *string) er
 // write. Group-membership rows and scheduling inbox objects referencing the
 // principal go with it — exactly the rows the doctor would otherwise flag
 // as dangling/orphaned.
-func (w *AdminWrites) DeleteUser(username string) error {
+func (w *AdminWrites) DeleteUser(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
 	principal := "principals/" + username
-	return withTx(w.DB, func(tx *sql.Tx) error {
+	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
 		var calendars, books int
-		if err := tx.QueryRow(`SELECT
+		if err := tx.QueryRowContext(ctx, `SELECT
 			(SELECT count(*) FROM calendarinstances WHERE principaluri = $1),
 			(SELECT count(*) FROM addressbooks WHERE principaluri = $1)`,
 			principal).Scan(&calendars, &books); err != nil {
@@ -145,7 +140,7 @@ func (w *AdminWrites) DeleteUser(username string) error {
 			return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade",
 				principal, calendars, books)
 		}
-		return deletePrincipalRows(tx, principal, username)
+		return deletePrincipalRows(ctx, tx, principal, username)
 	})
 }
 
@@ -158,44 +153,44 @@ func (w *AdminWrites) DeleteUser(username string) error {
 // and users row. All in one transaction, so a failure leaves the account and
 // its data intact. Property-storage rows are left for the doctor's
 // orphaned-property sweep, same as DeleteUser.
-func (w *AdminWrites) DeleteUserCascade(username string) error {
+func (w *AdminWrites) DeleteUserCascade(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	return withTx(w.DB, func(tx *sql.Tx) error {
-		return deleteUserCascadeRows(tx, username)
+	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
+		return deleteUserCascadeRows(ctx, tx, username)
 	})
 }
 
 // deleteUserCascadeRows is DeleteUserCascade inside a caller-owned
 // transaction, so PurgeExpired can claim the tombstone and cascade in one.
-func deleteUserCascadeRows(tx *sql.Tx, username string) error {
+func deleteUserCascadeRows(ctx context.Context, tx *sql.Tx, username string) error {
 	principal := "principals/" + username
 	// Owned calendars (access=1): capture ids first, since the deletes below
 	// remove the very instance rows that mark ownership.
-	ownedCals, err := scanIDs(tx,
+	ownedCals, err := scanIDs(ctx, tx,
 		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND access = 1`, principal)
 	if err != nil {
 		return err
 	}
 	for _, id := range ownedCals {
-		if err := deleteCalendarRows(tx, id); err != nil {
+		if err := deleteCalendarRows(ctx, tx, id); err != nil {
 			return err
 		}
 	}
 	// Any remaining instance rows are shares into this principal; drop them.
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM calendarinstances WHERE principaluri = $1`, principal); err != nil {
 		return err
 	}
 
-	ownedBooks, err := scanIDs(tx,
+	ownedBooks, err := scanIDs(ctx, tx,
 		`SELECT id FROM addressbooks WHERE principaluri = $1`, principal)
 	if err != nil {
 		return err
 	}
 	for _, id := range ownedBooks {
-		if err := deleteAddressBookRows(tx, id); err != nil {
+		if err := deleteAddressBookRows(ctx, tx, id); err != nil {
 			return err
 		}
 	}
@@ -206,12 +201,12 @@ func deleteUserCascadeRows(tx *sql.Tx, username string) error {
 	// outlive the deleted account. The contact_import ledger is deliberately
 	// NOT purged here — it is evidence about a migration run and is meant to
 	// survive the principal (see scripts/schema/pgsql.calserver.sql).
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM contact_frecency WHERE principal = $1`, principal); err != nil {
 		return err
 	}
 
-	return deletePrincipalRows(tx, principal, username)
+	return deletePrincipalRows(ctx, tx, principal, username)
 }
 
 // deletePrincipalRows removes the rows shared by both delete paths: the
@@ -221,46 +216,46 @@ func deleteUserCascadeRows(tx *sql.Tx, username string) error {
 // triple (the principal plus the two proxy sub-principals), and its users
 // row (absent for group principals, which is fine). It errors if no
 // principal row matched, so deleting an unknown account is reported.
-func deletePrincipalRows(tx *sql.Tx, principal, username string) error {
+func deletePrincipalRows(ctx context.Context, tx *sql.Tx, principal, username string) error {
 	proxyRead := principal + "/calendar-proxy-read"
 	proxyWrite := principal + "/calendar-proxy-write"
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 DELETE FROM groupmembers
  WHERE principal_id IN (SELECT id FROM principals WHERE uri IN ($1, $2, $3))
     OR member_id    IN (SELECT id FROM principals WHERE uri IN ($1, $2, $3))`,
 		principal, proxyRead, proxyWrite); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM schedulingobjects WHERE principaluri = $1`, principal); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM calendar_availability WHERE principal = $1`, principal); err != nil {
 		return err
 	}
 	// Their share-invite inbox: no foreign key, and a later account with the
 	// same name must not inherit the invites.
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM notifications WHERE principaluri = $1`, principal); err != nil {
 		return err
 	}
 	// Their own free-busy setting, and their place on everyone else's
 	// allowed list (a later account with the same name must not inherit
 	// those grants).
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM free_busy_visibility WHERE principal = $1`, principal); err != nil {
 		return err
 	}
 	// Grants name the principal by URI or by its address.
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 UPDATE free_busy_visibility v
    SET allowed = array_remove(array_remove(v.allowed, $1::text), a.addr), updated_at = now()
   FROM (SELECT coalesce('mailto:' || lower((SELECT email FROM principals WHERE uri = $1)), '') AS addr) a
  WHERE $1::text = ANY (v.allowed) OR a.addr = ANY (v.allowed)`, principal); err != nil {
 		return err
 	}
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM principals WHERE uri IN ($1, $2, $3)`, principal, proxyRead, proxyWrite)
 	if err != nil {
 		return err
@@ -272,7 +267,7 @@ UPDATE free_busy_visibility v
 	if n == 0 {
 		return fmt.Errorf("no principal %q: %w", principal, ErrNoPrincipal)
 	}
-	if _, err := tx.Exec(`DELETE FROM users WHERE username = $1`, username); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE username = $1`, username); err != nil {
 		return err
 	}
 	return nil
@@ -293,7 +288,7 @@ type DeletedPrincipal struct {
 // window and reason (idempotent). It touches no calendar/card/principal data —
 // the auth gate disables login immediately, and the purge job removes the data
 // once the window elapses. retainDays must be positive.
-func (w *AdminWrites) ScheduleDelete(username string, retainDays int, reason string) error {
+func (w *AdminWrites) ScheduleDelete(ctx context.Context, username string, retainDays int, reason string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
@@ -302,7 +297,7 @@ func (w *AdminWrites) ScheduleDelete(username string, retainDays int, reason str
 	}
 	principal := "principals/" + username
 	var exists bool
-	if err := w.DB.QueryRow(
+	if err := w.DB.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM principals WHERE uri = $1)`, principal).Scan(&exists); err != nil {
 		return err
 	}
@@ -310,7 +305,7 @@ func (w *AdminWrites) ScheduleDelete(username string, retainDays int, reason str
 		return fmt.Errorf("no principal %q: %w", principal, ErrNoPrincipal)
 	}
 	// purge_after is materialized now so a later config change never moves it.
-	_, err := w.DB.Exec(`
+	_, err := w.DB.ExecContext(ctx, `
 INSERT INTO deleted_principals (principal, username, purge_after, reason)
 VALUES ($1, $2, now() + make_interval(days => $3), nullif($4, ''))
 ON CONFLICT (principal) DO UPDATE
@@ -323,11 +318,11 @@ ON CONFLICT (principal) DO UPDATE
 
 // CancelDelete removes a pending-deletion tombstone (restore). It errors if the
 // account was not scheduled for deletion.
-func (w *AdminWrites) CancelDelete(username string) error {
+func (w *AdminWrites) CancelDelete(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
 		return fmt.Errorf("invalid username %q", username)
 	}
-	res, err := w.DB.Exec(
+	res, err := w.DB.ExecContext(ctx,
 		`DELETE FROM deleted_principals WHERE principal = $1`, "principals/"+username)
 	if err != nil {
 		return err
@@ -343,16 +338,16 @@ func (w *AdminWrites) CancelDelete(username string) error {
 }
 
 // Deletions lists all pending-deletion tombstones, soonest purge first.
-func (w *AdminWrites) Deletions() ([]DeletedPrincipal, error) {
-	return scanDeletions(w.DB.Query(
+func (w *AdminWrites) Deletions(ctx context.Context) ([]DeletedPrincipal, error) {
+	return scanDeletions(w.DB.QueryContext(ctx,
 		`SELECT principal, username, coalesce(reason, ''), deleted_at, purge_after
 		   FROM deleted_principals ORDER BY purge_after`))
 }
 
 // ExpiredDeletions lists tombstones whose retention window has elapsed
 // (purge_after <= now()), soonest first — what a purge sweep would act on.
-func (w *AdminWrites) ExpiredDeletions() ([]DeletedPrincipal, error) {
-	return scanDeletions(w.DB.Query(
+func (w *AdminWrites) ExpiredDeletions(ctx context.Context) ([]DeletedPrincipal, error) {
+	return scanDeletions(w.DB.QueryContext(ctx,
 		`SELECT principal, username, coalesce(reason, ''), deleted_at, purge_after
 		   FROM deleted_principals WHERE purge_after <= now() ORDER BY purge_after`))
 }
@@ -366,20 +361,20 @@ func (w *AdminWrites) ExpiredDeletions() ([]DeletedPrincipal, error) {
 // too, so the account keeps its tombstone (login stays disabled) and the next
 // sweep retries it. A cascade that finds the principal already gone
 // (ErrNoPrincipal) still counts as purged, and commits the claim.
-func (w *AdminWrites) PurgeExpired() ([]DeletedPrincipal, error) {
-	expired, err := w.ExpiredDeletions()
+func (w *AdminWrites) PurgeExpired(ctx context.Context) ([]DeletedPrincipal, error) {
+	expired, err := w.ExpiredDeletions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var purged []DeletedPrincipal
 	for _, d := range expired {
 		claimed := false
-		err := withTx(w.DB, func(tx *sql.Tx) error {
+		err := withTx(ctx, w.DB, func(tx *sql.Tx) error {
 			// Claim: decide ownership by the delete, not the earlier read. If a
 			// restore already removed the tombstone, RowsAffected is 0 and we
 			// skip. The delete also locks the tombstone against a concurrent
 			// restore until the cascade commits.
-			res, err := tx.Exec(
+			res, err := tx.ExecContext(ctx,
 				`DELETE FROM deleted_principals WHERE principal = $1 AND purge_after <= now()`,
 				d.Principal)
 			if err != nil {
@@ -391,7 +386,7 @@ func (w *AdminWrites) PurgeExpired() ([]DeletedPrincipal, error) {
 				return nil // lost the race to a restore; leave the account intact
 			}
 			claimed = true
-			if err := deleteUserCascadeRows(tx, d.Username); err != nil && !errors.Is(err, ErrNoPrincipal) {
+			if err := deleteUserCascadeRows(ctx, tx, d.Username); err != nil && !errors.Is(err, ErrNoPrincipal) {
 				return err
 			}
 			return nil
@@ -425,8 +420,8 @@ func scanDeletions(rows *sql.Rows, queryErr error) ([]DeletedPrincipal, error) {
 // scanIDs runs a single-column query and collects the string ids, used by
 // DeleteUserCascade to capture owned collection ids before deleting the rows
 // that identify them.
-func scanIDs(tx *sql.Tx, query string, args ...any) ([]string, error) {
-	rows, err := tx.Query(query, args...)
+func scanIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -443,8 +438,8 @@ func scanIDs(tx *sql.Tx, query string, args ...any) ([]string, error) {
 }
 
 // SetPassword replaces a user's digesta1 hash.
-func (w *AdminWrites) SetPassword(username, digestA1 string) error {
-	res, err := w.DB.Exec(
+func (w *AdminWrites) SetPassword(ctx context.Context, username, digestA1 string) error {
+	res, err := w.DB.ExecContext(ctx,
 		`UPDATE users SET digesta1 = $2 WHERE username = $1`, username, digestA1)
 	if err != nil {
 		return err
@@ -490,14 +485,14 @@ func DeletableOrphanChecks() []string {
 // DeleteOrphans removes the rows a doctor check flagged, returning how many
 // went. The deletes mirror the doctor's queries exactly, so a doctor run
 // right after reports the check clean.
-func (w *AdminWrites) DeleteOrphans(check string) (int64, error) {
+func (w *AdminWrites) DeleteOrphans(ctx context.Context, check string) (int64, error) {
 	if check == "orphaned-property" {
 		// Classified in Go (same walk the doctor uses), deleted by id in one
 		// statement, inside the transaction the classification read in, so
 		// the delete is all or nothing.
 		var total int64
-		err := withTx(w.DB, func(tx *sql.Tx) error {
-			orphans, err := orphanedPropertyRows(tx)
+		err := withTx(ctx, w.DB, func(tx *sql.Tx) error {
+			orphans, err := orphanedPropertyRows(ctx, tx)
 			if err != nil || len(orphans) == 0 {
 				return err
 			}
@@ -505,7 +500,7 @@ func (w *AdminWrites) DeleteOrphans(check string) (int64, error) {
 			for i, o := range orphans {
 				ids[i] = o.id
 			}
-			res, err := tx.Exec(`DELETE FROM propertystorage WHERE id = ANY($1::bigint[])`, ids)
+			res, err := tx.ExecContext(ctx, `DELETE FROM propertystorage WHERE id = ANY($1::bigint[])`, ids)
 			if err != nil {
 				return err
 			}
@@ -521,7 +516,7 @@ func (w *AdminWrites) DeleteOrphans(check string) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("check %q is not deletable", check)
 	}
-	res, err := w.DB.Exec(query)
+	res, err := w.DB.ExecContext(ctx, query)
 	if err != nil {
 		return 0, err
 	}

@@ -60,7 +60,7 @@ func TestCalendarAvailability(t *testing.T) {
 
 	get := func(principal string) string {
 		t.Helper()
-		data, err := backend.Availability(principal)
+		data, err := backend.Availability(t.Context(), principal)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestCalendarAvailability(t *testing.T) {
 	}
 
 	// Re-applying the schema moves nothing and keeps newer values.
-	if err := backend.SetAvailability("principals/alice", []byte("newer")); err != nil {
+	if err := backend.SetAvailability(t.Context(), "principals/alice", []byte("newer")); err != nil {
 		t.Fatal(err)
 	}
 	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", extFile)
@@ -107,7 +107,7 @@ func TestCalendarAvailability(t *testing.T) {
 	if got := get("principals/nobody"); got != "" {
 		t.Errorf("unset availability = %q, want none", got)
 	}
-	if err := backend.DeleteAvailability("principals/bob"); err != nil {
+	if err := backend.DeleteAvailability(t.Context(), "principals/bob"); err != nil {
 		t.Fatal(err)
 	}
 	if got := get("principals/bob"); got != "" {
@@ -116,10 +116,10 @@ func TestCalendarAvailability(t *testing.T) {
 
 	// Doctor: a row for a missing principal is flagged and deletable; the
 	// live ones are not.
-	if err := backend.SetAvailability("principals/nobody", []byte("x")); err != nil {
+	if err := backend.SetAvailability(t.Context(), "principals/nobody", []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	report, err := (&storage.AdminQueries{DB: db}).Doctor(0)
+	report, err := (&storage.AdminQueries{DB: db}).Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestCalendarAvailability(t *testing.T) {
 		t.Errorf("orphaned-availability findings = %v, want just principals/nobody", flagged)
 	}
 	writes := &storage.AdminWrites{DB: db}
-	if n, err := writes.DeleteOrphans("orphaned-availability"); err != nil || n != 1 {
+	if n, err := writes.DeleteOrphans(t.Context(), "orphaned-availability"); err != nil || n != 1 {
 		t.Errorf("DeleteOrphans = %d, %v; want 1", n, err)
 	}
 	if got := get("principals/alice"); got != "newer" {
@@ -143,7 +143,7 @@ func TestCalendarAvailability(t *testing.T) {
 	// Free-busy visibility round-trip (VAVAILABILITY-PLAN.md §10).
 	vis := func(principal string) acl.FreeBusyVisibility {
 		t.Helper()
-		v, err := backend.FreeBusyVisibility(principal)
+		v, err := backend.FreeBusyVisibility(t.Context(), principal)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,31 +152,31 @@ func TestCalendarAvailability(t *testing.T) {
 	if v := vis("principals/alice"); v.Hidden || len(v.Allowed) != 0 {
 		t.Errorf("unset visibility = %+v, want the default", v)
 	}
-	if err := backend.SetFreeBusyVisibility("principals/alice",
+	if err := backend.SetFreeBusyVisibility(t.Context(), "principals/alice",
 		acl.FreeBusyVisibility{Hidden: true, Allowed: []string{"principals/bob", "principals/carol"}}); err != nil {
 		t.Fatal(err)
 	}
 	if v := vis("principals/alice"); !v.Hidden || strings.Join(v.Allowed, ",") != "principals/bob,principals/carol" {
 		t.Errorf("alice visibility = %+v", v)
 	}
-	if err := backend.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{}); err != nil {
+	if err := backend.SetFreeBusyVisibility(t.Context(), "principals/alice", acl.FreeBusyVisibility{}); err != nil {
 		t.Fatal(err)
 	}
 	if v := vis("principals/alice"); v.Hidden || len(v.Allowed) != 0 {
 		t.Errorf("replaced visibility = %+v, want domain with nobody extra", v)
 	}
-	if err := backend.SetFreeBusyVisibility("principals/alice",
+	if err := backend.SetFreeBusyVisibility(t.Context(), "principals/alice",
 		acl.FreeBusyVisibility{Allowed: []string{"principals/carol"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.SetFreeBusyVisibility("principals/bob",
+	if err := backend.SetFreeBusyVisibility(t.Context(), "principals/bob",
 		acl.FreeBusyVisibility{Hidden: true, Allowed: []string{"principals/alice", "mailto:alice@example.org", "principals/carol"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.SetFreeBusyVisibility("principals/nobody", acl.FreeBusyVisibility{Hidden: true}); err != nil {
+	if err := backend.SetFreeBusyVisibility(t.Context(), "principals/nobody", acl.FreeBusyVisibility{Hidden: true}); err != nil {
 		t.Fatal(err)
 	}
-	report, err = (&storage.AdminQueries{DB: db}).Doctor(0)
+	report, err = (&storage.AdminQueries{DB: db}).Doctor(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,13 +189,13 @@ func TestCalendarAvailability(t *testing.T) {
 	if len(flagged) != 1 || flagged[0] != "free-busy visibility of principals/nobody" {
 		t.Errorf("orphaned-visibility findings = %v", flagged)
 	}
-	if n, err := writes.DeleteOrphans("orphaned-visibility"); err != nil || n != 1 {
+	if n, err := writes.DeleteOrphans(t.Context(), "orphaned-visibility"); err != nil || n != 1 {
 		t.Errorf("DeleteOrphans(orphaned-visibility) = %d, %v; want 1", n, err)
 	}
 
 	// Deleting the user deletes their working hours, their visibility, and
 	// their place on everyone else's allowed list.
-	if err := writes.DeleteUserCascade("alice"); err != nil {
+	if err := writes.DeleteUserCascade(t.Context(), "alice"); err != nil {
 		t.Fatal(err)
 	}
 	if got := get("principals/alice"); got != "" {

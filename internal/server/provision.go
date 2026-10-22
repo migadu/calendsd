@@ -74,7 +74,7 @@ func (p *provisioner) ensure(ctx context.Context, principal, email string) error
 // create looks principal up and inserts it when absent. Callers hold the
 // principal's in-flight slot, so no other ensure races it in this process.
 func (p *provisioner) create(ctx context.Context, principal, email string) error {
-	existing, err := p.principals.PrincipalByPathContext(ctx, principal)
+	existing, err := p.principals.PrincipalByPath(ctx, principal)
 	if err != nil {
 		return err
 	}
@@ -86,11 +86,11 @@ func (p *provisioner) create(ctx context.Context, principal, email string) error
 	// The users.digesta1 column is unused for rcptd logins (rcptd owns the
 	// password), but it's NOT NULL, so store an unguessable random value that
 	// no md5(user:realm:pass) can equal — Digest auth simply never matches.
-	if err := p.writes.CreateUserContext(ctx, username, storage.BlockedDigestA1(), email, email); err != nil {
+	if err := p.writes.CreateUser(ctx, username, storage.BlockedDigestA1(), email, email); err != nil {
 		// Another process (or a racing first login on another host) may have
 		// created it between our check and insert; treat "now exists" as
 		// success rather than a hard error.
-		if again, e2 := p.principals.PrincipalByPathContext(ctx, principal); e2 == nil && again != nil {
+		if again, e2 := p.principals.PrincipalByPath(ctx, principal); e2 == nil && again != nil {
 			return nil
 		}
 		return err

@@ -4,6 +4,7 @@
 package caldav
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -67,42 +68,42 @@ func (o *ObjectInfo) QuotedETag() string {
 // CalDAV\Backend\BackendInterface subset the MVP needs.
 type Backend interface {
 	// CalendarsForUser lists the calendars owned by a principal.
-	CalendarsForUser(principalURI string) ([]CalendarInfo, error)
+	CalendarsForUser(ctx context.Context, principalURI string) ([]CalendarInfo, error)
 	// CreateCalendar makes a new calendar and returns its ID.
-	CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error)
+	CreateCalendar(ctx context.Context, principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error)
 	// DeleteCalendar removes a calendar with its objects.
-	DeleteCalendar(calendarID CalendarID) error
+	DeleteCalendar(ctx context.Context, calendarID CalendarID) error
 	// UpdateCalendar registers PropPatch handlers for the calendar
 	// properties the backend persists (sabre's updateCalendar).
-	UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch)
+	UpdateCalendar(ctx context.Context, calendarID CalendarID, pp *dav.PropPatch)
 
 	// CalendarObjects lists all objects of a calendar.
-	CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error)
+	CalendarObjects(ctx context.Context, calendarID CalendarID) ([]ObjectInfo, error)
 	// CalendarQuery returns the URIs of objects that could match a query with
 	// the given top-level component type ("" = no constraint) and optional
 	// time range (zero Start/End = unconstrained). It is a coarse prefilter
 	// that must return a superset of the true matches; the caller validates
 	// each candidate. Port of sabre's BackendInterface::calendarQuery.
-	CalendarQuery(calendarID CalendarID, componentType string, start, end time.Time) ([]string, error)
+	CalendarQuery(ctx context.Context, calendarID CalendarID, componentType string, start, end time.Time) ([]string, error)
 	// CalendarObject fetches one object, or nil if absent.
-	CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error)
+	CalendarObject(ctx context.Context, calendarID CalendarID, objectURI string) (*ObjectInfo, error)
 	// CreateCalendarObject stores a new object, returning its quoted etag.
-	CreateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error)
+	CreateCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string, data []byte) (string, error)
 	// UpdateCalendarObject replaces an object, returning its quoted etag.
-	UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error)
+	UpdateCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string, data []byte) (string, error)
 	// DeleteCalendarObject removes an object.
-	DeleteCalendarObject(calendarID CalendarID, objectURI string) error
+	DeleteCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string) error
 
 	// ChangesForCalendar returns changes since syncToken ("" = initial
 	// sync); nil means sync is unsupported or the token is unknown.
-	ChangesForCalendar(calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
+	ChangesForCalendar(ctx context.Context, calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
 // UIDLookup is implemented by backends that find an object by its UID with an
 // index (storage.CalDAV) rather than by loading the whole calendar.
 type UIDLookup interface {
 	// CalendarObjectByUID returns the calendar's object carrying uid, or nil.
-	CalendarObjectByUID(calendarID CalendarID, uid string) (*ObjectInfo, error)
+	CalendarObjectByUID(ctx context.Context, calendarID CalendarID, uid string) (*ObjectInfo, error)
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
@@ -122,7 +123,7 @@ type MockBackend struct {
 	mu sync.Mutex
 }
 
-func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, error) {
+func (m *MockBackend) CalendarsForUser(ctx context.Context, principalURI string) ([]CalendarInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []CalendarInfo
@@ -134,7 +135,7 @@ func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, err
 	return out, nil
 }
 
-func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error) {
+func (m *MockBackend) CreateCalendar(ctx context.Context, principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++
@@ -147,7 +148,7 @@ func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map
 	return id, nil
 }
 
-func (m *MockBackend) DeleteCalendar(calendarID CalendarID) error {
+func (m *MockBackend) DeleteCalendar(ctx context.Context, calendarID CalendarID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, c := range m.Calendars {
@@ -160,7 +161,7 @@ func (m *MockBackend) DeleteCalendar(calendarID CalendarID) error {
 	return nil
 }
 
-func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, error) {
+func (m *MockBackend) CalendarObjects(ctx context.Context, calendarID CalendarID) ([]ObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []ObjectInfo
@@ -172,7 +173,7 @@ func (m *MockBackend) CalendarObjects(calendarID CalendarID) ([]ObjectInfo, erro
 
 // CalendarQuery returns every object URI (a valid superset); the mock leaves
 // all filtering to the caller's validator.
-func (m *MockBackend) CalendarQuery(calendarID CalendarID, componentType string, start, end time.Time) ([]string, error) {
+func (m *MockBackend) CalendarQuery(ctx context.Context, calendarID CalendarID, componentType string, start, end time.Time) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []string
@@ -183,7 +184,7 @@ func (m *MockBackend) CalendarQuery(calendarID CalendarID, componentType string,
 	return out, nil
 }
 
-func (m *MockBackend) CalendarObject(calendarID CalendarID, objectURI string) (*ObjectInfo, error) {
+func (m *MockBackend) CalendarObject(ctx context.Context, calendarID CalendarID, objectURI string) (*ObjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, exists := m.Objects[calendarID][objectURI]
@@ -194,7 +195,7 @@ func (m *MockBackend) CalendarObject(calendarID CalendarID, objectURI string) (*
 	return &copied, nil
 }
 
-func (m *MockBackend) CreateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
+func (m *MockBackend) CreateCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string, data []byte) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.Objects == nil {
@@ -210,11 +211,11 @@ func (m *MockBackend) CreateCalendarObject(calendarID CalendarID, objectURI stri
 
 // UpdateCalendarObject delegates to CreateCalendarObject, which takes the lock —
 // so it must not take it here (the mutex is not reentrant).
-func (m *MockBackend) UpdateCalendarObject(calendarID CalendarID, objectURI string, data []byte) (string, error) {
-	return m.CreateCalendarObject(calendarID, objectURI, data)
+func (m *MockBackend) UpdateCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string, data []byte) (string, error) {
+	return m.CreateCalendarObject(ctx, calendarID, objectURI, data)
 }
 
-func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI string) error {
+func (m *MockBackend) DeleteCalendarObject(ctx context.Context, calendarID CalendarID, objectURI string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Objects[calendarID], objectURI)
@@ -223,7 +224,7 @@ func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI stri
 
 // UpdateCalendar accepts all mutations into the in-memory props, like
 // sabre's mock.
-func (m *MockBackend) UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch) {
+func (m *MockBackend) UpdateCalendar(ctx context.Context, calendarID CalendarID, pp *dav.PropPatch) {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -244,6 +245,6 @@ func (m *MockBackend) UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch) {
 }
 
 // ChangesForCalendar reports no sync support, like sabre's plain mock.
-func (m *MockBackend) ChangesForCalendar(CalendarID, string, int, int) (*dav.ChangeSet, error) {
+func (m *MockBackend) ChangesForCalendar(context.Context, CalendarID, string, int, int) (*dav.ChangeSet, error) {
 	return nil, nil
 }

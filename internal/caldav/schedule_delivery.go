@@ -4,6 +4,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
@@ -61,7 +62,7 @@ func (p *SchedulePlugin) asyncSendsOffloaded() bool {
 // once the send settles; local delivery stays synchronous either way (it is a
 // fast storage write, and a local attendee should see the change at once).
 func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, objectPath string) {
-	if principalForAddress(p.server, msg.Recipient) != "" {
+	if principalForAddress(r.Context(), p.server, msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
 	} else {
 		for _, plugin := range p.server.Plugins() {
@@ -94,7 +95,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool,
 // scheduleLocalDelivery drops the message into the recipient's inbox and
 // updates their calendar copy. Port of sabre's scheduleLocalDelivery.
 func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Message) {
-	principalURI := principalForAddress(p.server, msg.Recipient)
+	principalURI := principalForAddress(r.Context(), p.server, msg.Recipient)
 	if principalURI == "" {
 		msg.ScheduleStatus = "3.7;Could not find principal."
 		return
@@ -102,7 +103,7 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 	_, name := pathutil.Split(principalURI)
 	homePath := "calendars/" + name
 
-	inboxNode, err := p.server.Tree.NodeForPath(homePath + "/inbox")
+	inboxNode, err := p.server.Tree.NodeForPath(r.Context(), homePath+"/inbox")
 	if err != nil {
 		msg.ScheduleStatus = "5.2;Could not find local inbox"
 		return
@@ -112,7 +113,7 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 		msg.ScheduleStatus = "5.2;Could not find local inbox"
 		return
 	}
-	defaultCalendar := p.defaultCalendarPath(principalURI)
+	defaultCalendar := p.defaultCalendarPath(r.Context(), principalURI)
 	if defaultCalendar == "" {
 		msg.ScheduleStatus = "5.2;Could not find a schedule-default-calendar-URL property"
 		return
@@ -120,15 +121,15 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 
 	// Locate an existing copy by UID across the recipient's calendars.
 	var existingObj *CalendarObject
-	home, _ := p.server.Tree.NodeForPath(homePath)
+	home, _ := p.server.Tree.NodeForPath(r.Context(), homePath)
 	if coll, ok := home.(dav.Collection); ok {
-		children, _ := coll.Children()
+		children, _ := coll.Children(r.Context())
 		for _, child := range children {
 			calNode, isCal := child.(*Calendar)
 			if !isCal {
 				continue
 			}
-			if obj, err := calNode.ObjectByUID(msg.UID); err == nil && obj != nil {
+			if obj, err := calNode.ObjectByUID(r.Context(), msg.UID); err == nil && obj != nil {
 				existingObj = obj
 				break
 			}
@@ -152,7 +153,7 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 
 	// The raw iTIP message lands in the inbox.
 	fileName := "calserver-" + randomToken() + ".ics"
-	if _, err := inbox.CreateFile(fileName, strings.NewReader(string(ical.EncodeLenient(msg.Calendar)))); err != nil {
+	if _, err := inbox.CreateFile(r.Context(), fileName, strings.NewReader(string(ical.EncodeLenient(msg.Calendar)))); err != nil {
 		msg.ScheduleStatus = "5.2;Could not deliver to local inbox"
 		return
 	}
@@ -160,18 +161,18 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 	if newObject != nil {
 		serialized := ical.EncodeLenient(newObject)
 		if existingObj != nil {
-			if _, err := existingObj.Put(strings.NewReader(string(serialized))); err != nil {
+			if _, err := existingObj.Put(r.Context(), strings.NewReader(string(serialized))); err != nil {
 				msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
 				return
 			}
 		} else {
-			calendarNode, err := p.server.Tree.NodeForPath(defaultCalendar)
+			calendarNode, err := p.server.Tree.NodeForPath(r.Context(), defaultCalendar)
 			if err != nil {
 				msg.ScheduleStatus = "5.2;Could not find the default calendar"
 				return
 			}
 			if coll, ok := calendarNode.(dav.Collection); ok {
-				if _, err := coll.CreateFile(fileName, strings.NewReader(string(serialized))); err != nil {
+				if _, err := coll.CreateFile(r.Context(), fileName, strings.NewReader(string(serialized))); err != nil {
 					msg.ScheduleStatus = "5.2;Could not deliver to the default calendar"
 					return
 				}
@@ -189,7 +190,7 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, principalURI, defaultCalendar string, newObject *goical.Calendar, existingObj *CalendarObject) {
 	if msg.Method == "CANCEL" {
 		if existingObj != nil {
-			if err := existingObj.Delete(); err != nil {
+			if err := existingObj.Delete(r.Context()); err != nil {
 				msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
 				return
 			}
@@ -201,20 +202,20 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 	// Decide participation: decline on a free-busy conflict, else accept.
 	preState := ical.EncodeLenient(newObject) // pre-decision copy for the REPLY diff
 	partStat := "ACCEPTED"
-	if p.hasConflict(principalURI, preState) {
+	if p.hasConflict(r.Context(), principalURI, preState) {
 		partStat = "DECLINED"
 	}
 	setAttendeePartStat(newObject, msg.Recipient, partStat)
 	serialized := ical.EncodeLenient(newObject)
 
 	if existingObj != nil {
-		if _, err := existingObj.Put(strings.NewReader(string(serialized))); err != nil {
+		if _, err := existingObj.Put(r.Context(), strings.NewReader(string(serialized))); err != nil {
 			msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
 			return
 		}
 	} else if partStat == "ACCEPTED" {
 		// Declined bookings never land on the resource calendar, like CS.
-		calendarNode, err := p.server.Tree.NodeForPath(defaultCalendar)
+		calendarNode, err := p.server.Tree.NodeForPath(r.Context(), defaultCalendar)
 		if err != nil {
 			msg.ScheduleStatus = "5.2;Could not find the default calendar"
 			return
@@ -225,7 +226,7 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 			return
 		}
 		fileName := "calserver-" + randomToken() + ".ics"
-		if _, err := coll.CreateFile(fileName, strings.NewReader(string(serialized))); err != nil {
+		if _, err := coll.CreateFile(r.Context(), fileName, strings.NewReader(string(serialized))); err != nil {
 			msg.ScheduleStatus = "5.2;Could not deliver to the default calendar"
 			return
 		}
@@ -236,7 +237,7 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 	// organizer's PUT (InterceptWrite), so their copy is not yet persisted
 	// and delivering now could not update it. AfterWrite flushes the queue.
 	oldCal, _ := ical.Decode(preState)
-	replies, err := ical.ParseEvent(newObject, p.addressesForPrincipal(principalURI), oldCal)
+	replies, err := ical.ParseEvent(newObject, p.addressesForPrincipal(r.Context(), principalURI), oldCal)
 	if err != nil {
 		return
 	}
@@ -256,7 +257,7 @@ func (p *SchedulePlugin) queueReply(r *http.Request, reply *ical.Message) {
 
 // hasConflict reports whether the object's occurrence window overlaps any
 // busy period on the principal's calendars, ignoring copies of the same UID.
-func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
+func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, data []byte) bool {
 	d, err := ical.Denormalize(data)
 	if err != nil || d.FirstOccurrence == nil || d.LastOccurrence == nil {
 		return false
@@ -268,7 +269,7 @@ func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
 	}
 
 	_, name := pathutil.Split(principalURI)
-	home, err := p.server.Tree.NodeForPath("calendars/" + name)
+	home, err := p.server.Tree.NodeForPath(ctx, "calendars/"+name)
 	if err != nil {
 		return false
 	}
@@ -276,7 +277,7 @@ func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
 	if !ok {
 		return false
 	}
-	children, err := coll.Children()
+	children, err := coll.Children(ctx)
 	if err != nil {
 		return false
 	}
@@ -286,7 +287,7 @@ func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
 		if !isCal {
 			continue
 		}
-		objs, err := calNode.QueryObjects("", start, end)
+		objs, err := calNode.QueryObjects(ctx, "", start, end)
 		if err != nil {
 			continue
 		}

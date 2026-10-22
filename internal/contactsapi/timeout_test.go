@@ -7,6 +7,7 @@ package contactsapi_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -87,7 +88,7 @@ func TestStalledAuthAnswers503(t *testing.T) {
 func TestStalledDatabaseAnswers503(t *testing.T) {
 	db := stalledDB(t)
 	users := &storage.Users{DB: db}
-	tomb := func(ctx context.Context, p string) bool { ok, _ := users.IsDeletedContext(ctx, p); return ok }
+	tomb := func(ctx context.Context, p string) bool { ok, _ := users.IsDeleted(ctx, p); return ok }
 	h := contactsapi.New(db, fakeAuth{}, tomb, contactsapi.Options{RequestTimeout: 200 * time.Millisecond})
 	w, took := serveTimed(t, h)
 	if w.Code != http.StatusServiceUnavailable {
@@ -118,5 +119,41 @@ func TestAuthOutageAnswers503(t *testing.T) {
 	w, _ := serveTimed(t, h)
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("WWW-Authenticate") != "" {
 		t.Fatalf("status = %d, challenge %q; want 503 without a challenge", w.Code, w.Header().Get("WWW-Authenticate"))
+	}
+}
+
+// A write stuck behind a row lock answers 503 at the deadline instead of
+// waiting for the lock: the request's context reaches the storage write.
+func TestLockedWriteAnswers503(t *testing.T) {
+	e := newEnv(t, "calserver_capi_lockedwrite", contactsapi.Options{RequestTimeout: 300 * time.Millisecond})
+	const alice = "alice@example.org"
+	e.principal(alice)
+	var created contactJSON
+	e.want(e.do(alice, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("u1", "Bob Builder")}), 201).json(t, &created)
+
+	tx, err := e.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SELECT 1 FROM cards WHERE id = $1 FOR UPDATE`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan resp, 1)
+	start := time.Now()
+	go func() { done <- e.do(alice, "DELETE", fmt.Sprintf("/api/v1/contacts/%d", created.ID), nil) }()
+	select {
+	case r := <-done:
+		if r.code != http.StatusServiceUnavailable {
+			t.Errorf("locked DELETE = %d, want 503; body %s", r.code, r.body)
+		}
+		if took := time.Since(start); took > 2*time.Second {
+			t.Errorf("took %v; the deadline did not bound the write", took)
+		}
+	case <-time.After(5 * time.Second):
+		tx.Rollback() // let the stuck request finish
+		<-done
+		t.Fatal("locked DELETE ignored the request deadline")
 	}
 }

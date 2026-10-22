@@ -5,6 +5,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 
 // ChangeLog returns the change rows of one collection, newest first.
 // kind is "calendar" or "addressbook".
-func (q *AdminQueries) ChangeLog(kind, collectionID string, limit int) ([]AdminChange, error) {
+func (q *AdminQueries) ChangeLog(ctx context.Context, kind, collectionID string, limit int) ([]AdminChange, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
@@ -28,7 +29,7 @@ func (q *AdminQueries) ChangeLog(kind, collectionID string, limit int) ([]AdminC
 	} else if kind != "calendar" {
 		return nil, fmt.Errorf("unknown change-log kind %q", kind)
 	}
-	rows, err := q.DB.Query(fmt.Sprintf(`
+	rows, err := q.DB.QueryContext(ctx, fmt.Sprintf(`
 SELECT c.uri, c.synctoken, c.operation, o.lastmodified
   FROM %s c
   LEFT JOIN %s o ON o.%s = c.%s AND o.uri = c.uri
@@ -58,8 +59,8 @@ SELECT c.uri, c.synctoken, c.operation, o.lastmodified
 // sharee has not responded (share_invitestatus = 1). The shared sabre
 // schema stores no notification objects, so this is the DB truth for
 // "pending invites".
-func (q *AdminQueries) PendingShareInvites(principalURI string) ([]AdminCalendarInstance, error) {
-	rows, err := q.DB.Query(`
+func (q *AdminQueries) PendingShareInvites(ctx context.Context, principalURI string) ([]AdminCalendarInstance, error) {
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT id, calendarid, coalesce(principaluri, ''), coalesce(uri, ''), access,
        coalesce(displayname, ''), coalesce(share_href, ''),
        coalesce(share_displayname, ''), share_invitestatus
@@ -106,7 +107,7 @@ type AdminDoctorReport struct {
 
 // Doctor runs every §3.7 invariant check. scanCap bounds the expensive
 // parse-every-object checks; <=0 means the default (adminScanCap).
-func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
+func (q *AdminQueries) Doctor(ctx context.Context, scanCap int) (*AdminDoctorReport, error) {
 	if scanCap <= 0 {
 		scanCap = adminScanCap
 	}
@@ -149,7 +150,7 @@ func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
 			   FROM free_busy_visibility v
 			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = v.principal)`},
 	} {
-		rows, err := q.DB.Query(c.query)
+		rows, err := q.DB.QueryContext(ctx, c.query)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", c.check, err)
 		}
@@ -170,7 +171,7 @@ func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
 	}
 
 	// Principal/user mismatches (§3.2), folded into the same report.
-	diags, err := q.AuthDiagnostics()
+	diags, err := q.AuthDiagnostics(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -190,13 +191,13 @@ func (q *AdminQueries) Doctor(scanCap int) (*AdminDoctorReport, error) {
 			Detail: "digesta1 is not a 32-char md5 hex — auth always fails"})
 	}
 
-	if err := q.doctorPropertyPaths(report); err != nil {
+	if err := q.doctorPropertyPaths(ctx, report); err != nil {
 		return nil, err
 	}
-	if err := q.doctorObjects(report, scanCap); err != nil {
+	if err := q.doctorObjects(ctx, report, scanCap); err != nil {
 		return nil, err
 	}
-	if err := q.doctorCards(report, scanCap); err != nil {
+	if err := q.doctorCards(ctx, report, scanCap); err != nil {
 		return nil, err
 	}
 	return report, nil
@@ -216,10 +217,10 @@ type orphanedPropRow struct {
 // queries total: the rows plus three reference sets loaded once, so the
 // check stays flat no matter how many property rows exist. q is the pool for
 // the doctor and the deleting transaction for DeleteOrphans.
-func orphanedPropertyRows(q interface {
-	Query(query string, args ...any) (*sql.Rows, error)
+func orphanedPropertyRows(ctx context.Context, q interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }) ([]orphanedPropRow, error) {
-	rows, err := q.Query(`SELECT id, path FROM propertystorage ORDER BY id`)
+	rows, err := q.QueryContext(ctx, `SELECT id, path FROM propertystorage ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +241,7 @@ func orphanedPropertyRows(q interface {
 	}
 
 	loadSet := func(query string) (map[string]bool, error) {
-		rows, err := q.Query(query)
+		rows, err := q.QueryContext(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -312,8 +313,8 @@ func orphanedPropertyRows(q interface {
 	return orphans, nil
 }
 
-func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
-	orphans, err := orphanedPropertyRows(q.DB)
+func (q *AdminQueries) doctorPropertyPaths(ctx context.Context, report *AdminDoctorReport) error {
+	orphans, err := orphanedPropertyRows(ctx, q.DB)
 	if err != nil {
 		return err
 	}
@@ -331,8 +332,8 @@ func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
 // columns (§3.4 as a sweep). The query stops one row past the cap, which is
 // enough to report truncation: closing a cursor mid-way still drains the rest
 // of the table over the wire.
-func (q *AdminQueries) doctorObjects(report *AdminDoctorReport, scanCap int) error {
-	rows, err := q.DB.Query(`
+func (q *AdminQueries) doctorObjects(ctx context.Context, report *AdminDoctorReport, scanCap int) error {
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype, ''),
        coalesce(o.etag, ''), o.size, o.firstoccurence, o.lastoccurence, o.calendardata
   FROM calendarobjects o ORDER BY o.id LIMIT $1`, scanCap+1)
@@ -409,7 +410,7 @@ SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype,
 	// (a write-back that never landed, a manually removed job). Objects still
 	// awaiting a queued send have a job and are skipped.
 	if len(pending) > 0 {
-		return q.flagStaleIMipPending(report, pending)
+		return q.flagStaleIMipPending(ctx, report, pending)
 	}
 	return nil
 }
@@ -424,8 +425,8 @@ const imipPendingMarker = "Scheduling message is queued for delivery"
 // reconciled against a queue that doesn't exist. Any other failure is an
 // error: reporting every pending object as stale, or none, off a half-read
 // job list would be wrong either way.
-func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [][2]string) error {
-	rows, err := q.DB.Query(`SELECT DISTINCT coalesce(args->>'uid','')
+func (q *AdminQueries) flagStaleIMipPending(ctx context.Context, report *AdminDoctorReport, pending [][2]string) error {
+	rows, err := q.DB.QueryContext(ctx, `SELECT DISTINCT coalesce(args->>'uid','')
 	  FROM jobs WHERE worker='imip_send' AND state IN ('available','executing')`)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
@@ -460,8 +461,8 @@ func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [
 
 // doctorCards checks every cards row: parseable vCard, correct etag/size.
 // Capped in SQL like doctorObjects.
-func (q *AdminQueries) doctorCards(report *AdminDoctorReport, scanCap int) error {
-	rows, err := q.DB.Query(`
+func (q *AdminQueries) doctorCards(ctx context.Context, report *AdminDoctorReport, scanCap int) error {
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT c.id, c.addressbookid, c.uri, coalesce(c.etag, ''), c.size, c.carddata
   FROM cards c ORDER BY c.id LIMIT $1`, scanCap+1)
 	if err != nil {

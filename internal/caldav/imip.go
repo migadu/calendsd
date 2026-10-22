@@ -109,12 +109,12 @@ type IMipPlugin struct {
 	// SenderAddresses returns the calendar-user addresses a principal may send
 	// as, used to authorize that the logged-in user owns msg.Sender. Wired from
 	// SchedulePlugin via UseScheduler; nil disables the per-user path.
-	SenderAddresses func(principalURI string) []string
+	SenderAddresses func(ctx context.Context, principalURI string) []string
 	// IsResourceSender reports whether a calendar-user address belongs to an
 	// auto-schedule (resource/location) principal, whose replies have no
 	// interactive login and are relayed through the server rather than sent as a
 	// user. Wired via UseScheduler.
-	IsResourceSender func(address string) bool
+	IsResourceSender func(ctx context.Context, address string) bool
 	// Metrics counts deliveries by outcome — the schedule-status branches
 	// mapped directly, so only smtp_error reads as an incident — and times
 	// the SMTP send. A nil Set records nothing.
@@ -134,7 +134,7 @@ type IMipPlugin struct {
 	// WriteBack patches a stored object's SCHEDULE-STATUS once a background send
 	// settles (or a synchronous deferred send resolves inline). Wired from
 	// SchedulePlugin.patchScheduleStatus via UseScheduler; nil no-ops.
-	WriteBack func(path, method, recipient, status string)
+	WriteBack func(ctx context.Context, path, method, recipient, status string)
 	// Now stamps the Date header; nil uses time.Now (tests pin it).
 	Now func() time.Time
 
@@ -239,11 +239,11 @@ func (p *IMipPlugin) QueuesExternalSends() bool { return p.Durable != nil }
 // the one write-back both the durable worker and the synchronous fallback use. objectPath is empty for
 // sends whose status isn't stored (a DELETE's cancels, a resource REPLY), where
 // it no-ops. recipient is the mailto: form patchScheduleStatus matches against.
-func (p *IMipPlugin) writeStatus(objectPath string, msg *ical.Message, status string) {
+func (p *IMipPlugin) writeStatus(ctx context.Context, objectPath string, msg *ical.Message, status string) {
 	if objectPath == "" || p.WriteBack == nil {
 		return
 	}
-	p.WriteBack(objectPath, msg.Method, msg.Recipient, status)
+	p.WriteBack(ctx, objectPath, msg.Method, msg.Recipient, status)
 }
 
 // logDelivery mirrors a delivery outcome (the same string the metric counts)
@@ -285,8 +285,8 @@ func (p *IMipPlugin) Init(s *dav.Server) { p.server = s }
 // wiring after both plugins are constructed.
 func (p *IMipPlugin) UseScheduler(s *SchedulePlugin) {
 	p.SenderAddresses = s.addressesForPrincipal
-	p.IsResourceSender = func(address string) bool {
-		uri := principalForAddress(s.server, address)
+	p.IsResourceSender = func(ctx context.Context, address string) bool {
+		uri := principalForAddress(ctx, s.server, address)
 		return uri != "" && s.AutoSchedule != nil && s.AutoSchedule(uri)
 	}
 	// Both the durable worker and the synchronous fallback write terminal
@@ -321,7 +321,7 @@ func (p *IMipPlugin) DeliverExternalAsync(r *http.Request, msg *ical.Message, ob
 		if status == "" {
 			status = statusFailed
 		}
-		p.writeStatus(objectPath, msg, status)
+		p.writeStatus(r.Context(), objectPath, msg, status)
 	}
 	return handled
 }
@@ -388,9 +388,9 @@ func (p *IMipPlugin) deliverExternal(r *http.Request, msg *ical.Message, backgro
 //     someone who is not the logged-in user.
 func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, recipient, subject string, body []byte, background bool, objectPath string) bool {
 	switch {
-	case p.senderOwnedByPrincipal(msg.Sender, dav.Principal(r.Context())):
+	case p.senderOwnedByPrincipal(r.Context(), msg.Sender, dav.Principal(r.Context())):
 		// fall through to the per-user submission below.
-	case p.IsResourceSender != nil && p.IsResourceSender(msg.Sender):
+	case p.IsResourceSender != nil && p.IsResourceSender(r.Context(), msg.Sender):
 		// A resource (room) answering a remote organizer: no interactive login,
 		// so relay through the shared server sender. The one sanctioned relay.
 		return p.deliverViaRelay(msg, sender, recipient, subject, body, "resource_relay", background, objectPath)
@@ -550,7 +550,7 @@ func (p *IMipPlugin) enqueueDurable(msg *ical.Message, envelopeFrom, username, r
 // completes and writes statusSent; a transient failure reschedules until the
 // attempts run out; a permanent failure (or exhaustion) writes the classified
 // terminal status and discards. Registered by the server wiring.
-func (p *IMipPlugin) DurableHandler(_ context.Context, j jobs.Job) error {
+func (p *IMipPlugin) DurableHandler(ctx context.Context, j jobs.Job) error {
 	var a imipJob
 	if err := json.Unmarshal(j.Args, &a); err != nil {
 		return jobs.Discard(fmt.Errorf("imip: unparseable job args: %w", err))
@@ -584,7 +584,7 @@ func (p *IMipPlugin) DurableHandler(_ context.Context, j jobs.Job) error {
 	if sendErr == nil {
 		p.Metrics.IMipDelivery(a.Outcome)
 		p.logger().Info("imip delivered (durable)", attrs...)
-		p.writeBackStatus(a, statusSent)
+		p.writeBackStatus(ctx, a, statusSent)
 		return nil
 	}
 	// Transient and attempts remain → reschedule (the queue applies backoff).
@@ -599,26 +599,26 @@ func (p *IMipPlugin) DurableHandler(_ context.Context, j jobs.Job) error {
 	}
 	p.Metrics.IMipDelivery(oc)
 	p.logger().Warn("imip durable giving up", append(attrs, "err", sendErr, "status", status)...)
-	p.writeBackStatus(a, status)
+	p.writeBackStatus(ctx, a, status)
 	return jobs.Discard(sendErr)
 }
 
 // writeBackStatus patches a durable job's terminal status onto its stored object
 // (no-op when the job carried no object_path — a cancel or resource reply).
-func (p *IMipPlugin) writeBackStatus(a imipJob, status string) {
+func (p *IMipPlugin) writeBackStatus(ctx context.Context, a imipJob, status string) {
 	if a.ObjectPath == "" || p.WriteBack == nil {
 		return
 	}
-	p.WriteBack(a.ObjectPath, a.Method, "mailto:"+a.Recipient, status)
+	p.WriteBack(ctx, a.ObjectPath, a.Method, "mailto:"+a.Recipient, status)
 }
 
 // senderOwnedByPrincipal reports whether the full msg.Sender (a "mailto:" URI)
 // is one of the addresses the principal may send as.
-func (p *IMipPlugin) senderOwnedByPrincipal(sender, principal string) bool {
+func (p *IMipPlugin) senderOwnedByPrincipal(ctx context.Context, sender, principal string) bool {
 	if principal == "" || p.SenderAddresses == nil {
 		return false
 	}
-	for _, addr := range p.SenderAddresses(principal) {
+	for _, addr := range p.SenderAddresses(ctx, principal) {
 		if strings.EqualFold(addr, sender) {
 			return true
 		}

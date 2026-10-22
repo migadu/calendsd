@@ -290,7 +290,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 		Auth:    backend,
 		Tombstoned: func(ctx context.Context, principal string) bool {
 			// Fails open on a DB error, like the DAV gate (see compose).
-			ok, _ := users.IsDeletedContext(ctx, principal)
+			ok, _ := users.IsDeleted(ctx, principal)
 			return ok
 		},
 		accessLog: cfg.AccessLog,
@@ -397,7 +397,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	// fails open (allow) on a DB error via the discarded error — a DB blip must
 	// not lock everyone out; the purge job is the backstop (SOFT-DELETE-PLAN
 	// §5, §12).
-	tombstoned := func(principal string) bool { ok, _ := users.IsDeleted(principal); return ok }
+	tombstoned := func(ctx context.Context, principal string) bool { ok, _ := users.IsDeleted(ctx, principal); return ok }
 	var backend auth.Backend
 	switch {
 	case authOverride != nil:
@@ -424,10 +424,10 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		srv.AddPlugin(ap)
 		backend = rb
 	default:
-		basic := &auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(username, password string) bool {
+		basic := &auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(ctx context.Context, username, password string) bool {
 			// Basic verifies against the same digesta1 hash, compared in
 			// constant time so verification does not leak the stored hash.
-			hash, err := users.HashA1(cfg.Realm, username)
+			hash, err := users.HashA1(ctx, cfg.Realm, username)
 			if err != nil {
 				slog.Error("basic auth: reading digesta1", "user", username, "err", err)
 				return false

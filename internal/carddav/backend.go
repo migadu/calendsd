@@ -4,6 +4,7 @@
 package carddav
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -43,20 +44,20 @@ func (c *CardInfo) QuotedETag() string {
 // Backend provides address book storage. Port of the sabre
 // CardDAV\Backend\BackendInterface subset the MVP needs.
 type Backend interface {
-	AddressBooksForUser(principalURI string) ([]AddressBookInfo, error)
-	CreateAddressBook(principalURI, uri string, props map[xml.Name]any) (string, error)
-	DeleteAddressBook(id string) error
-	UpdateAddressBook(id string, pp *dav.PropPatch)
+	AddressBooksForUser(ctx context.Context, principalURI string) ([]AddressBookInfo, error)
+	CreateAddressBook(ctx context.Context, principalURI, uri string, props map[xml.Name]any) (string, error)
+	DeleteAddressBook(ctx context.Context, id string) error
+	UpdateAddressBook(ctx context.Context, id string, pp *dav.PropPatch)
 
-	Cards(addressBookID string) ([]CardInfo, error)
-	Card(addressBookID, uri string) (*CardInfo, error)
-	CreateCard(addressBookID, uri string, data []byte) (string, error)
-	UpdateCard(addressBookID, uri string, data []byte) (string, error)
-	DeleteCard(addressBookID, uri string) error
+	Cards(ctx context.Context, addressBookID string) ([]CardInfo, error)
+	Card(ctx context.Context, addressBookID, uri string) (*CardInfo, error)
+	CreateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error)
+	UpdateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error)
+	DeleteCard(ctx context.Context, addressBookID, uri string) error
 
 	// ChangesForAddressBook returns changes since syncToken ("" = initial
 	// sync); nil means sync is unsupported or the token is unknown.
-	ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
+	ChangesForAddressBook(ctx context.Context, addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
@@ -68,7 +69,7 @@ type MockBackend struct {
 	nextID      int
 }
 
-func (m *MockBackend) AddressBooksForUser(principalURI string) ([]AddressBookInfo, error) {
+func (m *MockBackend) AddressBooksForUser(ctx context.Context, principalURI string) ([]AddressBookInfo, error) {
 	var out []AddressBookInfo
 	for _, b := range m.AddressBooks {
 		if b.PrincipalURI == principalURI {
@@ -78,7 +79,7 @@ func (m *MockBackend) AddressBooksForUser(principalURI string) ([]AddressBookInf
 	return out, nil
 }
 
-func (m *MockBackend) CreateAddressBook(principalURI, uri string, props map[xml.Name]any) (string, error) {
+func (m *MockBackend) CreateAddressBook(ctx context.Context, principalURI, uri string, props map[xml.Name]any) (string, error) {
 	m.nextID++
 	id := "mock-ab-" + hex.EncodeToString([]byte{byte(m.nextID)})
 	info := AddressBookInfo{ID: id, URI: uri, PrincipalURI: principalURI, Props: map[xml.Name]any{}}
@@ -89,7 +90,7 @@ func (m *MockBackend) CreateAddressBook(principalURI, uri string, props map[xml.
 	return id, nil
 }
 
-func (m *MockBackend) DeleteAddressBook(id string) error {
+func (m *MockBackend) DeleteAddressBook(ctx context.Context, id string) error {
 	for i, b := range m.AddressBooks {
 		if b.ID == id {
 			m.AddressBooks = append(m.AddressBooks[:i], m.AddressBooks[i+1:]...)
@@ -100,7 +101,7 @@ func (m *MockBackend) DeleteAddressBook(id string) error {
 	return nil
 }
 
-func (m *MockBackend) UpdateAddressBook(id string, pp *dav.PropPatch) {
+func (m *MockBackend) UpdateAddressBook(ctx context.Context, id string, pp *dav.PropPatch) {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		for i := range m.AddressBooks {
 			if m.AddressBooks[i].ID != id {
@@ -118,7 +119,7 @@ func (m *MockBackend) UpdateAddressBook(id string, pp *dav.PropPatch) {
 	})
 }
 
-func (m *MockBackend) Cards(addressBookID string) ([]CardInfo, error) {
+func (m *MockBackend) Cards(ctx context.Context, addressBookID string) ([]CardInfo, error) {
 	var uris []string
 	for uri := range m.CardsByBook[addressBookID] {
 		uris = append(uris, uri)
@@ -131,7 +132,7 @@ func (m *MockBackend) Cards(addressBookID string) ([]CardInfo, error) {
 	return out, nil
 }
 
-func (m *MockBackend) Card(addressBookID, uri string) (*CardInfo, error) {
+func (m *MockBackend) Card(ctx context.Context, addressBookID, uri string) (*CardInfo, error) {
 	c, exists := m.CardsByBook[addressBookID][uri]
 	if !exists {
 		return nil, nil
@@ -140,7 +141,7 @@ func (m *MockBackend) Card(addressBookID, uri string) (*CardInfo, error) {
 	return &copied, nil
 }
 
-func (m *MockBackend) CreateCard(addressBookID, uri string, data []byte) (string, error) {
+func (m *MockBackend) CreateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error) {
 	if m.CardsByBook == nil {
 		m.CardsByBook = map[string]map[string]*CardInfo{}
 	}
@@ -152,15 +153,15 @@ func (m *MockBackend) CreateCard(addressBookID, uri string, data []byte) (string
 	return c.QuotedETag(), nil
 }
 
-func (m *MockBackend) UpdateCard(addressBookID, uri string, data []byte) (string, error) {
-	return m.CreateCard(addressBookID, uri, data)
+func (m *MockBackend) UpdateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error) {
+	return m.CreateCard(ctx, addressBookID, uri, data)
 }
 
-func (m *MockBackend) DeleteCard(addressBookID, uri string) error {
+func (m *MockBackend) DeleteCard(ctx context.Context, addressBookID, uri string) error {
 	delete(m.CardsByBook[addressBookID], uri)
 	return nil
 }
 
-func (m *MockBackend) ChangesForAddressBook(string, string, int, int) (*dav.ChangeSet, error) {
+func (m *MockBackend) ChangesForAddressBook(context.Context, string, string, int, int) (*dav.ChangeSet, error) {
 	return nil, nil
 }

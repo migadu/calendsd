@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -13,21 +14,21 @@ import (
 
 // handleStats prints the admin dashboard's overview from the command line:
 // per-table row counts plus the newest change-log rows (ADMIN-PLAN.md §3.1).
-func handleStats(args []string) {
+func handleStats(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("stats", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
 	dsnOverride := dbFlag(flags)
 	changes := flags.Int("changes", 10, "Recent change-log rows to show per change table (0 disables)")
 	flags.Parse(args)
 
-	q := openAdminQueries(*dsnOverride)
-	counts, err := q.Counts()
+	q := openAdminQueries(ctx, *dsnOverride)
+	counts, err := q.Counts(ctx)
 	if err != nil {
 		fatalf("Failed to count tables: %v", err)
 	}
 	var recent []storage.AdminChange
 	if *changes > 0 {
-		recent, err = q.RecentChanges(*changes)
+		recent, err = q.RecentChanges(ctx, *changes)
 		if err != nil {
 			fatalf("Failed to load recent changes: %v", err)
 		}

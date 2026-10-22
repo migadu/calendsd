@@ -14,7 +14,7 @@ import (
 // read-only admin query bundle. Unlike health (where a missing DSN is a
 // reportable state), the data commands cannot do anything without one, so
 // failures exit directly.
-func openAdminQueries(dsnOverride string) *storage.AdminQueries {
+func openAdminQueries(ctx context.Context, dsnOverride string) *storage.AdminQueries {
 	dsn := dsnFor(dsnOverride)
 	if dsn == "" {
 		fatalf("A Postgres DSN is required: pass --db or set [database] dsn in the config file.")
@@ -23,7 +23,7 @@ func openAdminQueries(dsnOverride string) *storage.AdminQueries {
 	if err != nil {
 		fatalf("Failed to open database: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
+	ctx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		fatalf("Failed to connect to database: %v", err)

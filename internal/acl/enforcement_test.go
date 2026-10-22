@@ -128,7 +128,7 @@ func TestCopyMoveMissingSourceCannotClobberForeignDestination(t *testing.T) {
 		if w.Code != 403 {
 			t.Errorf("%s missing source onto foreign object = %d, want 403: %s", method, w.Code, w.Body.String())
 		}
-		if !srv.Tree.NodeExists("calendars/user1/cal/event.ics") {
+		if !srv.Tree.NodeExists(req.Context(), "calendars/user1/cal/event.ics") {
 			t.Errorf("%s deleted the foreign destination", method)
 		}
 	}
@@ -144,7 +144,7 @@ func TestCopyMoveMissingSourceIs404(t *testing.T) {
 		if w.Code != 404 {
 			t.Errorf("%s missing source = %d, want 404: %s", method, w.Code, w.Body.String())
 		}
-		if !srv.Tree.NodeExists("calendars/user1/cal/event.ics") {
+		if !srv.Tree.NodeExists(req.Context(), "calendars/user1/cal/event.ics") {
 			t.Errorf("%s with a missing source deleted the destination", method)
 		}
 	}

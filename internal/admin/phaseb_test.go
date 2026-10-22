@@ -4,6 +4,7 @@ package admin
 // plugin chain), scheduling inbox parsing, sync preview, doctor.
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ import (
 
 // Fake store additions for Phase B.
 
-func (fakeStore) ChangeLog(kind, collectionID string, limit int) ([]storage.AdminChange, error) {
+func (fakeStore) ChangeLog(ctx context.Context, kind, collectionID string, limit int) ([]storage.AdminChange, error) {
 	return []storage.AdminChange{
 		{Kind: kind, CollectionID: collectionID, ObjectURI: "a.ics", SyncToken: 4,
 			Operation: 2, LastModified: i64(1750000000)},
@@ -27,7 +28,7 @@ func (fakeStore) ChangeLog(kind, collectionID string, limit int) ([]storage.Admi
 	}, nil
 }
 
-func (fakeStore) PendingShareInvites(principalURI string) ([]storage.AdminCalendarInstance, error) {
+func (fakeStore) PendingShareInvites(ctx context.Context, principalURI string) ([]storage.AdminCalendarInstance, error) {
 	if principalURI != "principals/bob" {
 		return nil, nil
 	}
@@ -38,7 +39,7 @@ func (fakeStore) PendingShareInvites(principalURI string) ([]storage.AdminCalend
 	}, nil
 }
 
-func (fakeStore) Doctor(scanCap int) (*storage.AdminDoctorReport, error) {
+func (fakeStore) Doctor(ctx context.Context, scanCap int) (*storage.AdminDoctorReport, error) {
 	return &storage.AdminDoctorReport{
 		Findings: []storage.AdminFinding{{
 			Check: "orphaned-instance", Subject: "instance id=42",
@@ -53,7 +54,7 @@ type fakeScheduling struct{}
 
 const testITIP = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:evt-9\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20260401T090000Z\r\nSUMMARY:Planning\r\nORGANIZER;CN=Alice:mailto:alice@example.org\r\nATTENDEE;CN=Bob;PARTSTAT=NEEDS-ACTION;SCHEDULE-STATUS=1.2:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 
-func (fakeScheduling) SchedulingObjects(principalURI string) ([]caldav.SchedulingObjectInfo, error) {
+func (fakeScheduling) SchedulingObjects(ctx context.Context, principalURI string) ([]caldav.SchedulingObjectInfo, error) {
 	if principalURI != "principals/bob" {
 		return nil, nil
 	}
@@ -61,20 +62,22 @@ func (fakeScheduling) SchedulingObjects(principalURI string) ([]caldav.Schedulin
 		PrincipalURI: principalURI, CalendarData: []byte(testITIP)}}, nil
 }
 
-func (fakeScheduling) SchedulingObject(principalURI, objectURI string) (*caldav.SchedulingObjectInfo, error) {
+func (fakeScheduling) SchedulingObject(ctx context.Context, principalURI, objectURI string) (*caldav.SchedulingObjectInfo, error) {
 	return nil, nil
 }
-func (fakeScheduling) CreateSchedulingObject(principalURI, objectURI string, data []byte) error {
+func (fakeScheduling) CreateSchedulingObject(ctx context.Context, principalURI, objectURI string, data []byte) error {
 	return nil
 }
-func (fakeScheduling) DeleteSchedulingObject(principalURI, objectURI string) error { return nil }
+func (fakeScheduling) DeleteSchedulingObject(ctx context.Context, principalURI, objectURI string) error {
+	return nil
+}
 
 // syncBackend overrides the mock's "sync unsupported" answer.
 type syncBackend struct {
 	caldav.MockBackend
 }
 
-func (s *syncBackend) ChangesForCalendar(id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+func (s *syncBackend) ChangesForCalendar(ctx context.Context, id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	if syncToken == "3" {
 		return &dav.ChangeSet{SyncToken: "5", Added: []string{"a.ics"}, Deleted: []string{"gone.ics"}}, nil
 	}

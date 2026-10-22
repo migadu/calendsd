@@ -71,7 +71,7 @@ func sharingDB(t *testing.T, dbName string) *storage.CalDAV {
 // the value the sharing plugin hands the backend.
 func ownerCalID(t *testing.T, backend *storage.CalDAV) caldav.CalendarID {
 	t.Helper()
-	cals, err := backend.CalendarsForUser("principals/alice")
+	cals, err := backend.CalendarsForUser(t.Context(), "principals/alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestShareTwoCalendarsWithOnePerson(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cals, err := backend.CalendarsForUser("principals/alice")
+	cals, err := backend.CalendarsForUser(t.Context(), "principals/alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,14 +120,14 @@ func TestShareTwoCalendarsWithOnePerson(t *testing.T) {
 
 	// Share BOTH calendars with Bob — the second must not collide.
 	for _, cal := range cals {
-		if _, err := backend.UpdateInvites(cal.ID, []caldav.Sharee{
+		if _, err := backend.UpdateInvites(t.Context(), cal.ID, []caldav.Sharee{
 			{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessReadWrite},
 		}); err != nil {
 			t.Fatalf("sharing calendar %q with bob: %v", cal.ID.Calendar, err)
 		}
 	}
 
-	bobCals, err := backend.CalendarsForUser("principals/bob")
+	bobCals, err := backend.CalendarsForUser(t.Context(), "principals/bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestCalendarSharing(t *testing.T) {
 	calID := ownerCalID(t, backend)
 
 	// --- Phase 1: add Bob (read-write) and Carol (read-only). ---------------
-	_, err := backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err := backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", CommonName: "Bob B", Access: caldav.AccessReadWrite},
 		{Href: carolHref, Principal: "principals/carol", CommonName: "Carol C", Access: caldav.AccessRead},
 	})
@@ -149,7 +149,7 @@ func TestCalendarSharing(t *testing.T) {
 		t.Fatalf("UpdateInvites add: %v", err)
 	}
 
-	invites, err := backend.Invites(calID)
+	invites, err := backend.Invites(t.Context(), calID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestCalendarSharing(t *testing.T) {
 
 	// Bob's shared view must now surface in his calendar home, cloned from the
 	// owner's displayname, writable (no read-only marker).
-	bobCals, err := backend.CalendarsForUser("principals/bob")
+	bobCals, err := backend.CalendarsForUser(t.Context(), "principals/bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// Carol's read-only share carries sabre's read-only marker.
-	carolCals, err := backend.CalendarsForUser("principals/carol")
+	carolCals, err := backend.CalendarsForUser(t.Context(), "principals/carol")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,27 +207,27 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// --- Phase 2: downgrade Bob to read-only; must update, not duplicate. ---
-	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", CommonName: "Bob B", Access: caldav.AccessRead},
 	})
 	if err != nil {
 		t.Fatalf("UpdateInvites downgrade: %v", err)
 	}
-	invites, _ = backend.Invites(calID)
+	invites, _ = backend.Invites(t.Context(), calID)
 	if got := len(invites); got != 3 {
 		t.Fatalf("invites after downgrade = %d, want 3 (updated, not duplicated)", got)
 	}
 	if bob := findInvite(t, invites, bobHref); bob.Access != caldav.AccessRead {
 		t.Errorf("bob access after downgrade = %d, want %d", bob.Access, caldav.AccessRead)
 	}
-	if bobCals, _ := backend.CalendarsForUser("principals/bob"); len(bobCals) != 1 {
+	if bobCals, _ := backend.CalendarsForUser(t.Context(), "principals/bob"); len(bobCals) != 1 {
 		t.Fatalf("bob still has %d calendars after downgrade, want 1", len(bobCals))
 	} else if _, readOnly := bobCals[0].Props[xml.Name{Space: davxml.NSSabreDAV, Local: "read-only"}]; !readOnly {
 		t.Error("bob downgraded to read but calendar is not marked read-only")
 	}
 
 	// --- Phase 3: an unresolved principal is recorded as an invalid invite. -
-	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{
 		{Href: danHref, Principal: "", CommonName: "Dan D", Access: caldav.AccessRead},
 	})
 	if err != nil {
@@ -239,7 +239,7 @@ func TestCalendarSharing(t *testing.T) {
 	}
 
 	// --- Phase 4: removing a sharee drops their instance row entirely. ------
-	_, err = backend.UpdateInvites(calID, []caldav.Sharee{
+	_, err = backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{
 		{Href: carolHref, Access: caldav.AccessNoAccess},
 	})
 	if err != nil {
@@ -250,11 +250,11 @@ func TestCalendarSharing(t *testing.T) {
 			t.Fatalf("carol still present after removal: %+v", s)
 		}
 	}
-	if carolCals, _ := backend.CalendarsForUser("principals/carol"); len(carolCals) != 0 {
+	if carolCals, _ := backend.CalendarsForUser(t.Context(), "principals/carol"); len(carolCals) != 0 {
 		t.Errorf("carol still has %d calendars after removal, want 0", len(carolCals))
 	}
 	// The owner must never be removable via a share request against her row.
-	if aliceCals, _ := backend.CalendarsForUser("principals/alice"); len(aliceCals) != 1 {
+	if aliceCals, _ := backend.CalendarsForUser(t.Context(), "principals/alice"); len(aliceCals) != 1 {
 		t.Errorf("owner calendars = %d after sharee churn, want 1", len(aliceCals))
 	}
 }
@@ -264,7 +264,7 @@ func TestCalendarShareReply(t *testing.T) {
 	backend := sharingDB(t, "calserver_sharereply")
 	calID := ownerCalID(t, backend)
 
-	if _, err := backend.UpdateInvites(calID, []caldav.Sharee{
+	if _, err := backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessReadWrite},
 		{Href: carolHref, Principal: "principals/carol", Access: caldav.AccessRead},
 	}); err != nil {
@@ -283,7 +283,7 @@ func TestCalendarShareReply(t *testing.T) {
 
 	// Carol accepts: her instance is confirmed and the shared-as path points at
 	// her own calendar home.
-	path, err := backend.ShareReply("principals/carol", hostURL, caldav.InviteAccepted, "", "", "")
+	path, err := backend.ShareReply(t.Context(), "principals/carol", hostURL, caldav.InviteAccepted, "", "", "")
 	if err != nil {
 		t.Fatalf("ShareReply accept: %v", err)
 	}
@@ -306,23 +306,23 @@ func TestCalendarShareReply(t *testing.T) {
 	if status != caldav.InviteAccepted {
 		t.Errorf("carol invite status after accept = %d, want accepted (%d)", status, caldav.InviteAccepted)
 	}
-	if cals, _ := backend.CalendarsForUser("principals/carol"); len(cals) != 1 {
+	if cals, _ := backend.CalendarsForUser(t.Context(), "principals/carol"); len(cals) != 1 {
 		t.Errorf("carol calendars after accept = %d, want 1", len(cals))
 	}
 
 	// Bob declines: his instance is dropped and the calendar disappears from
 	// his home, while the owner's calendar is untouched.
-	path, err = backend.ShareReply("principals/bob", hostURL, caldav.InviteDeclined, "", "", "")
+	path, err = backend.ShareReply(t.Context(), "principals/bob", hostURL, caldav.InviteDeclined, "", "", "")
 	if err != nil {
 		t.Fatalf("ShareReply decline: %v", err)
 	}
 	if path != "" {
 		t.Errorf("declined shared-as path = %q, want empty", path)
 	}
-	if cals, _ := backend.CalendarsForUser("principals/bob"); len(cals) != 0 {
+	if cals, _ := backend.CalendarsForUser(t.Context(), "principals/bob"); len(cals) != 0 {
 		t.Errorf("bob calendars after decline = %d, want 0", len(cals))
 	}
-	if cals, _ := backend.CalendarsForUser("principals/alice"); len(cals) != 1 {
+	if cals, _ := backend.CalendarsForUser(t.Context(), "principals/alice"); len(cals) != 1 {
 		t.Errorf("owner calendars after a sharee decline = %d, want 1", len(cals))
 	}
 }
@@ -331,7 +331,7 @@ func TestCalendarShareReply(t *testing.T) {
 func TestCalendarNotifications(t *testing.T) {
 	backend := sharingDB(t, "calserver_notifications")
 
-	if items, err := backend.NotificationsForPrincipal("principals/bob"); err != nil {
+	if items, err := backend.NotificationsForPrincipal(t.Context(), "principals/bob"); err != nil {
 		t.Fatal(err)
 	} else if len(items) != 0 {
 		t.Fatalf("fresh inbox has %d items, want 0", len(items))
@@ -347,11 +347,11 @@ func TestCalendarNotifications(t *testing.T) {
 		InviteStatus: caldav.InviteNoResponse,
 		Summary:      "join my calendar",
 	}
-	if err := backend.AddNotification("principals/bob", invite); err != nil {
+	if err := backend.AddNotification(t.Context(), "principals/bob", invite); err != nil {
 		t.Fatalf("AddNotification: %v", err)
 	}
 
-	items, err := backend.NotificationsForPrincipal("principals/bob")
+	items, err := backend.NotificationsForPrincipal(t.Context(), "principals/bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,10 +369,10 @@ func TestCalendarNotifications(t *testing.T) {
 
 	// Re-adding the same entry id updates in place rather than duplicating.
 	invite.Access = caldav.AccessRead
-	if err := backend.AddNotification("principals/bob", invite); err != nil {
+	if err := backend.AddNotification(t.Context(), "principals/bob", invite); err != nil {
 		t.Fatalf("AddNotification update: %v", err)
 	}
-	items, _ = backend.NotificationsForPrincipal("principals/bob")
+	items, _ = backend.NotificationsForPrincipal(t.Context(), "principals/bob")
 	if len(items) != 1 {
 		t.Fatalf("inbox has %d items after re-add, want 1 (upsert)", len(items))
 	}
@@ -381,14 +381,14 @@ func TestCalendarNotifications(t *testing.T) {
 	}
 
 	// The inbox is per principal — Carol sees nothing.
-	if items, _ := backend.NotificationsForPrincipal("principals/carol"); len(items) != 0 {
+	if items, _ := backend.NotificationsForPrincipal(t.Context(), "principals/carol"); len(items) != 0 {
 		t.Errorf("carol inbox has %d items, want 0 (per-principal isolation)", len(items))
 	}
 
-	if err := backend.DeleteNotification("principals/bob", invite.ID); err != nil {
+	if err := backend.DeleteNotification(t.Context(), "principals/bob", invite.ID); err != nil {
 		t.Fatalf("DeleteNotification: %v", err)
 	}
-	if items, _ := backend.NotificationsForPrincipal("principals/bob"); len(items) != 0 {
+	if items, _ := backend.NotificationsForPrincipal(t.Context(), "principals/bob"); len(items) != 0 {
 		t.Errorf("inbox has %d items after delete, want 0", len(items))
 	}
 }
@@ -413,7 +413,7 @@ func TestCalendarPublish(t *testing.T) {
 		t.Fatalf("calendar is published before any request: %q", got)
 	}
 
-	if err := backend.SetPublishStatus(calID, true); err != nil {
+	if err := backend.SetPublishStatus(t.Context(), calID, true); err != nil {
 		t.Fatalf("SetPublishStatus publish: %v", err)
 	}
 	first := publicURI()
@@ -422,14 +422,14 @@ func TestCalendarPublish(t *testing.T) {
 	}
 
 	// Re-publishing keeps the same public URI stable.
-	if err := backend.SetPublishStatus(calID, true); err != nil {
+	if err := backend.SetPublishStatus(t.Context(), calID, true); err != nil {
 		t.Fatalf("SetPublishStatus re-publish: %v", err)
 	}
 	if got := publicURI(); got != first {
 		t.Errorf("public URI changed on re-publish: %q -> %q", first, got)
 	}
 
-	if err := backend.SetPublishStatus(calID, false); err != nil {
+	if err := backend.SetPublishStatus(t.Context(), calID, false); err != nil {
 		t.Fatalf("SetPublishStatus unpublish: %v", err)
 	}
 	if got := publicURI(); got != "" {
@@ -438,10 +438,10 @@ func TestCalendarPublish(t *testing.T) {
 
 	// Deleting a published calendar must cascade the publication away, so no
 	// orphan row survives (the FK does this without DeleteCalendar knowing).
-	if err := backend.SetPublishStatus(calID, true); err != nil {
+	if err := backend.SetPublishStatus(t.Context(), calID, true); err != nil {
 		t.Fatalf("SetPublishStatus re-publish before delete: %v", err)
 	}
-	if err := backend.DeleteCalendar(calID); err != nil {
+	if err := backend.DeleteCalendar(t.Context(), calID); err != nil {
 		t.Fatalf("DeleteCalendar: %v", err)
 	}
 	if got := publicURI(); got != "" {
@@ -451,7 +451,7 @@ func TestCalendarPublish(t *testing.T) {
 
 func mustInvites(t *testing.T, b *storage.CalDAV, id caldav.CalendarID) []caldav.Sharee {
 	t.Helper()
-	invites, err := b.Invites(id)
+	invites, err := b.Invites(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func findInvite(t *testing.T, invites []caldav.Sharee, href string) caldav.Share
 // must fill it or every sharee could re-share (and raise their own access).
 func TestShareeViewCarriesShareAccess(t *testing.T) {
 	backend := sharingDB(t, "calserver_sharing_access")
-	if _, err := backend.UpdateInvites(ownerCalID(t, backend), []caldav.Sharee{
+	if _, err := backend.UpdateInvites(t.Context(), ownerCalID(t, backend), []caldav.Sharee{
 		{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessRead},
 		{Href: carolHref, Principal: "principals/carol", Access: caldav.AccessReadWrite},
 	}); err != nil {
@@ -485,7 +485,7 @@ func TestShareeViewCarriesShareAccess(t *testing.T) {
 		"principals/bob":   caldav.AccessRead,
 		"principals/carol": caldav.AccessReadWrite,
 	} {
-		cals, err := backend.CalendarsForUser(principal)
+		cals, err := backend.CalendarsForUser(t.Context(), principal)
 		if err != nil {
 			t.Fatal(err)
 		}

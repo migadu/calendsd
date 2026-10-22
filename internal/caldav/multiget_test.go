@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func multigetServer() *dav.Server {
 	event := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\nBEGIN:VEVENT\r\nUID:floating\r\n" +
 		"DTSTAMP:20260101T000000Z\r\nDTSTART:20260301T100000\r\nDTEND:20260301T110000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	for _, id := range []string{"1", "2"} {
-		if _, err := backend.CreateCalendarObject(caldav.CalendarID{Calendar: id}, "e.ics", []byte(event)); err != nil {
+		if _, err := backend.CreateCalendarObject(context.Background(), caldav.CalendarID{Calendar: id}, "e.ics", []byte(event)); err != nil {
 			panic(err)
 		}
 	}

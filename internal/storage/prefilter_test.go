@@ -48,10 +48,10 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 	// A July VEVENT (occurrence bounds set) and a VTODO (bounds NULL).
 	julyEvent := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e\r\nDTSTART:20260715T120000Z\r\nDTEND:20260715T130000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	todo := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:t\r\nDUE:20260715T120000Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
-	if _, err := backend.CreateCalendarObject(id, "event.ics", []byte(julyEvent)); err != nil {
+	if _, err := backend.CreateCalendarObject(t.Context(), id, "event.ics", []byte(julyEvent)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.CreateCalendarObject(id, "todo.ics", []byte(todo)); err != nil {
+	if _, err := backend.CreateCalendarObject(t.Context(), id, "todo.ics", []byte(todo)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,7 +76,7 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 		{"range starting past 2038", "VEVENT", far, far.AddDate(1, 0, 0), nil},
 	}
 	for _, tc := range cases {
-		got, err := backend.CalendarQuery(id, tc.comp, tc.start, tc.end)
+		got, err := backend.CalendarQuery(t.Context(), id, tc.comp, tc.start, tc.end)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -87,7 +87,7 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 
 	// The admin object browser takes the same bounds.
 	farUnix := far.Unix()
-	objs, _, err := (&storage.AdminQueries{DB: db}).Objects(storage.AdminObjectQuery{
+	objs, _, err := (&storage.AdminQueries{DB: db}).Objects(t.Context(), storage.AdminObjectQuery{
 		CalendarID: id.Calendar, End: &farUnix})
 	if err != nil {
 		t.Fatalf("Objects with a bound past 2038: %v", err)

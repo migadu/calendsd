@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +35,7 @@ func check(b Backend, r *http.Request) (string, bool, string) {
 func TestBasicBackend(t *testing.T) {
 	b := &BasicBackend{
 		Realm: "SabreDAV",
-		Validate: func(user, pass string) bool {
+		Validate: func(_ context.Context, user, pass string) bool {
 			return user == "admin" && pass == "admin"
 		},
 	}
@@ -62,7 +63,7 @@ func TestBasicBackend(t *testing.T) {
 func digestBackend() *DigestBackend {
 	return &DigestBackend{
 		Realm: "SabreDAV",
-		HashA1: func(r, u string) (string, error) {
+		HashA1: func(_ context.Context, r, u string) (string, error) {
 			if u == "admin" {
 				return DigestA1("admin", r, "admin"), nil
 			}
@@ -154,7 +155,7 @@ func TestDigestReplayProtection(t *testing.T) {
 func TestDigestBackendRejections(t *testing.T) {
 	b := &DigestBackend{
 		Realm: "SabreDAV",
-		HashA1: func(r, u string) (string, error) {
+		HashA1: func(_ context.Context, r, u string) (string, error) {
 			if u == "admin" {
 				return DigestA1("admin", r, "admin"), nil
 			}
@@ -226,7 +227,7 @@ func TestPrincipalPrefixOverride(t *testing.T) {
 	if got := principalPath("", "admin"); got != "principals/admin" {
 		t.Errorf("default principal = %q, want principals/admin", got)
 	}
-	b := &BasicBackend{PrincipalPrefix: "users/", Validate: func(string, string) bool { return true }}
+	b := &BasicBackend{PrincipalPrefix: "users/", Validate: func(context.Context, string, string) bool { return true }}
 	r := httptest.NewRequest("PROPFIND", "/", nil)
 	r.SetBasicAuth("admin", "admin")
 	if got, _, _ := check(b, r); got != "users/admin" {
@@ -266,7 +267,7 @@ func TestFixedPrincipalBypassesBackends(t *testing.T) {
 func TestSubmissionSecretStash(t *testing.T) {
 	t.Run("basic stashes the password", func(t *testing.T) {
 		p := NewPlugin(&BasicBackend{Realm: "SabreDAV",
-			Validate: func(u, pw string) bool { return u == "admin" && pw == "hunter2" }})
+			Validate: func(_ context.Context, u, pw string) bool { return u == "admin" && pw == "hunter2" }})
 		r := httptest.NewRequest("PROPFIND", "/", nil)
 		r.SetBasicAuth("admin", "hunter2")
 		r = r.WithContext(dav.ContextWithPrincipal(r.Context(), ""))
@@ -295,7 +296,7 @@ func TestSubmissionSecretStash(t *testing.T) {
 // request proceeds anonymously instead of drawing a 401 challenge.
 func TestAutoRequireLoginOff(t *testing.T) {
 	p := NewPlugin(&BasicBackend{Realm: "SabreDAV",
-		Validate: func(string, string) bool { return false }})
+		Validate: func(context.Context, string, string) bool { return false }})
 	p.AutoRequireLogin = false
 	w := httptest.NewRecorder()
 	proceed, err := p.BeforeMethod(w, httptest.NewRequest("PROPFIND", "/", nil))

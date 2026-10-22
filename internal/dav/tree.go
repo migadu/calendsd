@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"io"
 	"strings"
 
@@ -24,7 +25,7 @@ func NewTree(root Collection) *Tree {
 }
 
 // NodeForPath resolves a server-relative path ("" is the root).
-func (t *Tree) NodeForPath(path string) (Node, error) {
+func (t *Tree) NodeForPath(ctx context.Context, path string) (Node, error) {
 	path = strings.Trim(path, "/")
 	if path == "" {
 		return t.root, nil
@@ -38,7 +39,7 @@ func (t *Tree) NodeForPath(path string) (Node, error) {
 		if !isColl {
 			return nil, ErrNotFound("Could not find node at path: %s", path)
 		}
-		child, err := coll.Child(part)
+		child, err := coll.Child(ctx, part)
 		if err != nil {
 			return nil, err
 		}
@@ -48,26 +49,26 @@ func (t *Tree) NodeForPath(path string) (Node, error) {
 }
 
 // NodeExists reports whether a node exists at path.
-func (t *Tree) NodeExists(path string) bool {
+func (t *Tree) NodeExists(ctx context.Context, path string) bool {
 	if strings.Trim(path, "/") == "" {
 		return true
 	}
 	parent, base := pathutil.Split(strings.Trim(path, "/"))
-	parentNode, err := t.NodeForPath(parent)
+	parentNode, err := t.NodeForPath(ctx, parent)
 	if err != nil {
 		return false
 	}
 	coll, isColl := parentNode.(Collection)
-	return isColl && coll.ChildExists(base)
+	return isColl && coll.ChildExists(ctx, base)
 }
 
 // Delete removes the node at path.
-func (t *Tree) Delete(path string) error {
-	node, err := t.NodeForPath(path)
+func (t *Tree) Delete(ctx context.Context, path string) error {
+	node, err := t.NodeForPath(ctx, path)
 	if err != nil {
 		return err
 	}
-	return node.Delete()
+	return node.Delete(ctx)
 }
 
 // pathContainsOrEquals reports whether descendant is ancestor itself or lives
@@ -83,19 +84,19 @@ func pathContainsOrEquals(ancestor, descendant string) bool {
 
 // Copy copies the node at sourcePath to destinationPath. With depth 0 a
 // collection is copied without children (RFC 4918 §9.8.3).
-func (t *Tree) Copy(sourcePath, destinationPath string, depth int) error {
+func (t *Tree) Copy(ctx context.Context, sourcePath, destinationPath string, depth int) error {
 	// Copying a collection into itself or a descendant is forbidden (RFC 4918
 	// §9.8.5); without this guard copyNode recurses into the collection it is
 	// still writing to and allocates until the process is OOM-killed.
 	if pathContainsOrEquals(sourcePath, destinationPath) {
 		return ErrForbidden("Cannot copy a resource into itself or a descendant")
 	}
-	source, err := t.NodeForPath(sourcePath)
+	source, err := t.NodeForPath(ctx, sourcePath)
 	if err != nil {
 		return err
 	}
 	destDir, destName := pathutil.Split(strings.Trim(destinationPath, "/"))
-	destParent, err := t.NodeForPath(destDir)
+	destParent, err := t.NodeForPath(ctx, destDir)
 	if err != nil {
 		return err
 	}
@@ -103,12 +104,12 @@ func (t *Tree) Copy(sourcePath, destinationPath string, depth int) error {
 	if !isColl {
 		return ErrConflict("Unable to copy into a non-collection")
 	}
-	return t.copyNode(source, coll, destName, depth)
+	return t.copyNode(ctx, source, coll, destName, depth)
 }
 
 // Move moves the node at sourcePath to destinationPath. A move within one
 // parent is a rename; otherwise it's copy + delete, like sabre.
-func (t *Tree) Move(sourcePath, destinationPath string) error {
+func (t *Tree) Move(ctx context.Context, sourcePath, destinationPath string) error {
 	if pathContainsOrEquals(sourcePath, destinationPath) {
 		return ErrForbidden("Cannot move a resource into itself or a descendant")
 	}
@@ -116,46 +117,46 @@ func (t *Tree) Move(sourcePath, destinationPath string) error {
 	destDir, destName := pathutil.Split(strings.Trim(destinationPath, "/"))
 
 	if sourceDir == destDir {
-		source, err := t.NodeForPath(sourcePath)
+		source, err := t.NodeForPath(ctx, sourcePath)
 		if err != nil {
 			return err
 		}
-		return source.SetName(destName)
+		return source.SetName(ctx, destName)
 	}
-	if err := t.Copy(sourcePath, destinationPath, DepthInfinity); err != nil {
+	if err := t.Copy(ctx, sourcePath, destinationPath, DepthInfinity); err != nil {
 		return err
 	}
-	source, err := t.NodeForPath(sourcePath)
+	source, err := t.NodeForPath(ctx, sourcePath)
 	if err != nil {
 		return err
 	}
-	return source.Delete()
+	return source.Delete(ctx)
 }
 
 // copyNode clones source into destinationParent under destinationName,
 // mirroring sabre's Tree::copyNode.
-func (t *Tree) copyNode(source Node, destParent Collection, destName string, depth int) error {
+func (t *Tree) copyNode(ctx context.Context, source Node, destParent Collection, destName string, depth int) error {
 	if destName == "" {
 		destName = source.Name()
 	}
 	switch src := source.(type) {
 	case File:
-		data, err := src.Get()
+		data, err := src.Get(ctx)
 		if err != nil {
 			return err
 		}
 		defer data.Close()
-		if _, err := destParent.CreateFile(destName, data); err != nil {
+		if _, err := destParent.CreateFile(ctx, destName, data); err != nil {
 			return err
 		}
 	case Collection:
-		if err := destParent.CreateDirectory(destName); err != nil {
+		if err := destParent.CreateDirectory(ctx, destName); err != nil {
 			return err
 		}
 		if depth == 0 {
 			break
 		}
-		destNode, err := destParent.Child(destName)
+		destNode, err := destParent.Child(ctx, destName)
 		if err != nil {
 			return err
 		}
@@ -163,27 +164,27 @@ func (t *Tree) copyNode(source Node, destParent Collection, destName string, dep
 		if !isColl {
 			return ErrConflict("Copy destination is not a collection")
 		}
-		children, err := src.Children()
+		children, err := src.Children(ctx)
 		if err != nil {
 			return err
 		}
 		for _, child := range children {
-			if err := t.copyNode(child, destColl, "", depth); err != nil {
+			if err := t.copyNode(ctx, child, destColl, "", depth); err != nil {
 				return err
 			}
 		}
 	default:
 		// A node that is neither File nor Collection copies as an empty
 		// file, like sabre's fallback.
-		if _, err := destParent.CreateFile(destName, emptyReader{}); err != nil {
+		if _, err := destParent.CreateFile(ctx, destName, emptyReader{}); err != nil {
 			return err
 		}
 	}
 
 	if props, isProps := source.(PropNode); isProps {
-		if destNode, err := destParent.Child(destName); err == nil {
+		if destNode, err := destParent.Child(ctx, destName); err == nil {
 			if destProps, ok := destNode.(PropNode); ok {
-				copyProperties(props, destProps)
+				copyProperties(ctx, props, destProps)
 			}
 		}
 	}
@@ -192,13 +193,13 @@ func (t *Tree) copyNode(source Node, destParent Collection, destName string, dep
 
 // copyProperties transfers all custom properties, matching sabre's behavior
 // of replaying them through PropPatch on the destination.
-func copyProperties(src, dst PropNode) {
-	values, err := src.Props(nil)
+func copyProperties(ctx context.Context, src, dst PropNode) {
+	values, err := src.Props(ctx, nil)
 	if err != nil || len(values) == 0 {
 		return
 	}
 	pp := NewPropPatch(values)
-	dst.PropPatch(pp)
+	dst.PropPatch(ctx, pp)
 	pp.Commit()
 }
 

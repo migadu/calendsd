@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"context"
 	"strconv"
 
 	"calserver/internal/dav"
@@ -17,11 +18,11 @@ func NewSimpleFile(name, contents string) *SimpleFile {
 	return &SimpleFile{File: *NewFile(name, contents)}
 }
 
-func (f *SimpleFile) Delete() error {
+func (f *SimpleFile) Delete(ctx context.Context) error {
 	return dav.ErrForbidden("Permission denied to delete node")
 }
 
-func (f *SimpleFile) SetName(string) error {
+func (f *SimpleFile) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename file")
 }
 
@@ -67,9 +68,9 @@ func (sc *SyncCollection) SyncToken() string {
 	return strconv.Itoa(sc.Token)
 }
 
-func (sc *SyncCollection) Changes(syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+func (sc *SyncCollection) Changes(ctx context.Context, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	if syncToken == "" {
-		children, err := sc.Children()
+		children, err := sc.Children(ctx)
 		if err != nil {
 			return nil, err
 		}

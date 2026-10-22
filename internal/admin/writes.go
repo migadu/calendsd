@@ -7,6 +7,7 @@ package admin
 // orphan deletion go through the storage.AdminWrites carve-out.
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"log/slog"
@@ -25,14 +26,14 @@ import (
 // tests fake it. digestA1 is computed by the handlers so the realm stays in
 // one place (App.Config.Realm).
 type Writes interface {
-	CreateUser(username, digestA1, email, displayName string) error
-	SetPassword(username, digestA1 string) error
-	DeleteUser(username string) error
-	DeleteUserCascade(username string) error
-	ScheduleDelete(username string, days int, reason string) error
-	CancelDelete(username string) error
-	Deletions() ([]storage.DeletedPrincipal, error)
-	DeleteOrphans(check string) (int64, error)
+	CreateUser(ctx context.Context, username, digestA1, email, displayName string) error
+	SetPassword(ctx context.Context, username, digestA1 string) error
+	DeleteUser(ctx context.Context, username string) error
+	DeleteUserCascade(ctx context.Context, username string) error
+	ScheduleDelete(ctx context.Context, username string, days int, reason string) error
+	CancelDelete(ctx context.Context, username string) error
+	Deletions(ctx context.Context) ([]storage.DeletedPrincipal, error)
+	DeleteOrphans(ctx context.Context, check string) (int64, error)
 }
 
 var _ Writes = (*storage.AdminWrites)(nil)
@@ -85,7 +86,7 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	digest := auth.DigestA1(username, a.Config.Realm, password)
-	err := a.Writes.CreateUser(username, digest,
+	err := a.Writes.CreateUser(r.Context(), username, digest,
 		r.PostFormValue("email"), r.PostFormValue("displayname"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -106,7 +107,7 @@ func (a *App) setPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username and password are required", http.StatusBadRequest)
 		return
 	}
-	if err := a.Writes.SetPassword(username, auth.DigestA1(username, a.Config.Realm, password)); err != nil {
+	if err := a.Writes.SetPassword(r.Context(), username, auth.DigestA1(username, a.Config.Realm, password)); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -128,9 +129,9 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 	cascade := r.PostFormValue("cascade") == "1"
 	var err error
 	if cascade {
-		err = a.Writes.DeleteUserCascade(username)
+		err = a.Writes.DeleteUserCascade(r.Context(), username)
 	} else {
-		err = a.Writes.DeleteUser(username)
+		err = a.Writes.DeleteUser(r.Context(), username)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -164,7 +165,7 @@ func (a *App) scheduleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		days = n
 	}
-	if err := a.Writes.ScheduleDelete(username, days, r.PostFormValue("reason")); err != nil {
+	if err := a.Writes.ScheduleDelete(r.Context(), username, days, r.PostFormValue("reason")); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -182,7 +183,7 @@ func (a *App) restoreUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username is required", http.StatusBadRequest)
 		return
 	}
-	if err := a.Writes.CancelDelete(username); err != nil {
+	if err := a.Writes.CancelDelete(r.Context(), username); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -203,7 +204,7 @@ func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
 	members := strings.Fields(r.PostFormValue("members"))
 	// Reject typos up front: every member must be an existing principal.
 	for _, m := range members {
-		p, err := a.Principals.PrincipalByPath(m)
+		p, err := a.Principals.PrincipalByPath(r.Context(), m)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -214,7 +215,7 @@ func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	group := principal + "/calendar-proxy-" + kind
-	if err := a.Principals.SetGroupMemberSet(group, members); err != nil {
+	if err := a.Principals.SetGroupMemberSet(r.Context(), group, members); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -328,7 +329,7 @@ func (a *App) deleteOrphans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	check := r.PostFormValue("check")
-	n, err := a.Writes.DeleteOrphans(check)
+	n, err := a.Writes.DeleteOrphans(r.Context(), check)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

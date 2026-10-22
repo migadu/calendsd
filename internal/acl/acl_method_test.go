@@ -49,7 +49,7 @@ func TestACLForNodeIsEffectiveACL(t *testing.T) {
 		return false
 	}
 	for _, path := range []string{"", "principals/user1"} {
-		node, err := srv.Tree.NodeForPath(path)
+		node, err := srv.Tree.NodeForPath(t.Context(), path)
 		if err != nil {
 			t.Fatal(err)
 		}

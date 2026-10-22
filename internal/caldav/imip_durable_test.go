@@ -84,8 +84,8 @@ type writeBackRec struct {
 	path, method, rcpt, status string
 }
 
-func (w *writeBackRec) fn() func(path, method, recipient, status string) {
-	return func(path, method, recipient, status string) {
+func (w *writeBackRec) fn() func(ctx context.Context, path, method, recipient, status string) {
+	return func(_ context.Context, path, method, recipient, status string) {
 		w.called = true
 		w.path, w.method, w.rcpt, w.status = path, method, recipient, status
 	}

@@ -2,6 +2,7 @@ package dav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -34,12 +35,12 @@ func (c *CorePlugin) Features() []string {
 
 // Methods implements MethodProvider. Matches sabre's getAllowedMethods:
 // MKCOL is only advertised on unmapped URIs.
-func (c *CorePlugin) Methods(path string) []string {
+func (c *CorePlugin) Methods(ctx context.Context, path string) []string {
 	methods := []string{
 		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND",
 		"PUT", "PROPPATCH", "COPY", "MOVE", "REPORT",
 	}
-	if c.server.Tree == nil || !c.server.Tree.NodeExists(path) {
+	if c.server.Tree == nil || !c.server.Tree.NodeExists(ctx, path) {
 		methods = append(methods, "MKCOL")
 	}
 	return methods
@@ -153,7 +154,7 @@ func (c *CorePlugin) options(w http.ResponseWriter, r *http.Request) error {
 	}
 	h := w.Header()
 	h.Set("DAV", strings.Join(c.server.Features(), ", "))
-	h.Set("Allow", strings.Join(c.server.AllowedMethods(path), ", "))
+	h.Set("Allow", strings.Join(c.server.AllowedMethods(r.Context(), path), ", "))
 	h.Set("MS-Author-Via", "DAV")
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Length", "0")
@@ -169,7 +170,7 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	if err != nil {
 		return true, err
 	}
-	node, err := c.server.Tree.NodeForPath(path)
+	node, err := c.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return true, err
 	}
@@ -229,7 +230,7 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 		return true, nil
 	}
 
-	body, err := file.Get()
+	body, err := file.Get(r.Context())
 	if err != nil {
 		return true, err
 	}
@@ -375,10 +376,10 @@ func (c *CorePlugin) delete(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	}
-	if err := c.server.Tree.Delete(path); err != nil {
+	if err := c.server.Tree.Delete(r.Context(), path); err != nil {
 		return err
 	}
-	c.server.fireAfterUnbind(path)
+	c.server.fireAfterUnbind(r.Context(), path)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusNoContent)
 	return nil
@@ -498,7 +499,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		body = io.MultiReader(strings.NewReader(string(first[:n])), r.Body)
 	}
 
-	isNew := !c.server.Tree.NodeExists(path)
+	isNew := !c.server.Tree.NodeExists(r.Context(), path)
 
 	// Write interceptors (the scheduling broker) may rewrite the payload.
 	raw, err := io.ReadAll(body)
@@ -521,7 +522,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	modified := !bytes.Equal(sent, raw)
 
 	if !isNew {
-		node, err := c.server.Tree.NodeForPath(path)
+		node, err := c.server.Tree.NodeForPath(r.Context(), path)
 		if err != nil {
 			return err
 		}
@@ -529,7 +530,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		if !isFile {
 			return ErrConflict("PUT is not allowed on non-files.")
 		}
-		etag, err := file.Put(body)
+		etag, err := file.Put(r.Context(), body)
 		if err != nil {
 			return err
 		}
@@ -542,10 +543,10 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	parentPath, name := pathutil.Split(path)
-	if !c.server.Tree.NodeExists(parentPath) {
+	if !c.server.Tree.NodeExists(r.Context(), parentPath) {
 		return ErrConflict("Files can not be created in non-existent collections")
 	}
-	parent, err := c.server.Tree.NodeForPath(parentPath)
+	parent, err := c.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		return err
 	}
@@ -553,7 +554,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	if !isColl {
 		return ErrConflict("Files can only be created as children of collections")
 	}
-	etag, err := coll.CreateFile(name, body)
+	etag, err := coll.CreateFile(r.Context(), name, body)
 	if err != nil {
 		return err
 	}
@@ -610,11 +611,11 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		resourceTypes = resourceType
 	}
 
-	if c.server.Tree.NodeExists(path) {
+	if c.server.Tree.NodeExists(r.Context(), path) {
 		return ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
 	parentPath, name := pathutil.Split(path)
-	parent, err := c.server.Tree.NodeForPath(parentPath)
+	parent, err := c.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		if AsError(err).Status == http.StatusNotFound {
 			return ErrConflict("Parent node does not exist")
@@ -632,14 +633,14 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		if !isExt {
 			return ErrForbidden("Unable to create a collection of this type")
 		}
-		if err := ext.CreateExtendedCollection(name, resourceTypes, extraProps); err != nil {
+		if err := ext.CreateExtendedCollection(r.Context(), name, resourceTypes, extraProps); err != nil {
 			return err
 		}
 		w.Header().Set("Content-Length", "0")
 		w.WriteHeader(http.StatusCreated)
 		return nil
 	}
-	if err := coll.CreateDirectory(name); err != nil {
+	if err := coll.CreateDirectory(r.Context(), name); err != nil {
 		return err
 	}
 
@@ -662,7 +663,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		if failed {
-			_ = c.server.Tree.Delete(path)
+			_ = c.server.Tree.Delete(r.Context(), path)
 			resp := propstatResponse(c.server.Href(path), names, result)
 			return c.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
 		}
@@ -702,7 +703,7 @@ func (c *CorePlugin) copy(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if err := c.server.Tree.Copy(path, info.destination, info.depth); err != nil {
+	if err := c.server.Tree.Copy(r.Context(), path, info.destination, info.depth); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Length", "0")
@@ -727,13 +728,13 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if err := c.server.Tree.Move(path, info.destination); err != nil {
+	if err := c.server.Tree.Move(r.Context(), path, info.destination); err != nil {
 		return err
 	}
 	// afterMove before afterUnbind, so listeners can transfer state
 	// (sabre's ordering note for property storage).
-	c.server.fireAfterMove(path, info.destination)
-	c.server.fireAfterUnbind(path)
+	c.server.fireAfterMove(r.Context(), path, info.destination)
+	c.server.fireAfterUnbind(r.Context(), path)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(statusForOverwrite(info.destinationExists))
 	return nil
@@ -749,10 +750,10 @@ func (c *CorePlugin) deleteDestination(r *http.Request, destination string) erro
 			}
 		}
 	}
-	if err := c.server.Tree.Delete(destination); err != nil {
+	if err := c.server.Tree.Delete(r.Context(), destination); err != nil {
 		return err
 	}
-	c.server.fireAfterUnbind(destination)
+	c.server.fireAfterUnbind(r.Context(), destination)
 	return nil
 }
 
@@ -773,7 +774,7 @@ type copyMoveInfo struct {
 func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMoveInfo, error) {
 	// Resolve the source first, so a missing source is a 404 before
 	// anything at the destination is touched.
-	if _, err := c.server.Tree.NodeForPath(sourcePath); err != nil {
+	if _, err := c.server.Tree.NodeForPath(r.Context(), sourcePath); err != nil {
 		return nil, err
 	}
 	destHeader := r.Header.Get("Destination")
@@ -806,7 +807,7 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 	}
 
 	destDir, _ := pathutil.Split(destination)
-	destParent, err := c.server.Tree.NodeForPath(destDir)
+	destParent, err := c.server.Tree.NodeForPath(r.Context(), destDir)
 	if err != nil {
 		if AsError(err).Status == http.StatusNotFound {
 			return nil, ErrConflict("The destination node is not found")
@@ -817,7 +818,7 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 		return nil, ErrUnsupportedMediaType("The destination node is not a collection")
 	}
 
-	destinationExists := c.server.Tree.NodeExists(destination)
+	destinationExists := c.server.Tree.NodeExists(r.Context(), destination)
 	if destinationExists && !overwrite {
 		return nil, ErrPreconditionFailed("The destination node already exists, and the overwrite header is set to false")
 	}
@@ -937,7 +938,7 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 		return reports
 	})
 	pf.Handle(dav("supported-method-set"), func() any {
-		return davxml.SupportedMethodSet(s.AllowedMethods(pf.Path()))
+		return davxml.SupportedMethodSet(s.AllowedMethods(pf.Context(), pf.Path()))
 	})
 }
 

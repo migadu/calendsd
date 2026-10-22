@@ -40,7 +40,7 @@ func newTestPlugin() (*Plugin, *captureHandler) {
 	cap := &captureHandler{}
 	p := NewPlugin(&BasicBackend{
 		Realm:    "SabreDAV",
-		Validate: func(u, pw string) bool { return u == "admin" && pw == "secret" },
+		Validate: func(_ context.Context, u, pw string) bool { return u == "admin" && pw == "secret" },
 	})
 	p.Logger = slog.New(cap)
 	return p, cap
@@ -99,7 +99,7 @@ func TestAuthLogWrongDigestUser(t *testing.T) {
 	cap := &captureHandler{}
 	p := NewPlugin(&DigestBackend{
 		Realm:  "SabreDAV",
-		HashA1: func(string, string) (string, error) { return "", nil },
+		HashA1: func(context.Context, string, string) (string, error) { return "", nil },
 	})
 	p.Logger = slog.New(cap)
 
@@ -170,7 +170,7 @@ func TestAuthLogSuccess(t *testing.T) {
 // TestAuthLogDefaultsToGlobal confirms a plugin with no explicit Logger falls
 // back to slog.Default() rather than panicking on nil.
 func TestAuthLogDefaultsToGlobal(t *testing.T) {
-	p := NewPlugin(&BasicBackend{Realm: "SabreDAV", Validate: func(string, string) bool { return false }})
+	p := NewPlugin(&BasicBackend{Realm: "SabreDAV", Validate: func(context.Context, string, string) bool { return false }})
 	r := httptest.NewRequest("PROPFIND", "/", nil)
 	r.SetBasicAuth("admin", "x")
 	// Must not panic even though p.Logger is nil.

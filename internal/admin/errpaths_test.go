@@ -32,123 +32,123 @@ type failStore struct {
 	fail string
 }
 
-func (s failStore) Counts() (*storage.AdminCounts, error) {
+func (s failStore) Counts(ctx context.Context) (*storage.AdminCounts, error) {
 	if s.fail == "Counts" {
 		return nil, errBoom
 	}
-	return s.fakeStore.Counts()
+	return s.fakeStore.Counts(ctx)
 }
 
-func (s failStore) RecentChanges(limit int) ([]storage.AdminChange, error) {
+func (s failStore) RecentChanges(ctx context.Context, limit int) ([]storage.AdminChange, error) {
 	if s.fail == "RecentChanges" {
 		return nil, errBoom
 	}
-	return s.fakeStore.RecentChanges(limit)
+	return s.fakeStore.RecentChanges(ctx, limit)
 }
 
-func (s failStore) AuthDiagnostics() (*storage.AdminAuthDiagnostics, error) {
+func (s failStore) AuthDiagnostics(ctx context.Context) (*storage.AdminAuthDiagnostics, error) {
 	if s.fail == "AuthDiagnostics" {
 		return nil, errBoom
 	}
-	return s.fakeStore.AuthDiagnostics()
+	return s.fakeStore.AuthDiagnostics(ctx)
 }
 
-func (s failStore) UserForPrincipal(principalURI string) (*storage.AdminUserRow, error) {
+func (s failStore) UserForPrincipal(ctx context.Context, principalURI string) (*storage.AdminUserRow, error) {
 	if s.fail == "UserForPrincipal" {
 		return nil, errBoom
 	}
-	return s.fakeStore.UserForPrincipal(principalURI)
+	return s.fakeStore.UserForPrincipal(ctx, principalURI)
 }
 
-func (s failStore) LookupCalendar(principalURI, uri string) (string, error) {
+func (s failStore) LookupCalendar(ctx context.Context, principalURI, uri string) (string, error) {
 	if s.fail == "LookupCalendar" {
 		return "", errBoom
 	}
-	return s.fakeStore.LookupCalendar(principalURI, uri)
+	return s.fakeStore.LookupCalendar(ctx, principalURI, uri)
 }
 
-func (s failStore) CalendarInstances(calendarID string) ([]storage.AdminCalendarInstance, error) {
+func (s failStore) CalendarInstances(ctx context.Context, calendarID string) ([]storage.AdminCalendarInstance, error) {
 	if s.fail == "CalendarInstances" {
 		return nil, errBoom
 	}
-	return s.fakeStore.CalendarInstances(calendarID)
+	return s.fakeStore.CalendarInstances(ctx, calendarID)
 }
 
-func (s failStore) CalendarMeta(calendarID string) (*storage.AdminCalendarMeta, error) {
+func (s failStore) CalendarMeta(ctx context.Context, calendarID string) (*storage.AdminCalendarMeta, error) {
 	if s.fail == "CalendarMeta" {
 		return nil, errBoom
 	}
-	return s.fakeStore.CalendarMeta(calendarID)
+	return s.fakeStore.CalendarMeta(ctx, calendarID)
 }
 
-func (s failStore) PropertyRows(path string) ([]storage.AdminPropRow, error) {
+func (s failStore) PropertyRows(ctx context.Context, path string) ([]storage.AdminPropRow, error) {
 	if s.fail == "PropertyRows" {
 		return nil, errBoom
 	}
-	return s.fakeStore.PropertyRows(path)
+	return s.fakeStore.PropertyRows(ctx, path)
 }
 
-func (s failStore) AddressBook(id string) (*storage.AdminAddressBook, error) {
+func (s failStore) AddressBook(ctx context.Context, id string) (*storage.AdminAddressBook, error) {
 	if s.fail == "AddressBook" {
 		return nil, errBoom
 	}
-	return s.fakeStore.AddressBook(id)
+	return s.fakeStore.AddressBook(ctx, id)
 }
 
-func (s failStore) LookupAddressBook(principalURI, uri string) (string, error) {
+func (s failStore) LookupAddressBook(ctx context.Context, principalURI, uri string) (string, error) {
 	if s.fail == "LookupAddressBook" {
 		return "", errBoom
 	}
-	return s.fakeStore.LookupAddressBook(principalURI, uri)
+	return s.fakeStore.LookupAddressBook(ctx, principalURI, uri)
 }
 
-func (s failStore) Objects(q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error) {
+func (s failStore) Objects(ctx context.Context, q storage.AdminObjectQuery) ([]storage.AdminObjectRow, bool, error) {
 	if s.fail == "Objects" {
 		return nil, false, errBoom
 	}
-	return s.fakeStore.Objects(q)
+	return s.fakeStore.Objects(ctx, q)
 }
 
-func (s failStore) Object(calendarID, uri string) (*storage.AdminObjectDetail, error) {
+func (s failStore) Object(ctx context.Context, calendarID, uri string) (*storage.AdminObjectDetail, error) {
 	if s.fail == "Object" {
 		return nil, errBoom
 	}
-	return s.fakeStore.Object(calendarID, uri)
+	return s.fakeStore.Object(ctx, calendarID, uri)
 }
 
-func (s failStore) CardsSearch(bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error) {
+func (s failStore) CardsSearch(ctx context.Context, bookID, match string, inData bool, limit int) ([]storage.AdminCardRow, bool, error) {
 	if s.fail == "CardsSearch" {
 		return nil, false, errBoom
 	}
-	return s.fakeStore.CardsSearch(bookID, match, inData, limit)
+	return s.fakeStore.CardsSearch(ctx, bookID, match, inData, limit)
 }
 
-func (s failStore) Card(bookID, uri string) (*storage.AdminCardDetail, error) {
+func (s failStore) Card(ctx context.Context, bookID, uri string) (*storage.AdminCardDetail, error) {
 	if s.fail == "Card" {
 		return nil, errBoom
 	}
-	return s.fakeStore.Card(bookID, uri)
+	return s.fakeStore.Card(ctx, bookID, uri)
 }
 
-func (s failStore) ChangeLog(kind, collectionID string, limit int) ([]storage.AdminChange, error) {
+func (s failStore) ChangeLog(ctx context.Context, kind, collectionID string, limit int) ([]storage.AdminChange, error) {
 	if s.fail == "ChangeLog" {
 		return nil, errBoom
 	}
-	return s.fakeStore.ChangeLog(kind, collectionID, limit)
+	return s.fakeStore.ChangeLog(ctx, kind, collectionID, limit)
 }
 
-func (s failStore) PendingShareInvites(principalURI string) ([]storage.AdminCalendarInstance, error) {
+func (s failStore) PendingShareInvites(ctx context.Context, principalURI string) ([]storage.AdminCalendarInstance, error) {
 	if s.fail == "PendingShareInvites" {
 		return nil, errBoom
 	}
-	return s.fakeStore.PendingShareInvites(principalURI)
+	return s.fakeStore.PendingShareInvites(ctx, principalURI)
 }
 
-func (s failStore) Doctor(scanCap int) (*storage.AdminDoctorReport, error) {
+func (s failStore) Doctor(ctx context.Context, scanCap int) (*storage.AdminDoctorReport, error) {
 	if s.fail == "Doctor" {
 		return nil, errBoom
 	}
-	return s.fakeStore.Doctor(scanCap)
+	return s.fakeStore.Doctor(ctx, scanCap)
 }
 
 // TestStoreErrorsSurfaceAs500 walks every data handler with each of its
@@ -191,55 +191,55 @@ type failPrincipals struct {
 	fail string
 }
 
-func (f failPrincipals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
+func (f failPrincipals) PrincipalsByPrefix(ctx context.Context, prefix string) ([]acl.Principal, error) {
 	if f.fail == "PrincipalsByPrefix" {
 		return nil, errBoom
 	}
-	return f.Backend.PrincipalsByPrefix(prefix)
+	return f.Backend.PrincipalsByPrefix(context.Background(), prefix)
 }
 
-func (f failPrincipals) PrincipalByPath(path string) (*acl.Principal, error) {
+func (f failPrincipals) PrincipalByPath(ctx context.Context, path string) (*acl.Principal, error) {
 	if f.fail == "PrincipalByPath" {
 		return nil, errBoom
 	}
-	return f.Backend.PrincipalByPath(path)
+	return f.Backend.PrincipalByPath(context.Background(), path)
 }
 
-func (f failPrincipals) GroupMembership(principal string) ([]string, error) {
+func (f failPrincipals) GroupMembership(ctx context.Context, principal string) ([]string, error) {
 	if f.fail == "GroupMembership" {
 		return nil, errBoom
 	}
-	return f.Backend.GroupMembership(principal)
+	return f.Backend.GroupMembership(context.Background(), principal)
 }
 
-func (f failPrincipals) GroupMemberSet(principal string) ([]string, error) {
+func (f failPrincipals) GroupMemberSet(ctx context.Context, principal string) ([]string, error) {
 	if f.fail == "GroupMemberSet-read" && strings.HasSuffix(principal, "-read") {
 		return nil, errBoom
 	}
 	if f.fail == "GroupMemberSet-write" && strings.HasSuffix(principal, "-write") {
 		return nil, errBoom
 	}
-	return f.Backend.GroupMemberSet(principal)
+	return f.Backend.GroupMemberSet(context.Background(), principal)
 }
 
-func (f failPrincipals) SetGroupMemberSet(principal string, members []string) error {
+func (f failPrincipals) SetGroupMemberSet(ctx context.Context, principal string, members []string) error {
 	if f.fail == "SetGroupMemberSet" {
 		return errBoom
 	}
-	return f.Backend.SetGroupMemberSet(principal, members)
+	return f.Backend.SetGroupMemberSet(context.Background(), principal, members)
 }
 
 // failCalendars fails the calendar-home listing; everything else delegates.
 type failCalendars struct{ caldav.Backend }
 
-func (failCalendars) CalendarsForUser(string) ([]caldav.CalendarInfo, error) {
+func (failCalendars) CalendarsForUser(context.Context, string) ([]caldav.CalendarInfo, error) {
 	return nil, errBoom
 }
 
 // failBooks fails the address-book-home listing.
 type failBooks struct{ carddav.Backend }
 
-func (failBooks) AddressBooksForUser(string) ([]carddav.AddressBookInfo, error) {
+func (failBooks) AddressBooksForUser(context.Context, string) ([]carddav.AddressBookInfo, error) {
 	return nil, errBoom
 }
 
@@ -291,7 +291,7 @@ func TestPrincipalGroupClassification(t *testing.T) {
 // weirdStore serves malformed and stale rows on top of the fixture.
 type weirdStore struct{ fakeStore }
 
-func (s weirdStore) Object(calendarID, uri string) (*storage.AdminObjectDetail, error) {
+func (s weirdStore) Object(ctx context.Context, calendarID, uri string) (*storage.AdminObjectDetail, error) {
 	switch uri {
 	case "garbage.ics":
 		return &storage.AdminObjectDetail{Row: storage.AdminObjectRow{URI: uri},
@@ -304,19 +304,19 @@ func (s weirdStore) Object(calendarID, uri string) (*storage.AdminObjectDetail, 
 		row.LastOccurrence = nil
 		return &storage.AdminObjectDetail{Row: row, Data: []byte(testICS)}, nil
 	}
-	return s.fakeStore.Object(calendarID, uri)
+	return s.fakeStore.Object(ctx, calendarID, uri)
 }
 
-func (s weirdStore) Card(bookID, uri string) (*storage.AdminCardDetail, error) {
+func (s weirdStore) Card(ctx context.Context, bookID, uri string) (*storage.AdminCardDetail, error) {
 	if uri == "stale.vcf" {
 		return &storage.AdminCardDetail{
 			Row:  storage.AdminCardRow{URI: uri, ETag: "bogus", Size: 999},
 			Data: []byte(testVCF)}, nil
 	}
-	return s.fakeStore.Card(bookID, uri)
+	return s.fakeStore.Card(ctx, bookID, uri)
 }
 
-func (s weirdStore) UserForPrincipal(principalURI string) (*storage.AdminUserRow, error) {
+func (s weirdStore) UserForPrincipal(ctx context.Context, principalURI string) (*storage.AdminUserRow, error) {
 	switch principalURI {
 	case "principals/bob": // too short to be an md5 hex
 		return &storage.AdminUserRow{Username: "bob", DigestA1: "notahash"}, nil
@@ -324,7 +324,7 @@ func (s weirdStore) UserForPrincipal(principalURI string) (*storage.AdminUserRow
 		return &storage.AdminUserRow{Username: "carol",
 			DigestA1: strings.Repeat("Z", 32)}, nil
 	}
-	return s.fakeStore.UserForPrincipal(principalURI)
+	return s.fakeStore.UserForPrincipal(ctx, principalURI)
 }
 
 func TestObjectParseErrorAndAllStaleColumns(t *testing.T) {
@@ -465,7 +465,7 @@ func TestSchedulingParamsAndUnavailable(t *testing.T) {
 // failScheduling fails the inbox listing.
 type failScheduling struct{ fakeScheduling }
 
-func (failScheduling) SchedulingObjects(string) ([]caldav.SchedulingObjectInfo, error) {
+func (failScheduling) SchedulingObjects(context.Context, string) ([]caldav.SchedulingObjectInfo, error) {
 	return nil, errBoom
 }
 
@@ -526,7 +526,7 @@ func TestParseInboxItemBranches(t *testing.T) {
 // errSyncCalendars fails the sync preview.
 type errSyncCalendars struct{ caldav.Backend }
 
-func (errSyncCalendars) ChangesForCalendar(caldav.CalendarID, string, int, int) (*dav.ChangeSet, error) {
+func (errSyncCalendars) ChangesForCalendar(context.Context, caldav.CalendarID, string, int, int) (*dav.ChangeSet, error) {
 	return nil, errBoom
 }
 
@@ -626,7 +626,7 @@ func TestParsePrivilegesBadXML(t *testing.T) {
 // invite status).
 type helperStore struct{ fakeStore }
 
-func (s helperStore) CalendarInstances(calendarID string) ([]storage.AdminCalendarInstance, error) {
+func (s helperStore) CalendarInstances(ctx context.Context, calendarID string) ([]storage.AdminCalendarInstance, error) {
 	return []storage.AdminCalendarInstance{
 		{InstanceID: "20", CalendarID: "7", PrincipalURI: "principals/alice",
 			URI: "default", Access: 3, InviteStatus: 1},
@@ -639,7 +639,7 @@ func (s helperStore) CalendarInstances(calendarID string) ([]storage.AdminCalend
 	}, nil
 }
 
-func (s helperStore) RecentChanges(limit int) ([]storage.AdminChange, error) {
+func (s helperStore) RecentChanges(ctx context.Context, limit int) ([]storage.AdminChange, error) {
 	return []storage.AdminChange{
 		{Kind: "calendar", CollectionID: "7", CollectionURI: "default",
 			PrincipalURI: "principals/alice", ObjectURI: "new.ics", SyncToken: 1,
@@ -716,53 +716,53 @@ type failWrites struct {
 	fail string
 }
 
-func (f *failWrites) CreateUser(username, digestA1, email, displayName string) error {
+func (f *failWrites) CreateUser(ctx context.Context, username, digestA1, email, displayName string) error {
 	if f.fail == "CreateUser" {
 		return errBoom
 	}
-	return f.fakeWrites.CreateUser(username, digestA1, email, displayName)
+	return f.fakeWrites.CreateUser(ctx, username, digestA1, email, displayName)
 }
 
-func (f *failWrites) SetPassword(username, digestA1 string) error {
+func (f *failWrites) SetPassword(ctx context.Context, username, digestA1 string) error {
 	if f.fail == "SetPassword" {
 		return errBoom
 	}
-	return f.fakeWrites.SetPassword(username, digestA1)
+	return f.fakeWrites.SetPassword(ctx, username, digestA1)
 }
 
-func (f *failWrites) DeleteUser(username string) error {
+func (f *failWrites) DeleteUser(ctx context.Context, username string) error {
 	if f.fail == "DeleteUser" {
 		return errBoom
 	}
-	return f.fakeWrites.DeleteUser(username)
+	return f.fakeWrites.DeleteUser(ctx, username)
 }
 
-func (f *failWrites) ScheduleDelete(username string, days int, reason string) error {
+func (f *failWrites) ScheduleDelete(ctx context.Context, username string, days int, reason string) error {
 	if f.fail == "ScheduleDelete" {
 		return errBoom
 	}
-	return f.fakeWrites.ScheduleDelete(username, days, reason)
+	return f.fakeWrites.ScheduleDelete(ctx, username, days, reason)
 }
 
-func (f *failWrites) CancelDelete(username string) error {
+func (f *failWrites) CancelDelete(ctx context.Context, username string) error {
 	if f.fail == "CancelDelete" {
 		return errBoom
 	}
-	return f.fakeWrites.CancelDelete(username)
+	return f.fakeWrites.CancelDelete(ctx, username)
 }
 
-func (f *failWrites) Deletions() ([]storage.DeletedPrincipal, error) {
+func (f *failWrites) Deletions(ctx context.Context) ([]storage.DeletedPrincipal, error) {
 	if f.fail == "Deletions" {
 		return nil, errBoom
 	}
-	return f.fakeWrites.Deletions()
+	return f.fakeWrites.Deletions(ctx)
 }
 
-func (f *failWrites) DeleteOrphans(check string) (int64, error) {
+func (f *failWrites) DeleteOrphans(ctx context.Context, check string) (int64, error) {
 	if f.fail == "DeleteOrphans" {
 		return 0, errBoom
 	}
-	return f.fakeWrites.DeleteOrphans(check)
+	return f.fakeWrites.DeleteOrphans(ctx, check)
 }
 
 func TestWriteCarveOutErrors(t *testing.T) {
@@ -888,7 +888,7 @@ func TestPropPatchRemoveSlashlessAndRejected(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("slashless proppatch = %d: %s", w.Code, w.Body.String())
 	}
-	cals, _ := backend.CalendarsForUser("principals/alice")
+	cals, _ := backend.CalendarsForUser(t.Context(), "principals/alice")
 	if got := cals[0].Props[xmlName{Space: "DAV:", Local: "displayname"}]; got != "Slashless" {
 		t.Fatalf("displayname = %v, want Slashless", got)
 	}
@@ -902,7 +902,7 @@ func TestPropPatchRemoveSlashlessAndRejected(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "property removed") {
 		t.Fatalf("remove proppatch = %d: %s", w.Code, w.Body.String())
 	}
-	cals, _ = backend.CalendarsForUser("principals/alice")
+	cals, _ = backend.CalendarsForUser(t.Context(), "principals/alice")
 	if got, present := cals[0].Props[xmlName{Space: "DAV:", Local: "displayname"}]; present {
 		t.Fatalf("displayname still present after remove: %v", got)
 	}

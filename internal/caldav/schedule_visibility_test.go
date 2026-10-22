@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -178,7 +179,7 @@ func TestFreeBusyVisibilityRejects(t *testing.T) {
 
 type failingPolicy struct{}
 
-func (failingPolicy) FreeBusyVisibility(string) (acl.FreeBusyVisibility, error) {
+func (failingPolicy) FreeBusyVisibility(context.Context, string) (acl.FreeBusyVisibility, error) {
 	return acl.FreeBusyVisibility{}, errors.New("database down")
 }
 

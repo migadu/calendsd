@@ -5,6 +5,7 @@ package admin
 // mock production chain, orphan deletion pass-through.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,12 +36,12 @@ type fakeWrites struct {
 	deletions []storage.DeletedPrincipal
 }
 
-func (f *fakeWrites) CreateUser(username, digestA1, email, displayName string) error {
+func (f *fakeWrites) CreateUser(ctx context.Context, username, digestA1, email, displayName string) error {
 	f.created = append(f.created, strings.Join([]string{username, digestA1, email, displayName}, " "))
 	return nil
 }
 
-func (f *fakeWrites) SetPassword(username, digestA1 string) error {
+func (f *fakeWrites) SetPassword(ctx context.Context, username, digestA1 string) error {
 	if f.passwords == nil {
 		f.passwords = map[string]string{}
 	}
@@ -48,31 +49,31 @@ func (f *fakeWrites) SetPassword(username, digestA1 string) error {
 	return nil
 }
 
-func (f *fakeWrites) DeleteUser(username string) error {
+func (f *fakeWrites) DeleteUser(ctx context.Context, username string) error {
 	f.removed = append(f.removed, username)
 	return nil
 }
 
-func (f *fakeWrites) DeleteUserCascade(username string) error {
+func (f *fakeWrites) DeleteUserCascade(ctx context.Context, username string) error {
 	f.cascaded = append(f.cascaded, username)
 	return nil
 }
 
-func (f *fakeWrites) ScheduleDelete(username string, days int, reason string) error {
+func (f *fakeWrites) ScheduleDelete(ctx context.Context, username string, days int, reason string) error {
 	f.scheduled = append(f.scheduled, fmt.Sprintf("%s %d %s", username, days, reason))
 	return nil
 }
 
-func (f *fakeWrites) CancelDelete(username string) error {
+func (f *fakeWrites) CancelDelete(ctx context.Context, username string) error {
 	f.restored = append(f.restored, username)
 	return nil
 }
 
-func (f *fakeWrites) Deletions() ([]storage.DeletedPrincipal, error) {
+func (f *fakeWrites) Deletions(ctx context.Context) ([]storage.DeletedPrincipal, error) {
 	return f.deletions, nil
 }
 
-func (f *fakeWrites) DeleteOrphans(check string) (int64, error) {
+func (f *fakeWrites) DeleteOrphans(ctx context.Context, check string) (int64, error) {
 	f.deleted = append(f.deleted, check)
 	return 2, nil
 }
@@ -158,7 +159,7 @@ func TestSetDelegation(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("set-delegation = %d: %s", w.Code, w.Body.String())
 	}
-	members, _ := a.Principals.GroupMemberSet("principals/alice/calendar-proxy-read")
+	members, _ := a.Principals.GroupMemberSet(t.Context(), "principals/alice/calendar-proxy-read")
 	if len(members) != 2 || members[0] != "principals/bob" {
 		t.Fatalf("member set = %v", members)
 	}
@@ -171,7 +172,7 @@ func TestSetDelegation(t *testing.T) {
 		t.Fatalf("unknown member = %d: %s", w.Code, w.Body.String())
 	}
 	// The fixture's pre-existing write set must survive untouched.
-	if members, _ := a.Principals.GroupMemberSet("principals/alice/calendar-proxy-write"); len(members) != 1 || members[0] != "principals/bob" {
+	if members, _ := a.Principals.GroupMemberSet(t.Context(), "principals/alice/calendar-proxy-write"); len(members) != 1 || members[0] != "principals/bob" {
 		t.Fatalf("write proxy set mutated on rejected request: %v", members)
 	}
 
@@ -197,7 +198,7 @@ func TestPropPatchThroughChain(t *testing.T) {
 	}
 
 	// The mock backend must have received the update through UpdateCalendar.
-	cals, _ := backend.CalendarsForUser("principals/alice")
+	cals, _ := backend.CalendarsForUser(t.Context(), "principals/alice")
 	if got := cals[0].Props[xmlName{Space: "DAV:", Local: "displayname"}]; got != "Renamed" {
 		t.Fatalf("displayname after proppatch = %v", got)
 	}
@@ -242,11 +243,11 @@ func TestProvision(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("provision = %d: %s", w.Code, w.Body.String())
 	}
-	cals, _ := calBackend.CalendarsForUser("principals/bob")
+	cals, _ := calBackend.CalendarsForUser(t.Context(), "principals/bob")
 	if len(cals) != 1 {
 		t.Fatalf("no calendar auto-provisioned for bob: %v", cals)
 	}
-	books, _ := abBackend.AddressBooksForUser("principals/bob")
+	books, _ := abBackend.AddressBooksForUser(t.Context(), "principals/bob")
 	if len(books) != 1 {
 		t.Fatalf("no address book auto-provisioned for bob: %v", books)
 	}

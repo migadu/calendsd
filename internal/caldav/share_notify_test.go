@@ -119,7 +119,7 @@ type fakePolicy struct {
 	asked    []string
 }
 
-func (f *fakePolicy) ShareNotify(domain string) (string, error) {
+func (f *fakePolicy) ShareNotify(ctx context.Context, domain string) (string, error) {
 	f.asked = append(f.asked, domain)
 	if f.err != nil {
 		return "", f.err
@@ -135,7 +135,7 @@ type fakeShares struct {
 	err  error
 }
 
-func (f *fakeShares) SharedInstance(calendarID, principal string) (*caldav.SharedInstance, error) {
+func (f *fakeShares) SharedInstance(ctx context.Context, calendarID, principal string) (*caldav.SharedInstance, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -390,7 +390,7 @@ func TestShareWorkerRevalidates(t *testing.T) {
 		{"superseded by a re-share", func(f *shareFixture) { f.shares.inst.ID, f.shares.inst.URI = 9, "def-456" }, false, "skipped_obsolete"},
 		{"mailbox changed", func(f *shareFixture) {
 			// PrincipalByPath copies the struct but shares its Props map.
-			p, _ := f.mailer.Principals.PrincipalByPath("principals/bob")
+			p, _ := f.mailer.Principals.PrincipalByPath(t.Context(), "principals/bob")
 			p.Props[xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}] = "robert@example.org"
 		}, false, "skipped_obsolete"},
 		{"policy turned off", func(f *shareFixture) { f.policy.byDomain = nil }, false, "skipped_policy"},

@@ -4,6 +4,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -20,7 +21,7 @@ var (
 // matches a mailto: calendar user address (case-insensitively), or "" when
 // none does. Implements caldav.AddressResolver; served by the
 // principals_lower_email index.
-func (p *Principals) PrincipalByAddress(prefix, address string) (string, error) {
+func (p *Principals) PrincipalByAddress(ctx context.Context, prefix, address string) (string, error) {
 	if len(address) < len("mailto:") || !strings.EqualFold(address[:len("mailto:")], "mailto:") {
 		return "", nil
 	}
@@ -29,7 +30,7 @@ func (p *Principals) PrincipalByAddress(prefix, address string) (string, error) 
 		return "", nil
 	}
 	var uri string
-	err := p.DB.QueryRow(`
+	err := p.DB.QueryRowContext(ctx, `
 SELECT uri FROM principals
  WHERE lower(email) = lower($1)
    AND uri LIKE $2 AND strpos(substr(uri, $3), '/') = 0
@@ -44,9 +45,9 @@ SELECT uri FROM principals
 // CalendarObjectByUID returns the object carrying uid in the calendar, or nil
 // when there is none. Implements caldav.UIDLookup; served by the
 // calendarobjects_calendarid_uid index.
-func (b *CalDAV) CalendarObjectByUID(id caldav.CalendarID, uid string) (*caldav.ObjectInfo, error) {
+func (b *CalDAV) CalendarObjectByUID(ctx context.Context, id caldav.CalendarID, uid string) (*caldav.ObjectInfo, error) {
 	defer b.Metrics.DBOpTimer("calendar_object_by_uid")()
-	rows, err := b.DB.Query(
+	rows, err := b.DB.QueryContext(ctx,
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1 AND uid = $2 ORDER BY id LIMIT 1`,
 		id.Calendar, uid)
 	if err != nil {

@@ -1,6 +1,7 @@
 package caldav
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -39,9 +40,9 @@ type InviteNotification struct {
 // NotificationsBackend stores per-principal notifications. Port of sabre's
 // Backend\NotificationSupport (invite subset).
 type NotificationsBackend interface {
-	NotificationsForPrincipal(principalURI string) ([]InviteNotification, error)
-	AddNotification(principalURI string, n InviteNotification) error
-	DeleteNotification(principalURI, id string) error
+	NotificationsForPrincipal(ctx context.Context, principalURI string) ([]InviteNotification, error)
+	AddNotification(ctx context.Context, principalURI string, n InviteNotification) error
+	DeleteNotification(ctx context.Context, principalURI, id string) error
 }
 
 // Notifications is a principal's notification collection. Port of
@@ -57,15 +58,17 @@ func NewNotifications(backend NotificationsBackend, principalURI string) *Notifi
 }
 
 func (n *Notifications) Name() string { return "notifications" }
-func (n *Notifications) SetName(string) error {
+func (n *Notifications) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
-func (n *Notifications) Delete() error           { return dav.ErrForbidden("Permission denied to delete node") }
+func (n *Notifications) Delete(ctx context.Context) error {
+	return dav.ErrForbidden("Permission denied to delete node")
+}
 func (n *Notifications) LastModified() time.Time { return time.Time{} }
 func (n *Notifications) Owner() string           { return n.principalURI }
 
-func (n *Notifications) Children() ([]dav.Node, error) {
-	items, err := n.backend.NotificationsForPrincipal(n.principalURI)
+func (n *Notifications) Children(ctx context.Context) ([]dav.Node, error) {
+	items, err := n.backend.NotificationsForPrincipal(ctx, n.principalURI)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +79,9 @@ func (n *Notifications) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (n *Notifications) Child(name string) (dav.Node, error) {
+func (n *Notifications) Child(ctx context.Context, name string) (dav.Node, error) {
 	id := strings.TrimSuffix(name, ".xml")
-	items, err := n.backend.NotificationsForPrincipal(n.principalURI)
+	items, err := n.backend.NotificationsForPrincipal(ctx, n.principalURI)
 	if err != nil {
 		return nil, err
 	}
@@ -90,15 +93,15 @@ func (n *Notifications) Child(name string) (dav.Node, error) {
 	return nil, dav.ErrNotFound("Notification not found")
 }
 
-func (n *Notifications) ChildExists(name string) bool {
-	_, err := n.Child(name)
+func (n *Notifications) ChildExists(ctx context.Context, name string) bool {
+	_, err := n.Child(ctx, name)
 	return err == nil
 }
 
-func (n *Notifications) CreateFile(string, io.Reader) (string, error) {
+func (n *Notifications) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in the notifications collection is not allowed")
 }
-func (n *Notifications) CreateDirectory(string) error {
+func (n *Notifications) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in the notifications collection is not allowed")
 }
 
@@ -128,11 +131,11 @@ func (nn *NotificationNode) ACL() []acl.ACE {
 	return []acl.ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
 }
 
-func (nn *NotificationNode) SetName(string) error {
+func (nn *NotificationNode) SetName(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Renaming notifications is not allowed")
 }
-func (nn *NotificationNode) Delete() error {
-	return nn.backend.DeleteNotification(nn.principalURI, nn.invite.ID)
+func (nn *NotificationNode) Delete(ctx context.Context) error {
+	return nn.backend.DeleteNotification(ctx, nn.principalURI, nn.invite.ID)
 }
 func (nn *NotificationNode) LastModified() time.Time { return nn.invite.DTStamp }
 func (nn *NotificationNode) ContentType() string     { return "application/xml" }
@@ -185,11 +188,11 @@ type MemoryNotificationsBackend struct {
 	Notifications map[string][]InviteNotification
 }
 
-func (m *MemoryNotificationsBackend) NotificationsForPrincipal(principalURI string) ([]InviteNotification, error) {
+func (m *MemoryNotificationsBackend) NotificationsForPrincipal(ctx context.Context, principalURI string) ([]InviteNotification, error) {
 	return m.Notifications[principalURI], nil
 }
 
-func (m *MemoryNotificationsBackend) AddNotification(principalURI string, n InviteNotification) error {
+func (m *MemoryNotificationsBackend) AddNotification(ctx context.Context, principalURI string, n InviteNotification) error {
 	if m.Notifications == nil {
 		m.Notifications = map[string][]InviteNotification{}
 	}
@@ -197,7 +200,7 @@ func (m *MemoryNotificationsBackend) AddNotification(principalURI string, n Invi
 	return nil
 }
 
-func (m *MemoryNotificationsBackend) DeleteNotification(principalURI, id string) error {
+func (m *MemoryNotificationsBackend) DeleteNotification(ctx context.Context, principalURI, id string) error {
 	items := m.Notifications[principalURI]
 	for i, item := range items {
 		if item.ID == id {

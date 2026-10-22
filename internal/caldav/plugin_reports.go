@@ -73,7 +73,7 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 		return err
 	}
 
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 	// direct free-busy-query.
 	var payloads [][]byte
 	if !calNode.transparent() {
-		objects, err := calNode.QueryObjects("", start, end)
+		objects, err := calNode.QueryObjects(r.Context(), "", start, end)
 		if err != nil {
 			return err
 		}
@@ -96,7 +96,7 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 			payloads = append(payloads, obj.Data())
 		}
 	}
-	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(path), time.Now())
+	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(r.Context(), path), time.Now())
 	if err != nil {
 		return err
 	}
@@ -109,8 +109,8 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 
 // calendarTimeZone resolves a calendar's timezone from its
 // calendar-timezone property; UTC when unset, like sabre.
-func (p *Plugin) calendarTimeZone(calendarPath string) *time.Location {
-	node, err := p.server.Tree.NodeForPath(calendarPath)
+func (p *Plugin) calendarTimeZone(ctx context.Context, calendarPath string) *time.Location {
+	node, err := p.server.Tree.NodeForPath(ctx, calendarPath)
 	if err != nil {
 		return time.UTC
 	}
@@ -151,7 +151,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		}
 		return dav.ErrBadRequest("%s", err)
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		if _, isObj := node.(*CalendarObject); isObj {
 			calendarPath, _ = pathutil.Split(path)
 		}
-		loc = p.calendarTimeZone(calendarPath)
+		loc = p.calendarTimeZone(r.Context(), calendarPath)
 	}
 	validator := &Validator{Loc: loc}
 
@@ -194,7 +194,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 			// occurrence bounds) instead of loading every object; the
 			// validator below stays authoritative.
 			componentType, trStart, trEnd := query.prefilterHints()
-			objs, err := n.QueryObjects(componentType, trStart, trEnd)
+			objs, err := n.QueryObjects(r.Context(), componentType, trStart, trEnd)
 			if err != nil {
 				return err
 			}
@@ -265,7 +265,7 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 		calendarPath, _ := pathutil.Split(objPath)
 		loc, seen := zones[calendarPath]
 		if !seen {
-			loc = p.calendarTimeZone(calendarPath)
+			loc = p.calendarTimeZone(r.Context(), calendarPath)
 			zones[calendarPath] = loc
 		}
 		return loc

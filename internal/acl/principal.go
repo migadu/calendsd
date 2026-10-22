@@ -1,6 +1,7 @@
 package acl
 
 import (
+	"context"
 	"encoding/xml"
 	"io"
 	"time"
@@ -14,8 +15,8 @@ import (
 type PrincipalHolder interface {
 	PrincipalURL() string
 	AlternateURISet() []string
-	GroupMemberSet() ([]string, error)
-	GroupMembership() ([]string, error)
+	GroupMemberSet(ctx context.Context) ([]string, error)
+	GroupMembership(ctx context.Context) ([]string, error)
 }
 
 // ACE is one access control entry.
@@ -57,7 +58,7 @@ type FreeBusyVisibility struct {
 
 // FreeBusyPolicy looks up an owner's free-busy visibility.
 type FreeBusyPolicy interface {
-	FreeBusyVisibility(ownerPrincipal string) (FreeBusyVisibility, error)
+	FreeBusyVisibility(ctx context.Context, ownerPrincipal string) (FreeBusyVisibility, error)
 }
 
 // ACLHolder is a node carrying its own ACL (sabre's IACL subset).
@@ -82,11 +83,11 @@ func (p *PrincipalNode) Name() string {
 	return name
 }
 
-func (p *PrincipalNode) SetName(string) error {
+func (p *PrincipalNode) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
 
-func (p *PrincipalNode) Delete() error {
+func (p *PrincipalNode) Delete(ctx context.Context) error {
 	return dav.ErrForbidden("Permission denied to delete node")
 }
 
@@ -105,16 +106,16 @@ func (p *PrincipalNode) AlternateURISet() []string {
 	return out
 }
 
-func (p *PrincipalNode) GroupMemberSet() ([]string, error) {
-	return p.backend.GroupMemberSet(p.principal.URI)
+func (p *PrincipalNode) GroupMemberSet(ctx context.Context) ([]string, error) {
+	return p.backend.GroupMemberSet(ctx, p.principal.URI)
 }
 
-func (p *PrincipalNode) GroupMembership() ([]string, error) {
-	return p.backend.GroupMembership(p.principal.URI)
+func (p *PrincipalNode) GroupMembership(ctx context.Context) ([]string, error) {
+	return p.backend.GroupMembership(ctx, p.principal.URI)
 }
 
 // Props implements dav.PropNode with the stored principal properties.
-func (p *PrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
+func (p *PrincipalNode) Props(ctx context.Context, names []xml.Name) (map[xml.Name]any, error) {
 	if len(names) == 0 {
 		return p.principal.Props, nil
 	}
@@ -127,7 +128,7 @@ func (p *PrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
 	return out, nil
 }
 
-func (p *PrincipalNode) PropPatch(pp *dav.PropPatch) {}
+func (p *PrincipalNode) PropPatch(ctx context.Context, pp *dav.PropPatch) {}
 
 // ACL implements ACLHolder: the principal itself has full access, mirroring
 // sabre's ACLTrait default.
@@ -170,18 +171,18 @@ func (c *PrincipalCollection) Name() string {
 	return name
 }
 
-func (c *PrincipalCollection) SetName(string) error {
+func (c *PrincipalCollection) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
 
-func (c *PrincipalCollection) Delete() error {
+func (c *PrincipalCollection) Delete(ctx context.Context) error {
 	return dav.ErrForbidden("Permission denied to delete node")
 }
 
 func (c *PrincipalCollection) LastModified() time.Time { return time.Time{} }
 
-func (c *PrincipalCollection) Child(name string) (dav.Node, error) {
-	p, err := c.backend.PrincipalByPath(c.prefix + "/" + name)
+func (c *PrincipalCollection) Child(ctx context.Context, name string) (dav.Node, error) {
+	p, err := c.backend.PrincipalByPath(ctx, c.prefix+"/"+name)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +192,8 @@ func (c *PrincipalCollection) Child(name string) (dav.Node, error) {
 	return c.wrap(*p), nil
 }
 
-func (c *PrincipalCollection) Children() ([]dav.Node, error) {
-	principals, err := c.backend.PrincipalsByPrefix(c.prefix)
+func (c *PrincipalCollection) Children(ctx context.Context) ([]dav.Node, error) {
+	principals, err := c.backend.PrincipalsByPrefix(ctx, c.prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -203,20 +204,20 @@ func (c *PrincipalCollection) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (c *PrincipalCollection) ChildExists(name string) bool {
-	p, err := c.backend.PrincipalByPath(c.prefix + "/" + name)
+func (c *PrincipalCollection) ChildExists(ctx context.Context, name string) bool {
+	p, err := c.backend.PrincipalByPath(ctx, c.prefix+"/"+name)
 	return err == nil && p != nil
 }
 
-func (c *PrincipalCollection) CreateFile(string, io.Reader) (string, error) {
+func (c *PrincipalCollection) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrForbidden("Permission denied to create file (filename )")
 }
 
-func (c *PrincipalCollection) CreateDirectory(string) error {
+func (c *PrincipalCollection) CreateDirectory(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to create directory")
 }
 
 // SearchPrincipals implements PrincipalSearcher via the backend.
-func (c *PrincipalCollection) SearchPrincipals(search map[xml.Name]string, test string) ([]string, error) {
-	return c.backend.SearchPrincipals(c.prefix, search, test)
+func (c *PrincipalCollection) SearchPrincipals(ctx context.Context, search map[xml.Name]string, test string) ([]string, error) {
+	return c.backend.SearchPrincipals(ctx, c.prefix, search, test)
 }

@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http/httptest"
 	"strings"
@@ -94,7 +95,7 @@ func TestBugNotificationItemReadableByStranger(t *testing.T) {
 		InviteStatus: caldav.InviteNoResponse,
 		Summary:      "Confidential shared calendar",
 	}
-	if err := backend.AddNotification("principals/user1", invite); err != nil {
+	if err := backend.AddNotification(t.Context(), "principals/user1", invite); err != nil {
 		t.Fatalf("seed notification: %v", err)
 	}
 
@@ -153,7 +154,7 @@ type publishCall struct {
 	value bool
 }
 
-func (b *recordingPublishBackend) SetPublishStatus(id caldav.CalendarID, value bool) error {
+func (b *recordingPublishBackend) SetPublishStatus(ctx context.Context, id caldav.CalendarID, value bool) error {
 	b.publishCalls = append(b.publishCalls, publishCall{id: id, value: value})
 	return nil
 }

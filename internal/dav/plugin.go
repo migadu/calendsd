@@ -28,7 +28,7 @@ type FeatureProvider interface {
 type MethodProvider interface {
 	// Methods returns the HTTP methods this plugin can handle for the node
 	// at path. Called for Allow headers; path may not exist.
-	Methods(path string) []string
+	Methods(ctx context.Context, path string) []string
 	// HandleMethod handles the request if it can. It returns true if the
 	// request was handled and the response written.
 	HandleMethod(w http.ResponseWriter, r *http.Request) (handled bool, err error)
@@ -86,7 +86,7 @@ type PrePropPatchHook interface {
 // handlers ran (sabre's propPatch event at priority 300, where property
 // storage lives).
 type PropPatchHook interface {
-	PropPatch(path string, pp *PropPatch) error
+	PropPatch(ctx context.Context, path string, pp *PropPatch) error
 }
 
 // LatePropFindHook runs after node-supplied dead properties (sabre's
@@ -107,13 +107,13 @@ type ChildFilterHook interface {
 
 // AfterUnbindHook fires after a node was removed (sabre's afterUnbind).
 type AfterUnbindHook interface {
-	AfterUnbind(path string) error
+	AfterUnbind(ctx context.Context, path string) error
 }
 
 // AfterMoveHook fires after a MOVE completed (sabre's afterMove; runs before
 // AfterUnbind so listeners can transfer state).
 type AfterMoveHook interface {
-	AfterMove(source, destination string) error
+	AfterMove(ctx context.Context, source, destination string) error
 }
 
 // ReportSetProvider advertises the REPORTs a plugin supports on a node, for

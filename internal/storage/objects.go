@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -21,8 +22,8 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
-	rows, err := b.DB.Query(
+func (b *CalDAV) CalendarObjects(ctx context.Context, id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
+	rows, err := b.DB.QueryContext(ctx,
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
 	if err != nil {
 		return nil, err
@@ -43,7 +44,7 @@ func (b *CalDAV) CalendarObjects(id caldav.CalendarID) ([]caldav.ObjectInfo, err
 // denormalized firstoccurence/lastoccurence bounds, transcribing sabre's PDO
 // calendarQuery. The occurrence filters are NULL-safe so objects without
 // computed bounds are never wrongly excluded — the caller's validator refines.
-func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start, end time.Time) ([]string, error) {
+func (b *CalDAV) CalendarQuery(ctx context.Context, id caldav.CalendarID, componentType string, start, end time.Time) ([]string, error) {
 	defer b.Metrics.DBOpTimer("calendar_query")()
 	q := `SELECT uri FROM calendarobjects WHERE calendarid = $1`
 	args := []any{id.Calendar}
@@ -62,7 +63,7 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 		args = append(args, start.Unix())
 		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d::bigint)", len(args))
 	}
-	rows, err := b.DB.Query(q, args...)
+	rows, err := b.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +79,8 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 	return out, rows.Err()
 }
 
-func (b *CalDAV) CalendarObject(id caldav.CalendarID, objectURI string) (*caldav.ObjectInfo, error) {
-	obj, err := scanObject(b.DB.QueryRow(
+func (b *CalDAV) CalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string) (*caldav.ObjectInfo, error) {
+	obj, err := scanObject(b.DB.QueryRowContext(ctx,
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
 		id.Calendar, objectURI), id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -111,14 +112,14 @@ func scanObject(row rowScanner, id caldav.CalendarID) (*caldav.ObjectInfo, error
 // CreateCalendarObject mirrors sabre's createCalendarObject + addChange,
 // wrapped in one transaction (deliberately safer than sabre's unwrapped
 // statements — see PLAN.md §5).
-func (b *CalDAV) CreateCalendarObject(id caldav.CalendarID, objectURI string, data []byte) (string, error) {
+func (b *CalDAV) CreateCalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string, data []byte) (string, error) {
 	defer b.Metrics.DBOpTimer("create_object")()
 	d, err := ical.Denormalize(data)
 	if err != nil {
 		return "", err
 	}
-	err = withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`
+	err = withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO calendarobjects
        (calendarid, uri, calendardata, lastmodified, etag, size, componenttype, firstoccurence, lastoccurence, uid)
 VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
@@ -126,7 +127,7 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
 			d.FirstOccurrence, d.LastOccurrence, d.UID); err != nil {
 			return err
 		}
-		return recordChange(tx, calendarLog, id.Calendar, objectURI, 1)
+		return recordChange(ctx, tx, calendarLog, id.Calendar, objectURI, 1)
 	})
 	if err != nil {
 		return "", err
@@ -134,17 +135,17 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
 	return `"` + d.ETag + `"`, nil
 }
 
-func (b *CalDAV) UpdateCalendarObject(id caldav.CalendarID, objectURI string, data []byte) (string, error) {
+func (b *CalDAV) UpdateCalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string, data []byte) (string, error) {
 	defer b.Metrics.DBOpTimer("update_object")()
 	d, err := ical.Denormalize(data)
 	if err != nil {
 		return "", err
 	}
-	err = withTx(b.DB, func(tx *sql.Tx) error {
+	err = withTx(ctx, b.DB, func(tx *sql.Tx) error {
 		// A vanished object is ErrNotFound, with no change row: logging a
 		// modify for a uri that no longer exists would tell sync clients to
 		// fetch something that 404s.
-		if err := affectedOne(tx.Exec(`
+		if err := affectedOne(tx.ExecContext(ctx, `
 UPDATE calendarobjects
    SET calendardata = $1, lastmodified = extract(epoch from now())::int,
        etag = $2, size = $3, componenttype = $4,
@@ -154,7 +155,7 @@ UPDATE calendarobjects
 			d.UID, id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return recordChange(tx, calendarLog, id.Calendar, objectURI, 2)
+		return recordChange(ctx, tx, calendarLog, id.Calendar, objectURI, 2)
 	})
 	if err != nil {
 		return "", err
@@ -162,13 +163,13 @@ UPDATE calendarobjects
 	return `"` + d.ETag + `"`, nil
 }
 
-func (b *CalDAV) DeleteCalendarObject(id caldav.CalendarID, objectURI string) error {
-	return withTx(b.DB, func(tx *sql.Tx) error {
-		if err := affectedOne(tx.Exec(
+func (b *CalDAV) DeleteCalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string) error {
+	return withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		if err := affectedOne(tx.ExecContext(ctx,
 			`DELETE FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
 			id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return recordChange(tx, calendarLog, id.Calendar, objectURI, 3)
+		return recordChange(ctx, tx, calendarLog, id.Calendar, objectURI, 3)
 	})
 }

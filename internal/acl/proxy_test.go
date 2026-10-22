@@ -74,7 +74,7 @@ func TestCalendarProxyDelegation(t *testing.T) {
 	if len(members) != 1 || members[0] != "principals/user2" {
 		t.Errorf("group-member-set = %v, want [principals/user2]", members)
 	}
-	groups, _ := backend.GroupMembership("principals/user2")
+	groups, _ := backend.GroupMembership(t.Context(), "principals/user2")
 	if !contains(groups, "principals/user1/calendar-proxy-write") {
 		t.Errorf("user2 group membership %v missing the proxy group", groups)
 	}

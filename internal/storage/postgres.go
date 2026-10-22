@@ -6,6 +6,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/xml"
 	"errors"
@@ -104,8 +105,8 @@ var propertyMap = []struct {
 	{xml.Name{Space: "http://apple.com/ns/ical/", Local: "calendar-color"}, "calendarcolor"},
 }
 
-func (b *CalDAV) CalendarsForUser(principalURI string) ([]caldav.CalendarInfo, error) {
-	rows, err := b.DB.Query(`
+func (b *CalDAV) CalendarsForUser(ctx context.Context, principalURI string) ([]caldav.CalendarInfo, error) {
+	rows, err := b.DB.QueryContext(ctx, `
 SELECT calendarinstances.id as id, displayname, description, timezone,
        calendarorder, calendarcolor, calendarid, uri, synctoken, components,
        principaluri, transparent, access
@@ -189,7 +190,7 @@ func componentSetValue(components string) davxml.Raw {
 
 var compNameRe = regexp.MustCompile(`name="([A-Z]+)"`)
 
-func (b *CalDAV) CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (caldav.CalendarID, error) {
+func (b *CalDAV) CreateCalendar(ctx context.Context, principalURI, calendarURI string, props map[xml.Name]any) (caldav.CalendarID, error) {
 	components := "VEVENT,VTODO"
 	if v, exists := props[xml.Name{Space: davxml.NSCalDAV, Local: "supported-calendar-component-set"}]; exists {
 		if raw, isRaw := v.([]byte); isRaw {
@@ -204,8 +205,8 @@ func (b *CalDAV) CreateCalendar(principalURI, calendarURI string, props map[xml.
 	}
 
 	var calendarID, instanceID int64
-	err := withTx(b.DB, func(tx *sql.Tx) error {
-		if err := tx.QueryRow(
+	err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx,
 			`INSERT INTO calendars (synctoken, components) VALUES (1, $1) RETURNING id`,
 			components).Scan(&calendarID); err != nil {
 			return err
@@ -225,7 +226,7 @@ func (b *CalDAV) CreateCalendar(principalURI, calendarURI string, props map[xml.
 		for i := range values {
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
 		}
-		return tx.QueryRow(fmt.Sprintf(
+		return tx.QueryRowContext(ctx, fmt.Sprintf(
 			`INSERT INTO calendarinstances (%s) VALUES (%s) RETURNING id`,
 			strings.Join(columns, ", "), strings.Join(placeholders, ", ")),
 			values...).Scan(&instanceID)
@@ -242,7 +243,7 @@ func (b *CalDAV) CreateCalendar(principalURI, calendarURI string, props map[xml.
 // UpdateCalendar transcribes sabre's updateCalendar: the propertyMap columns
 // plus schedule-calendar-transp update calendarinstances (by instance ID)
 // and bump the synctoken with an empty-uri change record.
-func (b *CalDAV) UpdateCalendar(id caldav.CalendarID, pp *dav.PropPatch) {
+func (b *CalDAV) UpdateCalendar(ctx context.Context, id caldav.CalendarID, pp *dav.PropPatch) {
 	transp := xml.Name{Space: davxml.NSCalDAV, Local: "schedule-calendar-transp"}
 	supported := []xml.Name{transp}
 	for _, pm := range propertyMap {
@@ -274,13 +275,13 @@ func (b *CalDAV) UpdateCalendar(id caldav.CalendarID, pp *dav.PropPatch) {
 		}
 
 		args = append(args, id.Instance)
-		err := withTx(b.DB, func(tx *sql.Tx) error {
-			if err := affectedOne(tx.Exec(fmt.Sprintf(
+		err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
+			if err := affectedOne(tx.ExecContext(ctx, fmt.Sprintf(
 				`UPDATE calendarinstances SET %s WHERE id = $%d`,
 				strings.Join(assignments, ", "), len(args)), args...)); err != nil {
 				return err
 			}
-			return recordChange(tx, calendarLog, id.Calendar, "", 2)
+			return recordChange(ctx, tx, calendarLog, id.Calendar, "", 2)
 		})
 		return nil, err == nil
 	})
@@ -303,17 +304,17 @@ func toNullString(v any) any {
 // DeleteCalendar transcribes sabre's access-aware deleteCalendar: only the
 // shared owner (access=1) removes the calendar with all its data; a sharee
 // merely drops their own instance row, leaving the owner's calendar intact.
-func (b *CalDAV) DeleteCalendar(id caldav.CalendarID) error {
-	return withTx(b.DB, func(tx *sql.Tx) error {
+func (b *CalDAV) DeleteCalendar(ctx context.Context, id caldav.CalendarID) error {
+	return withTx(ctx, b.DB, func(tx *sql.Tx) error {
 		var access int
-		if err := tx.QueryRow(
+		if err := tx.QueryRowContext(ctx,
 			`SELECT access FROM calendarinstances WHERE id = $1`, id.Instance).Scan(&access); err != nil {
 			return err
 		}
 		if access == 1 { // Sharing\Plugin::ACCESS_SHAREDOWNER
-			return deleteCalendarRows(tx, id.Calendar)
+			return deleteCalendarRows(ctx, tx, id.Calendar)
 		}
-		_, err := tx.Exec(
+		_, err := tx.ExecContext(ctx,
 			`DELETE FROM calendarinstances WHERE id = $1`, id.Instance)
 		return err
 	})
@@ -323,14 +324,14 @@ func (b *CalDAV) DeleteCalendar(id caldav.CalendarID) error {
 // objects, change log, every instance row (the owner's and any sharees'),
 // and the calendars row itself. Shared by DeleteCalendar's owner branch and
 // AdminWrites.DeleteUserCascade so the two delete paths cannot drift.
-func deleteCalendarRows(tx *sql.Tx, calendarID string) error {
+func deleteCalendarRows(ctx context.Context, tx *sql.Tx, calendarID string) error {
 	for _, q := range []string{
 		`DELETE FROM calendarobjects WHERE calendarid = $1`,
 		`DELETE FROM calendarchanges WHERE calendarid = $1`,
 		`DELETE FROM calendarinstances WHERE calendarid = $1`,
 		`DELETE FROM calendars WHERE id = $1`,
 	} {
-		if _, err := tx.Exec(q, calendarID); err != nil {
+		if _, err := tx.ExecContext(ctx, q, calendarID); err != nil {
 			return err
 		}
 	}

@@ -18,26 +18,26 @@ func TestMockBackendConcurrentUse(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			principal := fmt.Sprintf("principals/u%d", i%2)
-			if _, err := m.CreateCalendar(principal, fmt.Sprintf("cal%d", i), nil); err != nil {
+			if _, err := m.CreateCalendar(t.Context(), principal, fmt.Sprintf("cal%d", i), nil); err != nil {
 				t.Error(err)
 			}
-			if _, err := m.CalendarsForUser(principal); err != nil {
+			if _, err := m.CalendarsForUser(t.Context(), principal); err != nil {
 				t.Error(err)
 			}
-			if err := m.CreateSchedulingObject(principal, fmt.Sprintf("i%d.ics", i), []byte("x")); err != nil {
+			if err := m.CreateSchedulingObject(t.Context(), principal, fmt.Sprintf("i%d.ics", i), []byte("x")); err != nil {
 				t.Error(err)
 			}
-			if _, err := m.SchedulingObjects(principal); err != nil {
+			if _, err := m.SchedulingObjects(t.Context(), principal); err != nil {
 				t.Error(err)
 			}
-			if err := m.SetAvailability(principal, []byte("x")); err != nil {
+			if err := m.SetAvailability(t.Context(), principal, []byte("x")); err != nil {
 				t.Error(err)
 			}
 		}()
 	}
 	wg.Wait()
-	cals0, _ := m.CalendarsForUser("principals/u0")
-	cals1, _ := m.CalendarsForUser("principals/u1")
+	cals0, _ := m.CalendarsForUser(t.Context(), "principals/u0")
+	cals1, _ := m.CalendarsForUser(t.Context(), "principals/u1")
 	if len(cals0)+len(cals1) != 8 {
 		t.Errorf("calendars = %d, want 8", len(cals0)+len(cals1))
 	}

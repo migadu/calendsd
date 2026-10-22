@@ -4,6 +4,7 @@ package dav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
 	"time"
@@ -15,9 +16,9 @@ type Node interface {
 	// Name returns the last path segment of the node.
 	Name() string
 	// SetName renames the node.
-	SetName(name string) error
+	SetName(ctx context.Context, name string) error
 	// Delete removes the node (recursively for collections).
-	Delete() error
+	Delete(ctx context.Context) error
 	// LastModified returns the node's last modification time.
 	// Nodes without a known mtime return the zero time.
 	LastModified() time.Time
@@ -27,16 +28,16 @@ type Node interface {
 type Collection interface {
 	Node
 	// Child returns the child node with the given name, or ErrNotFound.
-	Child(name string) (Node, error)
+	Child(ctx context.Context, name string) (Node, error)
 	// Children lists all child nodes.
-	Children() ([]Node, error)
+	Children(ctx context.Context) ([]Node, error)
 	// ChildExists reports whether a child with the given name exists.
-	ChildExists(name string) bool
+	ChildExists(ctx context.Context, name string) bool
 	// CreateFile creates a new file node. The returned etag, if non-empty,
 	// must be surrounded by double-quotes.
-	CreateFile(name string, data io.Reader) (etag string, err error)
+	CreateFile(ctx context.Context, name string, data io.Reader) (etag string, err error)
 	// CreateDirectory creates a new child collection.
-	CreateDirectory(name string) error
+	CreateDirectory(ctx context.Context, name string) error
 }
 
 // File is a leaf node carrying a payload. Port of sabre's IFile.
@@ -44,10 +45,10 @@ type File interface {
 	Node
 	// Get returns the file payload. A payload that is also an io.Seeker
 	// (see BytesBody) is served with http.ServeContent.
-	Get() (io.ReadCloser, error)
+	Get(ctx context.Context) (io.ReadCloser, error)
 	// Put replaces the file payload. The returned etag, if non-empty,
 	// must be surrounded by double-quotes.
-	Put(data io.Reader) (etag string, err error)
+	Put(ctx context.Context, data io.Reader) (etag string, err error)
 	// ContentType returns the MIME type, or "" if unknown.
 	ContentType() string
 	// Size returns the payload size in bytes.
@@ -63,7 +64,7 @@ type ExtendedCollection interface {
 	Collection
 	// CreateExtendedCollection creates a child with the given resource
 	// types and initial properties.
-	CreateExtendedCollection(name string, resourceTypes []xml.Name, props map[xml.Name]any) error
+	CreateExtendedCollection(ctx context.Context, name string, resourceTypes []xml.Name, props map[xml.Name]any) error
 }
 
 // PropNode is a node with custom (dead or protected) properties.
@@ -73,10 +74,10 @@ type PropNode interface {
 	// Props returns values for the requested properties; absent entries
 	// mean the node doesn't have that property. An empty request slice
 	// asks for all properties (allprop).
-	Props(names []xml.Name) (map[xml.Name]any, error)
+	Props(ctx context.Context, names []xml.Name) (map[xml.Name]any, error)
 	// PropPatch is invoked during PROPPATCH; the node registers handlers
 	// for the mutations it supports.
-	PropPatch(pp *PropPatch)
+	PropPatch(ctx context.Context, pp *PropPatch)
 }
 
 // BytesBody wraps an in-memory payload as a File.Get body. It is seekable,

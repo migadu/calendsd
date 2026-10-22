@@ -3,6 +3,7 @@
 package caldav
 
 import (
+	"context"
 	"encoding/xml"
 	"strings"
 
@@ -16,9 +17,9 @@ import (
 
 // defaultCalendarPath picks the principal's first VEVENT-capable calendar,
 // like sabre's default-calendar search.
-func (p *SchedulePlugin) defaultCalendarPath(principalURI string) string {
+func (p *SchedulePlugin) defaultCalendarPath(ctx context.Context, principalURI string) string {
 	_, name := pathutil.Split(principalURI)
-	home, err := p.server.Tree.NodeForPath("calendars/" + name)
+	home, err := p.server.Tree.NodeForPath(ctx, "calendars/"+name)
 	if err != nil {
 		return ""
 	}
@@ -26,7 +27,7 @@ func (p *SchedulePlugin) defaultCalendarPath(principalURI string) string {
 	if !ok {
 		return ""
 	}
-	children, err := coll.Children()
+	children, err := coll.Children(ctx)
 	if err != nil {
 		return ""
 	}
@@ -39,8 +40,8 @@ func (p *SchedulePlugin) defaultCalendarPath(principalURI string) string {
 }
 
 // addressesForPrincipal returns a principal's calendar user addresses.
-func (p *SchedulePlugin) addressesForPrincipal(principalURI string) []string {
-	node, err := p.server.Tree.NodeForPath(principalURI)
+func (p *SchedulePlugin) addressesForPrincipal(ctx context.Context, principalURI string) []string {
+	node, err := p.server.Tree.NodeForPath(ctx, principalURI)
 	if err != nil {
 		return nil
 	}
@@ -52,12 +53,12 @@ func (p *SchedulePlugin) addressesForPrincipal(principalURI string) []string {
 }
 
 // principalEmail returns a principal node's email address, if any.
-func principalEmail(node dav.Node) string {
+func principalEmail(ctx context.Context, node dav.Node) string {
 	pn, ok := node.(dav.PropNode)
 	if !ok {
 		return ""
 	}
-	props, err := pn.Props([]xml.Name{{Space: davxml.NSSabreDAV, Local: "email-address"}})
+	props, err := pn.Props(ctx, []xml.Name{{Space: davxml.NSSabreDAV, Local: "email-address"}})
 	if err != nil {
 		return ""
 	}
@@ -68,12 +69,12 @@ func principalEmail(node dav.Node) string {
 }
 
 // principalName returns a principal node's display name, if any.
-func principalName(node dav.Node) string {
+func principalName(ctx context.Context, node dav.Node) string {
 	pn, ok := node.(dav.PropNode)
 	if !ok {
 		return ""
 	}
-	props, err := pn.Props([]xml.Name{{Space: davxml.NSDav, Local: "displayname"}})
+	props, err := pn.Props(ctx, []xml.Name{{Space: davxml.NSDav, Local: "displayname"}})
 	if err != nil {
 		return ""
 	}
@@ -89,7 +90,7 @@ func principalName(node dav.Node) string {
 type AddressResolver interface {
 	// PrincipalByAddress returns the principal directly under prefix owning
 	// address, or "" when none does.
-	PrincipalByAddress(prefix, address string) (string, error)
+	PrincipalByAddress(ctx context.Context, prefix, address string) (string, error)
 }
 
 // principalForAddress finds the principal owning a calendar user address
@@ -97,11 +98,11 @@ type AddressResolver interface {
 // sharing both resolve through here. The calendar root's principal backend
 // answers directly when it is an AddressResolver; otherwise every principal
 // is listed and its alternate-URI-set compared.
-func principalForAddress(s *dav.Server, address string) string {
-	if node, err := s.Tree.NodeForPath("calendars"); err == nil {
+func principalForAddress(ctx context.Context, s *dav.Server, address string) string {
+	if node, err := s.Tree.NodeForPath(ctx, "calendars"); err == nil {
 		if root, ok := node.(*CalendarRoot); ok {
 			if resolver, ok := root.principals.(AddressResolver); ok {
-				uri, err := resolver.PrincipalByAddress(root.principalPrefix, address)
+				uri, err := resolver.PrincipalByAddress(ctx, root.principalPrefix, address)
 				if err != nil {
 					return ""
 				}
@@ -109,7 +110,7 @@ func principalForAddress(s *dav.Server, address string) string {
 			}
 		}
 	}
-	principals, err := s.Tree.NodeForPath("principals")
+	principals, err := s.Tree.NodeForPath(ctx, "principals")
 	if err != nil {
 		return ""
 	}
@@ -117,7 +118,7 @@ func principalForAddress(s *dav.Server, address string) string {
 	if !ok {
 		return ""
 	}
-	children, err := coll.Children()
+	children, err := coll.Children(ctx)
 	if err != nil {
 		return ""
 	}
@@ -142,12 +143,12 @@ type groupMemberInfo struct{ address, name, email string }
 // principal, and if so its members' scheduling info. A principal counts as a
 // group when it carries a non-empty {DAV:}group-member-set (only groups and
 // proxy sub-principals do, and proxy sub-principals are never attendees).
-func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo, groupEmail string, isGroup bool) {
-	uri := principalForAddress(p.server, address)
+func (p *SchedulePlugin) groupMembers(ctx context.Context, address string) (members []groupMemberInfo, groupEmail string, isGroup bool) {
+	uri := principalForAddress(ctx, p.server, address)
 	if uri == "" {
 		return nil, "", false
 	}
-	node, err := p.server.Tree.NodeForPath(uri)
+	node, err := p.server.Tree.NodeForPath(ctx, uri)
 	if err != nil {
 		return nil, "", false
 	}
@@ -155,13 +156,13 @@ func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo
 	if !ok {
 		return nil, "", false
 	}
-	set, err := holder.GroupMemberSet()
+	set, err := holder.GroupMemberSet(ctx)
 	if err != nil || len(set) == 0 {
 		return nil, "", false
 	}
-	groupEmail = principalEmail(node)
+	groupEmail = principalEmail(ctx, node)
 	for _, memberURI := range set {
-		mnode, err := p.server.Tree.NodeForPath(memberURI)
+		mnode, err := p.server.Tree.NodeForPath(ctx, memberURI)
 		if err != nil {
 			continue
 		}
@@ -180,7 +181,7 @@ func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo
 			addr = p.server.BaseURI + memberURI + "/"
 		}
 		members = append(members, groupMemberInfo{
-			address: addr, name: principalName(mnode), email: principalEmail(mnode),
+			address: addr, name: principalName(ctx, mnode), email: principalEmail(ctx, mnode),
 		})
 	}
 	return members, groupEmail, true
@@ -194,7 +195,7 @@ func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo
 // expand into, bounding scheduling/iMIP fan-out (mail-amplification defense).
 const maxExpandedAttendees = 250
 
-func (p *SchedulePlugin) expandGroupAttendees(cal *goical.Calendar) bool {
+func (p *SchedulePlugin) expandGroupAttendees(ctx context.Context, cal *goical.Calendar) bool {
 	changed := false
 	for _, comp := range cal.Children {
 		if comp.Name != goical.CompEvent {
@@ -212,7 +213,7 @@ func (p *SchedulePlugin) expandGroupAttendees(cal *goical.Calendar) bool {
 			if atts[i].Params.Get("CUTYPE") == "X-SERVER-GROUP" {
 				continue // already expanded
 			}
-			members, groupEmail, isGroup := p.groupMembers(atts[i].Value)
+			members, groupEmail, isGroup := p.groupMembers(ctx, atts[i].Value)
 			if !isGroup {
 				continue
 			}

@@ -4,6 +4,7 @@
 package acl
 
 import (
+	"context"
 	"encoding/xml"
 	"strings"
 
@@ -25,20 +26,20 @@ type Principal struct {
 type Backend interface {
 	// PrincipalsByPrefix lists principals directly under a prefix such as
 	// "principals".
-	PrincipalsByPrefix(prefix string) ([]Principal, error)
+	PrincipalsByPrefix(ctx context.Context, prefix string) ([]Principal, error)
 	// PrincipalByPath returns the principal at path, or nil.
-	PrincipalByPath(path string) (*Principal, error)
+	PrincipalByPath(ctx context.Context, path string) (*Principal, error)
 	// GroupMemberSet lists members of a group principal.
-	GroupMemberSet(principal string) ([]string, error)
+	GroupMemberSet(ctx context.Context, principal string) ([]string, error)
 	// GroupMembership lists groups a principal belongs to.
-	GroupMembership(principal string) ([]string, error)
+	GroupMembership(ctx context.Context, principal string) ([]string, error)
 	// SetGroupMemberSet replaces the members of a group principal. Used to
 	// configure calendar-proxy delegation via PROPPATCH group-member-set.
-	SetGroupMemberSet(principal string, members []string) error
+	SetGroupMemberSet(ctx context.Context, principal string, members []string) error
 	// SearchPrincipals returns principal paths under prefix whose
 	// properties match every (test=allof) or any (test=anyof) of the
 	// searched name→substring pairs. Port of searchPrincipals.
-	SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error)
+	SearchPrincipals(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error)
 }
 
 // MemoryBackend is an in-memory principal backend, used by tests and the
@@ -49,7 +50,7 @@ type MemoryBackend struct {
 	Groups map[string][]string
 }
 
-func (m *MemoryBackend) PrincipalsByPrefix(prefix string) ([]Principal, error) {
+func (m *MemoryBackend) PrincipalsByPrefix(ctx context.Context, prefix string) ([]Principal, error) {
 	var out []Principal
 	for _, p := range m.Principals {
 		if parent, _ := pathutil.Split(p.URI); parent == prefix {
@@ -59,7 +60,7 @@ func (m *MemoryBackend) PrincipalsByPrefix(prefix string) ([]Principal, error) {
 	return out, nil
 }
 
-func (m *MemoryBackend) PrincipalByPath(path string) (*Principal, error) {
+func (m *MemoryBackend) PrincipalByPath(ctx context.Context, path string) (*Principal, error) {
 	for _, p := range m.Principals {
 		if p.URI == path {
 			return &p, nil
@@ -68,11 +69,11 @@ func (m *MemoryBackend) PrincipalByPath(path string) (*Principal, error) {
 	return nil, nil
 }
 
-func (m *MemoryBackend) GroupMemberSet(principal string) ([]string, error) {
+func (m *MemoryBackend) GroupMemberSet(ctx context.Context, principal string) ([]string, error) {
 	return m.Groups[principal], nil
 }
 
-func (m *MemoryBackend) SetGroupMemberSet(principal string, members []string) error {
+func (m *MemoryBackend) SetGroupMemberSet(ctx context.Context, principal string, members []string) error {
 	if m.Groups == nil {
 		m.Groups = map[string][]string{}
 	}
@@ -80,7 +81,7 @@ func (m *MemoryBackend) SetGroupMemberSet(principal string, members []string) er
 	return nil
 }
 
-func (m *MemoryBackend) GroupMembership(principal string) ([]string, error) {
+func (m *MemoryBackend) GroupMembership(ctx context.Context, principal string) ([]string, error) {
 	var out []string
 	for group, members := range m.Groups {
 		for _, member := range members {
@@ -92,7 +93,7 @@ func (m *MemoryBackend) GroupMembership(principal string) ([]string, error) {
 	return out, nil
 }
 
-func (m *MemoryBackend) SearchPrincipals(prefix string, search map[xml.Name]string, test string) ([]string, error) {
+func (m *MemoryBackend) SearchPrincipals(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error) {
 	if len(search) == 0 {
 		return nil, nil
 	}

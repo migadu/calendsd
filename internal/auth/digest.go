@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
@@ -28,7 +29,7 @@ type DigestBackend struct {
 	PrincipalPrefix string
 	// HashA1 returns the stored md5(user:realm:pass) hex digest for a
 	// user, "" if the user is unknown, or an error if the store failed.
-	HashA1 func(realm, username string) (hash string, err error)
+	HashA1 func(ctx context.Context, realm, username string) (hash string, err error)
 	// Metrics counts attempts and times the check; only requests that
 	// actually present Digest credentials are counted.
 	Metrics *metrics.Set
@@ -55,7 +56,7 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 	}
 	start := time.Now()
 	defer func() { b.Metrics.ObserveAuthCheck("digest", time.Since(start).Seconds()) }()
-	a1, err := b.HashA1(b.Realm, username)
+	a1, err := b.HashA1(r.Context(), b.Realm, username)
 	if err != nil {
 		// An outage, not wrong credentials: "error", so it doesn't read as a
 		// brute force.

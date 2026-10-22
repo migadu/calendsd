@@ -24,7 +24,7 @@ import (
 // (registration order), so downstream sees validated iCalendar.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
 	parentPath, _ := pathutil.Split(path)
-	parent, err := p.server.Tree.NodeForPath(parentPath)
+	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
 		return data, nil // not a calendar object write; leave it to other handlers
 	}
@@ -118,7 +118,7 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 		return false, nil
 	}
 	calPath := strings.TrimSuffix(path, "/"+addMemberSegment)
-	node, err := p.server.Tree.NodeForPath(calPath)
+	node, err := p.server.Tree.NodeForPath(r.Context(), calPath)
 	if err != nil {
 		return true, err
 	}
@@ -156,7 +156,7 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 			}
 		}
 	}
-	etag, err := cal.CreateFile(name, bytes.NewReader(raw))
+	etag, err := cal.CreateFile(r.Context(), name, bytes.NewReader(raw))
 	if err != nil {
 		return true, err
 	}

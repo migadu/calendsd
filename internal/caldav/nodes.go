@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
 	"regexp"
@@ -37,14 +38,16 @@ func NewCalendarRoot(principals acl.Backend, backend Backend, name string) *Cale
 }
 
 func (r *CalendarRoot) Name() string { return r.name }
-func (r *CalendarRoot) SetName(string) error {
+func (r *CalendarRoot) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
-func (r *CalendarRoot) Delete() error           { return dav.ErrForbidden("Permission denied to delete node") }
+func (r *CalendarRoot) Delete(ctx context.Context) error {
+	return dav.ErrForbidden("Permission denied to delete node")
+}
 func (r *CalendarRoot) LastModified() time.Time { return time.Time{} }
 
-func (r *CalendarRoot) Children() ([]dav.Node, error) {
-	principals, err := r.principals.PrincipalsByPrefix(r.principalPrefix)
+func (r *CalendarRoot) Children(ctx context.Context) ([]dav.Node, error) {
+	principals, err := r.principals.PrincipalsByPrefix(ctx, r.principalPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +61,8 @@ func (r *CalendarRoot) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (r *CalendarRoot) Child(name string) (dav.Node, error) {
-	p, err := r.principals.PrincipalByPath(r.principalPrefix + "/" + name)
+func (r *CalendarRoot) Child(ctx context.Context, name string) (dav.Node, error) {
+	p, err := r.principals.PrincipalByPath(ctx, r.principalPrefix+"/"+name)
 	if err != nil {
 		return nil, err
 	}
@@ -72,16 +75,16 @@ func (r *CalendarRoot) Child(name string) (dav.Node, error) {
 	return home, nil
 }
 
-func (r *CalendarRoot) ChildExists(name string) bool {
-	p, err := r.principals.PrincipalByPath(r.principalPrefix + "/" + name)
+func (r *CalendarRoot) ChildExists(ctx context.Context, name string) bool {
+	p, err := r.principals.PrincipalByPath(ctx, r.principalPrefix+"/"+name)
 	return err == nil && p != nil
 }
 
-func (r *CalendarRoot) CreateFile(string, io.Reader) (string, error) {
+func (r *CalendarRoot) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in this collection is not supported")
 }
 
-func (r *CalendarRoot) CreateDirectory(string) error {
+func (r *CalendarRoot) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in this collection is not supported")
 }
 
@@ -104,14 +107,16 @@ func (h *CalendarHome) Name() string {
 	return h.principalURI[i+1:]
 }
 
-func (h *CalendarHome) SetName(string) error {
+func (h *CalendarHome) SetName(context.Context, string) error {
 	return dav.ErrForbidden("Permission denied to rename node")
 }
-func (h *CalendarHome) Delete() error           { return dav.ErrForbidden("Permission denied to delete node") }
+func (h *CalendarHome) Delete(ctx context.Context) error {
+	return dav.ErrForbidden("Permission denied to delete node")
+}
 func (h *CalendarHome) LastModified() time.Time { return time.Time{} }
 
-func (h *CalendarHome) Children() ([]dav.Node, error) {
-	infos, err := h.provisioned()
+func (h *CalendarHome) Children(ctx context.Context) ([]dav.Node, error) {
+	infos, err := h.provisioned(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +137,7 @@ func (h *CalendarHome) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (h *CalendarHome) Child(name string) (dav.Node, error) {
+func (h *CalendarHome) Child(ctx context.Context, name string) (dav.Node, error) {
 	if sb, ok := h.backend.(SchedulingBackend); ok {
 		switch name {
 		case "inbox":
@@ -144,7 +149,7 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 	if nb, ok := h.backend.(NotificationsBackend); ok && name == "notifications" {
 		return NewNotifications(nb, h.principalURI), nil
 	}
-	infos, err := h.provisioned()
+	infos, err := h.provisioned(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -161,45 +166,45 @@ func (h *CalendarHome) Child(name string) (dav.Node, error) {
 // provisioned lists the principal's calendars, recreating the default
 // "calendar" first when auto-provisioning is on and none are left (Calendar
 // Server regenerates it after deletion; the CalDAVTester suite relies on it).
-func (h *CalendarHome) provisioned() ([]CalendarInfo, error) {
-	infos, err := h.backend.CalendarsForUser(h.principalURI)
+func (h *CalendarHome) provisioned(ctx context.Context) ([]CalendarInfo, error) {
+	infos, err := h.backend.CalendarsForUser(ctx, h.principalURI)
 	if err != nil || !h.autoProvision || len(infos) > 0 {
 		return infos, err
 	}
-	if _, err := h.backend.CreateCalendar(h.principalURI, "calendar", map[xml.Name]any{
+	if _, err := h.backend.CreateCalendar(ctx, h.principalURI, "calendar", map[xml.Name]any{
 		{Space: davxml.NSDav, Local: "displayname"}: "calendar",
 	}); err != nil {
 		return nil, err
 	}
-	return h.backend.CalendarsForUser(h.principalURI)
+	return h.backend.CalendarsForUser(ctx, h.principalURI)
 }
 
-func (h *CalendarHome) ChildExists(name string) bool {
-	_, err := h.Child(name)
+func (h *CalendarHome) ChildExists(ctx context.Context, name string) bool {
+	_, err := h.Child(ctx, name)
 	return err == nil
 }
 
-func (h *CalendarHome) CreateFile(string, io.Reader) (string, error) {
+func (h *CalendarHome) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating new files in this collection is not supported")
 }
 
 // CreateDirectory refuses plain MKCOL; calendars come via MKCALENDAR (the
 // plugin calls CreateCalendar).
-func (h *CalendarHome) CreateDirectory(string) error {
+func (h *CalendarHome) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating new collections in this collection is not supported")
 }
 
 // CreateCalendar makes a new calendar in this home (extended MKCOL and
 // MKCALENDAR land here).
-func (h *CalendarHome) CreateCalendar(name string, props map[xml.Name]any) error {
-	_, err := h.backend.CreateCalendar(h.principalURI, name, props)
+func (h *CalendarHome) CreateCalendar(ctx context.Context, name string, props map[xml.Name]any) error {
+	_, err := h.backend.CreateCalendar(ctx, h.principalURI, name, props)
 	return err
 }
 
 // CreateExtendedCollection implements dav.ExtendedCollection: calendars and
 // subscriptions, depending on the resource types. Port of sabre's
 // CalendarHome::createExtendedCollection.
-func (h *CalendarHome) CreateExtendedCollection(name string, resourceTypes []xml.Name, props map[xml.Name]any) error {
+func (h *CalendarHome) CreateExtendedCollection(ctx context.Context, name string, resourceTypes []xml.Name, props map[xml.Name]any) error {
 	isSubscription := false
 	isCalendar := false
 	for _, rt := range resourceTypes {
@@ -216,10 +221,10 @@ func (h *CalendarHome) CreateExtendedCollection(name string, resourceTypes []xml
 		if !supported {
 			return dav.ErrForbidden("This backend does not support subscriptions")
 		}
-		_, err := subs.CreateSubscription(h.principalURI, name, props)
+		_, err := subs.CreateSubscription(ctx, h.principalURI, name, props)
 		return err
 	case isCalendar:
-		return h.CreateCalendar(name, props)
+		return h.CreateCalendar(ctx, name, props)
 	default:
 		return dav.ErrForbidden("Unable to create a collection of this type in the calendar home")
 	}
@@ -258,14 +263,16 @@ func NewCalendar(backend Backend, info CalendarInfo) *Calendar {
 }
 
 func (c *Calendar) Name() string { return c.Info.URI }
-func (c *Calendar) SetName(string) error {
+func (c *Calendar) SetName(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Renaming calendars is not yet supported")
 }
-func (c *Calendar) Delete() error           { return c.backend.DeleteCalendar(c.Info.ID) }
+func (c *Calendar) Delete(ctx context.Context) error {
+	return c.backend.DeleteCalendar(ctx, c.Info.ID)
+}
 func (c *Calendar) LastModified() time.Time { return time.Time{} }
 
-func (c *Calendar) Children() ([]dav.Node, error) {
-	objs, err := c.backend.CalendarObjects(c.Info.ID)
+func (c *Calendar) Children(ctx context.Context) ([]dav.Node, error) {
+	objs, err := c.backend.CalendarObjects(ctx, c.Info.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -276,8 +283,8 @@ func (c *Calendar) Children() ([]dav.Node, error) {
 	return out, nil
 }
 
-func (c *Calendar) Child(name string) (dav.Node, error) {
-	obj, err := c.backend.CalendarObject(c.Info.ID, name)
+func (c *Calendar) Child(ctx context.Context, name string) (dav.Node, error) {
+	obj, err := c.backend.CalendarObject(ctx, c.Info.ID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -290,14 +297,14 @@ func (c *Calendar) Child(name string) (dav.Node, error) {
 // QueryObjects returns the objects passing the backend's coarse prefilter for a
 // calendar-query with the given top-level component type and time range. The
 // caller applies the full validator to each; this only narrows what is loaded.
-func (c *Calendar) QueryObjects(componentType string, start, end time.Time) ([]*CalendarObject, error) {
-	uris, err := c.backend.CalendarQuery(c.Info.ID, componentType, start, end)
+func (c *Calendar) QueryObjects(ctx context.Context, componentType string, start, end time.Time) ([]*CalendarObject, error) {
+	uris, err := c.backend.CalendarQuery(ctx, c.Info.ID, componentType, start, end)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*CalendarObject, 0, len(uris))
 	for _, uri := range uris {
-		obj, err := c.backend.CalendarObject(c.Info.ID, uri)
+		obj, err := c.backend.CalendarObject(ctx, c.Info.ID, uri)
 		if err != nil {
 			return nil, err
 		}
@@ -311,15 +318,15 @@ func (c *Calendar) QueryObjects(componentType string, start, end time.Time) ([]*
 // ObjectByUID returns the calendar's object carrying uid, or nil. A backend
 // implementing UIDLookup answers from its index; otherwise every object is
 // loaded and parsed.
-func (c *Calendar) ObjectByUID(uid string) (*CalendarObject, error) {
+func (c *Calendar) ObjectByUID(ctx context.Context, uid string) (*CalendarObject, error) {
 	if lookup, ok := c.backend.(UIDLookup); ok {
-		obj, err := lookup.CalendarObjectByUID(c.Info.ID, uid)
+		obj, err := lookup.CalendarObjectByUID(ctx, c.Info.ID, uid)
 		if err != nil || obj == nil {
 			return nil, err
 		}
 		return NewCalendarObject(c.backend, c.Info, *obj), nil
 	}
-	objs, err := c.backend.CalendarObjects(c.Info.ID)
+	objs, err := c.backend.CalendarObjects(ctx, c.Info.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -331,20 +338,20 @@ func (c *Calendar) ObjectByUID(uid string) (*CalendarObject, error) {
 	return nil, nil
 }
 
-func (c *Calendar) ChildExists(name string) bool {
-	obj, err := c.backend.CalendarObject(c.Info.ID, name)
+func (c *Calendar) ChildExists(ctx context.Context, name string) bool {
+	obj, err := c.backend.CalendarObject(ctx, c.Info.ID, name)
 	return err == nil && obj != nil
 }
 
-func (c *Calendar) CreateFile(name string, data io.Reader) (string, error) {
+func (c *Calendar) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
 	raw, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
 	}
-	return c.backend.CreateCalendarObject(c.Info.ID, name, raw)
+	return c.backend.CreateCalendarObject(ctx, c.Info.ID, name, raw)
 }
 
-func (c *Calendar) CreateDirectory(string) error {
+func (c *Calendar) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in calendar objects is not allowed")
 }
 
@@ -368,7 +375,7 @@ func (c *Calendar) SupportedComponents() []string {
 }
 
 // Props implements dav.PropNode with the calendar's stored properties.
-func (c *Calendar) Props(names []xml.Name) (map[xml.Name]any, error) {
+func (c *Calendar) Props(ctx context.Context, names []xml.Name) (map[xml.Name]any, error) {
 	if len(names) == 0 {
 		return c.Info.Props, nil
 	}
@@ -379,7 +386,7 @@ func (c *Calendar) Props(names []xml.Name) (map[xml.Name]any, error) {
 		// It is served on request only — never in the allprops bulk above,
 		// which would add a query per calendar to every home listing.
 		if n == (xml.Name{Space: davxml.NSCalendarServer, Local: "invite"}) {
-			if raw, ok := c.inviteProperty(); ok {
+			if raw, ok := c.inviteProperty(ctx); ok {
 				out[n] = raw
 			}
 			continue
@@ -396,12 +403,12 @@ func (c *Calendar) Props(names []xml.Name) (map[xml.Name]any, error) {
 // level. Port of sabre's SharingPlugin invite serialization. Returns ok=false
 // when the backend does not support sharing (the property is then omitted); an
 // empty (but supported) roster yields ok=true with no <cs:user> children.
-func (c *Calendar) inviteProperty() (davxml.Raw, bool) {
+func (c *Calendar) inviteProperty(ctx context.Context) (davxml.Raw, bool) {
 	sharing, ok := c.backend.(SharingSupport)
 	if !ok {
 		return nil, false
 	}
-	sharees, err := sharing.Invites(c.Info.ID)
+	sharees, err := sharing.Invites(ctx, c.Info.ID)
 	if err != nil {
 		return nil, false
 	}
@@ -432,8 +439,8 @@ type inviteUserXML struct {
 	Access     shareAccessXML `xml:"http://calendarserver.org/ns/ access"`
 }
 
-func (c *Calendar) PropPatch(pp *dav.PropPatch) {
-	c.backend.UpdateCalendar(c.Info.ID, pp)
+func (c *Calendar) PropPatch(ctx context.Context, pp *dav.PropPatch) {
+	c.backend.UpdateCalendar(ctx, c.Info.ID, pp)
 }
 
 // Owner returns the owning principal.
@@ -449,8 +456,8 @@ func (c *Calendar) SyncToken() string {
 }
 
 // Changes implements dav.SyncCollection.
-func (c *Calendar) Changes(syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
-	return c.backend.ChangesForCalendar(c.Info.ID, syncToken, syncLevel, limit)
+func (c *Calendar) Changes(ctx context.Context, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+	return c.backend.ChangesForCalendar(ctx, c.Info.ID, syncToken, syncLevel, limit)
 }
 
 // SupportedPrivileges extends the default tree with read-free-busy, like
@@ -558,17 +565,17 @@ func NewCalendarObject(backend Backend, calendar CalendarInfo, obj ObjectInfo) *
 }
 
 func (o *CalendarObject) Name() string { return o.obj.URI }
-func (o *CalendarObject) SetName(string) error {
+func (o *CalendarObject) SetName(context.Context, string) error {
 	// Sabre's CalendarObject inherits DAV\Node::setName, which forbids
 	// renaming a file; match that exactly (a MOVE-rename gets 403, not 405).
 	return dav.ErrForbidden("Permission denied to rename file")
 }
-func (o *CalendarObject) Delete() error {
-	return o.backend.DeleteCalendarObject(o.calendar.ID, o.obj.URI)
+func (o *CalendarObject) Delete(ctx context.Context) error {
+	return o.backend.DeleteCalendarObject(ctx, o.calendar.ID, o.obj.URI)
 }
 func (o *CalendarObject) LastModified() time.Time { return time.Time{} }
 
-func (o *CalendarObject) Get() (io.ReadCloser, error) {
+func (o *CalendarObject) Get(ctx context.Context) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(o.viewData())), nil
 }
 
@@ -590,12 +597,12 @@ func (o *CalendarObject) viewData() []byte {
 	return o.view
 }
 
-func (o *CalendarObject) Put(data io.Reader) (string, error) {
+func (o *CalendarObject) Put(ctx context.Context, data io.Reader) (string, error) {
 	raw, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
 	}
-	etag, err := o.backend.UpdateCalendarObject(o.calendar.ID, o.obj.URI, raw)
+	etag, err := o.backend.UpdateCalendarObject(ctx, o.calendar.ID, o.obj.URI, raw)
 	if err != nil {
 		return "", err
 	}

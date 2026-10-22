@@ -2,6 +2,7 @@ package dav
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,12 +41,12 @@ func (c *memColl) attach(n Node) {
 	c.children = append(c.children, n)
 }
 
-func (c *memColl) Name() string              { return c.name }
-func (c *memColl) SetName(n string) error    { c.name = n; return nil }
-func (c *memColl) LastModified() time.Time   { return time.Time{} }
-func (c *memColl) Children() ([]Node, error) { return c.children, nil }
+func (c *memColl) Name() string                                 { return c.name }
+func (c *memColl) SetName(ctx context.Context, n string) error  { c.name = n; return nil }
+func (c *memColl) LastModified() time.Time                      { return time.Time{} }
+func (c *memColl) Children(ctx context.Context) ([]Node, error) { return c.children, nil }
 
-func (c *memColl) Delete() error {
+func (c *memColl) Delete(ctx context.Context) error {
 	if c.parent != nil {
 		c.parent.removeChild(c.name)
 	}
@@ -61,7 +62,7 @@ func (c *memColl) removeChild(name string) {
 	}
 }
 
-func (c *memColl) Child(name string) (Node, error) {
+func (c *memColl) Child(ctx context.Context, name string) (Node, error) {
 	for _, ch := range c.children {
 		if ch.Name() == name {
 			return ch, nil
@@ -70,12 +71,12 @@ func (c *memColl) Child(name string) (Node, error) {
 	return nil, ErrNotFound("File not found: %s", name)
 }
 
-func (c *memColl) ChildExists(name string) bool {
-	_, err := c.Child(name)
+func (c *memColl) ChildExists(ctx context.Context, name string) bool {
+	_, err := c.Child(context.Background(), name)
 	return err == nil
 }
 
-func (c *memColl) CreateFile(name string, data io.Reader) (string, error) {
+func (c *memColl) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
 	contents, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
@@ -84,7 +85,7 @@ func (c *memColl) CreateFile(name string, data io.Reader) (string, error) {
 	return "", nil
 }
 
-func (c *memColl) CreateDirectory(name string) error {
+func (c *memColl) CreateDirectory(ctx context.Context, name string) error {
 	c.children = append(c.children, &memColl{name: name, parent: c})
 	return nil
 }
@@ -101,27 +102,27 @@ type memFile struct {
 	seekable bool
 }
 
-func (f *memFile) Name() string            { return f.name }
-func (f *memFile) SetName(n string) error  { f.name = n; return nil }
-func (f *memFile) LastModified() time.Time { return f.mtime }
-func (f *memFile) ContentType() string     { return "" }
-func (f *memFile) ETag() string            { return f.etag }
+func (f *memFile) Name() string                                { return f.name }
+func (f *memFile) SetName(ctx context.Context, n string) error { f.name = n; return nil }
+func (f *memFile) LastModified() time.Time                     { return f.mtime }
+func (f *memFile) ContentType() string                         { return "" }
+func (f *memFile) ETag() string                                { return f.etag }
 
-func (f *memFile) Delete() error {
+func (f *memFile) Delete(ctx context.Context) error {
 	if f.parent != nil {
 		f.parent.removeChild(f.name)
 	}
 	return nil
 }
 
-func (f *memFile) Get() (io.ReadCloser, error) {
+func (f *memFile) Get(ctx context.Context) (io.ReadCloser, error) {
 	if f.seekable {
 		return BytesBody(f.contents), nil
 	}
 	return io.NopCloser(bytes.NewReader(f.contents)), nil
 }
 
-func (f *memFile) Put(data io.Reader) (string, error) {
+func (f *memFile) Put(ctx context.Context, data io.Reader) (string, error) {
 	contents, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
@@ -145,7 +146,7 @@ type memSyncColl struct {
 
 func (s *memSyncColl) SyncToken() string { return s.token }
 
-func (s *memSyncColl) Changes(syncToken string, syncLevel, limit int) (*ChangeSet, error) {
+func (s *memSyncColl) Changes(ctx context.Context, syncToken string, syncLevel, limit int) (*ChangeSet, error) {
 	if syncToken != "" && syncToken != s.token {
 		return nil, nil // invalid/unknown token
 	}
@@ -165,7 +166,7 @@ func (u *unbindRecorder) BeforeUnbind(r *http.Request, path string) error {
 	return nil
 }
 
-func (u *unbindRecorder) AfterUnbind(path string) error {
+func (u *unbindRecorder) AfterUnbind(ctx context.Context, path string) error {
 	u.after = append(u.after, path)
 	return nil
 }
@@ -258,7 +259,7 @@ func TestPutRejectsPercentEncodedDotDotSegment(t *testing.T) {
 	if rec.Code < 400 {
 		t.Errorf("PUT /coll/%%2e%%2e = %d, want a 4xx rejection", rec.Code)
 	}
-	if coll.ChildExists("..") {
+	if coll.ChildExists(req.Context(), "..") {
 		t.Errorf(`PUT created a node literally named ".." in the collection`)
 	}
 }
@@ -277,7 +278,7 @@ func TestPutRejectsEncodedSlashInSegment(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("PUT with an encoded slash = %d, want 403", rec.Code)
 	}
-	if len(coll.children) != 0 || root.ChildExists("x") {
+	if len(coll.children) != 0 || root.ChildExists(req.Context(), "x") {
 		t.Errorf("PUT with an encoded slash created a node")
 	}
 }

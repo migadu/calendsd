@@ -78,7 +78,7 @@ func openScratchDB(t *testing.T, dbName string) *sql.DB {
 func TestChangeFiresNotify(t *testing.T) {
 	db := openScratchDB(t, "calserver_push_notify")
 	backend := &storage.CalDAV{DB: db}
-	id, err := backend.CreateCalendar("principals/alice", "home", nil)
+	id, err := backend.CreateCalendar(t.Context(), "principals/alice", "home", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestChangeFiresNotify(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := backend.CreateCalendarObject(id, "e.ics", []byte(sampleICS)); err != nil {
+	if _, err := backend.CreateCalendarObject(ctx, id, "e.ics", []byte(sampleICS)); err != nil {
 		t.Fatal(err)
 	}
 	n, err := conn.WaitForNotification(ctx)
@@ -111,7 +111,7 @@ func TestChangeFiresNotify(t *testing.T) {
 func TestStoreRoundTrip(t *testing.T) {
 	db := openScratchDB(t, "calserver_push_store")
 	backend := &storage.CalDAV{DB: db}
-	id, err := backend.CreateCalendar("principals/alice", "home", nil)
+	id, err := backend.CreateCalendar(t.Context(), "principals/alice", "home", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +188,11 @@ func (okChecker) CheckPrivileges(_ context.Context, _ string, _ ...string) error
 func TestDispatchDeliversAndDedups(t *testing.T) {
 	db := openScratchDB(t, "calserver_push_dispatch")
 	backend := &storage.CalDAV{DB: db}
-	id, err := backend.CreateCalendar("principals/alice", "home", nil)
+	id, err := backend.CreateCalendar(t.Context(), "principals/alice", "home", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.CreateCalendarObject(id, "e.ics", []byte(sampleICS)); err != nil {
+	if _, err := backend.CreateCalendarObject(t.Context(), id, "e.ics", []byte(sampleICS)); err != nil {
 		t.Fatal(err)
 	}
 	store := &Store{DB: db}
@@ -225,7 +225,7 @@ func TestDispatchDeliversAndDedups(t *testing.T) {
 	}
 
 	// A new change plus a Gone endpoint prunes the subscription.
-	if _, err := backend.CreateCalendarObject(id, "f.ics", []byte(sampleICS)); err != nil {
+	if _, err := backend.CreateCalendarObject(ctx, id, "f.ics", []byte(sampleICS)); err != nil {
 		t.Fatal(err)
 	}
 	sender.status = 410
@@ -241,11 +241,11 @@ func TestDispatchDeliversAndDedups(t *testing.T) {
 func behindSubscription(t *testing.T, db *sql.DB) (*Store, string) {
 	t.Helper()
 	backend := &storage.CalDAV{DB: db}
-	id, err := backend.CreateCalendar("principals/alice", "home", nil)
+	id, err := backend.CreateCalendar(t.Context(), "principals/alice", "home", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.CreateCalendarObject(id, "e.ics", []byte(sampleICS)); err != nil {
+	if _, err := backend.CreateCalendarObject(t.Context(), id, "e.ics", []byte(sampleICS)); err != nil {
 		t.Fatal(err)
 	}
 	store := &Store{DB: db}

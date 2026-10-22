@@ -149,11 +149,11 @@ func (s *Server) Features() []string {
 
 // AllowedMethods returns all HTTP methods plugins can handle for path,
 // deduplicated, in registration order.
-func (s *Server) AllowedMethods(path string) []string {
+func (s *Server) AllowedMethods(ctx context.Context, path string) []string {
 	var out []string
 	for _, p := range s.plugins {
 		if mp, ok := p.(MethodProvider); ok {
-			for _, m := range mp.Methods(path) {
+			for _, m := range mp.Methods(ctx, path) {
 				if !slices.Contains(out, m) {
 					out = append(out, m)
 				}
@@ -267,8 +267,9 @@ func (s *Server) WriteError(w http.ResponseWriter, err error) {
 	h := w.Header()
 	h.Set("Content-Type", "application/xml; charset=utf-8")
 	if de.Status == http.StatusMethodNotAllowed {
-		// Mirrors sabre's MethodNotAllowed::getHTTPHeaders.
-		h.Set("Allow", strings.Join(s.AllowedMethods(""), ", "))
+		// Mirrors sabre's MethodNotAllowed::getHTTPHeaders. The methods of
+		// the in-memory root need no storage, so no request context.
+		h.Set("Allow", strings.Join(s.AllowedMethods(context.Background(), ""), ", "))
 	}
 	w.WriteHeader(de.Status)
 	body := errorBody{Exception: de.Exception, Message: de.Message}
@@ -317,7 +318,7 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 	}
 	path = strings.Trim(path, "/")
 
-	node, err := s.Tree.NodeForPath(path)
+	node, err := s.Tree.NodeForPath(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +352,7 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 
 	var out []davxml.Response
 	for _, item := range items {
-		if err := s.runPropFind(item.pf, item.node); err != nil {
+		if err := s.runPropFind(ctx, item.pf, item.node); err != nil {
 			return nil, err
 		}
 		// WebDAV recommends (and iCal demands, for principals) a
@@ -370,7 +371,7 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 
 // runPropFind fires the property hooks for one node in sabre's order:
 // core defaults, plugins, then node-supplied dead properties.
-func (s *Server) runPropFind(pf *PropFind, node Node) error {
+func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error {
 	corePropFind(s, pf, node)
 	for _, p := range s.plugins {
 		if hook, ok := p.(PropFindHook); ok {
@@ -386,7 +387,7 @@ func (s *Server) runPropFind(pf *PropFind, node Node) error {
 			want = pf.Props404()
 		}
 		if pf.IsAllProps() || len(want) > 0 {
-			values, err := props.Props(want)
+			values, err := props.Props(ctx, want)
 			if err != nil {
 				return err
 			}
@@ -421,7 +422,7 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 		pp.SetResultCode(protected, http.StatusForbidden)
 	}
 
-	node, err := s.Tree.NodeForPath(path)
+	node, err := s.Tree.NodeForPath(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -434,12 +435,12 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 		}
 	}
 	if props, ok := node.(PropNode); ok {
-		props.PropPatch(pp)
+		props.PropPatch(ctx, pp)
 	}
 	// Property-storage plugins claim the remainder (sabre priority 300).
 	for _, p := range s.plugins {
 		if hook, ok := p.(PropPatchHook); ok {
-			if err := hook.PropPatch(path, pp); err != nil {
+			if err := hook.PropPatch(ctx, path, pp); err != nil {
 				return nil, err
 			}
 		}
@@ -449,19 +450,19 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 }
 
 // fireAfterUnbind notifies plugins that a node was removed.
-func (s *Server) fireAfterUnbind(path string) {
+func (s *Server) fireAfterUnbind(ctx context.Context, path string) {
 	for _, p := range s.plugins {
 		if hook, ok := p.(AfterUnbindHook); ok {
-			_ = hook.AfterUnbind(path)
+			_ = hook.AfterUnbind(ctx, path)
 		}
 	}
 }
 
 // fireAfterMove notifies plugins that a node moved.
-func (s *Server) fireAfterMove(source, destination string) {
+func (s *Server) fireAfterMove(ctx context.Context, source, destination string) {
 	for _, p := range s.plugins {
 		if hook, ok := p.(AfterMoveHook); ok {
-			_ = hook.AfterMove(source, destination)
+			_ = hook.AfterMove(ctx, source, destination)
 		}
 	}
 }
@@ -475,7 +476,7 @@ func isCollectionNode(n Node) bool {
 // from the requester (e.g. domain-scoped principal listings). Every listing
 // goes through here, so a filtered child leaves no trace in any response.
 func (s *Server) VisibleChildren(ctx context.Context, path string, coll Collection) ([]Node, error) {
-	children, err := coll.Children()
+	children, err := coll.Children(ctx)
 	if err != nil {
 		return nil, err
 	}

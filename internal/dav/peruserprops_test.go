@@ -12,14 +12,14 @@ type memPropStore struct {
 	props map[string]map[xml.Name]any
 }
 
-func (m *memPropStore) PropFind(path string, pf *PropFind) error {
+func (m *memPropStore) PropFind(ctx context.Context, path string, pf *PropFind) error {
 	for n, v := range m.props[path] {
 		pf.Set(n, v, http.StatusOK)
 	}
 	return nil
 }
 
-func (m *memPropStore) PropPatch(path string, pp *PropPatch) error {
+func (m *memPropStore) PropPatch(ctx context.Context, path string, pp *PropPatch) error {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		if m.props == nil {
 			m.props = map[string]map[xml.Name]any{}
@@ -39,8 +39,8 @@ func (m *memPropStore) PropPatch(path string, pp *PropPatch) error {
 	return nil
 }
 
-func (m *memPropStore) Delete(path string) error       { return nil }
-func (m *memPropStore) Move(source, dest string) error { return nil }
+func (m *memPropStore) Delete(ctx context.Context, path string) error       { return nil }
+func (m *memPropStore) Move(ctx context.Context, source, dest string) error { return nil }
 
 // ownedColl is a collection with an owner, standing in for a Calendar.
 type ownedColl struct {
@@ -81,7 +81,7 @@ func TestPerUserProps(t *testing.T) {
 	}
 	// The global property-storage plugin claims the rest, like the real
 	// pipeline (its PropPatchHook runs after the node handlers).
-	if err := store.PropPatch(path, pp); err != nil {
+	if err := store.PropPatch(t.Context(), path, pp); err != nil {
 		t.Fatal(err)
 	}
 	result, ok := pp.Commit()

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/xml"
 	"fmt"
@@ -31,8 +32,8 @@ type PropertyStorage struct {
 
 var _ dav.PropStorageBackend = (*PropertyStorage)(nil)
 
-func (p *PropertyStorage) PropFind(path string, pf *dav.PropFind) error {
-	rows, err := p.DB.Query(
+func (p *PropertyStorage) PropFind(ctx context.Context, path string, pf *dav.PropFind) error {
+	rows, err := p.DB.QueryContext(ctx,
 		`SELECT name, value, valuetype FROM propertystorage WHERE path = $1`, path)
 	if err != nil {
 		return err
@@ -61,16 +62,16 @@ func (p *PropertyStorage) PropFind(path string, pf *dav.PropFind) error {
 	return rows.Err()
 }
 
-func (p *PropertyStorage) PropPatch(path string, pp *dav.PropPatch) error {
+func (p *PropertyStorage) PropPatch(ctx context.Context, path string, pp *dav.PropPatch) error {
 	pp.HandleRemaining(func(values map[xmlName]any) (map[xmlName]int, bool) {
 		// PROPPATCH is all-or-nothing (RFC 4918 §9.2): apply every property
 		// write in one transaction so a failure midway leaves nothing
 		// half-committed.
-		err := withTx(p.DB, func(tx *sql.Tx) error {
+		err := withTx(ctx, p.DB, func(tx *sql.Tx) error {
 			for name, value := range values {
 				clark := davxml.Clark(name)
 				if value == nil {
-					if _, err := tx.Exec(
+					if _, err := tx.ExecContext(ctx,
 						`DELETE FROM propertystorage WHERE path = $1 AND name = $2`,
 						path, clark); err != nil {
 						return err
@@ -88,7 +89,7 @@ func (p *PropertyStorage) PropPatch(path string, pp *dav.PropPatch) error {
 				default:
 					return fmt.Errorf("unsupported property value type %T", value)
 				}
-				if _, err := tx.Exec(`
+				if _, err := tx.ExecContext(ctx, `
 INSERT INTO propertystorage (path, name, valuetype, value) VALUES ($1, $2, $3, $4)
 ON CONFLICT (path, name) DO UPDATE SET valuetype = $3, value = $4`,
 					path, clark, valuetype, stored); err != nil {
@@ -102,8 +103,8 @@ ON CONFLICT (path, name) DO UPDATE SET valuetype = $3, value = $4`,
 	return nil
 }
 
-func (p *PropertyStorage) Delete(path string) error {
-	_, err := p.DB.Exec(
+func (p *PropertyStorage) Delete(ctx context.Context, path string) error {
+	_, err := p.DB.ExecContext(ctx,
 		`DELETE FROM propertystorage WHERE path = $1 OR path LIKE $2 ESCAPE '\'`,
 		path, escapeLike(path)+"/%")
 	return err
@@ -111,8 +112,8 @@ func (p *PropertyStorage) Delete(path string) error {
 
 // Move renames the exact path and all children, like sabre's PDO backend, in
 // one statement, so a failure cannot leave the property subtree half-renamed.
-func (p *PropertyStorage) Move(source, destination string) error {
-	_, err := p.DB.Exec(`
+func (p *PropertyStorage) Move(ctx context.Context, source, destination string) error {
+	_, err := p.DB.ExecContext(ctx, `
 UPDATE propertystorage SET path = $2 || substr(path, length($1) + 1)
  WHERE path = $1 OR path LIKE $3 ESCAPE '\'`,
 		source, destination, escapeLike(source)+"/%")

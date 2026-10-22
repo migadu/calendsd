@@ -18,9 +18,9 @@ type Users struct {
 // HashA1 returns the stored digesta1 hash for a user, or "" when there is no
 // such user. A database failure is an error, not an unknown user, so callers
 // can tell an outage from bad credentials.
-func (u *Users) HashA1(realm, username string) (string, error) {
+func (u *Users) HashA1(ctx context.Context, realm, username string) (string, error) {
 	var hash sql.NullString
-	err := u.DB.QueryRow(
+	err := u.DB.QueryRowContext(ctx,
 		`SELECT digesta1 FROM users WHERE username = $1`, username).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -31,13 +31,7 @@ func (u *Users) HashA1(realm, username string) (string, error) {
 // IsDeleted reports whether a principal has a pending-deletion tombstone
 // (soft-deleted, not yet purged). It is a single primary-key lookup, cheap
 // enough to call on every authenticated request from the auth gate.
-func (u *Users) IsDeleted(principal string) (bool, error) {
-	return u.IsDeletedContext(context.Background(), principal)
-}
-
-// IsDeletedContext is IsDeleted bounded by ctx, so a stalled database cannot
-// hold a request past its deadline.
-func (u *Users) IsDeletedContext(ctx context.Context, principal string) (bool, error) {
+func (u *Users) IsDeleted(ctx context.Context, principal string) (bool, error) {
 	var exists bool
 	err := u.DB.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM deleted_principals WHERE principal = $1)`,

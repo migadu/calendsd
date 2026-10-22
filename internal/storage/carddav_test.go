@@ -56,18 +56,18 @@ func TestChangesForAddressBookIncremental(t *testing.T) {
 	db := openCardDAVScratchDB(t, "calserver_abchanges")
 	backend := &storage.CardDAV{DB: db}
 
-	id, err := backend.CreateAddressBook("principals/admin", "contacts", nil)
+	id, err := backend.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.CreateCard(id, "card1.vcf", []byte(fmt.Sprintf(testVCF, "c1", "Card One"))); err != nil {
+	if _, err := backend.CreateCard(t.Context(), id, "card1.vcf", []byte(fmt.Sprintf(testVCF, "c1", "Card One"))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.CreateCard(id, "gone.vcf", []byte(fmt.Sprintf(testVCF, "c2", "Card Gone"))); err != nil {
+	if _, err := backend.CreateCard(t.Context(), id, "gone.vcf", []byte(fmt.Sprintf(testVCF, "c2", "Card Gone"))); err != nil {
 		t.Fatal(err)
 	}
 
-	initial, err := backend.ChangesForAddressBook(id, "", 1, 0)
+	initial, err := backend.ChangesForAddressBook(t.Context(), id, "", 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,17 +76,17 @@ func TestChangesForAddressBookIncremental(t *testing.T) {
 	}
 
 	// Changes after the initial token: one added, one modified, one deleted.
-	if _, err := backend.CreateCard(id, "new.vcf", []byte(fmt.Sprintf(testVCF, "c3", "Card New"))); err != nil {
+	if _, err := backend.CreateCard(t.Context(), id, "new.vcf", []byte(fmt.Sprintf(testVCF, "c3", "Card New"))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.UpdateCard(id, "card1.vcf", []byte(fmt.Sprintf(testVCF, "c1", "Card One v2"))); err != nil {
+	if _, err := backend.UpdateCard(t.Context(), id, "card1.vcf", []byte(fmt.Sprintf(testVCF, "c1", "Card One v2"))); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.DeleteCard(id, "gone.vcf"); err != nil {
+	if err := backend.DeleteCard(t.Context(), id, "gone.vcf"); err != nil {
 		t.Fatal(err)
 	}
 
-	cs, err := backend.ChangesForAddressBook(id, initial.SyncToken, 1, 0)
+	cs, err := backend.ChangesForAddressBook(t.Context(), id, initial.SyncToken, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestUpdateAddressBookBumpsSyncToken(t *testing.T) {
 	db := openCardDAVScratchDB(t, "calserver_abupdate")
 	backend := &storage.CardDAV{DB: db}
 
-	id, err := backend.CreateAddressBook("principals/admin", "contacts", nil)
+	id, err := backend.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestUpdateAddressBookBumpsSyncToken(t *testing.T) {
 	pp := dav.NewPropPatch(map[xml.Name]any{
 		{Space: "DAV:", Local: "displayname"}: "Renamed Contacts",
 	})
-	backend.UpdateAddressBook(id, pp)
+	backend.UpdateAddressBook(t.Context(), id, pp)
 	if _, ok := pp.Commit(); !ok {
 		t.Fatalf("UpdateAddressBook proppatch failed: %s", pp)
 	}
@@ -161,7 +161,7 @@ func TestSearchPrincipalsEscapesLike(t *testing.T) {
 			('principals/jxdoe', 'jxdoe@example.org', 'jxdoe')`)
 
 	p := &storage.Principals{DB: db}
-	got, err := p.SearchPrincipals("principals",
+	got, err := p.SearchPrincipals(t.Context(), "principals",
 		map[xml.Name]string{{Space: "DAV:", Local: "displayname"}: "j_doe"}, "anyof")
 	if err != nil {
 		t.Fatal(err)
@@ -179,21 +179,21 @@ func TestDeleteAllCardsSyncsUnderALimit(t *testing.T) {
 	db := openCardDAVScratchDB(t, "calserver_d_deleteall")
 	backend := &storage.CardDAV{DB: db}
 
-	id, err := backend.CreateAddressBook("principals/admin", "contacts", nil)
+	id, err := backend.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"a.vcf", "b.vcf", "c.vcf"}
 	for _, uri := range want {
-		if _, err := backend.CreateCard(id, uri, []byte(fmt.Sprintf(testVCF, uri, uri))); err != nil {
+		if _, err := backend.CreateCard(t.Context(), id, uri, []byte(fmt.Sprintf(testVCF, uri, uri))); err != nil {
 			t.Fatal(err)
 		}
 	}
-	initial, err := backend.ChangesForAddressBook(id, "", 1, 0)
+	initial, err := backend.ChangesForAddressBook(t.Context(), id, "", 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, err := backend.DeleteAllCards(id); err != nil || n != 3 {
+	if n, err := backend.DeleteAllCards(t.Context(), id); err != nil || n != 3 {
 		t.Fatalf("DeleteAllCards = %d, %v; want 3", n, err)
 	}
 
@@ -201,7 +201,7 @@ func TestDeleteAllCardsSyncsUnderALimit(t *testing.T) {
 	var deleted []string
 	token := initial.SyncToken
 	for range 10 {
-		cs, err := backend.ChangesForAddressBook(id, token, 1, 1)
+		cs, err := backend.ChangesForAddressBook(t.Context(), id, token, 1, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,10 +215,10 @@ func TestDeleteAllCardsSyncsUnderALimit(t *testing.T) {
 		t.Fatalf("paged sync reported deletions %v, want %v", deleted, want)
 	}
 	// A later write must not reuse any of the deletions' tokens.
-	if _, err := backend.CreateCard(id, "d.vcf", []byte(fmt.Sprintf(testVCF, "d", "d"))); err != nil {
+	if _, err := backend.CreateCard(t.Context(), id, "d.vcf", []byte(fmt.Sprintf(testVCF, "d", "d"))); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := backend.ChangesForAddressBook(id, token, 1, 0)
+	cs, err := backend.ChangesForAddressBook(t.Context(), id, token, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

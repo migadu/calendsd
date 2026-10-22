@@ -1,6 +1,7 @@
 package caldav
 
 import (
+	"context"
 	"encoding/xml"
 	"net/http"
 	"strings"
@@ -47,7 +48,7 @@ func (p *Plugin) Init(s *dav.Server) {
 // calendarserver delegation extension, RFC-less but advertised by sabre).
 func (p *Plugin) Features() []string { return []string{"calendar-access", "calendar-proxy"} }
 
-func (p *Plugin) Methods(path string) []string { return []string{"MKCALENDAR"} }
+func (p *Plugin) Methods(ctx context.Context, path string) []string { return []string{"MKCALENDAR"} }
 
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	switch r.Method {

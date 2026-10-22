@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ func attemptsWant(lines ...string) string {
 func TestBasicBackendMetrics(t *testing.T) {
 	set := metrics.New("test")
 	b := &BasicBackend{Realm: "r", Metrics: set,
-		Validate: func(u, p string) bool { return p == "good" }}
+		Validate: func(_ context.Context, u, p string) bool { return p == "good" }}
 
 	ok := httptest.NewRequest("GET", "/", nil)
 	ok.SetBasicAuth("hans", "good")
@@ -46,7 +47,7 @@ func TestBasicBackendMetrics(t *testing.T) {
 func TestPluginCountsCredentiallessProbe(t *testing.T) {
 	set := metrics.New("test")
 	p := NewPlugin(&BasicBackend{Realm: "r", Metrics: set,
-		Validate: func(u, pw string) bool { return false }})
+		Validate: func(_ context.Context, u, pw string) bool { return false }})
 	p.Metrics = set
 
 	r := httptest.NewRequest("PROPFIND", "/", nil) // no credentials at all

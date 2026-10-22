@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
@@ -26,8 +27,8 @@ type CardDAV struct {
 
 var _ carddav.Backend = (*CardDAV)(nil)
 
-func (b *CardDAV) AddressBooksForUser(principalURI string) ([]carddav.AddressBookInfo, error) {
-	rows, err := b.DB.Query(
+func (b *CardDAV) AddressBooksForUser(ctx context.Context, principalURI string) ([]carddav.AddressBookInfo, error) {
+	rows, err := b.DB.QueryContext(ctx,
 		`SELECT id, uri, displayname, description, synctoken FROM addressbooks WHERE principaluri = $1`,
 		principalURI)
 	if err != nil {
@@ -64,11 +65,11 @@ func (b *CardDAV) AddressBooksForUser(principalURI string) ([]carddav.AddressBoo
 	return out, rows.Err()
 }
 
-func (b *CardDAV) CreateAddressBook(principalURI, uri string, props map[xml.Name]any) (string, error) {
+func (b *CardDAV) CreateAddressBook(ctx context.Context, principalURI, uri string, props map[xml.Name]any) (string, error) {
 	displayname := stringProp(props, xml.Name{Space: davxml.NSDav, Local: "displayname"})
 	description := stringProp(props, xml.Name{Space: carddav.NSCardDAV, Local: "addressbook-description"})
 	var id int64
-	err := b.DB.QueryRow(`
+	err := b.DB.QueryRowContext(ctx, `
 INSERT INTO addressbooks (principaluri, uri, displayname, description, synctoken)
 VALUES ($1, $2, $3, $4, 1) RETURNING id`,
 		principalURI, uri, displayname, description).Scan(&id)
@@ -85,22 +86,22 @@ func stringProp(props map[xml.Name]any, name xml.Name) any {
 	return nil
 }
 
-func (b *CardDAV) DeleteAddressBook(id string) error {
-	return withTx(b.DB, func(tx *sql.Tx) error {
-		return deleteAddressBookRows(tx, id)
+func (b *CardDAV) DeleteAddressBook(ctx context.Context, id string) error {
+	return withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		return deleteAddressBookRows(ctx, tx, id)
 	})
 }
 
 // deleteAddressBookRows removes an address book with its cards and change
 // log. Shared by DeleteAddressBook and AdminWrites.DeleteUserCascade so the
 // two delete paths cannot drift.
-func deleteAddressBookRows(tx *sql.Tx, id string) error {
+func deleteAddressBookRows(ctx context.Context, tx *sql.Tx, id string) error {
 	for _, q := range []string{
 		`DELETE FROM cards WHERE addressbookid = $1`,
 		`DELETE FROM addressbookchanges WHERE addressbookid = $1`,
 		`DELETE FROM addressbooks WHERE id = $1`,
 	} {
-		if _, err := tx.Exec(q, id); err != nil {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err
 		}
 	}
@@ -113,7 +114,7 @@ var abPropertyColumns = map[xml.Name]string{
 	{Space: carddav.NSCardDAV, Local: "addressbook-description"}: "description",
 }
 
-func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
+func (b *CardDAV) UpdateAddressBook(ctx context.Context, id string, pp *dav.PropPatch) {
 	var supported []xml.Name
 	for name := range abPropertyColumns {
 		supported = append(supported, name)
@@ -133,13 +134,13 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 			return nil, true
 		}
 		args = append(args, id)
-		err := withTx(b.DB, func(tx *sql.Tx) error {
-			if err := affectedOne(tx.Exec(
+		err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
+			if err := affectedOne(tx.ExecContext(ctx,
 				"UPDATE addressbooks SET "+strings.Join(assignments, ", ")+" WHERE id = $"+strconv.Itoa(len(args)),
 				args...)); err != nil {
 				return err
 			}
-			return recordChange(tx, addressBookLog, id, "", 2)
+			return recordChange(ctx, tx, addressBookLog, id, "", 2)
 		})
 		return nil, err == nil
 	})
@@ -149,8 +150,8 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 // objectColumns and the contacts API's cardETagExpr.
 const cardColumns = `uri, carddata, coalesce(etag, md5(carddata)), size`
 
-func (b *CardDAV) Cards(addressBookID string) ([]carddav.CardInfo, error) {
-	rows, err := b.DB.Query(`SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1`, addressBookID)
+func (b *CardDAV) Cards(ctx context.Context, addressBookID string) ([]carddav.CardInfo, error) {
+	rows, err := b.DB.QueryContext(ctx, `SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1`, addressBookID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,8 +167,8 @@ func (b *CardDAV) Cards(addressBookID string) ([]carddav.CardInfo, error) {
 	return out, rows.Err()
 }
 
-func (b *CardDAV) Card(addressBookID, uri string) (*carddav.CardInfo, error) {
-	c, err := scanCard(b.DB.QueryRow(
+func (b *CardDAV) Card(ctx context.Context, addressBookID, uri string) (*carddav.CardInfo, error) {
+	c, err := scanCard(b.DB.QueryRowContext(ctx,
 		`SELECT `+cardColumns+` FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri),
 		addressBookID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -190,16 +191,16 @@ func scanCard(row rowScanner, addressBookID string) (*carddav.CardInfo, error) {
 	}, nil
 }
 
-func (b *CardDAV) CreateCard(addressBookID, uri string, data []byte) (string, error) {
+func (b *CardDAV) CreateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error) {
 	etag := cardETag(data)
-	err := withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`
+	err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO cards (addressbookid, uri, carddata, lastmodified, etag, size)
 VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
 			addressBookID, uri, data, etag, len(data)); err != nil {
 			return err
 		}
-		return recordChange(tx, addressBookLog, addressBookID, uri, 1)
+		return recordChange(ctx, tx, addressBookLog, addressBookID, uri, 1)
 	})
 	if err != nil {
 		return "", err
@@ -207,17 +208,17 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
 	return `"` + etag + `"`, nil
 }
 
-func (b *CardDAV) UpdateCard(addressBookID, uri string, data []byte) (string, error) {
+func (b *CardDAV) UpdateCard(ctx context.Context, addressBookID, uri string, data []byte) (string, error) {
 	etag := cardETag(data)
-	err := withTx(b.DB, func(tx *sql.Tx) error {
+	err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
 		// A vanished card is ErrNotFound, with no change row.
-		if err := affectedOne(tx.Exec(`
+		if err := affectedOne(tx.ExecContext(ctx, `
 UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
  WHERE addressbookid = $4 AND uri = $5`,
 			data, etag, len(data), addressBookID, uri)); err != nil {
 			return err
 		}
-		return recordChange(tx, addressBookLog, addressBookID, uri, 2)
+		return recordChange(ctx, tx, addressBookLog, addressBookID, uri, 2)
 	})
 	if err != nil {
 		return "", err
@@ -234,14 +235,14 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 // matched=true on success; matched=false with no write and no change row when
 // the card is missing or its etag moved. An empty expected never matches.
 // Backs the API's If-Match (docs/snappymail-calserver-contacts.md § Endpoints).
-func (b *CardDAV) UpdateCardIfMatch(addressBookID, uri string, data []byte, expected string) (string, bool, error) {
+func (b *CardDAV) UpdateCardIfMatch(ctx context.Context, addressBookID, uri string, data []byte, expected string) (string, bool, error) {
 	if expected == "" {
 		return "", false, nil
 	}
 	etag := cardETag(data)
 	matched := false
-	err := withTx(b.DB, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`
+	err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
 UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
  WHERE addressbookid = $4 AND uri = $5 AND coalesce(etag, md5(carddata)) = $6`,
 			data, etag, len(data), addressBookID, uri, expected)
@@ -256,7 +257,7 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 			return nil
 		}
 		matched = true
-		return recordChange(tx, addressBookLog, addressBookID, uri, 2)
+		return recordChange(ctx, tx, addressBookLog, addressBookID, uri, 2)
 	})
 	if err != nil || !matched {
 		return "", false, err
@@ -273,15 +274,15 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 // REPORT with a limit resumes from one past the last change it returned, so
 // rows sharing a token would be skipped once a limit split them.
 // Returns how many were removed. The book itself stays.
-func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
+func (b *CardDAV) DeleteAllCards(ctx context.Context, addressBookID string) (int, error) {
 	n := 0
-	err := withTx(b.DB, func(tx *sql.Tx) error {
+	err := withTx(ctx, b.DB, func(tx *sql.Tx) error {
 		var token int64
-		if err := tx.QueryRow(
+		if err := tx.QueryRowContext(ctx,
 			`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, addressBookID).Scan(&token); err != nil {
 			return err
 		}
-		res, err := tx.Exec(`
+		res, err := tx.ExecContext(ctx, `
 WITH gone AS (DELETE FROM cards WHERE addressbookid = $1 RETURNING id, uri)
 INSERT INTO addressbookchanges (uri, synctoken, addressbookid, operation)
 SELECT uri, $2 + row_number() OVER (ORDER BY id) - 1, $1, 3 FROM gone`, addressBookID, token)
@@ -296,10 +297,10 @@ SELECT uri, $2 + row_number() OVER (ORDER BY id) - 1, $1, 3 FROM gone`, addressB
 		if n == 0 {
 			return nil // nothing changed: leave the token and the listeners alone
 		}
-		if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+deleted, addressBookID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+deleted, addressBookID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(`SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
+		_, err = tx.ExecContext(ctx, `SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
 		return err
 	})
 	if err != nil {
@@ -308,13 +309,13 @@ SELECT uri, $2 + row_number() OVER (ORDER BY id) - 1, $1, 3 FROM gone`, addressB
 	return n, nil
 }
 
-func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
-	return withTx(b.DB, func(tx *sql.Tx) error {
-		if err := affectedOne(tx.Exec(
+func (b *CardDAV) DeleteCard(ctx context.Context, addressBookID, uri string) error {
+	return withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		if err := affectedOne(tx.ExecContext(ctx,
 			`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri)); err != nil {
 			return err
 		}
-		return recordChange(tx, addressBookLog, addressBookID, uri, 3)
+		return recordChange(ctx, tx, addressBookLog, addressBookID, uri, 3)
 	})
 }
 

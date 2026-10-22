@@ -30,7 +30,7 @@ func TestPrincipalsByPrefix(t *testing.T) {
 		"":           {"top"},
 		"nothing":    nil,
 	} {
-		list, err := p.PrincipalsByPrefix(prefix)
+		list, err := p.PrincipalsByPrefix(t.Context(), prefix)
 		if err != nil {
 			t.Fatal(err)
 		}

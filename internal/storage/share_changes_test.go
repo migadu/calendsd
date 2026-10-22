@@ -66,10 +66,10 @@ func TestUpdateInvitesReportsCommittedChanges(t *testing.T) {
 	if changes := mustUpdate(t, backend, calID, caldav.Sharee{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessNoAccess}); len(changes) != 0 {
 		t.Fatalf("removal reported %+v", changes)
 	}
-	if _, err := backend.SharedInstance(calID.Calendar, "principals/bob"); err != nil {
+	if _, err := backend.SharedInstance(t.Context(), calID.Calendar, "principals/bob"); err != nil {
 		t.Fatal(err)
 	}
-	if inst, _ := backend.SharedInstance(calID.Calendar, "principals/bob"); inst != nil {
+	if inst, _ := backend.SharedInstance(t.Context(), calID.Calendar, "principals/bob"); inst != nil {
 		t.Fatalf("bob still shared after removal: %+v", inst)
 	}
 
@@ -154,19 +154,19 @@ func TestUpdateInvitesRollsBack(t *testing.T) {
 	// Bob's update already ran in the same transaction.
 	bad := calID
 	bad.Instance = "999999"
-	changes, err := backend.UpdateInvites(bad, []caldav.Sharee{
+	changes, err := backend.UpdateInvites(t.Context(), bad, []caldav.Sharee{
 		bobSet(caldav.AccessReadWrite),
 		{Href: carolHref, Principal: "principals/carol", Access: caldav.AccessRead},
 	})
 	if err == nil || changes != nil {
 		t.Fatalf("UpdateInvites = %+v, %v; want an error and no changes", changes, err)
 	}
-	if inst, _ := backend.SharedInstance(calID.Calendar, "principals/bob"); inst == nil || inst.Access != caldav.AccessRead {
+	if inst, _ := backend.SharedInstance(t.Context(), calID.Calendar, "principals/bob"); inst == nil || inst.Access != caldav.AccessRead {
 		t.Fatalf("bob after rollback = %+v, want the original read share", inst)
 	}
 
 	// A calendar with no owner instance is refused outright.
-	if _, err := backend.UpdateInvites(caldav.CalendarID{Calendar: "999999", Instance: "1"},
+	if _, err := backend.UpdateInvites(t.Context(), caldav.CalendarID{Calendar: "999999", Instance: "1"},
 		[]caldav.Sharee{bobSet(caldav.AccessRead)}); err == nil {
 		t.Fatal("share on a calendar without an owner instance succeeded")
 	}
@@ -187,7 +187,7 @@ func TestUpdateInvitesConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = backend.UpdateInvites(calID, []caldav.Sharee{bobSet(caldav.AccessRead)})
+			results[i], errs[i] = backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{bobSet(caldav.AccessRead)})
 		}(i)
 	}
 	wg.Wait()
@@ -217,11 +217,11 @@ func TestUpdateInvitesConcurrent(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, replyErr = backend.ShareReply("principals/bob", "/calendars/alice/default", caldav.InviteDeclined, "", "", "")
+			_, replyErr = backend.ShareReply(t.Context(), "principals/bob", "/calendars/alice/default", caldav.InviteDeclined, "", "", "")
 		}()
 		go func() {
 			defer wg.Done()
-			_, updErr = backend.UpdateInvites(calID, []caldav.Sharee{bobSet(caldav.AccessReadWrite)})
+			_, updErr = backend.UpdateInvites(t.Context(), calID, []caldav.Sharee{bobSet(caldav.AccessReadWrite)})
 		}()
 		wg.Wait()
 		if replyErr != nil || updErr != nil {
@@ -238,7 +238,7 @@ func TestSharedInstanceReportsOwnerAndName(t *testing.T) {
 	calID := ownerCalID(t, backend)
 	c := onlyChange(t, mustUpdate(t, backend, calID, bobSet(caldav.AccessReadWrite)))
 
-	inst, err := backend.SharedInstance(calID.Calendar, "principals/bob")
+	inst, err := backend.SharedInstance(t.Context(), calID.Calendar, "principals/bob")
 	if err != nil || inst == nil {
 		t.Fatalf("SharedInstance = %+v, %v", inst, err)
 	}
@@ -247,7 +247,7 @@ func TestSharedInstanceReportsOwnerAndName(t *testing.T) {
 		t.Fatalf("SharedInstance = %+v", inst)
 	}
 	// The owner's own row is not a shared instance.
-	if inst, err := backend.SharedInstance(calID.Calendar, "principals/alice"); err != nil || inst != nil {
+	if inst, err := backend.SharedInstance(t.Context(), calID.Calendar, "principals/alice"); err != nil || inst != nil {
 		t.Fatalf("owner lookup = %+v, %v; want none", inst, err)
 	}
 }
@@ -256,14 +256,14 @@ func TestDomainPolicy(t *testing.T) {
 	backend := sharingDB(t, "calserver_domain_policy")
 	policy := &storage.DomainPolicy{DB: backend.DB}
 
-	if v, err := policy.ShareNotify("example.org"); err != nil || v != "off" {
+	if v, err := policy.ShareNotify(t.Context(), "example.org"); err != nil || v != "off" {
 		t.Fatalf("no row = %q, %v; want off", v, err)
 	}
 	if _, err := backend.DB.Exec(
 		`INSERT INTO domain_scheduling_policy (domain, share_notify) VALUES ('example.org', 'email')`); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := policy.ShareNotify("Example.ORG"); err != nil || v != "email" {
+	if v, err := policy.ShareNotify(t.Context(), "Example.ORG"); err != nil || v != "email" {
 		t.Fatalf("opted in = %q, %v; want email (lookups lowercase)", v, err)
 	}
 	// The table only takes known values and lowercased domains.
@@ -278,23 +278,23 @@ func TestDomainPolicy(t *testing.T) {
 
 	// The cache serves a changed row until its TTL lapses.
 	cached := &storage.CachedSharePolicy{Source: policy, TTL: time.Hour}
-	if v, _ := cached.ShareNotify("example.org"); v != "email" {
+	if v, _ := cached.ShareNotify(t.Context(), "example.org"); v != "email" {
 		t.Fatalf("cached = %q", v)
 	}
 	if _, err := backend.DB.Exec(`UPDATE domain_scheduling_policy SET share_notify = 'off'`); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := cached.ShareNotify("example.org"); v != "email" {
+	if v, _ := cached.ShareNotify(t.Context(), "example.org"); v != "email" {
 		t.Fatalf("cached after change = %q, want the cached email", v)
 	}
-	if v, _ := (&storage.CachedSharePolicy{Source: policy, TTL: time.Hour}).ShareNotify("example.org"); v != "off" {
+	if v, _ := (&storage.CachedSharePolicy{Source: policy, TTL: time.Hour}).ShareNotify(t.Context(), "example.org"); v != "off" {
 		t.Fatalf("fresh cache = %q, want off", v)
 	}
 }
 
 func mustUpdate(t *testing.T, b *storage.CalDAV, id caldav.CalendarID, sharees ...caldav.Sharee) []caldav.ShareChange {
 	t.Helper()
-	changes, err := b.UpdateInvites(id, sharees)
+	changes, err := b.UpdateInvites(t.Context(), id, sharees)
 	if err != nil {
 		t.Fatalf("UpdateInvites: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestUpdateInvitesRegrantUnderNewAddressSurvivesStaleRemove(t *testing.T) {
 	if c.InstanceID != first.InstanceID || c.Access != caldav.AccessReadWrite {
 		t.Fatalf("re-grant = %+v", c)
 	}
-	inst, err := backend.SharedInstance(calID.Calendar, "principals/bob")
+	inst, err := backend.SharedInstance(t.Context(), calID.Calendar, "principals/bob")
 	if err != nil || inst == nil || inst.ID != first.InstanceID || inst.Access != caldav.AccessReadWrite {
 		t.Fatalf("bob's share after the POST = %+v, %v; want instance %d read-write", inst, err, first.InstanceID)
 	}

@@ -5,9 +5,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"calserver/internal/config"
 	"calserver/internal/version"
@@ -55,25 +58,29 @@ func main() {
 		globalConfig = *cfg
 	}
 
+	// Ctrl-C or SIGTERM cancels whatever the command is waiting on.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	switch command {
 	case "health":
-		handleHealth(subArgs)
+		handleHealth(ctx, subArgs)
 	case "panel":
 		handlePanel(subArgs, configPath)
 	case "stats":
-		handleStats(subArgs)
+		handleStats(ctx, subArgs)
 	case "doctor":
-		handleDoctor(subArgs)
+		handleDoctor(ctx, subArgs)
 	case "principal", "principals":
-		handlePrincipal(subArgs)
+		handlePrincipal(ctx, subArgs)
 	case "jobs":
-		handleJobs(subArgs)
+		handleJobs(ctx, subArgs)
 	case "imip":
-		handleImip(subArgs)
+		handleImip(ctx, subArgs)
 	case "contacts":
-		handleContacts(subArgs)
+		handleContacts(ctx, subArgs)
 	case "schema":
-		handleSchema(subArgs)
+		handleSchema(ctx, subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()

@@ -2,6 +2,7 @@ package caldav
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -28,13 +29,13 @@ const maxFreeBusyAllowed = 200
 // inboxVisibilityPropFind serves free-busy-visibility. It is always present:
 // without a stored setting it reads as the default (audience domain, nobody
 // extra).
-func (p *SchedulePlugin) inboxVisibilityPropFind(pf *dav.PropFind, inbox *Inbox) {
+func (p *SchedulePlugin) inboxVisibilityPropFind(ctx context.Context, pf *dav.PropFind, inbox *Inbox) {
 	vb := inbox.visibility()
 	if vb == nil {
 		return
 	}
 	pf.Handle(freeBusyVisibilityName, func() any {
-		v, err := vb.FreeBusyVisibility(inbox.principalURI)
+		v, err := vb.FreeBusyVisibility(ctx, inbox.principalURI)
 		if err != nil {
 			slog.Warn("reading free-busy visibility", "principal", inbox.principalURI, "err", err)
 			return nil
@@ -67,7 +68,7 @@ func (p *SchedulePlugin) renderVisibility(v acl.FreeBusyVisibility) davxml.Raw {
 // prePropPatchVisibility claims free-busy-visibility on an inbox. Like
 // calendar-availability, the value is validated before any PROPPATCH
 // callback runs, so a rejected value stores nothing.
-func (p *SchedulePlugin) prePropPatchVisibility(inbox *Inbox, pp *dav.PropPatch) {
+func (p *SchedulePlugin) prePropPatchVisibility(ctx context.Context, inbox *Inbox, pp *dav.PropPatch) {
 	value, ok := pp.Mutation(freeBusyVisibilityName)
 	if !ok {
 		return
@@ -97,7 +98,7 @@ func (p *SchedulePlugin) prePropPatchVisibility(inbox *Inbox, pp *dav.PropPatch)
 			}
 			// An empty element: the default setting.
 		}
-		parsed, err := p.parseVisibility(fragment, p.principalDomain(inbox.principalURI))
+		parsed, err := p.parseVisibility(ctx, fragment, p.principalDomain(ctx, inbox.principalURI))
 		if err != nil {
 			reject("invalid value", err)
 			return
@@ -108,9 +109,9 @@ func (p *SchedulePlugin) prePropPatchVisibility(inbox *Inbox, pp *dav.PropPatch)
 	pp.Handle(names, func(map[xml.Name]any) (map[xml.Name]int, bool) {
 		var err error
 		if remove {
-			err = vb.DeleteFreeBusyVisibility(inbox.principalURI)
+			err = vb.DeleteFreeBusyVisibility(ctx, inbox.principalURI)
 		} else {
-			err = vb.SetFreeBusyVisibility(inbox.principalURI, v)
+			err = vb.SetFreeBusyVisibility(ctx, inbox.principalURI, v)
 		}
 		if err != nil {
 			slog.Error("storing free-busy visibility", "principal", inbox.principalURI, "err", err)
@@ -123,7 +124,7 @@ func (p *SchedulePlugin) prePropPatchVisibility(inbox *Inbox, pp *dav.PropPatch)
 // parseVisibility reads the property's element content: an optional
 // <audience> (domain | nobody) and an optional <allow> of DAV:href entries
 // (see allowedEntry). ownerDomain is the inbox owner's mail domain.
-func (p *SchedulePlugin) parseVisibility(fragment []byte, ownerDomain string) (acl.FreeBusyVisibility, error) {
+func (p *SchedulePlugin) parseVisibility(ctx context.Context, fragment []byte, ownerDomain string) (acl.FreeBusyVisibility, error) {
 	var v acl.FreeBusyVisibility
 	dec := xml.NewDecoder(io.MultiReader(
 		strings.NewReader("<v>"), bytes.NewReader(fragment), strings.NewReader("</v>")))
@@ -164,7 +165,7 @@ func (p *SchedulePlugin) parseVisibility(fragment []byte, ownerDomain string) (a
 					return v, fmt.Errorf("unknown audience %q", value)
 				}
 			case len(path) == 3:
-				uri := p.allowedEntry(value, ownerDomain)
+				uri := p.allowedEntry(ctx, value, ownerDomain)
 				if uri == "" {
 					return v, fmt.Errorf("cannot grant %q", value)
 				}
@@ -195,15 +196,15 @@ func (p *SchedulePlugin) parseVisibility(fragment []byte, ownerDomain string) (a
 //   - A principal path is accepted only for a principal in the owner's
 //     domain; any other path is refused exactly like one that does not
 //     exist.
-func (p *SchedulePlugin) allowedEntry(href, ownerDomain string) string {
+func (p *SchedulePlugin) allowedEntry(ctx context.Context, href, ownerDomain string) string {
 	if strings.HasPrefix(strings.ToLower(href), "mailto:") {
 		addr := strings.ToLower(href[len("mailto:"):])
 		at := strings.LastIndex(addr, "@")
 		if at <= 0 || at == len(addr)-1 || strings.ContainsAny(addr, " <>") {
 			return ""
 		}
-		if uri := principalForAddress(p.server, "mailto:"+addr); uri != "" && ownerDomain != "" &&
-			p.principalDomain(uri) == ownerDomain {
+		if uri := principalForAddress(ctx, p.server, "mailto:"+addr); uri != "" && ownerDomain != "" &&
+			p.principalDomain(ctx, uri) == ownerDomain {
 			return uri
 		}
 		return "mailto:" + addr
@@ -212,24 +213,24 @@ func (p *SchedulePlugin) allowedEntry(href, ownerDomain string) string {
 	if !strings.HasPrefix(path, "principals/") || ownerDomain == "" {
 		return ""
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(ctx, path)
 	if err != nil {
 		return ""
 	}
 	ph, ok := node.(acl.PrincipalHolder)
-	if !ok || p.principalDomain(ph.PrincipalURL()) != ownerDomain {
+	if !ok || p.principalDomain(ctx, ph.PrincipalURL()) != ownerDomain {
 		return ""
 	}
 	return ph.PrincipalURL()
 }
 
 // principalDomain returns a principal's lower-cased mail domain, or "".
-func (p *SchedulePlugin) principalDomain(principalURI string) string {
-	node, err := p.server.Tree.NodeForPath(principalURI)
+func (p *SchedulePlugin) principalDomain(ctx context.Context, principalURI string) string {
+	node, err := p.server.Tree.NodeForPath(ctx, principalURI)
 	if err != nil {
 		return ""
 	}
-	email := principalEmail(node)
+	email := principalEmail(ctx, node)
 	if at := strings.LastIndex(email, "@"); at >= 0 && at < len(email)-1 {
 		return strings.ToLower(email[at+1:])
 	}

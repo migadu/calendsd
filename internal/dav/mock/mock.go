@@ -4,6 +4,7 @@
 package mock
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -46,14 +47,14 @@ func (c *Collection) Attach(n dav.Node) {
 
 func (c *Collection) Name() string { return c.name }
 
-func (c *Collection) SetName(name string) error {
+func (c *Collection) SetName(ctx context.Context, name string) error {
 	c.name = name
 	return nil
 }
 
 func (c *Collection) LastModified() time.Time { return time.Time{} }
 
-func (c *Collection) Child(name string) (dav.Node, error) {
+func (c *Collection) Child(ctx context.Context, name string) (dav.Node, error) {
 	for _, ch := range c.children {
 		if ch.Name() == name {
 			return ch, nil
@@ -62,14 +63,14 @@ func (c *Collection) Child(name string) (dav.Node, error) {
 	return nil, dav.ErrNotFound("File not found: %s in '%s'", name, c.name)
 }
 
-func (c *Collection) Children() ([]dav.Node, error) { return c.children, nil }
+func (c *Collection) Children(ctx context.Context) ([]dav.Node, error) { return c.children, nil }
 
-func (c *Collection) ChildExists(name string) bool {
-	_, err := c.Child(name)
+func (c *Collection) ChildExists(ctx context.Context, name string) bool {
+	_, err := c.Child(ctx, name)
 	return err == nil
 }
 
-func (c *Collection) CreateFile(name string, data io.Reader) (string, error) {
+func (c *Collection) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
 	contents, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
@@ -79,7 +80,7 @@ func (c *Collection) CreateFile(name string, data io.Reader) (string, error) {
 	return f.ETag(), nil
 }
 
-func (c *Collection) CreateDirectory(name string) error {
+func (c *Collection) CreateDirectory(ctx context.Context, name string) error {
 	c.children = append(c.children, &Collection{name: name, parent: c})
 	return nil
 }
@@ -93,7 +94,7 @@ func (c *Collection) DeleteChild(name string) {
 	}
 }
 
-func (c *Collection) Delete() error {
+func (c *Collection) Delete(ctx context.Context) error {
 	if c.parent != nil {
 		c.parent.DeleteChild(c.name)
 	}
@@ -118,18 +119,18 @@ func (f *File) SetLastModified(t time.Time) { f.lastModified = t }
 
 func (f *File) Name() string { return f.name }
 
-func (f *File) SetName(name string) error {
+func (f *File) SetName(ctx context.Context, name string) error {
 	f.name = name
 	return nil
 }
 
 func (f *File) LastModified() time.Time { return f.lastModified }
 
-func (f *File) Get() (io.ReadCloser, error) {
+func (f *File) Get(ctx context.Context) (io.ReadCloser, error) {
 	return dav.BytesBody(f.contents), nil
 }
 
-func (f *File) Put(data io.Reader) (string, error) {
+func (f *File) Put(ctx context.Context, data io.Reader) (string, error) {
 	contents, err := io.ReadAll(data)
 	if err != nil {
 		return "", err
@@ -147,7 +148,7 @@ func (f *File) ETag() string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-func (f *File) Delete() error {
+func (f *File) Delete(ctx context.Context) error {
 	if f.parent != nil {
 		f.parent.DeleteChild(f.name)
 	}
@@ -167,14 +168,14 @@ func (m *MemoryPropStorage) ensure() {
 	}
 }
 
-func (m *MemoryPropStorage) PropFind(path string, pf *dav.PropFind) error {
+func (m *MemoryPropStorage) PropFind(ctx context.Context, path string, pf *dav.PropFind) error {
 	for name, value := range m.Props[path] {
 		pf.Set(name, value, 200)
 	}
 	return nil
 }
 
-func (m *MemoryPropStorage) PropPatch(path string, pp *dav.PropPatch) error {
+func (m *MemoryPropStorage) PropPatch(ctx context.Context, path string, pp *dav.PropPatch) error {
 	m.ensure()
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		if m.Props[path] == nil {
@@ -192,12 +193,12 @@ func (m *MemoryPropStorage) PropPatch(path string, pp *dav.PropPatch) error {
 	return nil
 }
 
-func (m *MemoryPropStorage) Delete(path string) error {
+func (m *MemoryPropStorage) Delete(ctx context.Context, path string) error {
 	delete(m.Props, path)
 	return nil
 }
 
-func (m *MemoryPropStorage) Move(source, destination string) error {
+func (m *MemoryPropStorage) Move(ctx context.Context, source, destination string) error {
 	m.ensure()
 	if props, exists := m.Props[source]; exists {
 		m.Props[destination] = props
@@ -252,7 +253,7 @@ func NewPropCollection(name string, props map[xml.Name]any, children ...dav.Node
 	return pc
 }
 
-func (pc *PropCollection) Props(names []xml.Name) (map[xml.Name]any, error) {
+func (pc *PropCollection) Props(ctx context.Context, names []xml.Name) (map[xml.Name]any, error) {
 	if len(names) == 0 {
 		return pc.props, nil
 	}
@@ -265,7 +266,7 @@ func (pc *PropCollection) Props(names []xml.Name) (map[xml.Name]any, error) {
 	return out, nil
 }
 
-func (pc *PropCollection) PropPatch(pp *dav.PropPatch) {
+func (pc *PropCollection) PropPatch(ctx context.Context, pp *dav.PropPatch) {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		switch pc.Mode {
 		case UpdateFalse:
@@ -291,7 +292,7 @@ func (pc *PropCollection) PropPatch(pp *dav.PropPatch) {
 
 // CreateDirectory mirrors sabre's override: children of a properties
 // collection are properties collections with the same fail mode.
-func (pc *PropCollection) CreateDirectory(name string) error {
+func (pc *PropCollection) CreateDirectory(ctx context.Context, name string) error {
 	child := NewPropCollection(name, nil)
 	child.Mode = pc.Mode
 	pc.Attach(child)

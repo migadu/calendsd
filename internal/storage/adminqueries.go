@@ -34,7 +34,7 @@ type AdminCounts struct {
 }
 
 // Counts tallies every table the panel inspects.
-func (q *AdminQueries) Counts() (*AdminCounts, error) {
+func (q *AdminQueries) Counts(ctx context.Context) (*AdminCounts, error) {
 	var c AdminCounts
 	for _, t := range []struct {
 		table string
@@ -50,7 +50,7 @@ func (q *AdminQueries) Counts() (*AdminCounts, error) {
 		{"schedulingobjects", &c.SchedulingObjects},
 		{"propertystorage", &c.PropertyRows},
 	} {
-		if err := q.DB.QueryRow("SELECT count(*) FROM " + t.table).Scan(t.dst); err != nil {
+		if err := q.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+t.table).Scan(t.dst); err != nil {
 			return nil, fmt.Errorf("counting %s: %w", t.table, err)
 		}
 	}
@@ -62,12 +62,7 @@ func (q *AdminQueries) Counts() (*AdminCounts, error) {
 // Unlike Counts it stays O(1) on large databases, so it is safe in a health
 // check that runs on a monitoring interval. A missing extension table fails it
 // too: the server starts without one and only fails the requests that need it.
-func (q *AdminQueries) SchemaPresent() error {
-	return q.SchemaPresentContext(context.Background())
-}
-
-// SchemaPresentContext is SchemaPresent bounded by ctx.
-func (q *AdminQueries) SchemaPresentContext(ctx context.Context) error {
+func (q *AdminQueries) SchemaPresent(ctx context.Context) error {
 	for _, table := range append([]string{
 		"principals", "users", "calendars", "calendarinstances",
 		"calendarobjects", "addressbooks", "cards", "schedulingobjects",
@@ -99,12 +94,12 @@ type AdminChange struct {
 // RecentChanges returns the newest change-log rows across calendars and
 // address books, most recent first (by change-row id per table, interleaved
 // by nothing better — there is no cross-table ordering without timestamps).
-func (q *AdminQueries) RecentChanges(limit int) ([]AdminChange, error) {
+func (q *AdminQueries) RecentChanges(ctx context.Context, limit int) ([]AdminChange, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	var out []AdminChange
-	rows, err := q.DB.Query(`
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT c.calendarid, coalesce(ci.uri, ''), coalesce(ci.principaluri, ''),
        c.uri, c.synctoken, c.operation, o.lastmodified
   FROM calendarchanges c
@@ -132,7 +127,7 @@ SELECT c.calendarid, coalesce(ci.uri, ''), coalesce(ci.principaluri, ''),
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = q.DB.Query(`
+	rows, err = q.DB.QueryContext(ctx, `
 SELECT c.addressbookid, coalesce(ab.uri, ''), coalesce(ab.principaluri, ''),
        c.uri, c.synctoken, c.operation, cd.lastmodified
   FROM addressbookchanges c
@@ -175,10 +170,10 @@ type AdminAuthDiagnostics struct {
 }
 
 // AuthDiagnostics cross-checks principals against users.
-func (q *AdminQueries) AuthDiagnostics() (*AdminAuthDiagnostics, error) {
+func (q *AdminQueries) AuthDiagnostics(ctx context.Context) (*AdminAuthDiagnostics, error) {
 	var d AdminAuthDiagnostics
 	collect := func(dst *[]string, query string) error {
-		rows, err := q.DB.Query(query)
+		rows, err := q.DB.QueryContext(ctx, query)
 		if err != nil {
 			return err
 		}
@@ -222,11 +217,11 @@ type AdminUserRow struct {
 
 // UserForPrincipal returns the users row matching a principal path
 // ("principals/<name>" → username "<name>"), or nil when absent.
-func (q *AdminQueries) UserForPrincipal(principalURI string) (*AdminUserRow, error) {
+func (q *AdminQueries) UserForPrincipal(ctx context.Context, principalURI string) (*AdminUserRow, error) {
 	username := strings.TrimPrefix(principalURI, "principals/")
 	var u AdminUserRow
 	var digest sql.NullString
-	err := q.DB.QueryRow(`SELECT username, digesta1 FROM users WHERE username = $1`,
+	err := q.DB.QueryRowContext(ctx, `SELECT username, digesta1 FROM users WHERE username = $1`,
 		username).Scan(&u.Username, &digest)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -259,8 +254,8 @@ type AdminCalendarInstance struct {
 
 // CalendarInstances lists every principal's instance of one calendar,
 // owner first.
-func (q *AdminQueries) CalendarInstances(calendarID string) ([]AdminCalendarInstance, error) {
-	rows, err := q.DB.Query(`
+func (q *AdminQueries) CalendarInstances(ctx context.Context, calendarID string) ([]AdminCalendarInstance, error) {
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT id, calendarid, coalesce(principaluri, ''), coalesce(uri, ''), access,
        coalesce(displayname, ''), coalesce(description, ''),
        coalesce(calendarcolor, ''), calendarorder, coalesce(timezone, ''),
@@ -293,9 +288,9 @@ SELECT id, calendarid, coalesce(principaluri, ''), coalesce(uri, ''), access,
 
 // LookupCalendar resolves (principal, calendar URI) to the shared calendars
 // row id, or "" when no such instance exists.
-func (q *AdminQueries) LookupCalendar(principalURI, uri string) (string, error) {
+func (q *AdminQueries) LookupCalendar(ctx context.Context, principalURI, uri string) (string, error) {
 	var id int64
-	err := q.DB.QueryRow(
+	err := q.DB.QueryRowContext(ctx,
 		`SELECT calendarid FROM calendarinstances WHERE principaluri = $1 AND uri = $2`,
 		principalURI, uri).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -318,10 +313,10 @@ type AdminCalendarMeta struct {
 
 // CalendarMeta returns sync token, supported components, and object totals
 // for one calendar, or nil when the calendar does not exist.
-func (q *AdminQueries) CalendarMeta(calendarID string) (*AdminCalendarMeta, error) {
+func (q *AdminQueries) CalendarMeta(ctx context.Context, calendarID string) (*AdminCalendarMeta, error) {
 	var m AdminCalendarMeta
 	var components sql.NullString
-	err := q.DB.QueryRow(`SELECT synctoken, components FROM calendars WHERE id = $1`,
+	err := q.DB.QueryRowContext(ctx, `SELECT synctoken, components FROM calendars WHERE id = $1`,
 		calendarID).Scan(&m.SyncToken, &components)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -330,7 +325,7 @@ func (q *AdminQueries) CalendarMeta(calendarID string) (*AdminCalendarMeta, erro
 		return nil, err
 	}
 	m.Components = components.String
-	if err := q.DB.QueryRow(
+	if err := q.DB.QueryRowContext(ctx,
 		`SELECT count(*), coalesce(sum(size), 0) FROM calendarobjects WHERE calendarid = $1`,
 		calendarID).Scan(&m.ObjectCount, &m.TotalSize); err != nil {
 		return nil, err
@@ -352,10 +347,10 @@ type AdminPropRow struct {
 
 // PropertyRows returns the propertystorage rows for path: its global dead
 // props plus every per-user overlay row.
-func (q *AdminQueries) PropertyRows(path string) ([]AdminPropRow, error) {
+func (q *AdminQueries) PropertyRows(ctx context.Context, path string) ([]AdminPropRow, error) {
 	// Overlay rows are path + "/" + LF + principal; LF needs no LIKE
 	// escaping, but the path itself does (escapeLike, backslash escapes).
-	rows, err := q.DB.Query(`
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT path, name, coalesce(valuetype, 1), coalesce(value, ''::bytea)
   FROM propertystorage
  WHERE path = $1 OR path LIKE $2 ESCAPE '\'
@@ -399,11 +394,11 @@ type AdminAddressBook struct {
 }
 
 // AddressBook returns one address book with card totals, or nil.
-func (q *AdminQueries) AddressBook(id string) (*AdminAddressBook, error) {
+func (q *AdminQueries) AddressBook(ctx context.Context, id string) (*AdminAddressBook, error) {
 	var b AdminAddressBook
 	var principal, uri, displayname, description sql.NullString
 	var rowID int64
-	err := q.DB.QueryRow(`
+	err := q.DB.QueryRowContext(ctx, `
 SELECT id, principaluri, uri, displayname, description, synctoken
   FROM addressbooks WHERE id = $1`, id).Scan(
 		&rowID, &principal, &uri, &displayname, &description, &b.SyncToken)
@@ -416,7 +411,7 @@ SELECT id, principaluri, uri, displayname, description, synctoken
 	b.ID = fmt.Sprint(rowID)
 	b.PrincipalURI, b.URI = principal.String, uri.String
 	b.DisplayName, b.Description = displayname.String, description.String
-	if err := q.DB.QueryRow(
+	if err := q.DB.QueryRowContext(ctx,
 		`SELECT count(*), coalesce(sum(size), 0) FROM cards WHERE addressbookid = $1`,
 		id).Scan(&b.CardCount, &b.TotalSize); err != nil {
 		return nil, err
@@ -426,9 +421,9 @@ SELECT id, principaluri, uri, displayname, description, synctoken
 
 // LookupAddressBook resolves (principal, book URI) to the addressbooks row
 // id, or "".
-func (q *AdminQueries) LookupAddressBook(principalURI, uri string) (string, error) {
+func (q *AdminQueries) LookupAddressBook(ctx context.Context, principalURI, uri string) (string, error) {
 	var id int64
-	err := q.DB.QueryRow(
+	err := q.DB.QueryRowContext(ctx,
 		`SELECT id FROM addressbooks WHERE principaluri = $1 AND uri = $2`,
 		principalURI, uri).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -477,7 +472,7 @@ const adminScanCap = 5000
 // (not merely more rows) behind it, or an in-data scan hit the scan cap.
 // Unless InData asks for a payload search, filtering happens in SQL and
 // calendardata never leaves the database.
-func (q *AdminQueries) Objects(query AdminObjectQuery) (objects []AdminObjectRow, truncated bool, err error) {
+func (q *AdminQueries) Objects(ctx context.Context, query AdminObjectQuery) (objects []AdminObjectRow, truncated bool, err error) {
 	if query.Limit <= 0 || query.Limit > 500 {
 		query.Limit = 100
 	}
@@ -501,7 +496,7 @@ func (q *AdminQueries) Objects(query AdminObjectQuery) (objects []AdminObjectRow
 			where += fmt.Sprintf(" AND (uri ILIKE $%d OR uid ILIKE $%d)", len(args), len(args))
 		}
 		// One row past the limit answers "were there more matches".
-		rows, err := q.DB.Query(fmt.Sprintf(`
+		rows, err := q.DB.QueryContext(ctx, fmt.Sprintf(`
 SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
        size, lastmodified, firstoccurence, lastoccurence
   FROM calendarobjects WHERE %s ORDER BY id DESC LIMIT %d`, where, query.Limit+1), args...)
@@ -536,7 +531,7 @@ SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
 	// past the cap, so the database never ships payloads the loop would
 	// discard.
 	args = append(args, adminScanCap+1)
-	rows, err := q.DB.Query(fmt.Sprintf(`
+	rows, err := q.DB.QueryContext(ctx, fmt.Sprintf(`
 SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
        size, lastmodified, firstoccurence, lastoccurence, calendardata
   FROM calendarobjects WHERE %s ORDER BY id DESC LIMIT $%d`, where, len(args)), args...)
@@ -594,10 +589,10 @@ type AdminObjectDetail struct {
 }
 
 // Object fetches one calendar object with its stored metadata, or nil.
-func (q *AdminQueries) Object(calendarID, uri string) (*AdminObjectDetail, error) {
+func (q *AdminQueries) Object(ctx context.Context, calendarID, uri string) (*AdminObjectDetail, error) {
 	var d AdminObjectDetail
 	var lastmod, first, last sql.NullInt64
-	err := q.DB.QueryRow(`
+	err := q.DB.QueryRowContext(ctx, `
 SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
        size, lastmodified, firstoccurence, lastoccurence, calendardata
   FROM calendarobjects WHERE calendarid = $1 AND uri = $2`, calendarID, uri).Scan(
@@ -633,7 +628,7 @@ type AdminCardRow struct {
 // case-insensitive substring over uri (and carddata when inData is set).
 // Same contract as Objects: SQL-side filtering without payload transfer
 // unless inData, and truncated only when matches were actually cut off.
-func (q *AdminQueries) CardsSearch(bookID, match string, inData bool, limit int) (cards []AdminCardRow, truncated bool, err error) {
+func (q *AdminQueries) CardsSearch(ctx context.Context, bookID, match string, inData bool, limit int) (cards []AdminCardRow, truncated bool, err error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -645,7 +640,7 @@ func (q *AdminQueries) CardsSearch(bookID, match string, inData bool, limit int)
 			args = append(args, "%"+escapeLike(match)+"%")
 			where += fmt.Sprintf(" AND uri ILIKE $%d", len(args))
 		}
-		rows, err := q.DB.Query(fmt.Sprintf(`
+		rows, err := q.DB.QueryContext(ctx, fmt.Sprintf(`
 SELECT uri, coalesce(etag, ''), size, lastmodified
   FROM cards WHERE %s ORDER BY id DESC LIMIT %d`, where, limit+1), args...)
 		if err != nil {
@@ -670,7 +665,7 @@ SELECT uri, coalesce(etag, ''), size, lastmodified
 		return cards, false, nil
 	}
 
-	rows, err := q.DB.Query(`
+	rows, err := q.DB.QueryContext(ctx, `
 SELECT uri, coalesce(etag, ''), size, lastmodified, carddata
   FROM cards WHERE addressbookid = $1 ORDER BY id DESC LIMIT $2`, bookID, adminScanCap+1)
 	if err != nil {
@@ -716,10 +711,10 @@ type AdminCardDetail struct {
 }
 
 // Card fetches one card with its stored metadata, or nil.
-func (q *AdminQueries) Card(bookID, uri string) (*AdminCardDetail, error) {
+func (q *AdminQueries) Card(ctx context.Context, bookID, uri string) (*AdminCardDetail, error) {
 	var d AdminCardDetail
 	var lastmod sql.NullInt64
-	err := q.DB.QueryRow(`
+	err := q.DB.QueryRowContext(ctx, `
 SELECT uri, coalesce(etag, ''), size, lastmodified, carddata
   FROM cards WHERE addressbookid = $1 AND uri = $2`, bookID, uri).Scan(
 		&d.Row.URI, &d.Row.ETag, &d.Row.Size, &lastmod, &d.Data)

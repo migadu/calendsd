@@ -65,7 +65,7 @@ func TestLookupsPrincipalByAddress(t *testing.T) {
 		{"principals", "mailto:", ""},
 		{"principals", "mailto:nobody@example.org", ""},
 	} {
-		got, err := principals.PrincipalByAddress(tc.prefix, tc.address)
+		got, err := principals.PrincipalByAddress(t.Context(), tc.prefix, tc.address)
 		if err != nil {
 			t.Fatalf("PrincipalByAddress(%q, %q): %v", tc.prefix, tc.address, err)
 		}
@@ -85,7 +85,7 @@ func TestLookupsCalendarObjectByUID(t *testing.T) {
 		INSERT INTO calendarinstances (calendarid, principaluri, access, uri)
 			VALUES (currval('calendars_id_seq'), 'principals/alice', 1, 'b');
 	`)}
-	cals, err := backend.CalendarsForUser("principals/alice")
+	cals, err := backend.CalendarsForUser(t.Context(), "principals/alice")
 	if err != nil || len(cals) != 2 {
 		t.Fatalf("calendars = %d (%v), want 2", len(cals), err)
 	}
@@ -97,7 +97,7 @@ func TestLookupsCalendarObjectByUID(t *testing.T) {
 		cal      int
 		uri, uid string
 	}{{0, "one.ics", "uid-1"}, {0, "two.ics", "uid-2"}, {1, "other.ics", "uid-1"}} {
-		if _, err := backend.CreateCalendarObject(cals[o.cal].ID, o.uri, event(o.uid)); err != nil {
+		if _, err := backend.CreateCalendarObject(t.Context(), cals[o.cal].ID, o.uri, event(o.uid)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -105,7 +105,7 @@ func TestLookupsCalendarObjectByUID(t *testing.T) {
 		cal       int
 		uid, want string
 	}{{0, "uid-1", "one.ics"}, {0, "uid-2", "two.ics"}, {1, "uid-1", "other.ics"}, {1, "uid-2", ""}, {0, "missing", ""}} {
-		obj, err := backend.CalendarObjectByUID(cals[tc.cal].ID, tc.uid)
+		obj, err := backend.CalendarObjectByUID(t.Context(), cals[tc.cal].ID, tc.uid)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -32,7 +32,7 @@ func (p *SchedulePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (b
 	if err != nil {
 		return false, nil
 	}
-	node, err := p.server.Tree.NodeForPath(path)
+	node, err := p.server.Tree.NodeForPath(r.Context(), path)
 	if err != nil {
 		return false, nil
 	}
@@ -128,7 +128,7 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	for _, att := range vfb.Props.Values("ATTENDEE") {
 		status := "2.0;Success"
 		var fbData string
-		principal := principalForAddress(p.server, att.Value)
+		principal := principalForAddress(r.Context(), p.server, att.Value)
 		if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {
@@ -180,7 +180,7 @@ type scheduleResponseItemXML struct {
 // the caller can distinguish "denied" from "free".
 func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker PrivilegeChecker, principalURI string, start, end time.Time, extraProps ...string) (fb []byte, readable bool, err error) {
 	_, name := pathutil.Split(principalURI)
-	home, err := p.server.Tree.NodeForPath("calendars/" + name)
+	home, err := p.server.Tree.NodeForPath(ctx, "calendars/"+name)
 	if err != nil {
 		return nil, false, err
 	}
@@ -188,7 +188,7 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 	if !ok {
 		return nil, false, nil
 	}
-	children, err := coll.Children()
+	children, err := coll.Children(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -213,7 +213,7 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 		if calNode.transparent() {
 			continue
 		}
-		objs, err := calNode.QueryObjects("", start, end)
+		objs, err := calNode.QueryObjects(ctx, "", start, end)
 		if err != nil {
 			continue
 		}
@@ -228,7 +228,7 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 	// read-free-busy check, so they reach exactly who could already see busy
 	// time. A principal whose calendars are all private still reports them:
 	// hours are not calendar content (VAVAILABILITY-PLAN.md §4.3).
-	if availability := p.availabilityFor(name); availability != nil {
+	if availability := p.availabilityFor(ctx, name); availability != nil {
 		fb, err = ical.GenerateFreeBusyWithAvailability(payloads, availability, start, end, time.UTC, time.Now(), extraProps...)
 		if !errors.Is(err, ical.ErrInvalidAvailability) {
 			return fb, true, err
@@ -243,8 +243,8 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 
 // availabilityFor returns the stored calendar-availability of the user whose
 // home is calendars/<name>, or nil when none is set or it cannot be read.
-func (p *SchedulePlugin) availabilityFor(name string) []byte {
-	node, err := p.server.Tree.NodeForPath("calendars/" + name + "/inbox")
+func (p *SchedulePlugin) availabilityFor(ctx context.Context, name string) []byte {
+	node, err := p.server.Tree.NodeForPath(ctx, "calendars/"+name+"/inbox")
 	if err != nil {
 		return nil
 	}
@@ -256,7 +256,7 @@ func (p *SchedulePlugin) availabilityFor(name string) []byte {
 	if ab == nil {
 		return nil
 	}
-	data, err := ab.Availability(inbox.principalURI)
+	data, err := ab.Availability(ctx, inbox.principalURI)
 	if err != nil {
 		slog.Warn("reading calendar-availability", "principal", inbox.principalURI, "err", err)
 		return nil

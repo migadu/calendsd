@@ -253,7 +253,7 @@ func (h *Handler) createTarget(r *http.Request, create bool) (storage.AddressBoo
 	if !create {
 		return storage.AddressBook{}, false, nil
 	}
-	id, err := h.cards.CreateAddressBook(principal, h.opts.DefaultBookURI, map[xml.Name]any{
+	id, err := h.cards.CreateAddressBook(r.Context(), principal, h.opts.DefaultBookURI, map[xml.Name]any{
 		{Space: "DAV:", Local: "displayname"}: h.opts.DefaultBookName,
 	})
 	if storage.IsUniqueViolation(err) {
@@ -316,7 +316,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		writeConflict(w, *existing)
 		return
 	}
-	if _, err := h.cards.CreateCard(book.ID, uri, data); err != nil {
+	if _, err := h.cards.CreateCard(r.Context(), book.ID, uri, data); err != nil {
 		if storage.IsUniqueViolation(err) {
 			// The check above and this insert are not atomic; a double-click or
 			// a plugin retry lands here, and it is the same conflict.
@@ -391,12 +391,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	ifMatch := unquoteETag(r.Header.Get("If-Match"))
 	switch {
 	case !hasIfMatch, ifMatch == "*":
-		if _, err := h.cards.UpdateCard(current.BookID, uri, data); err != nil {
+		if _, err := h.cards.UpdateCard(r.Context(), current.BookID, uri, data); err != nil {
 			h.fail(w, r, err)
 			return
 		}
 	default:
-		_, matched, err := h.cards.UpdateCardIfMatch(current.BookID, uri, data, ifMatch)
+		_, matched, err := h.cards.UpdateCardIfMatch(r.Context(), current.BookID, uri, data, ifMatch)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -430,7 +430,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such contact")
 		return
 	}
-	if err := h.cards.DeleteCard(c.BookID, c.URI); err != nil {
+	if err := h.cards.DeleteCard(r.Context(), c.BookID, c.URI); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -464,7 +464,7 @@ func (h *Handler) batchDelete(w http.ResponseWriter, r *http.Request) {
 			missing = append(missing, id)
 			continue
 		}
-		if err := h.cards.DeleteCard(c.BookID, c.URI); err != nil {
+		if err := h.cards.DeleteCard(r.Context(), c.BookID, c.URI); err != nil {
 			h.fail(w, r, err)
 			return
 		}
@@ -493,7 +493,7 @@ func (h *Handler) deleteAll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"deleted": 0, "book": ""})
 		return
 	}
-	n, err := h.cards.DeleteAllCards(book.ID)
+	n, err := h.cards.DeleteAllCards(r.Context(), book.ID)
 	if err != nil {
 		h.fail(w, r, err)
 		return

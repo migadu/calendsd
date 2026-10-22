@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
@@ -19,7 +20,7 @@ type BasicBackend struct {
 	// PrincipalPrefix is prepended to the username, like sabre.
 	PrincipalPrefix string
 	// Validate checks a username/password pair.
-	Validate func(username, password string) bool
+	Validate func(ctx context.Context, username, password string) bool
 	// Metrics counts attempts and times the check; only requests that
 	// actually present Basic credentials are counted, so a Digest login
 	// failing this backend in the stacked default setup adds no series.
@@ -51,7 +52,7 @@ func (b *BasicBackend) Check(r *http.Request) (string, error) {
 		return "", errNoBasic
 	}
 	start := time.Now()
-	valid := b.Validate(username, password)
+	valid := b.Validate(r.Context(), username, password)
 	b.Metrics.ObserveAuthCheck("basic", time.Since(start).Seconds())
 	if !valid {
 		b.Metrics.AuthAttempt("basic", "bad_credentials")

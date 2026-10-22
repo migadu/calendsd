@@ -243,7 +243,7 @@ func (f *Frecency) Bump(ctx context.Context, principalURI string, entries []Frec
 	}
 	sort.Strings(emails) // a fixed lock order, so two concurrent bumps cannot deadlock
 
-	return len(merged), withTx(f.DB, func(tx *sql.Tx) error {
+	return len(merged), withTx(ctx, f.DB, func(tx *sql.Tx) error {
 		for _, email := range emails {
 			a := merged[email]
 			if _, err := tx.ExecContext(ctx, `

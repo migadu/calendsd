@@ -86,13 +86,13 @@ func sendAsUserPlugin(sub caldav.UserMailer, relay caldav.Mailer) *caldav.IMipPl
 		SenderEmail: "server@example.org",
 		Mailer:      relay,
 		Submission:  sub,
-		SenderAddresses: func(principal string) []string {
+		SenderAddresses: func(_ context.Context, principal string) []string {
 			if principal == "principals/alice" {
 				return []string{"mailto:alice@example.org", "mailto:alice.alias@example.org"}
 			}
 			return nil
 		},
-		IsResourceSender: func(addr string) bool { return addr == "mailto:room1@example.org" },
+		IsResourceSender: func(_ context.Context, addr string) bool { return addr == "mailto:room1@example.org" },
 	}
 }
 
@@ -230,7 +230,7 @@ func submissionServer(sub caldav.UserMailer, relay caldav.Mailer) *dav.Server {
 	srv := dav.NewServer("/", root)
 	srv.AddPlugin(auth.NewPlugin(&auth.BasicBackend{
 		Realm:    "SabreDAV",
-		Validate: func(u, pw string) bool { return u == "user1" && pw == "pw" },
+		Validate: func(_ context.Context, u, pw string) bool { return u == "user1" && pw == "pw" },
 	}))
 	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 	srv.AddPlugin(&caldav.Plugin{})
@@ -264,7 +264,7 @@ func queuedSubmissionServer(sub caldav.UserMailer, dq caldav.DurableQueue) (*dav
 	srv := dav.NewServer("/", root)
 	srv.AddPlugin(auth.NewPlugin(&auth.BasicBackend{
 		Realm:    "SabreDAV",
-		Validate: func(u, pw string) bool { return u == "user1" && pw == "pw" },
+		Validate: func(_ context.Context, u, pw string) bool { return u == "user1" && pw == "pw" },
 	}))
 	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
 	srv.AddPlugin(&caldav.Plugin{})
@@ -280,7 +280,7 @@ func queuedSubmissionServer(sub caldav.UserMailer, dq caldav.DurableQueue) (*dav
 // object's ATTENDEE for addr, or "" if absent.
 func storedScheduleStatus(t *testing.T, backend *caldav.MockSchedulingBackend, addr string) string {
 	t.Helper()
-	obj, err := backend.CalendarObject(caldav.CalendarID{Calendar: "1"}, "e1.ics")
+	obj, err := backend.CalendarObject(t.Context(), caldav.CalendarID{Calendar: "1"}, "e1.ics")
 	if err != nil || obj == nil {
 		t.Fatalf("stored object missing: %v", err)
 	}

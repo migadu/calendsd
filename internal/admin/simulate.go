@@ -83,7 +83,7 @@ func (a *App) simulateData(r *http.Request) (any, error) {
 	// Effective ACL: resolve the node in the real tree and render the acl
 	// plugin's view of it (the plan's "walk the tree, render ACL()").
 	srv := a.NewSimulator(adminViewPrincipal)
-	node, err := srv.Tree.NodeForPath(strings.Trim(d.Path, "/"))
+	node, err := srv.Tree.NodeForPath(r.Context(), strings.Trim(d.Path, "/"))
 	if err != nil {
 		d.ACLNote = "node not found: " + err.Error()
 		return d, nil

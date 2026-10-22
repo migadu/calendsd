@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"context"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -193,12 +194,12 @@ type resolvingPrincipals struct {
 	listings, lookups int
 }
 
-func (b *resolvingPrincipals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
+func (b *resolvingPrincipals) PrincipalsByPrefix(ctx context.Context, prefix string) ([]acl.Principal, error) {
 	b.listings++
-	return b.MemoryBackend.PrincipalsByPrefix(prefix)
+	return b.MemoryBackend.PrincipalsByPrefix(ctx, prefix)
 }
 
-func (b *resolvingPrincipals) PrincipalByAddress(prefix, address string) (string, error) {
+func (b *resolvingPrincipals) PrincipalByAddress(ctx context.Context, prefix, address string) (string, error) {
 	b.lookups++
 	if prefix == "principals" && strings.EqualFold(address, "mailto:user2@example.org") {
 		return "principals/user2", nil
@@ -306,9 +307,9 @@ func TestInvitePropertyIsWellFormed(t *testing.T) {
 // records the body it gets.
 type bodyReader struct{ got string }
 
-func (b *bodyReader) PluginName() string           { return "body-reader" }
-func (b *bodyReader) Init(*dav.Server)             {}
-func (b *bodyReader) Methods(path string) []string { return []string{"POST"} }
+func (b *bodyReader) PluginName() string                                { return "body-reader" }
+func (b *bodyReader) Init(*dav.Server)                                  {}
+func (b *bodyReader) Methods(ctx context.Context, path string) []string { return []string{"POST"} }
 func (b *bodyReader) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	raw, err := io.ReadAll(r.Body)
 	b.got = string(raw)

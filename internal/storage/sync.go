@@ -5,6 +5,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strconv"
@@ -30,24 +31,24 @@ var (
 // ChangesForCalendar transcribes sabre's PDO getChangesForCalendar: the
 // deduplicated change log since a token (last operation per uri wins), or
 // the full object list for an initial sync.
-func (b *CalDAV) ChangesForCalendar(id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+func (b *CalDAV) ChangesForCalendar(ctx context.Context, id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	defer b.Metrics.DBOpTimer("changes_for_calendar")()
-	return changesSince(b.DB, calendarLog, id.Calendar, syncToken, limit)
+	return changesSince(ctx, b.DB, calendarLog, id.Calendar, syncToken, limit)
 }
 
 // ChangesForAddressBook is ChangesForCalendar for an address book.
-func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
+func (b *CardDAV) ChangesForAddressBook(ctx context.Context, addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	defer b.Metrics.DBOpTimer("changes_for_addressbook")()
-	return changesSince(b.DB, addressBookLog, addressBookID, syncToken, limit)
+	return changesSince(ctx, b.DB, addressBookLog, addressBookID, syncToken, limit)
 }
 
 // changesSince answers a sync REPORT for one collection. An empty token is an
 // initial sync (every member as added, at the current token); nil, nil means
 // an unknown collection or an unparseable token.
-func changesSince(db *sql.DB, log changeLog, collectionID, syncToken string, limit int) (*dav.ChangeSet, error) {
+func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, syncToken string, limit int) (*dav.ChangeSet, error) {
 	if syncToken == "" {
 		var currentToken int64
-		err := db.QueryRow(`SELECT synctoken FROM `+log.collections+` WHERE id = $1`, collectionID).Scan(&currentToken)
+		err := db.QueryRowContext(ctx, `SELECT synctoken FROM `+log.collections+` WHERE id = $1`, collectionID).Scan(&currentToken)
 		// A missing collection means "no sync info"; any other error is a
 		// real failure that must surface, not be masked as an empty change
 		// set.
@@ -58,7 +59,7 @@ func changesSince(db *sql.DB, log changeLog, collectionID, syncToken string, lim
 			return nil, err
 		}
 		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(currentToken, 10)}
-		rows, err := db.Query(`SELECT uri FROM `+log.members+` WHERE `+log.idColumn+` = $1`, collectionID)
+		rows, err := db.QueryContext(ctx, `SELECT uri FROM `+log.members+` WHERE `+log.idColumn+` = $1`, collectionID)
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +84,7 @@ func changesSince(db *sql.DB, log changeLog, collectionID, syncToken string, lim
 		// One extra row detects truncation, like sabre.
 		query += " LIMIT " + strconv.Itoa(limit+1)
 	}
-	rows, err := db.Query(query, since, collectionID)
+	rows, err := db.QueryContext(ctx, query, since, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -143,13 +144,13 @@ func changesSince(db *sql.DB, log changeLog, collectionID, syncToken string, lim
 // past that token skip one forever. Sabre's unwrapped statements race here;
 // the lock serializes all Go-side writers and any sabre writer that reaches
 // its UPDATE while we hold the row.
-func recordChange(tx *sql.Tx, log changeLog, collectionID, uri string, operation int) error {
+func recordChange(ctx context.Context, tx *sql.Tx, log changeLog, collectionID, uri string, operation int) error {
 	var token int64
-	if err := tx.QueryRow(`UPDATE `+log.collections+` SET synctoken = synctoken + 1
+	if err := tx.QueryRowContext(ctx, `UPDATE `+log.collections+` SET synctoken = synctoken + 1
  WHERE id = $1 RETURNING synctoken - 1`, collectionID).Scan(&token); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO `+log.changes+` (uri, synctoken, `+log.idColumn+`, operation)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+log.changes+` (uri, synctoken, `+log.idColumn+`, operation)
 VALUES ($1, $2, $3, $4)`, uri, token, collectionID, operation); err != nil {
 		return err
 	}
@@ -157,6 +158,6 @@ VALUES ($1, $2, $3, $4)`, uri, token, collectionID, operation); err != nil {
 	// changed. pg_notify delivers on COMMIT only, so a rolled-back write emits
 	// nothing; with no LISTENer (push disabled) it is a cheap no-op. The
 	// payload is the collection key the worker maps to subscriptions/topic.
-	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, log.notify+collectionID)
+	_, err := tx.ExecContext(ctx, `SELECT pg_notify('dav_push', $1)`, log.notify+collectionID)
 	return err
 }

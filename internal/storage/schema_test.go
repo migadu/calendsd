@@ -37,7 +37,7 @@ func TestApplySchema(t *testing.T) {
 	defer db.Close()
 	q := &storage.AdminQueries{DB: db}
 
-	if err := q.SchemaPresent(); err == nil || !strings.Contains(err.Error(), "notifications") {
+	if err := q.SchemaPresent(t.Context()); err == nil || !strings.Contains(err.Error(), "notifications") {
 		t.Fatalf("SchemaPresent on a sabre-only database = %v, want the first extension table missing", err)
 	}
 	for i := range 2 {
@@ -45,7 +45,7 @@ func TestApplySchema(t *testing.T) {
 			t.Fatalf("ApplySchema run %d: %v", i+1, err)
 		}
 	}
-	if err := q.SchemaPresent(); err != nil {
+	if err := q.SchemaPresent(t.Context()); err != nil {
 		t.Fatalf("SchemaPresent after ApplySchema: %v", err)
 	}
 

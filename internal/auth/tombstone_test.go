@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func TestPluginTombstoneGate(t *testing.T) {
 	p.Metrics = set
 
 	// Tombstoned: correct creds, but 403 (not a 401 re-challenge) and no proceed.
-	p.Tombstoned = func(principal string) bool { return principal == "principals/alice" }
+	p.Tombstoned = func(_ context.Context, principal string) bool { return principal == "principals/alice" }
 	proceed, err := p.BeforeMethod(httptest.NewRecorder(), httptest.NewRequest("PROPFIND", "/", nil))
 	if proceed {
 		t.Fatal("tombstoned account was allowed through")
@@ -52,7 +53,7 @@ func TestPluginTombstoneGate(t *testing.T) {
 	}
 
 	// Live account (gate returns false): the same credentials pass.
-	p.Tombstoned = func(string) bool { return false }
+	p.Tombstoned = func(context.Context, string) bool { return false }
 	if proceed, err := p.BeforeMethod(httptest.NewRecorder(), httptest.NewRequest("PROPFIND", "/", nil)); !proceed || err != nil {
 		t.Fatalf("live account rejected: proceed=%v err=%v", proceed, err)
 	}

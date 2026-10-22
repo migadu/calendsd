@@ -541,7 +541,7 @@ func TestParity(t *testing.T) {
 		// triple inserted, default calendar auto-provisioned through the
 		// production code path — must be fully usable via real sabre.
 		writes := &storage.AdminWrites{DB: db}
-		if err := writes.CreateUser("adminmade",
+		if err := writes.CreateUser(t.Context(), "adminmade",
 			auth.DigestA1("adminmade", "SabreDAV", "s3cret"),
 			"adminmade@example.org", "Admin Made"); err != nil {
 			t.Fatalf("CreateUser: %v", err)

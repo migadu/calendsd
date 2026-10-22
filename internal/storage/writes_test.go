@@ -25,17 +25,17 @@ func TestArrayColumnsRoundTrip(t *testing.T) {
 	db := openContactsScratchDB(t, "calserver_d_arrays")
 	cal := &storage.CalDAV{DB: db}
 	awkward := []string{"principals/a,b", `mailto:"q"@x`, "{brace}", "NULL", `back\slash`, ""}
-	if err := cal.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{Allowed: awkward}); err != nil {
+	if err := cal.SetFreeBusyVisibility(t.Context(), "principals/alice", acl.FreeBusyVisibility{Allowed: awkward}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := cal.FreeBusyVisibility("principals/alice")
+	got, err := cal.FreeBusyVisibility(t.Context(), "principals/alice")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got.Allowed, awkward) {
 		t.Errorf("Allowed round trip = %q, want %q", got.Allowed, awkward)
 	}
-	if err := cal.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{Hidden: true}); err != nil {
+	if err := cal.SetFreeBusyVisibility(t.Context(), "principals/alice", acl.FreeBusyVisibility{Hidden: true}); err != nil {
 		t.Fatal(err)
 	}
 	var stored string
@@ -81,7 +81,7 @@ func TestPropertyMoveRenamesSubtree(t *testing.T) {
 		('calendars/äx1/cal', '{DAV:}a', 1, 'x')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&storage.PropertyStorage{DB: db}).Move("calendars/ä_1/cal", "calendars/bö/new"); err != nil {
+	if err := (&storage.PropertyStorage{DB: db}).Move(t.Context(), "calendars/ä_1/cal", "calendars/bö/new"); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.Query(`SELECT path FROM propertystorage ORDER BY path`)
@@ -116,21 +116,21 @@ func TestNullETagReadsAsDataMD5(t *testing.T) {
 	db := openCardDAVScratchDB(t, "calserver_d_nulletag")
 	cal := &storage.CalDAV{DB: db}
 	card := &storage.CardDAV{DB: db}
-	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	calID, err := cal.CreateCalendar(t.Context(), "principals/admin", "default", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bookID, err := card.CreateAddressBook("principals/admin", "contacts", nil)
+	bookID, err := card.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ics := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
 	vcf := []byte("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:x\r\nFN:X\r\nEND:VCARD\r\n")
-	objETag, err := cal.CreateCalendarObject(calID, "x.ics", ics)
+	objETag, err := cal.CreateCalendarObject(t.Context(), calID, "x.ics", ics)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cardETag, err := card.CreateCard(bookID, "x.vcf", vcf)
+	cardETag, err := card.CreateCard(t.Context(), bookID, "x.vcf", vcf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,28 +138,28 @@ func TestNullETagReadsAsDataMD5(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	obj, err := cal.CalendarObject(calID, "x.ics")
+	obj, err := cal.CalendarObject(t.Context(), calID, "x.ics")
 	if err != nil || obj == nil || obj.ETag != objETag {
 		t.Errorf("CalendarObject etag = %+v, %v; want %s", obj, err, objETag)
 	}
-	if objs, err := cal.CalendarObjects(calID); err != nil || len(objs) != 1 || objs[0].ETag != objETag {
+	if objs, err := cal.CalendarObjects(t.Context(), calID); err != nil || len(objs) != 1 || objs[0].ETag != objETag {
 		t.Errorf("CalendarObjects = %+v, %v; want etag %s", objs, err, objETag)
 	}
-	c, err := card.Card(bookID, "x.vcf")
+	c, err := card.Card(t.Context(), bookID, "x.vcf")
 	if err != nil || c == nil || c.ETag != cardETag {
 		t.Errorf("Card etag = %+v, %v; want %s", c, err, cardETag)
 	}
-	if cards, err := card.Cards(bookID); err != nil || len(cards) != 1 || cards[0].ETag != cardETag {
+	if cards, err := card.Cards(t.Context(), bookID); err != nil || len(cards) != 1 || cards[0].ETag != cardETag {
 		t.Errorf("Cards = %+v, %v; want etag %s", cards, err, cardETag)
 	}
 
-	if obj, err := cal.CalendarObject(calID, "missing.ics"); obj != nil || err != nil {
+	if obj, err := cal.CalendarObject(t.Context(), calID, "missing.ics"); obj != nil || err != nil {
 		t.Errorf("CalendarObject(missing) = %+v, %v; want nil, nil", obj, err)
 	}
-	if c, err := card.Card(bookID, "missing.vcf"); c != nil || err != nil {
+	if c, err := card.Card(t.Context(), bookID, "missing.vcf"); c != nil || err != nil {
 		t.Errorf("Card(missing) = %+v, %v; want nil, nil", c, err)
 	}
-	if p, err := (&storage.Principals{DB: db}).PrincipalByPath("principals/missing"); p != nil || err != nil {
+	if p, err := (&storage.Principals{DB: db}).PrincipalByPath(t.Context(), "principals/missing"); p != nil || err != nil {
 		t.Errorf("PrincipalByPath(missing) = %+v, %v; want nil, nil", p, err)
 	}
 }
@@ -173,11 +173,11 @@ func TestWritesToMissingRowsAreNotFound(t *testing.T) {
 	cal := &storage.CalDAV{DB: db}
 	card := &storage.CardDAV{DB: db}
 
-	calID, err := cal.CreateCalendar("principals/admin", "default", nil)
+	calID, err := cal.CreateCalendar(t.Context(), "principals/admin", "default", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bookID, err := card.CreateAddressBook("principals/admin", "contacts", nil)
+	bookID, err := card.CreateAddressBook(t.Context(), "principals/admin", "contacts", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,10 +195,10 @@ func TestWritesToMissingRowsAreNotFound(t *testing.T) {
 	ics := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
 	vcf := []byte("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:x\r\nFN:X\r\nEND:VCARD\r\n")
 	for name, err := range map[string]error{
-		"UpdateCalendarObject": func() error { _, err := cal.UpdateCalendarObject(calID, "gone.ics", ics); return err }(),
-		"DeleteCalendarObject": cal.DeleteCalendarObject(calID, "gone.ics"),
-		"UpdateCard":           func() error { _, err := card.UpdateCard(bookID, "gone.vcf", vcf); return err }(),
-		"DeleteCard":           card.DeleteCard(bookID, "gone.vcf"),
+		"UpdateCalendarObject": func() error { _, err := cal.UpdateCalendarObject(t.Context(), calID, "gone.ics", ics); return err }(),
+		"DeleteCalendarObject": cal.DeleteCalendarObject(t.Context(), calID, "gone.ics"),
+		"UpdateCard":           func() error { _, err := card.UpdateCard(t.Context(), bookID, "gone.vcf", vcf); return err }(),
+		"DeleteCard":           card.DeleteCard(t.Context(), bookID, "gone.vcf"),
 	} {
 		if !errors.Is(err, storage.ErrNotFound) {
 			t.Errorf("%s on a missing row = %v, want ErrNotFound", name, err)
@@ -206,7 +206,7 @@ func TestWritesToMissingRowsAreNotFound(t *testing.T) {
 	}
 	// A PROPPATCH on an instance that is gone fails rather than logging.
 	pp := dav.NewPropPatch(map[xml.Name]any{{Space: "DAV:", Local: "displayname"}: "Renamed"})
-	cal.UpdateCalendar(caldav.CalendarID{Calendar: calID.Calendar, Instance: "999999"}, pp)
+	cal.UpdateCalendar(t.Context(), caldav.CalendarID{Calendar: calID.Calendar, Instance: "999999"}, pp)
 	if _, ok := pp.Commit(); ok {
 		t.Error("UpdateCalendar on a missing instance succeeded")
 	}

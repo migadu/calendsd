@@ -102,7 +102,7 @@ func newEnv(t *testing.T, dbName string, opts contactsapi.Options) *env {
 	t.Helper()
 	db := openScratchDB(t, dbName)
 	users := &storage.Users{DB: db}
-	tomb := func(ctx context.Context, p string) bool { ok, _ := users.IsDeletedContext(ctx, p); return ok }
+	tomb := func(ctx context.Context, p string) bool { ok, _ := users.IsDeleted(ctx, p); return ok }
 	return &env{t: t, db: db, h: contactsapi.New(db, fakeAuth{}, tomb, opts), opts: opts}
 }
 
@@ -111,7 +111,7 @@ func newEnv(t *testing.T, dbName string, opts contactsapi.Options) *env {
 func (e *env) principal(address string) {
 	e.t.Helper()
 	w := &storage.AdminWrites{DB: e.db}
-	if err := w.CreateUser(address, storage.BlockedDigestA1(), address, address); err != nil {
+	if err := w.CreateUser(context.Background(), address, storage.BlockedDigestA1(), address, address); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -230,7 +230,7 @@ func TestAuthGate(t *testing.T) {
 	// Valid credentials, account scheduled for deletion: 403, and nothing runs
 	// as them — the same gate DAV applies.
 	e.principal("erin@example.org")
-	if err := (&storage.AdminWrites{DB: e.db}).ScheduleDelete("erin@example.org", 30, "test"); err != nil {
+	if err := (&storage.AdminWrites{DB: e.db}).ScheduleDelete(req.Context(), "erin@example.org", 30, "test"); err != nil {
 		t.Fatal(err)
 	}
 	e.want(e.do("erin@example.org", "GET", "/api/v1/contacts", nil), http.StatusForbidden)
@@ -359,7 +359,7 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	const carol = "carol@example.org"
 	cardDAV := &storage.CardDAV{DB: e.db}
 	// A native calserver user: one book, made by DAV auto-provisioning.
-	if _, err := cardDAV.CreateAddressBook("principals/carol@example.org", "addressbook", nil); err != nil {
+	if _, err := cardDAV.CreateAddressBook(t.Context(), "principals/carol@example.org", "addressbook", nil); err != nil {
 		t.Fatal(err)
 	}
 	var created contactJSON
@@ -369,7 +369,7 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	}
 	// With two books and neither named webmail, a webmail book is created
 	// rather than guessing between them.
-	if _, err := cardDAV.CreateAddressBook("principals/carol@example.org", "second", nil); err != nil {
+	if _, err := cardDAV.CreateAddressBook(t.Context(), "principals/carol@example.org", "second", nil); err != nil {
 		t.Fatal(err)
 	}
 	e.want(e.do(carol, "POST", "/api/v1/contacts", map[string]string{"vcard": vcf("c2", "Eve")}), 201).json(t, &created)
@@ -389,14 +389,14 @@ func TestConflictNamesTheWebmailCopy(t *testing.T) {
 	const alice = "alice@example.org"
 	cardDAV := &storage.CardDAV{DB: e.db}
 	// "addressbook" sorts before "webmail"; give it a card with the same UID.
-	otherID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "addressbook", nil)
+	otherID, err := cardDAV.CreateAddressBook(t.Context(), "principals/alice@example.org", "addressbook", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cardDAV.CreateCard(otherID, "dup.vcf", []byte(vcf("dup", "Phone Copy"))); err != nil {
+	if _, err := cardDAV.CreateCard(t.Context(), otherID, "dup.vcf", []byte(vcf("dup", "Phone Copy"))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil); err != nil {
+	if _, err := cardDAV.CreateAddressBook(t.Context(), "principals/alice@example.org", "webmail", nil); err != nil {
 		t.Fatal(err)
 	}
 	var created contactJSON
@@ -434,7 +434,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 	e.principal("alice@example.org")
 	const alice = "alice@example.org"
 	cardDAV := &storage.CardDAV{DB: e.db}
-	bookID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil)
+	bookID, err := cardDAV.CreateAddressBook(t.Context(), "principals/alice@example.org", "webmail", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 	// A card a phone named without regard to its UID is listed under its real
 	// file name and must stay editable; only a CHANGE of UID is refused.
 	phone := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:0e1\r\nFN:Phone Named\r\nEND:VCARD\r\n"
-	if _, err := cardDAV.CreateCard(bookID, "ABC123.vcf", []byte(phone)); err != nil {
+	if _, err := cardDAV.CreateCard(t.Context(), bookID, "ABC123.vcf", []byte(phone)); err != nil {
 		t.Fatal(err)
 	}
 	phoneID := e.idOf("ABC123.vcf")
@@ -461,7 +461,7 @@ func TestUpdateEdgeCases(t *testing.T) {
 	// A UID that could never be a file name (a space, 300 characters) is no
 	// obstacle to editing a card that already has one.
 	odd := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:" + strings.Repeat("x", 300) + " y\r\nFN:Odd UID\r\nEND:VCARD\r\n"
-	if _, err := cardDAV.CreateCard(bookID, "odd.vcf", []byte(odd)); err != nil {
+	if _, err := cardDAV.CreateCard(t.Context(), bookID, "odd.vcf", []byte(odd)); err != nil {
 		t.Fatal(err)
 	}
 	e.want(e.do(alice, "PUT", path(e.idOf("odd.vcf")),
@@ -618,16 +618,16 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 	const alice = "alice@example.org"
 	cardDAV := &storage.CardDAV{DB: e.db}
 	// A second book the user made in calclient, with a card in it.
-	otherID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "personal", nil)
+	otherID, err := cardDAV.CreateAddressBook(t.Context(), "principals/alice@example.org", "personal", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cardDAV.CreateCard(otherID, "p1.vcf", []byte(vcf("p1", "Keep Me"))); err != nil {
+	if _, err := cardDAV.CreateCard(t.Context(), otherID, "p1.vcf", []byte(vcf("p1", "Keep Me"))); err != nil {
 		t.Fatal(err)
 	}
 	// With "personal" the sole book, a create would land there — so make the
 	// webmail book explicitly first, as the migration does.
-	webmailID, err := cardDAV.CreateAddressBook("principals/alice@example.org", "webmail", nil)
+	webmailID, err := cardDAV.CreateAddressBook(t.Context(), "principals/alice@example.org", "webmail", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +694,7 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 	// Delete-all with no webmail book and several others creates nothing.
 	e.principal("dan@example.org")
 	for _, uri := range []string{"a", "b"} {
-		if _, err := cardDAV.CreateAddressBook("principals/dan@example.org", uri, nil); err != nil {
+		if _, err := cardDAV.CreateAddressBook(t.Context(), "principals/dan@example.org", uri, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
