@@ -399,6 +399,16 @@ func TestEnqueueCredentialWithoutKeyring(t *testing.T) {
 	}
 }
 
+// TestEmptyBackoffUsesDefault: an empty (non-nil) Backoff, e.g. from a config
+// list with no entries, falls back to the default instead of indexing an
+// empty slice on the first retry.
+func TestEmptyBackoffUsesDefault(t *testing.T) {
+	q := New(nil, Config{Backoff: []time.Duration{}})
+	if got := q.backoff(1); got != defaultBackoff[0] {
+		t.Errorf("backoff(1) = %v, want %v", got, defaultBackoff[0])
+	}
+}
+
 // TestWaitSettlesInFlightJob: after the queue's ctx is cancelled, Wait returns
 // only once a running handler has returned and its outcome is recorded, so a
 // shutdown does not leave the row 'executing' for the reclaim sweep.

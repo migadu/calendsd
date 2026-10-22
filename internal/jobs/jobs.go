@@ -130,7 +130,7 @@ func New(db *sql.DB, cfg Config) *Queue {
 	if cfg.Workers <= 0 {
 		cfg.Workers = defaultWorkers
 	}
-	if cfg.Backoff == nil {
+	if len(cfg.Backoff) == 0 {
 		cfg.Backoff = defaultBackoff
 	}
 	if cfg.ReclaimAfter <= 0 {
