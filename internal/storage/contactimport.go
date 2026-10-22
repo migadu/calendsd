@@ -525,10 +525,15 @@ SELECT c.uri
 	return keep, elsewhere, nil
 }
 
+// bookSyncToken reads the book's synctoken and locks the row to commit. The
+// lock is what makes the ledger comparison mean anything: without it a DAV
+// client could write between this read and the diff, and the import would
+// overwrite that edit believing the book untouched since the last run.
+// Client writes lock the same row (abAddChange), so they wait for the import.
 func bookSyncToken(ctx context.Context, tx *sql.Tx, bookID int64) (int64, bool, error) {
 	var token int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT synctoken FROM addressbooks WHERE id = $1`, bookID).Scan(&token)
+		`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, bookID).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

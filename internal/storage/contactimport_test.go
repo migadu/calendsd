@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"calserver/internal/storage"
 )
@@ -609,6 +610,41 @@ func TestCopyIntoInsideTx(t *testing.T) {
 	}
 	if cards != 0 {
 		t.Fatalf("%d card(s) survived the rollback — COPY ran outside the transaction", cards)
+	}
+}
+
+// TestContactImportLocksTheBookWhileComparing covers the re-run reading the
+// book's synctoken without a lock: a DAV client could then write between the
+// read and the diff, and the import would overwrite that edit believing the
+// book untouched since the last run. With a client transaction holding the
+// book row, the import must wait rather than read past it.
+func TestContactImportLocksTheBookWhileComparing(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_d_ctimport_lock")
+	imp := &storage.ContactImport{DB: db}
+	cards := []storage.ImportCard{card("a", "A")}
+	first := mustImport(t, imp, baseRequest("lock@example.org", cards))
+
+	// A client write in flight holds the book row, as abAddChange does.
+	client, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Rollback()
+	if _, err := client.Exec(
+		`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, first.BookID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if res, err := imp.ImportPrincipal(ctx, baseRequest("lock@example.org", cards)); err == nil {
+		t.Fatalf("re-run went ahead (%s) while a client held the book; want it to wait", res.Action)
+	}
+
+	if err := client.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if res := mustImport(t, imp, baseRequest("lock@example.org", cards)); res.Action != storage.ActionSkipped {
+		t.Fatalf("re-run after the client finished = %s, want skipped", res.Action)
 	}
 }
 
