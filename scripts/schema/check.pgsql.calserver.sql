@@ -32,7 +32,8 @@ WITH checks AS (
         ('jobs_latest_ix'), ('domain_scheduling_policy'),
         ('contact_frecency'), ('contact_frecency_rank_ix'),
         ('contact_import'), ('contact_import_run_ix'),
-        ('calendar_availability'), ('free_busy_visibility')
+        ('calendar_availability'), ('free_busy_visibility'),
+        ('principals_lower_email'), ('calendarobjects_calendarid_uid')
       ) AS v(name)
 
     UNION ALL
