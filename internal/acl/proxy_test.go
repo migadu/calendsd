@@ -148,6 +148,10 @@ func TestPrincipalMatchResolvesHrefs(t *testing.T) {
 		!strings.Contains(body, "/dav/principals/user2/") {
 		t.Errorf("principal-match missed the proxy group or its members:\n%s", body)
 	}
+	// RFC 4918: every href sits inside a {DAV:}response (sabre omitted it).
+	if !strings.Contains(body, "<d:response>\n  <d:href>/dav/principals/user%201/calendar-proxy-write") {
+		t.Errorf("principal-match responses are not wrapped in {DAV:}response:\n%s", body)
+	}
 }
 
 // calendar-proxy-write-for lists the principals a user may proxy for.

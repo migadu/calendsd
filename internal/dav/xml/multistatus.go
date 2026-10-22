@@ -85,10 +85,6 @@ type Response struct {
 	Propstats []Propstat
 	// Status is set for status-only responses (e.g. 404 in sync reports).
 	Status int
-	// Bare omits the {DAV:}response wrapper, replicating sabre's
-	// principal-match serialization quirk (href/propstat directly under
-	// multistatus).
-	Bare bool
 }
 
 // MultiStatus is a {DAV:}multistatus response document.
@@ -192,9 +188,7 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 }
 
 func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
-	if !r.Bare {
-		b.WriteString(" <d:response>\n")
-	}
+	b.WriteString(" <d:response>\n")
 	fmt.Fprintf(b, "  <d:href>%s</d:href>\n", escapeText(r.Href))
 	for _, ps := range r.Propstats {
 		b.WriteString("  <d:propstat>\n   <d:prop>\n")
@@ -208,9 +202,7 @@ func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
 	if r.Status != 0 && len(r.Propstats) == 0 {
 		fmt.Fprintf(b, "  <d:status>HTTP/1.1 %s</d:status>\n", statusLine(r.Status))
 	}
-	if !r.Bare {
-		b.WriteString(" </d:response>\n")
-	}
+	b.WriteString(" </d:response>\n")
 }
 
 func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {

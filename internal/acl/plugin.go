@@ -567,7 +567,6 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 		}
 	}
 
-	// Sabre serializes these responses without the {DAV:}response wrapper.
 	ms := &davxml.MultiStatus{}
 	for _, match := range matches {
 		if req.Prop != nil && len(req.Prop.Names) > 0 {
@@ -579,15 +578,11 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 			if err != nil {
 				return err
 			}
-			for _, resp := range responses {
-				resp.Bare = true
-				ms.Responses = append(ms.Responses, resp)
-			}
+			ms.Responses = append(ms.Responses, responses...)
 		} else {
 			ms.Responses = append(ms.Responses, davxml.Response{
 				Href:   p.server.Href(match),
 				Status: http.StatusOK,
-				Bare:   true,
 			})
 		}
 	}

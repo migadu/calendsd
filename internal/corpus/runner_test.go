@@ -151,22 +151,22 @@ var passing = map[string]bool{
 	`Sabre\DAV\PropertyStorage\PluginTest::testMove`:                                   true,
 	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReport`:                           true,
 	`Sabre\DAVACL\AclPrincipalPropSetReportTest::testReportDepth1`:                     true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatch`:                              true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchPrincipalProperty`:             true,
-	`Sabre\DAVACL\PrincipalMatchTest::testPrincipalMatchProp`:                          true,
-	`Sabre\DAV\Sync\PluginTest::testIfConditions`:                                      true,
-	`Sabre\DAV\Sync\PluginTest::testIfConditionsNoSyncToken`:                           true,
-	`Sabre\DAV\Sync\PluginTest::testIfConditionsNot`:                                   true,
-	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollection`:                      true,
-	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollectionDepthFallBack`:         true,
-	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollectionLimit`:                 true,
-	`Sabre\DAV\Sync\PluginTest::testSyncInitialSyncCollection`:                         true,
-	`Sabre\DAV\Sync\PluginTest::testSyncInvalidToken`:                                  true,
-	`Sabre\DAV\Sync\PluginTest::testSyncInvalidTokenNoPrefix`:                          true,
-	`Sabre\DAV\Sync\PluginTest::testSyncNoProp`:                                        true,
-	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncCollection`:                              true,
-	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncInfo`:                                    true,
-	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncToken`:                                   true,
+	// PrincipalMatchTest's three cases are intentionally NOT listed: sabre
+	// serializes principal-match without the {DAV:}response wrapper RFC 4918
+	// requires, and we emit the wrapper (docs/review-fixes.md).
+	`Sabre\DAV\Sync\PluginTest::testIfConditions`:                              true,
+	`Sabre\DAV\Sync\PluginTest::testIfConditionsNoSyncToken`:                   true,
+	`Sabre\DAV\Sync\PluginTest::testIfConditionsNot`:                           true,
+	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollection`:              true,
+	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollectionDepthFallBack`: true,
+	`Sabre\DAV\Sync\PluginTest::testSubsequentSyncSyncCollectionLimit`:         true,
+	`Sabre\DAV\Sync\PluginTest::testSyncInitialSyncCollection`:                 true,
+	`Sabre\DAV\Sync\PluginTest::testSyncInvalidToken`:                          true,
+	`Sabre\DAV\Sync\PluginTest::testSyncInvalidTokenNoPrefix`:                  true,
+	`Sabre\DAV\Sync\PluginTest::testSyncNoProp`:                                true,
+	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncCollection`:                      true,
+	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncInfo`:                            true,
+	`Sabre\DAV\Sync\PluginTest::testSyncNoSyncToken`:                           true,
 }
 
 // outOfScopePrefixes are sabre plugins outside the MVP port scope
