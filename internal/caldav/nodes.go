@@ -308,6 +308,29 @@ func (c *Calendar) QueryObjects(componentType string, start, end time.Time) ([]*
 	return out, nil
 }
 
+// ObjectByUID returns the calendar's object carrying uid, or nil. A backend
+// implementing UIDLookup answers from its index; otherwise every object is
+// loaded and parsed.
+func (c *Calendar) ObjectByUID(uid string) (*CalendarObject, error) {
+	if lookup, ok := c.backend.(UIDLookup); ok {
+		obj, err := lookup.CalendarObjectByUID(c.Info.ID, uid)
+		if err != nil || obj == nil {
+			return nil, err
+		}
+		return NewCalendarObject(c.backend, c.Info, *obj), nil
+	}
+	objs, err := c.backend.CalendarObjects(c.Info.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, obj := range objs {
+		if d, err := ical.Denormalize(obj.CalendarData); err == nil && d.UID == uid {
+			return NewCalendarObject(c.backend, c.Info, obj), nil
+		}
+	}
+	return nil, nil
+}
+
 func (c *Calendar) ChildExists(name string) bool {
 	obj, err := c.backend.CalendarObject(c.Info.ID, name)
 	return err == nil && obj != nil

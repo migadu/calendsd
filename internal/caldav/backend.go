@@ -98,6 +98,13 @@ type Backend interface {
 	ChangesForCalendar(calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
+// UIDLookup is implemented by backends that find an object by its UID with an
+// index (storage.CalDAV) rather than by loading the whole calendar.
+type UIDLookup interface {
+	// CalendarObjectByUID returns the calendar's object carrying uid, or nil.
+	CalendarObjectByUID(calendarID CalendarID, uid string) (*ObjectInfo, error)
+}
+
 // MockBackend is the in-memory backend used by tests and the corpus runner.
 // Port of sabre's CalDAV\Backend\Mock.
 type MockBackend struct {

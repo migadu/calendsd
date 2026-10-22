@@ -87,12 +87,12 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 	// direct free-busy-query.
 	var payloads [][]byte
 	if !calNode.transparent() {
-		objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		objects, err := calNode.QueryObjects("", start, end)
 		if err != nil {
 			return err
 		}
 		for _, obj := range objects {
-			payloads = append(payloads, obj.CalendarData)
+			payloads = append(payloads, obj.Data())
 		}
 	}
 	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(path), time.Now())

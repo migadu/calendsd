@@ -204,12 +204,12 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 		if calNode.transparent() {
 			continue
 		}
-		objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		objs, err := calNode.QueryObjects("", start, end)
 		if err != nil {
 			continue
 		}
 		for _, obj := range objs {
-			payloads = append(payloads, obj.CalendarData)
+			payloads = append(payloads, obj.Data())
 		}
 	}
 	if !readable {
