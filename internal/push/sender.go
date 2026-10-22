@@ -31,6 +31,7 @@ func (s WebPushSender) Send(ctx context.Context, sub Subscription, topic string,
 		Endpoint: sub.PushResource,
 		Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.AuthSecret},
 	}, &webpush.Options{
+		HTTPClient:      pushClient,
 		Subscriber:      s.cfg.VAPIDSubject,
 		VAPIDPublicKey:  s.cfg.VAPIDPublicKey,
 		VAPIDPrivateKey: s.cfg.VAPIDPrivateKey,

@@ -46,6 +46,9 @@ func parseRegister(body []byte) (*registerRequest, error) {
 	if req.pushResource == "" || req.p256dh == "" || req.authSecret == "" {
 		return nil, fmt.Errorf("push-register requires web-push-subscription with push-resource, subscription-public-key and auth-secret")
 	}
+	if err := validatePushResource(req.pushResource); err != nil {
+		return nil, err
+	}
 	return req, nil
 }
 
