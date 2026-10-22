@@ -33,3 +33,27 @@ func TestInvalidSyncTokenEmitsValidSyncTokenPrecondition(t *testing.T) {
 		t.Errorf("error body missing the {DAV:}valid-sync-token precondition element:\n%s", out)
 	}
 }
+
+// sync-level is "1" or "infinite" (RFC 6578 §6.3); anything else is a 400,
+// not a silent level 1.
+func TestSyncLevelValues(t *testing.T) {
+	for level, want := range map[string]int{
+		"1":        http.StatusMultiStatus,
+		"infinite": http.StatusMultiStatus,
+		"infinity": http.StatusMultiStatus,
+		"bogus":    http.StatusBadRequest,
+		"2":        http.StatusBadRequest,
+	} {
+		sc := &memSyncColl{memColl: memColl{name: "cal"}, token: "1"}
+		s := NewServer("/", newMemColl("root", sc))
+		s.AddPlugin(&SyncPlugin{})
+		body := `<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>` + level +
+			`</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+		req := httptest.NewRequest("REPORT", "/cal/", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("sync-level %q = %d, want %d: %s", level, rec.Code, want, rec.Body.String())
+		}
+	}
+}

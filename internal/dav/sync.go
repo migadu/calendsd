@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"net/http"
-	"strconv"
 	"strings"
 
 	davxml "calserver/internal/dav/xml"
@@ -149,16 +148,15 @@ func (p *SyncPlugin) Report(name xml.Name, body []byte, path string, w http.Resp
 	}
 
 	syncLevel := 1
-	switch {
-	case req.SyncLevel == "infinity":
+	switch level := strings.TrimSpace(req.SyncLevel); level {
+	case "1":
+	case "infinite", "infinity": // RFC 6578's spelling, and sabre's
 		syncLevel = DepthInfinity
-	case req.SyncLevel != "":
-		if n, convErr := strconv.Atoi(req.SyncLevel); convErr == nil {
-			syncLevel = n
-		}
-	default:
+	case "":
 		// Fall back to the Depth header, like sabre.
 		syncLevel = parseDepth(r.Header.Get("Depth"), 1)
+	default:
+		return true, ErrBadRequest("sync-level must be 1 or infinite, not %q", level)
 	}
 	limit := 0
 	if req.Limit != nil {
