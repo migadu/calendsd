@@ -55,3 +55,24 @@ func TestParseMkcolElementValueIsSelfContained(t *testing.T) {
 			root.Space, root.Local, frag)
 	}
 }
+
+func TestParseMkcalendar(t *testing.T) {
+	types, props, err := ParseMkcalendar([]byte(`<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+ <D:set><D:prop><D:displayname>Work &amp; Play</D:displayname></D:prop></D:set>
+</C:mkcalendar>`))
+	if err != nil || types != nil || props[xml.Name{Space: NSDav, Local: "displayname"}] != "Work & Play" {
+		t.Errorf("plain body = %v, %v, %v; want no resourcetype and the unescaped displayname", types, props, err)
+	}
+
+	types, _, err = ParseMkcalendar([]byte(`<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/">
+ <D:set><D:prop><D:resourcetype><D:collection/><CS:subscribed/></D:resourcetype></D:prop></D:set>
+</C:mkcalendar>`))
+	want := []xml.Name{{Space: NSDav, Local: "collection"}, {Space: "http://calendarserver.org/ns/", Local: "subscribed"}}
+	if err != nil || len(types) != 2 || types[0] != want[0] || types[1] != want[1] {
+		t.Errorf("resourcetype = %v, %v; want %v", types, err, want)
+	}
+
+	if _, _, err := ParseMkcalendar([]byte(`<D:mkcol xmlns:D="DAV:"/>`)); err == nil {
+		t.Error("a {DAV:}mkcol root was accepted as MKCALENDAR")
+	}
+}

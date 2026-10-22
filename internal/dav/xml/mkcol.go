@@ -14,33 +14,51 @@ import (
 // are re-serialized *self-contained* — a stored fragment must not depend on
 // prefixes declared by the request document.
 func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
+	resourceType, haveResourceType, props, err := parseCreateBody(body, xml.Name{Space: NSDav, Local: "mkcol"})
+	if err != nil {
+		return nil, nil, err
+	}
+	if !haveResourceType {
+		return nil, nil, errMissingResourceType
+	}
+	return resourceType, props, nil
+}
+
+// ParseMkcalendar extracts the properties of an MKCALENDAR body (RFC 4791
+// §5.3.1), which has the extended-mkcol shape under a {CalDAV}mkcalendar
+// root. resourceType is nil when the body sets none (the caller's default
+// applies); iCal sets one to create subscriptions.
+func ParseMkcalendar(body []byte) (resourceType []xml.Name, props map[xml.Name]any, err error) {
+	resourceType, _, props, err = parseCreateBody(body, xml.Name{Space: NSCalDAV, Local: "mkcalendar"})
+	return resourceType, props, err
+}
+
+// parseCreateBody walks root > set > prop > *property elements*, the shape
+// extended MKCOL and MKCALENDAR share.
+func parseCreateBody(body []byte, root xml.Name) (resourceType []xml.Name, haveResourceType bool, props map[xml.Name]any, err error) {
 	dec := xml.NewDecoder(bytes.NewReader(body))
 
-	// Walk: mkcol > set > prop > *property elements*.
 	var stack []xml.Name
-	var resourceType []xml.Name
-	haveResourceType := false
-	props := map[xml.Name]any{}
+	props = map[xml.Name]any{}
 	rootSeen := false
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
 			if !rootSeen {
-				return nil, nil, io.ErrUnexpectedEOF
+				return nil, false, nil, io.ErrUnexpectedEOF
 			}
 			break
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, false, nil, err
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
 			depth := len(stack)
 			name := t.Name
-			isDav := name.Space == NSDav
 			switch {
-			case depth == 0 && (!isDav || name.Local != "mkcol"):
-				return nil, nil, xml.UnmarshalError("expected {DAV:}mkcol root")
+			case depth == 0 && name != root:
+				return nil, false, nil, xml.UnmarshalError("expected " + Clark(root) + " root")
 			case depth == 0:
 				rootSeen = true
 			case depth == 3:
@@ -49,14 +67,14 @@ func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
 					haveResourceType = true
 					types, err := parseResourceType(dec)
 					if err != nil {
-						return nil, nil, err
+						return nil, false, nil, err
 					}
 					resourceType = append(resourceType, types...)
 					continue // subtree fully consumed; no stack push
 				}
 				value, err := parsePropValue(dec, t)
 				if err != nil {
-					return nil, nil, err
+					return nil, false, nil, err
 				}
 				props[name] = value
 				continue // subtree fully consumed; no stack push
@@ -68,10 +86,7 @@ func ParseMkcol(body []byte) ([]xml.Name, map[xml.Name]any, error) {
 			}
 		}
 	}
-	if !haveResourceType {
-		return nil, nil, errMissingResourceType
-	}
-	return resourceType, props, nil
+	return resourceType, haveResourceType, props, nil
 }
 
 // parseResourceType consumes a {DAV:}resourcetype subtree, returning the names
