@@ -116,53 +116,85 @@ func decodeJCalProp(node []any) (*goical.Prop, error) {
 	}
 
 	jType, _ := node[2].(string)
-	value, valueParam, err := decodeJCalValue(jType, node[3:])
+	jType = strings.ToLower(jType)
+	value, err := decodeJCalValue(jType, node[3:])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", prop.Name, err)
 	}
-	// Only DATE differs from a date property's default (date-time), so it must
-	// be signalled with an explicit VALUE parameter; other types serialize
-	// unambiguously from their string form.
-	if valueParam != "" {
-		prop.Params["VALUE"] = []string{valueParam}
+	// A type other than the property's default (TEXT for one go-ical doesn't
+	// know) is signalled with a VALUE parameter (RFC 7265 §4.2): DATE for an
+	// all-day DTSTART, PERIOD for an RDATE, DATE-TIME for a TRIGGER.
+	def := (&goical.Prop{Name: prop.Name}).ValueType()
+	if def == goical.ValueDefault {
+		def = goical.ValueText
+	}
+	if jType != "unknown" && jType != "" && !strings.EqualFold(jType, string(def)) {
+		prop.Params["VALUE"] = []string{strings.ToUpper(jType)}
 	}
 	prop.Value = value
 	return prop, nil
 }
 
-// decodeJCalValue converts the jCal value slot(s) to an iCalendar value string
-// and, when needed, the VALUE parameter to set. Multiple values are joined with
-// commas as in iCalendar.
-func decodeJCalValue(jType string, values []any) (string, string, error) {
+// decodeJCalValue converts the jCal value slot(s) to an iCalendar value
+// string. Multiple values are joined with commas as in iCalendar.
+func decodeJCalValue(jType string, values []any) (string, error) {
 	parts := make([]string, 0, len(values))
 	for _, v := range values {
 		s, err := decodeJCalScalar(jType, v)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		parts = append(parts, s)
 	}
-	value := strings.Join(parts, ",")
-	if strings.EqualFold(jType, "date") {
-		return value, "DATE", nil
-	}
-	return value, "", nil
+	return strings.Join(parts, ","), nil
 }
 
 func decodeJCalScalar(jType string, v any) (string, error) {
-	switch strings.ToLower(jType) {
+	switch jType {
 	case "date-time":
 		s, ok := v.(string)
 		if !ok {
 			return "", fmt.Errorf("date-time value must be a string")
 		}
 		return icalDateTime(s), nil
+	case "time", "utc-offset":
+		// 10:30:00 -> 103000, -05:00 -> -0500
+		s, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("%s value must be a string", jType)
+		}
+		return strings.ReplaceAll(s, ":", ""), nil
 	case "date":
 		s, ok := v.(string)
 		if !ok {
 			return "", fmt.Errorf("date value must be a string")
 		}
 		return strings.ReplaceAll(s, "-", ""), nil
+	case "period":
+		// [start, end or duration]; the start is a jCal date-time.
+		pair, ok := v.([]any)
+		if !ok || len(pair) != 2 {
+			return "", fmt.Errorf("period value must be a [start, end] array")
+		}
+		start, ok1 := pair[0].(string)
+		end, ok2 := pair[1].(string)
+		if !ok1 || !ok2 {
+			return "", fmt.Errorf("period value must be a [start, end] array of strings")
+		}
+		if !strings.HasPrefix(strings.TrimLeft(end, "+-"), "P") {
+			end = icalDateTime(end)
+		}
+		return icalDateTime(start) + "/" + end, nil
+	case "float":
+		if pair, ok := v.([]any); ok {
+			// GEO: [latitude, longitude].
+			items := make([]string, len(pair))
+			for i, item := range pair {
+				items[i] = fmt.Sprintf("%v", item)
+			}
+			return strings.Join(items, ";"), nil
+		}
+		return fmt.Sprintf("%v", v), nil
 	case "boolean":
 		b, ok := v.(bool)
 		if !ok {
@@ -205,6 +237,9 @@ func icalDateTime(v string) string {
 // icalRecur reassembles an RRULE string from the jCal recur object, FREQ first.
 func icalRecur(m map[string]any) string {
 	part := func(k string, v any) string {
+		if s, ok := v.(string); ok && strings.EqualFold(k, "until") {
+			return "UNTIL=" + icalDateTime(s)
+		}
 		switch vv := v.(type) {
 		case []any:
 			items := make([]string, 0, len(vv))
