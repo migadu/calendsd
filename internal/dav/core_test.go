@@ -3,7 +3,9 @@ package dav
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -421,5 +423,36 @@ func TestExtendedMkcolFailureIsDeterministic(t *testing.T) {
 		} else if got != first {
 			t.Fatalf("response differs between runs:\n%s\nvs\n%s", first, got)
 		}
+	}
+}
+
+// failingUnbind is an AfterUnbind listener that always fails.
+type failingUnbind struct{}
+
+func (failingUnbind) PluginName() string { return "failing-unbind" }
+func (failingUnbind) Init(*Server)       {}
+func (failingUnbind) AfterUnbind(context.Context, string) error {
+	return errors.New("property cleanup failed")
+}
+
+// A failing after-unbind listener is logged, not dropped, and does not fail
+// a DELETE that has already removed the node.
+func TestAfterUnbindErrorIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	root := newMemColl("root", &memFile{name: "f.txt", contents: []byte("x")})
+	s := NewServer("/", root)
+	s.AddPlugin(failingUnbind{})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("DELETE", "/f.txt", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d, want 204", rec.Code)
+	}
+	if out := logs.String(); !strings.Contains(out, "after-unbind hook failed") ||
+		!strings.Contains(out, "failing-unbind") || !strings.Contains(out, "property cleanup failed") {
+		t.Errorf("hook error not logged; log:\n%s", out)
 	}
 }

@@ -124,10 +124,8 @@ func (p *TempFileFilterPlugin) BeforeMethod(w http.ResponseWriter, r *http.Reque
 // A server without access control allows everything, so the filter does too.
 func (p *TempFileFilterPlugin) mayBind(r *http.Request, reqPath string) bool {
 	parent := path.Dir("/" + reqPath)[1:]
-	for _, plugin := range p.server.Plugins() {
-		if checker, ok := plugin.(privilegeChecker); ok {
-			return checker.CheckPrivileges(r.Context(), parent, "{DAV:}bind") == nil
-		}
+	for checker := range Hooks[privilegeChecker](p.server) {
+		return checker.CheckPrivileges(r.Context(), parent, "{DAV:}bind") == nil
 	}
 	return true
 }

@@ -93,11 +93,7 @@ func (c *CorePlugin) report(w http.ResponseWriter, r *http.Request) error {
 		return ErrBadRequest("%s", err)
 	}
 	c.server.Metrics.ReportRequest(reportTypeLabel(name))
-	for _, p := range c.server.Plugins() {
-		rh, ok := p.(ReportHandler)
-		if !ok {
-			continue
-		}
+	for rh := range Hooks[ReportHandler](c.server) {
 		handled, err := rh.Report(name, body, path, w, r)
 		if err != nil {
 			return err
@@ -180,12 +176,10 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	// equivalents). Consulted before the File check so a plugin can
 	// serve a node that is not an IFile.
 	if !headOnly {
-		for _, p := range c.server.Plugins() {
-			if hook, ok := p.(GetHandlerHook); ok {
-				handled, err := hook.HandleGet(node, w, r)
-				if handled || err != nil {
-					return true, err
-				}
+		for hook := range Hooks[GetHandlerHook](c.server) {
+			handled, err := hook.HandleGet(node, w, r)
+			if handled || err != nil {
+				return true, err
 			}
 		}
 	}
@@ -369,11 +363,9 @@ func (c *CorePlugin) delete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range c.server.Plugins() {
-		if hook, ok := p.(BeforeUnbindHook); ok {
-			if err := hook.BeforeUnbind(r, path); err != nil {
-				return err
-			}
+	for hook := range Hooks[BeforeUnbindHook](c.server) {
+		if err := hook.BeforeUnbind(r, path); err != nil {
+			return err
 		}
 	}
 	if err := c.server.Tree.Delete(r.Context(), path); err != nil {
@@ -507,12 +499,10 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	sent := raw
-	for _, p := range c.server.Plugins() {
-		if hook, ok := p.(WriteInterceptor); ok {
-			raw, err = hook.InterceptWrite(r, path, raw, isNew)
-			if err != nil {
-				return err
-			}
+	for hook := range Hooks[WriteInterceptor](c.server) {
+		raw, err = hook.InterceptWrite(r, path, raw, isNew)
+		if err != nil {
+			return err
 		}
 	}
 	body = bytes.NewReader(raw)
@@ -569,10 +559,8 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 // fireAfterWrite notifies plugins that a PUT has been persisted (sabre's
 // afterWriteContent/afterCreateFile events).
 func (c *CorePlugin) fireAfterWrite(r *http.Request, path string) {
-	for _, p := range c.server.Plugins() {
-		if hook, ok := p.(AfterWriteHook); ok {
-			hook.AfterWrite(r, path)
-		}
+	for hook := range Hooks[AfterWriteHook](c.server) {
+		hook.AfterWrite(r, path)
 	}
 }
 
@@ -743,11 +731,9 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 // deleteDestination removes the node a COPY or MOVE overwrites, running the
 // same unbind hooks as a DELETE of it would.
 func (c *CorePlugin) deleteDestination(r *http.Request, destination string) error {
-	for _, p := range c.server.Plugins() {
-		if hook, ok := p.(BeforeUnbindHook); ok {
-			if err := hook.BeforeUnbind(r, destination); err != nil {
-				return err
-			}
+	for hook := range Hooks[BeforeUnbindHook](c.server) {
+		if err := hook.BeforeUnbind(r, destination); err != nil {
+			return err
 		}
 	}
 	if err := c.server.Tree.Delete(r.Context(), destination); err != nil {
@@ -930,10 +916,8 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 	})
 	pf.Handle(dav("supported-report-set"), func() any {
 		reports := davxml.ReportSet{}
-		for _, plugin := range s.Plugins() {
-			if provider, ok := plugin.(ReportSetProvider); ok {
-				reports = append(reports, provider.SupportedReports(node, pf.Path())...)
-			}
+		for provider := range Hooks[ReportSetProvider](s) {
+			reports = append(reports, provider.SupportedReports(node, pf.Path())...)
 		}
 		return reports
 	})

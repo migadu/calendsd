@@ -3,6 +3,7 @@ package dav
 import (
 	"context"
 	"encoding/xml"
+	"log/slog"
 	"net/http"
 	"net/url"
 	gopath "path"
@@ -135,12 +136,10 @@ func (s *Server) Plugin(name string) Plugin {
 // deduplicated, in registration order.
 func (s *Server) Features() []string {
 	var out []string
-	for _, p := range s.plugins {
-		if fp, ok := p.(FeatureProvider); ok {
-			for _, f := range fp.Features() {
-				if !slices.Contains(out, f) {
-					out = append(out, f)
-				}
+	for fp := range Hooks[FeatureProvider](s) {
+		for _, f := range fp.Features() {
+			if !slices.Contains(out, f) {
+				out = append(out, f)
 			}
 		}
 	}
@@ -151,12 +150,10 @@ func (s *Server) Features() []string {
 // deduplicated, in registration order.
 func (s *Server) AllowedMethods(ctx context.Context, path string) []string {
 	var out []string
-	for _, p := range s.plugins {
-		if mp, ok := p.(MethodProvider); ok {
-			for _, m := range mp.Methods(ctx, path) {
-				if !slices.Contains(out, m) {
-					out = append(out, m)
-				}
+	for mp := range Hooks[MethodProvider](s) {
+		for _, m := range mp.Methods(ctx, path) {
+			if !slices.Contains(out, m) {
+				out = append(out, m)
 			}
 		}
 	}
@@ -221,11 +218,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// first, a conditional request never reaches checkPreconditions below,
 	// so a 412/304 can't reveal a resource's existence or ETag to a client
 	// that lacks privilege on it. Do not move preconditions ahead of ACL.
-	for _, p := range s.plugins {
-		hook, ok := p.(BeforeMethodHook)
-		if !ok {
-			continue
-		}
+	for hook := range Hooks[BeforeMethodHook](s) {
 		proceed, err := hook.BeforeMethod(w, r)
 		if err != nil {
 			s.WriteError(w, err)
@@ -241,11 +234,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if !proceed {
 		return
 	}
-	for _, p := range s.plugins {
-		mp, ok := p.(MethodProvider)
-		if !ok {
-			continue
-		}
+	for mp := range Hooks[MethodProvider](s) {
 		handled, err := mp.HandleMethod(w, r)
 		if err != nil {
 			s.WriteError(w, err)
@@ -373,11 +362,9 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 // core defaults, plugins, then node-supplied dead properties.
 func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error {
 	corePropFind(s, pf, node)
-	for _, p := range s.plugins {
-		if hook, ok := p.(PropFindHook); ok {
-			if err := hook.PropFind(pf, node); err != nil {
-				return err
-			}
+	for hook := range Hooks[PropFindHook](s) {
+		if err := hook.PropFind(pf, node); err != nil {
+			return err
 		}
 	}
 	// Late phase: node dead properties (sabre's propFindNode at 120).
@@ -397,11 +384,9 @@ func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error
 		}
 	}
 	// Very late phase: property storage (sabre's priority 130).
-	for _, p := range s.plugins {
-		if hook, ok := p.(LatePropFindHook); ok {
-			if err := hook.PropFindLate(pf, node); err != nil {
-				return err
-			}
+	for hook := range Hooks[LatePropFindHook](s) {
+		if err := hook.PropFindLate(pf, node); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -427,22 +412,18 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 		return nil, err
 	}
 	// Pre-node hooks may claim mutations first (per-user property storage).
-	for _, p := range s.plugins {
-		if hook, ok := p.(PrePropPatchHook); ok {
-			if err := hook.PrePropPatch(ctx, path, node, pp); err != nil {
-				return nil, err
-			}
+	for hook := range Hooks[PrePropPatchHook](s) {
+		if err := hook.PrePropPatch(ctx, path, node, pp); err != nil {
+			return nil, err
 		}
 	}
 	if props, ok := node.(PropNode); ok {
 		props.PropPatch(ctx, pp)
 	}
 	// Property-storage plugins claim the remainder (sabre priority 300).
-	for _, p := range s.plugins {
-		if hook, ok := p.(PropPatchHook); ok {
-			if err := hook.PropPatch(ctx, path, pp); err != nil {
-				return nil, err
-			}
+	for hook := range Hooks[PropPatchHook](s) {
+		if err := hook.PropPatch(ctx, path, pp); err != nil {
+			return nil, err
 		}
 	}
 	result, _ := pp.Commit()
@@ -451,18 +432,21 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 
 // fireAfterUnbind notifies plugins that a node was removed.
 func (s *Server) fireAfterUnbind(ctx context.Context, path string) {
-	for _, p := range s.plugins {
-		if hook, ok := p.(AfterUnbindHook); ok {
-			_ = hook.AfterUnbind(ctx, path)
+	for hook := range Hooks[AfterUnbindHook](s) {
+		// The node is already gone, so a failing listener cannot undo the
+		// request; it can only leave state behind (e.g. dead properties).
+		if err := hook.AfterUnbind(ctx, path); err != nil {
+			slog.ErrorContext(ctx, "after-unbind hook failed", "plugin", hook.(Plugin).PluginName(), "path", path, "err", err)
 		}
 	}
 }
 
 // fireAfterMove notifies plugins that a node moved.
 func (s *Server) fireAfterMove(ctx context.Context, source, destination string) {
-	for _, p := range s.plugins {
-		if hook, ok := p.(AfterMoveHook); ok {
-			_ = hook.AfterMove(ctx, source, destination)
+	for hook := range Hooks[AfterMoveHook](s) {
+		if err := hook.AfterMove(ctx, source, destination); err != nil {
+			slog.ErrorContext(ctx, "after-move hook failed", "plugin", hook.(Plugin).PluginName(),
+				"source", source, "destination", destination, "err", err)
 		}
 	}
 }
@@ -480,10 +464,8 @@ func (s *Server) VisibleChildren(ctx context.Context, path string, coll Collecti
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range s.plugins {
-		if hook, ok := p.(ChildFilterHook); ok {
-			children = hook.FilterChildren(ctx, path, children)
-		}
+	for hook := range Hooks[ChildFilterHook](s) {
+		children = hook.FilterChildren(ctx, path, children)
 	}
 	return children, nil
 }

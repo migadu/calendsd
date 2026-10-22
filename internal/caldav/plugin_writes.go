@@ -148,22 +148,18 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 
 	// Run the same write-interceptor chain a PUT would (validation +
 	// scheduling), so an Add-Member POST is not a validation bypass.
-	for _, plugin := range p.server.Plugins() {
-		if wi, ok := plugin.(dav.WriteInterceptor); ok {
-			raw, err = wi.InterceptWrite(r, targetPath, raw, true)
-			if err != nil {
-				return true, err
-			}
+	for wi := range dav.Hooks[dav.WriteInterceptor](p.server) {
+		raw, err = wi.InterceptWrite(r, targetPath, raw, true)
+		if err != nil {
+			return true, err
 		}
 	}
 	etag, err := cal.CreateFile(r.Context(), name, bytes.NewReader(raw))
 	if err != nil {
 		return true, err
 	}
-	for _, plugin := range p.server.Plugins() {
-		if hook, ok := plugin.(dav.AfterWriteHook); ok {
-			hook.AfterWrite(r, targetPath)
-		}
+	for hook := range dav.Hooks[dav.AfterWriteHook](p.server) {
+		hook.AfterWrite(r, targetPath)
 	}
 
 	h := w.Header()

@@ -46,8 +46,8 @@ type AsyncExternalDeliverer interface {
 // AfterWrite. When false, deferring would leave the status stuck at pending, so
 // the caller delivers synchronously instead.
 func (p *SchedulePlugin) asyncSendsOffloaded() bool {
-	for _, plugin := range p.server.Plugins() {
-		if ext, ok := plugin.(AsyncExternalDeliverer); ok && ext.QueuesExternalSends() {
+	for ext := range dav.Hooks[AsyncExternalDeliverer](p.server) {
+		if ext.QueuesExternalSends() {
 			return true
 		}
 	}

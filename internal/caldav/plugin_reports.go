@@ -38,10 +38,8 @@ type PrivilegeChecker interface {
 // each of those into an unauthenticated bypass, not a no-op — so a missing
 // checker is a denial (and compose() also asserts one is wired at startup).
 func RequirePrivilegeChecker(server *dav.Server) (PrivilegeChecker, error) {
-	for _, plugin := range server.Plugins() {
-		if checker, ok := plugin.(PrivilegeChecker); ok {
-			return checker, nil
-		}
+	for checker := range dav.Hooks[PrivilegeChecker](server) {
+		return checker, nil
 	}
 	return nil, dav.ErrForbidden("access control is not configured on this server")
 }

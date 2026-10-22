@@ -207,10 +207,8 @@ func (s *Server) checkIfConditions(r *http.Request, path string) error {
 	if len(conditions) == 0 {
 		return nil
 	}
-	for _, p := range s.plugins {
-		if tv, ok := p.(TokenValidator); ok {
-			tv.ValidateTokens(r.Context(), conditions)
-		}
+	for tv := range Hooks[TokenValidator](s) {
+		tv.ValidateTokens(r.Context(), conditions)
 	}
 
 nextCondition:

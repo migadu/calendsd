@@ -3,6 +3,7 @@ package dav
 import (
 	"context"
 	"encoding/xml"
+	"iter"
 	"net/http"
 )
 
@@ -14,6 +15,18 @@ type Plugin interface {
 	PluginName() string
 	// Init is called when the plugin is registered on a server.
 	Init(s *Server)
+}
+
+// Hooks yields the registered plugins that implement T, in registration
+// order.
+func Hooks[T any](s *Server) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, p := range s.plugins {
+			if hook, ok := p.(T); ok && !yield(hook) {
+				return
+			}
+		}
+	}
 }
 
 // FeatureProvider contributes tokens to the DAV response header

@@ -307,11 +307,9 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 // surfaces any that then fail).
 func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Queue {
 	var imip *caldav.IMipPlugin
-	for _, p := range srv.Plugins() {
-		if m, ok := p.(*caldav.IMipPlugin); ok {
-			imip = m
-			break
-		}
+	for m := range dav.Hooks[*caldav.IMipPlugin](srv) {
+		imip = m
+		break
 	}
 	if imip == nil {
 		return nil
@@ -339,12 +337,10 @@ func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Q
 	q.Register("imip_send", imip.DurableHandler)
 	imip.Durable = q
 	// Share-invite notices ride the same queue (relay identity, no credential).
-	for _, p := range srv.Plugins() {
-		if sp, ok := p.(*caldav.SharingPlugin); ok {
-			if sm, ok := sp.Notifier.(*caldav.ShareMailer); ok {
-				q.Register(caldav.ShareNotifyWorker, sm.DurableHandler)
-				sm.Durable = q
-			}
+	for sp := range dav.Hooks[*caldav.SharingPlugin](srv) {
+		if sm, ok := sp.Notifier.(*caldav.ShareMailer); ok {
+			q.Register(caldav.ShareNotifyWorker, sm.DurableHandler)
+			sm.Durable = q
 		}
 	}
 	return q
