@@ -192,11 +192,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 		}
 		for _, child := range cards {
 			c := child.(*Card)
-			ok, err := query.match(c.Data())
-			if err != nil {
-				return err
-			}
-			if ok {
+			if query.match(c.Data()) {
 				matches = append(matches, path+"/"+c.Name())
 				if query.limit > 0 && len(matches) >= query.limit {
 					break
@@ -204,11 +200,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 			}
 		}
 	case *Card:
-		ok, err := query.match(n.Data())
-		if err != nil {
-			return err
-		}
-		if ok {
+		if query.match(n.Data()) {
 			matches = append(matches, path)
 		}
 	}
