@@ -18,7 +18,8 @@ type busyPeriod struct {
 // GenerateFreeBusy computes a VFREEBUSY response for the objects' VEVENTs
 // within [start, end). Subset of vobject's FreeBusyGenerator: transparent and
 // cancelled events are skipped, TENTATIVE maps to BUSY-TENTATIVE, recurring
-// events expand within the range, and overlapping same-type periods coalesce
+// events expand within the range with each override replacing its
+// occurrence, and overlapping same-type periods coalesce
 // (pinned against sabre's output in testdata/freebusy-golden.ics).
 //
 // extraProps are additional pre-formatted iCalendar property lines (unfolded,
@@ -55,10 +56,16 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 		if err != nil {
 			continue // unparseable objects contribute nothing, like sabre
 		}
+		resolveNonIANATZIDs(cal)
+		overridden := overriddenSlots(cal, loc)
 		for _, comp := range cal.Children {
 			switch comp.Name {
 			case goical.CompEvent:
-				p, err := eventBusyPeriods(comp, start, end, loc)
+				var skip map[int64]bool
+				if comp.Props.Get(goical.PropRecurrenceID) == nil {
+					skip = overridden[uidOf(comp)]
+				}
+				p, err := eventBusyPeriods(comp, start, end, loc, skip)
 				if err != nil {
 					return nil, err
 				}
@@ -190,7 +197,42 @@ func parseFreeBusyPeriodEnd(start time.Time, s string) (time.Time, error) {
 	return parseFreeBusyTime(s)
 }
 
-func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location) ([]busyPeriod, error) {
+// overriddenSlots maps each UID to the occurrences (by unix start) that have
+// a RECURRENCE-ID override of their own.
+func overriddenSlots(cal *goical.Calendar, loc *time.Location) map[string]map[int64]bool {
+	out := map[string]map[int64]bool{}
+	for _, comp := range cal.Children {
+		if comp.Name != goical.CompEvent {
+			continue
+		}
+		rid := comp.Props.Get(goical.PropRecurrenceID)
+		if rid == nil {
+			continue
+		}
+		t, err := rid.DateTime(loc)
+		if err != nil {
+			continue
+		}
+		uid := uidOf(comp)
+		if out[uid] == nil {
+			out[uid] = map[int64]bool{}
+		}
+		out[uid][t.Unix()] = true
+	}
+	return out
+}
+
+func uidOf(comp *goical.Component) string {
+	if p := comp.Props.Get(goical.PropUID); p != nil {
+		return p.Value
+	}
+	return ""
+}
+
+// eventBusyPeriods lists a VEVENT's busy time in [start, end). A master
+// leaves out the occurrences in overridden: each override counts on its own,
+// at its own time and with its own TRANSP and STATUS.
+func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location, overridden map[int64]bool) ([]busyPeriod, error) {
 	if transp := comp.Props.Get("TRANSP"); transp != nil && strings.EqualFold(transp.Value, "TRANSPARENT") {
 		return nil, nil
 	}
@@ -235,6 +277,9 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return nil, err
 	}
 	if roption == nil {
+		if overridden[dtstart.Unix()] {
+			return nil, nil
+		}
 		if p := clamp(dtstart, endOf(dtstart)); p != nil {
 			return []busyPeriod{*p}, nil
 		}
@@ -254,6 +299,9 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
 			break
+		}
+		if overridden[occStart.Unix()] {
+			continue
 		}
 		if p := clamp(occStart, endOf(occStart)); p != nil {
 			out = append(out, *p)
