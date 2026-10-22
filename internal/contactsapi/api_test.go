@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	"calserver/internal/auth"
 	"calserver/internal/contactsapi"
 	"calserver/internal/storage"
 )
@@ -74,15 +76,15 @@ func openScratchDB(t *testing.T, dbName string) *sql.DB {
 // principals/<user>, lowercased — the shape RcptdBackend produces.
 type fakeAuth struct{}
 
-func (fakeAuth) Check(r *http.Request) (string, bool, string) {
+func (fakeAuth) Check(r *http.Request) (string, error) {
 	user, pass, ok := r.BasicAuth()
 	if !ok {
-		return "", false, "no credentials"
+		return "", errors.New("no credentials")
 	}
 	if pass != "pw" {
-		return "", false, "bad password"
+		return "", auth.ErrBadCredentials
 	}
-	return "principals/" + strings.ToLower(user), true, ""
+	return "principals/" + strings.ToLower(user), nil
 }
 
 func (fakeAuth) Challenge(h http.Header, _ *http.Request) {

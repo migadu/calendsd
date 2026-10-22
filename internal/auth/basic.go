@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -32,20 +33,24 @@ func (b *BasicBackend) prefix() string {
 	return "principals/"
 }
 
-func (b *BasicBackend) Check(r *http.Request) (string, bool, string) {
+// errNoBasic is a Basic backend's Check failure for a request without Basic
+// credentials.
+var errNoBasic = errors.New("No 'Authorization: Basic' header found. Either the client didn't send one, or the server is misconfigured")
+
+func (b *BasicBackend) Check(r *http.Request) (string, error) {
 	username, password, ok := r.BasicAuth()
 	if !ok {
-		return "", false, "No 'Authorization: Basic' header found. Either the client didn't send one, or the server is misconfigured"
+		return "", errNoBasic
 	}
 	start := time.Now()
 	valid := b.Validate(username, password)
 	b.Metrics.ObserveAuthCheck("basic", time.Since(start).Seconds())
 	if !valid {
 		b.Metrics.AuthAttempt("basic", "bad_credentials")
-		return "", false, "Username or password was incorrect"
+		return "", ErrBadCredentials
 	}
 	b.Metrics.AuthAttempt("basic", "ok")
-	return b.prefix() + username, true, ""
+	return b.prefix() + username, nil
 }
 
 func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) {

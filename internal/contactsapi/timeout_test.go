@@ -47,9 +47,9 @@ func stalledDB(t *testing.T) *sql.DB {
 // a first-login provisioning write stuck on the network.
 type stallAuth struct{}
 
-func (stallAuth) Check(r *http.Request) (string, bool, string) {
+func (stallAuth) Check(r *http.Request) (string, error) {
 	<-r.Context().Done()
-	return "", false, "authentication service is unreachable"
+	return "", auth.ErrUnavailable
 }
 
 func (stallAuth) Challenge(h http.Header, _ *http.Request) {
@@ -101,8 +101,10 @@ func TestStalledDatabaseAnswers503(t *testing.T) {
 // downAuth answers the way RcptdBackend does when rcptd cannot be reached.
 type downAuth struct{}
 
-func (downAuth) Check(*http.Request) (string, bool, string) {
-	return "", false, auth.ReasonUnreachable
+func (downAuth) Check(r *http.Request) (string, error) {
+	// A real backend's call against the unreachable service.
+	_, err := auth.NewRcptdBackend("test", "http://127.0.0.1:1", "", 0).Check(r)
+	return "", err
 }
 
 func (downAuth) Challenge(h http.Header, _ *http.Request) {

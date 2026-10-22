@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -46,21 +47,25 @@ func (b *DigestBackend) prefix() string {
 	return "principals/"
 }
 
-func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
+// errNoDigest is a Digest backend's Check failure for a request without
+// Digest credentials.
+var errNoDigest = errors.New("No 'Authorization: Digest' header found. Either the client didn't send one, or the server is misconfigured")
+
+func (b *DigestBackend) Check(r *http.Request) (string, error) {
 	params := parseDigestHeader(r.Header.Get("Authorization"))
 	if params == nil {
-		return "", false, "No 'Authorization: Digest' header found. Either the client didn't send one, or the server is misconfigured"
+		return "", errNoDigest
 	}
 	username := params["username"]
 	if username == "" {
-		return "", false, "No 'Authorization: Digest' header found. Either the client didn't send one, or the server is misconfigured"
+		return "", errNoDigest
 	}
 	start := time.Now()
 	defer func() { b.Metrics.ObserveAuthCheck("digest", time.Since(start).Seconds()) }()
 	a1, ok := b.HashA1(b.Realm, username)
 	if !ok {
 		b.Metrics.AuthAttempt("digest", "bad_credentials")
-		return "", false, "Username or password was incorrect"
+		return "", ErrBadCredentials
 	}
 
 	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
@@ -69,19 +74,19 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 		// A protocol problem, not wrong credentials: "error", so a
 		// misbehaving client doesn't read as a brute force.
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Unsupported digest qop value"
+		return "", errors.New("Unsupported digest qop value")
 	}
 	issued, valid := b.verifyNonce(params["nonce"])
 	if !valid {
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Invalid digest nonce"
+		return "", errors.New("Invalid digest nonce")
 	}
 	// The digest covers the uri parameter, not the request line, so without
 	// this a captured header would authorize any other path.
 	uri := params["uri"]
 	if uri != r.RequestURI && uri != r.URL.RequestURI() {
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Digest uri does not match the request"
+		return "", errors.New("Digest uri does not match the request")
 	}
 	a2 := md5hex(r.Method + ":" + uri)
 	expected := md5hex(strings.Join([]string{
@@ -91,20 +96,20 @@ func (b *DigestBackend) Check(r *http.Request) (string, bool, string) {
 	// expected value through timing.
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(params["response"])) != 1 {
 		b.Metrics.AuthAttempt("digest", "bad_credentials")
-		return "", false, "Username or password was incorrect"
+		return "", ErrBadCredentials
 	}
 	// Right password, old nonce: Challenge answers with stale=true, so the
 	// client retries with a fresh nonce without prompting the user.
 	if b.clock().Sub(issued) > nonceTTL {
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Digest nonce expired"
+		return "", errors.New("Digest nonce expired")
 	}
 	if !b.advanceNonceCount(params["nonce"], params["nc"], issued) {
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Digest nonce count reused"
+		return "", errors.New("Digest nonce count reused")
 	}
 	b.Metrics.AuthAttempt("digest", "ok")
-	return b.prefix() + username, true, ""
+	return b.prefix() + username, nil
 }
 
 // nonceTTL is how long an issued nonce is accepted. Clients reuse a nonce
