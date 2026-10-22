@@ -56,7 +56,7 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 		if err != nil {
 			continue // unparseable objects contribute nothing, like sabre
 		}
-		resolveNonIANATZIDs(cal)
+		ResolveNonIANATZIDs(cal)
 		for _, comp := range cal.Children {
 			switch comp.Name {
 			case goical.CompEvent:

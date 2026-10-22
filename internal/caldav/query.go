@@ -408,6 +408,10 @@ func (v *Validator) Validate(cal *goical.Calendar, filter CompFilter) (bool, err
 	if cal.Name != filter.Name {
 		return false, nil
 	}
+	// Outlook TZIDs ("W. Europe Standard Time") are not IANA names; map them
+	// first, as expansion and free-busy do, or every time-range test on such
+	// an event fails. cal is the caller's own decoded copy.
+	ical.ResolveNonIANATZIDs(cal)
 	v.cal = cal
 	return v.validateComponent(cal.Component, filter.CompFilters, filter.PropFilters)
 }

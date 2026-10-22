@@ -11,7 +11,7 @@ import (
 	goical "github.com/emersion/go-ical"
 )
 
-// resolveNonIANATZIDs rewrites, in place, every date-time property in cal whose
+// ResolveNonIANATZIDs rewrites, in place, every date-time property in cal whose
 // TZID time.LoadLocation cannot resolve. go-ical's Prop.DateTime resolves TZIDs
 // only through time.LoadLocation, so Outlook-style zone names (e.g. "W. Europe
 // Standard Time") otherwise hard-error.
@@ -26,7 +26,7 @@ import (
 // TZIDs that time.LoadLocation already understands, DATE-only values, and
 // already-UTC values are left untouched, as are unknown TZIDs with no embedded
 // VTIMEZONE (there is nothing to resolve from).
-func resolveNonIANATZIDs(cal *goical.Calendar) {
+func ResolveNonIANATZIDs(cal *goical.Calendar) {
 	embedded := map[string]*goical.Component{}
 	for _, child := range cal.Children {
 		if child.Name != goical.CompTimezone {

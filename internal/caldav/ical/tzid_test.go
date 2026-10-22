@@ -96,7 +96,7 @@ func TestFixedOffsetCustomTZIDIsFlattened(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolveNonIANATZIDs(cal)
+	ResolveNonIANATZIDs(cal)
 	ds := cal.Children[1].Props.Get("DTSTART")
 	if ds.Value != "20260601T043000Z" || ds.Params.Get("TZID") != "" {
 		t.Errorf("DTSTART = %v %q, want 20260601T043000Z without TZID", ds.Params, ds.Value)

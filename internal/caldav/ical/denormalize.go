@@ -54,7 +54,7 @@ func Denormalize(data []byte) (*Denormalized, error) {
 	}
 	// Resolve Outlook-style non-IANA TZIDs from any embedded VTIMEZONE so the
 	// occurrence-bounds computation can parse their date-times.
-	resolveNonIANATZIDs(cal)
+	ResolveNonIANATZIDs(cal)
 
 	var comp *goical.Component
 	for _, child := range cal.Children {

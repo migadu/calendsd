@@ -17,7 +17,7 @@ import (
 func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*goical.Calendar, error) {
 	// Resolve Outlook-style non-IANA TZIDs from any embedded VTIMEZONE before
 	// expanding, since go-ical cannot load them by name.
-	resolveNonIANATZIDs(cal)
+	ResolveNonIANATZIDs(cal)
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
 	out.Props.SetText(goical.PropProductID, "-//calserver//calserver//EN")
