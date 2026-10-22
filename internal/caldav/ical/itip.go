@@ -133,9 +133,6 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == "0" {
 			out.sequence = p.Value
 		}
-		if p := comp.Props.Get("STATUS"); p != nil {
-			out.status = strings.ToUpper(p.Value)
-		}
 		for _, ex := range comp.Props.Values("EXDATE") {
 			exset = append(exset, splitList(ex.Value)...)
 		}
@@ -193,6 +190,11 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 	}
 	if out.master == nil {
 		return nil
+	}
+	// The event's status is the master's: a cancelled override cancels only
+	// its own occurrence, not the series.
+	if p := out.master.Props.Get("STATUS"); p != nil {
+		out.status = strings.ToUpper(p.Value)
 	}
 	sort.Strings(exset)
 	out.exdate = exset
