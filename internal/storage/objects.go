@@ -137,14 +137,17 @@ func (b *CalDAV) UpdateCalendarObject(id caldav.CalendarID, objectURI string, da
 		return "", err
 	}
 	err = withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`
+		// A vanished object is ErrNotFound, with no change row: logging a
+		// modify for a uri that no longer exists would tell sync clients to
+		// fetch something that 404s.
+		if err := affectedOne(tx.Exec(`
 UPDATE calendarobjects
    SET calendardata = $1, lastmodified = extract(epoch from now())::int,
        etag = $2, size = $3, componenttype = $4,
        firstoccurence = $5, lastoccurence = $6, uid = $7
  WHERE calendarid = $8 AND uri = $9`,
 			data, d.ETag, d.Size, d.ComponentType, d.FirstOccurrence, d.LastOccurrence,
-			d.UID, id.Calendar, objectURI); err != nil {
+			d.UID, id.Calendar, objectURI)); err != nil {
 			return err
 		}
 		return addChange(tx, id.Calendar, objectURI, 2)
@@ -157,9 +160,9 @@ UPDATE calendarobjects
 
 func (b *CalDAV) DeleteCalendarObject(id caldav.CalendarID, objectURI string) error {
 	return withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(
+		if err := affectedOne(tx.Exec(
 			`DELETE FROM calendarobjects WHERE calendarid = $1 AND uri = $2`,
-			id.Calendar, objectURI); err != nil {
+			id.Calendar, objectURI)); err != nil {
 			return err
 		}
 		return addChange(tx, id.Calendar, objectURI, 3)

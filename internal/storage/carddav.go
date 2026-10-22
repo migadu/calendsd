@@ -134,9 +134,9 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 		}
 		args = append(args, id)
 		err := withTx(b.DB, func(tx *sql.Tx) error {
-			if _, err := tx.Exec(
+			if err := affectedOne(tx.Exec(
 				"UPDATE addressbooks SET "+strings.Join(assignments, ", ")+" WHERE id = $"+strconv.Itoa(len(args)),
-				args...); err != nil {
+				args...)); err != nil {
 				return err
 			}
 			return abAddChange(tx, id, "", 2)
@@ -211,10 +211,11 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
 func (b *CardDAV) UpdateCard(addressBookID, uri string, data []byte) (string, error) {
 	etag := cardETag(data)
 	err := withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`
+		// A vanished card is ErrNotFound, with no change row.
+		if err := affectedOne(tx.Exec(`
 UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, etag = $2, size = $3
  WHERE addressbookid = $4 AND uri = $5`,
-			data, etag, len(data), addressBookID, uri); err != nil {
+			data, etag, len(data), addressBookID, uri)); err != nil {
 			return err
 		}
 		return abAddChange(tx, addressBookID, uri, 2)
@@ -311,8 +312,8 @@ SELECT uri, $2, $1, 3 FROM cards WHERE addressbookid = $1`, addressBookID, token
 
 func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
 	return withTx(b.DB, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(
-			`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri); err != nil {
+		if err := affectedOne(tx.Exec(
+			`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri)); err != nil {
 			return err
 		}
 		return abAddChange(tx, addressBookID, uri, 3)

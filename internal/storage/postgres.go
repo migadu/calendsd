@@ -275,9 +275,9 @@ func (b *CalDAV) UpdateCalendar(id caldav.CalendarID, pp *dav.PropPatch) {
 
 		args = append(args, id.Instance)
 		err := withTx(b.DB, func(tx *sql.Tx) error {
-			if _, err := tx.Exec(fmt.Sprintf(
+			if err := affectedOne(tx.Exec(fmt.Sprintf(
 				`UPDATE calendarinstances SET %s WHERE id = $%d`,
-				strings.Join(assignments, ", "), len(args)), args...); err != nil {
+				strings.Join(assignments, ", "), len(args)), args...)); err != nil {
 				return err
 			}
 			return addChange(tx, id.Calendar, "", 2)
