@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	goical "github.com/emersion/go-ical"
 	"github.com/teambition/rrule-go"
@@ -160,25 +161,45 @@ func formatProp(prop *goical.Prop) string {
 	}
 	sort.Strings(paramNames)
 	for _, name := range paramNames {
-		for _, v := range prop.Params[name] {
-			b.WriteString(";" + name + "=")
-			if strings.ContainsAny(v, ";:,") {
-				b.WriteString(`"` + v + `"`)
-			} else {
-				b.WriteString(v)
+		b.WriteString(";" + name + "=")
+		for i, v := range prop.Params[name] {
+			if i > 0 {
+				b.WriteByte(',')
 			}
+			b.WriteString(paramValue(v))
 		}
 	}
 	b.WriteString(":" + prop.Value)
 	return b.String()
 }
 
-// writeContentLine folds at 75 octets per RFC 5545 §3.1.
+// paramEscaper applies RFC 6868 to the characters a parameter value cannot
+// hold as they are.
+var paramEscaper = strings.NewReplacer("\r\n", "^n", "\n", "^n", "\r", "^n", `"`, "^'")
+
+// paramValue renders one parameter value: a double quote or line break is
+// RFC 6868-encoded, and a value containing ; : or , is quoted. A ^ is left
+// alone: go-ical keeps values as written, without decoding RFC 6868, so one
+// is already part of an encoding.
+func paramValue(v string) string {
+	v = paramEscaper.Replace(v)
+	if strings.ContainsAny(v, ";:,") {
+		return `"` + v + `"`
+	}
+	return v
+}
+
+// writeContentLine folds at 75 octets per RFC 5545 §3.1, counting the
+// leading space of a continuation line, and never inside a UTF-8 sequence.
 func writeContentLine(buf *bytes.Buffer, line string) {
 	const limit = 75
-	for len(line) > limit {
-		buf.WriteString(line[:limit] + "\r\n ")
-		line = line[limit:]
+	for n := limit; len(line) > n; n = limit - 1 {
+		cut := n
+		for !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		buf.WriteString(line[:cut] + "\r\n ")
+		line = line[cut:]
 	}
 	buf.WriteString(line + "\r\n")
 }
