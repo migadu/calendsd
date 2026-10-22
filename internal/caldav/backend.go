@@ -98,6 +98,13 @@ type Backend interface {
 	ChangesForCalendar(calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
+// UIDLookup is implemented by backends that find an object by its UID with an
+// index (storage.CalDAV) rather than by loading the whole calendar.
+type UIDLookup interface {
+	// CalendarObjectByUID returns the calendar's object carrying uid, or nil.
+	CalendarObjectByUID(calendarID CalendarID, uid string) (*ObjectInfo, error)
+}
+
 // MockBackend is the in-memory backend used by tests and the corpus runner.
 // Port of sabre's CalDAV\Backend\Mock.
 type MockBackend struct {
@@ -107,13 +114,17 @@ type MockBackend struct {
 
 	nextID int
 
-	// mu guards Objects. iTIP delivery now writes back SCHEDULE-STATUS from a
-	// background goroutine (the send queue) while requests read the same object,
-	// so the map needs the same concurrency-safety the real backend has.
+	// mu guards Calendars, Objects and nextID (and the maps of the mocks that
+	// embed this one). iTIP delivery writes back SCHEDULE-STATUS from a
+	// background goroutine (the send queue) while requests read the same
+	// state, so the mock needs the same concurrency-safety the real backend
+	// has.
 	mu sync.Mutex
 }
 
 func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []CalendarInfo
 	for _, c := range m.Calendars {
 		if c.PrincipalURI == principalURI {
@@ -124,6 +135,8 @@ func (m *MockBackend) CalendarsForUser(principalURI string) ([]CalendarInfo, err
 }
 
 func (m *MockBackend) CreateCalendar(principalURI, calendarURI string, props map[xml.Name]any) (CalendarID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.nextID++
 	id := CalendarID{Calendar: "mock-" + hex.EncodeToString([]byte{byte(m.nextID)})}
 	info := CalendarInfo{ID: id, URI: calendarURI, PrincipalURI: principalURI, Props: map[xml.Name]any{}}
@@ -212,6 +225,8 @@ func (m *MockBackend) DeleteCalendarObject(calendarID CalendarID, objectURI stri
 // sabre's mock.
 func (m *MockBackend) UpdateCalendar(calendarID CalendarID, pp *dav.PropPatch) {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		for i := range m.Calendars {
 			if m.Calendars[i].ID != calendarID {
 				continue

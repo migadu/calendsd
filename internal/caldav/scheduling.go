@@ -258,10 +258,14 @@ type MockSchedulingBackend struct {
 }
 
 func (m *MockSchedulingBackend) FreeBusyVisibility(principalURI string) (acl.FreeBusyVisibility, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.Visibilities[principalURI], nil
 }
 
 func (m *MockSchedulingBackend) SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibility) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Visibilities == nil {
 		m.Visibilities = map[string]acl.FreeBusyVisibility{}
 	}
@@ -270,15 +274,21 @@ func (m *MockSchedulingBackend) SetFreeBusyVisibility(principalURI string, v acl
 }
 
 func (m *MockSchedulingBackend) DeleteFreeBusyVisibility(principalURI string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Visibilities, principalURI)
 	return nil
 }
 
 func (m *MockSchedulingBackend) Availability(principalURI string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.Availabilities[principalURI], nil
 }
 
 func (m *MockSchedulingBackend) SetAvailability(principalURI string, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Availabilities == nil {
 		m.Availabilities = map[string][]byte{}
 	}
@@ -287,11 +297,15 @@ func (m *MockSchedulingBackend) SetAvailability(principalURI string, data []byte
 }
 
 func (m *MockSchedulingBackend) DeleteAvailability(principalURI string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Availabilities, principalURI)
 	return nil
 }
 
 func (m *MockSchedulingBackend) SchedulingObjects(principalURI string) ([]SchedulingObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []SchedulingObjectInfo
 	for uri, data := range m.Scheduling[principalURI] {
 		out = append(out, SchedulingObjectInfo{URI: uri, PrincipalURI: principalURI, CalendarData: data})
@@ -300,6 +314,8 @@ func (m *MockSchedulingBackend) SchedulingObjects(principalURI string) ([]Schedu
 }
 
 func (m *MockSchedulingBackend) SchedulingObject(principalURI, objectURI string) (*SchedulingObjectInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	data, exists := m.Scheduling[principalURI][objectURI]
 	if !exists {
 		return nil, nil
@@ -308,6 +324,8 @@ func (m *MockSchedulingBackend) SchedulingObject(principalURI, objectURI string)
 }
 
 func (m *MockSchedulingBackend) CreateSchedulingObject(principalURI, objectURI string, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Scheduling == nil {
 		m.Scheduling = map[string]map[string][]byte{}
 	}
@@ -319,6 +337,8 @@ func (m *MockSchedulingBackend) CreateSchedulingObject(principalURI, objectURI s
 }
 
 func (m *MockSchedulingBackend) DeleteSchedulingObject(principalURI, objectURI string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Scheduling[principalURI], objectURI)
 	return nil
 }

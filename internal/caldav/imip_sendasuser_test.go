@@ -132,7 +132,7 @@ func TestDeliverAsUserSendsAsLoggedInUser(t *testing.T) {
 			if !strings.HasPrefix(msg.ScheduleStatus, "1.1") {
 				t.Errorf("status = %q, want 1.1 (sent)", msg.ScheduleStatus)
 			}
-			if !strings.Contains(string(sub.msg), "From: "+tc.wantFrom) {
+			if !strings.Contains(string(sub.msg), "From: <"+tc.wantFrom+">") {
 				t.Errorf("message From header missing %q:\n%s", tc.wantFrom, sub.msg)
 			}
 		})
@@ -439,7 +439,7 @@ func TestIMipSubmissionSendsAsLoggedInUser(t *testing.T) {
 		t.Errorf("recipients = %v, want [guest@gmail.com]", sub.to)
 	}
 	email := string(sub.msg)
-	if !strings.Contains(email, "From: User One <user1@example.org>") || !strings.Contains(email, "method=REQUEST") {
+	if !strings.Contains(email, `From: "User One" <user1@example.org>`) || !strings.Contains(email, "method=REQUEST") {
 		t.Errorf("message should be a REQUEST from the organizer:\n%s", email)
 	}
 }

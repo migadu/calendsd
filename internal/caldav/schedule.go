@@ -328,7 +328,7 @@ func (p *SchedulePlugin) AfterWrite(r *http.Request, path string) {
 // Local delivery is likewise cheap and stays synchronous.
 func (p *SchedulePlugin) deferrableSend(msg *ical.Message) bool {
 	return msg.SignificantChange &&
-		p.principalForAddress(msg.Recipient) == "" &&
+		principalForAddress(p.server, msg.Recipient) == "" &&
 		strings.HasPrefix(msg.Recipient, "mailto:") &&
 		strings.HasPrefix(msg.Sender, "mailto:")
 }
@@ -356,22 +356,6 @@ func (p *SchedulePlugin) pendingWorkFor(r *http.Request) *pendingWork {
 	return w
 }
 
-// patchScheduleStatus re-opens the stored object at path and writes status onto
-// the ATTENDEE (or ORGANIZER, for a REPLY) matching recipient, persisting it
-// through the backend — which, unlike an HTTP PUT, does not re-run the iTIP
-// broker, so this cannot trigger another send. It runs on a queue worker after
-// the object was persisted, and is best-effort: if the object has since been
-// deleted, moved, or no longer names the recipient, it does nothing. The
-// per-object lock serializes the read-modify-write so concurrent per-attendee
-// write-backs don't clobber one another.
-//
-// Single-instance caveat: writeBackLocks is an in-process lock, so it serializes
-// the queue workers within one calserver process. Running multiple calserver
-// instances against one database (which the queue's FOR UPDATE SKIP LOCKED claim
-// otherwise allows) would need a database-level lock here — a per-object
-// advisory lock, or SELECT … FOR UPDATE on the calendarobjects row — to keep
-// two nodes from clobbering each other's SCHEDULE-STATUS. Today's deployment is
-// single-instance; revisit if that changes (JOB-QUEUE-PLAN.md, write-back).
 // writeBackLocker returns the configured cross-node locker, or the in-process
 // striped mutexes when none is wired.
 func (p *SchedulePlugin) writeBackLocker() WriteBackLocker {
@@ -381,6 +365,16 @@ func (p *SchedulePlugin) writeBackLocker() WriteBackLocker {
 	return &p.writeBackLocks
 }
 
+// patchScheduleStatus re-opens the stored object at path and writes status onto
+// the ATTENDEE (or ORGANIZER, for a REPLY) matching recipient, persisting it
+// through the backend — which, unlike an HTTP PUT, does not re-run the iTIP
+// broker, so this cannot trigger another send. It runs on a queue worker after
+// the object was persisted, and is best-effort: if the object has since been
+// deleted, moved, or no longer names the recipient, it does nothing. The
+// per-object lock (writeBackLocker) serializes the read-modify-write so
+// concurrent per-attendee write-backs don't clobber one another: across nodes
+// when WriteBackLocker is an AdvisoryLocker, otherwise only within this process
+// (writeBackLocks), which suffices for a single instance.
 func (p *SchedulePlugin) patchScheduleStatus(path, method, recipient, status string) {
 	unlock := p.writeBackLocker().Lock(path)
 	defer unlock()

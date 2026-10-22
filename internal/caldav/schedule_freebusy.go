@@ -3,13 +3,13 @@
 package caldav
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -112,15 +112,13 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	// ATTENDEE set to the recipient).
 	var idProps []string
 	if uid := vfb.Props.Get("UID"); uid != nil && uid.Value != "" {
-		idProps = append(idProps, "UID:"+uid.Value)
+		idProps = appendPropLine(idProps, uid)
 	}
 	if org := vfb.Props.Get("ORGANIZER"); org != nil {
-		idProps = append(idProps, formatICalProp(org))
+		idProps = appendPropLine(idProps, org)
 	}
 
-	var b strings.Builder
-	b.WriteString(xml.Header)
-	b.WriteString(`<cal:schedule-response xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">` + "\n")
+	var resp scheduleResponseXML
 	// The per-recipient aggregation below skips calendars the requester
 	// holds no read-free-busy on, so it needs the same checker.
 	checker, err := RequirePrivilegeChecker(p.server)
@@ -130,11 +128,11 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	for _, att := range vfb.Props.Values("ATTENDEE") {
 		status := "2.0;Success"
 		var fbData string
-		principal := p.principalForAddress(att.Value)
+		principal := principalForAddress(p.server, att.Value)
 		if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {
-			extra := append(append([]string{}, idProps...), "ATTENDEE:"+att.Value)
+			extra := appendPropLine(append([]string{}, idProps...), &goical.Prop{Name: "ATTENDEE", Value: att.Value})
 			fb, readable, err := p.freeBusyForPrincipal(r.Context(), checker, principal, start.UTC(), end.UTC(), extra...)
 			if err != nil {
 				status = "5.0;Internal error"
@@ -148,20 +146,31 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 				fbData = string(fb)
 			}
 		}
-		b.WriteString(" <cal:response>\n")
-		b.WriteString("  <cal:recipient><d:href>" + xmlEscapeText(att.Value) + "</d:href></cal:recipient>\n")
-		b.WriteString("  <cal:request-status>" + xmlEscapeText(status) + "</cal:request-status>\n")
-		if fbData != "" {
-			b.WriteString("  <cal:calendar-data>" + xmlEscapeText(fbData) + "</cal:calendar-data>\n")
-		}
-		b.WriteString(" </cal:response>\n")
+		resp.Responses = append(resp.Responses, scheduleResponseItemXML{
+			Recipient: hrefXML{Href: att.Value}, RequestStatus: status, CalendarData: fbData,
+		})
 	}
-	b.WriteString("</cal:schedule-response>\n")
+	body, err := xml.Marshal(resp)
+	if err != nil {
+		return err
+	}
 
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(http.StatusOK)
-	_, err = io.WriteString(w, b.String())
+	_, err = w.Write(append([]byte(xml.Header), body...))
 	return err
+}
+
+// scheduleResponseXML is the RFC 6638 §5 answer to an outbox POST.
+type scheduleResponseXML struct {
+	XMLName   xml.Name                  `xml:"urn:ietf:params:xml:ns:caldav schedule-response"`
+	Responses []scheduleResponseItemXML `xml:"urn:ietf:params:xml:ns:caldav response"`
+}
+
+type scheduleResponseItemXML struct {
+	Recipient     hrefXML `xml:"urn:ietf:params:xml:ns:caldav recipient"`
+	RequestStatus string  `xml:"urn:ietf:params:xml:ns:caldav request-status"`
+	CalendarData  string  `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
 }
 
 // freeBusyForPrincipal aggregates free-busy across the principal's calendars
@@ -204,12 +213,12 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 		if calNode.transparent() {
 			continue
 		}
-		objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		objs, err := calNode.QueryObjects("", start, end)
 		if err != nil {
 			continue
 		}
 		for _, obj := range objs {
-			payloads = append(payloads, obj.CalendarData)
+			payloads = append(payloads, obj.Data())
 		}
 	}
 	if !readable {
@@ -255,28 +264,18 @@ func (p *SchedulePlugin) availabilityFor(name string) []byte {
 	return data
 }
 
-// formatICalProp serializes an iCalendar property to a single unfolded content
-// line ("NAME;PARAM=value:value"), preserving parameters so a cloned ORGANIZER
-// keeps its CN.
-func formatICalProp(prop *goical.Prop) string {
-	var b strings.Builder
-	b.WriteString(prop.Name)
-	// Emit parameters in a stable order for deterministic output.
-	names := make([]string, 0, len(prop.Params))
-	for name := range prop.Params {
-		names = append(names, name)
+// appendPropLine appends prop as a content line, serialized by go-ical so
+// parameter values with ";:," are quoted (an ORGANIZER CN like "Doe, Jane"
+// stays one parameter) and long lines are folded. A property go-ical refuses
+// to encode (a parameter value with a DQUOTE) is left out.
+func appendPropLine(lines []string, prop *goical.Prop) []string {
+	comp := goical.NewComponent("X")
+	comp.Props.Add(&goical.Prop{Name: prop.Name, Params: prop.Params, Value: prop.Value})
+	var buf bytes.Buffer
+	if err := goical.NewEncoder(&buf).Encode(&goical.Calendar{Component: comp}); err != nil {
+		return lines
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		for _, v := range prop.Params[name] {
-			b.WriteString(";" + name + "=" + v)
-		}
-	}
-	b.WriteString(":" + prop.Value)
-	return b.String()
-}
-
-func xmlEscapeText(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
+	line := strings.TrimPrefix(buf.String(), "BEGIN:X\r\n")
+	line = strings.TrimSuffix(line, "\r\nEND:X\r\n")
+	return append(lines, line)
 }

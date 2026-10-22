@@ -83,10 +83,33 @@ func principalName(node dav.Node) string {
 	return ""
 }
 
+// AddressResolver is implemented by principal backends that resolve a
+// calendar user address with an indexed lookup (storage.Principals) rather
+// than by listing every principal.
+type AddressResolver interface {
+	// PrincipalByAddress returns the principal directly under prefix owning
+	// address, or "" when none does.
+	PrincipalByAddress(prefix, address string) (string, error)
+}
+
 // principalForAddress finds the principal owning a calendar user address
-// (sabre's getPrincipalByUri via calendar-user-address-set).
-func (p *SchedulePlugin) principalForAddress(address string) string {
-	principals, err := p.server.Tree.NodeForPath("principals")
+// (sabre's getPrincipalByUri via calendar-user-address-set). Scheduling and
+// sharing both resolve through here. The calendar root's principal backend
+// answers directly when it is an AddressResolver; otherwise every principal
+// is listed and its alternate-URI-set compared.
+func principalForAddress(s *dav.Server, address string) string {
+	if node, err := s.Tree.NodeForPath("calendars"); err == nil {
+		if root, ok := node.(*CalendarRoot); ok {
+			if resolver, ok := root.principals.(AddressResolver); ok {
+				uri, err := resolver.PrincipalByAddress(root.principalPrefix, address)
+				if err != nil {
+					return ""
+				}
+				return uri
+			}
+		}
+	}
+	principals, err := s.Tree.NodeForPath("principals")
 	if err != nil {
 		return ""
 	}
@@ -120,7 +143,7 @@ type groupMemberInfo struct{ address, name, email string }
 // group when it carries a non-empty {DAV:}group-member-set (only groups and
 // proxy sub-principals do, and proxy sub-principals are never attendees).
 func (p *SchedulePlugin) groupMembers(address string) (members []groupMemberInfo, groupEmail string, isGroup bool) {
-	uri := p.principalForAddress(address)
+	uri := principalForAddress(p.server, address)
 	if uri == "" {
 		return nil, "", false
 	}

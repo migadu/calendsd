@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
-	"strings"
 
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
@@ -66,29 +65,73 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type mkcalendarXML struct {
-	XMLName xml.Name `xml:"urn:ietf:params:xml:ns:caldav mkcalendar"`
-	Set     struct {
-		Prop struct {
-			Props []struct {
-				XMLName xml.Name
-				Inner   string `xml:",innerxml"`
-			} `xml:",any"`
-		} `xml:"prop"`
-	} `xml:"DAV: set"`
-}
+var (
+	nameMkcalendar     = xml.Name{Space: davxml.NSCalDAV, Local: "mkcalendar"}
+	namePropertyUpdate = xml.Name{Space: davxml.NSDav, Local: "propertyupdate"}
+)
 
+// parseMkcalendarProps reads the properties of an RFC 4791 §5.3.1 body
+// (mkcalendar > set > prop > *). The body has the shape of a PROPPATCH body,
+// so its tokens are re-encoded with the root renamed to {DAV:}propertyupdate
+// and handed to davxml's namespace-aware parser: text values come back
+// unescaped and element values as self-contained fragments that do not
+// depend on prefixes declared by the request.
 func parseMkcalendarProps(body []byte) (map[xml.Name]any, error) {
-	var parsed mkcalendarXML
-	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&parsed); err != nil {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	var buf bytes.Buffer
+	enc := xml.NewEncoder(&buf)
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if t.Name != nameMkcalendar {
+					return nil, xml.UnmarshalError("expected {" + davxml.NSCalDAV + "}mkcalendar root")
+				}
+				t.Name = namePropertyUpdate
+			}
+			depth++
+			// The decoder has resolved every name to its namespace, so the
+			// prefix declarations are dropped; the encoder re-derives them.
+			var attrs []xml.Attr
+			for _, a := range t.Attr {
+				if a.Name.Space != "xmlns" && a.Name != (xml.Name{Local: "xmlns"}) {
+					attrs = append(attrs, a)
+				}
+			}
+			t.Attr = attrs
+			err = enc.EncodeToken(t)
+		case xml.EndElement:
+			depth--
+			if depth == 0 {
+				t.Name = namePropertyUpdate
+			}
+			err = enc.EncodeToken(t)
+		case xml.CharData:
+			err = enc.EncodeToken(t)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := enc.Flush(); err != nil {
+		return nil, err
+	}
+	update, err := davxml.ParsePropertyUpdate(&buf)
+	if err != nil {
 		return nil, err
 	}
 	out := map[xml.Name]any{}
-	for _, prop := range parsed.Set.Prop.Props {
-		if strings.Contains(prop.Inner, "<") {
-			out[prop.XMLName] = []byte(prop.Inner)
-		} else {
-			out[prop.XMLName] = prop.Inner
+	for name, value := range update.Values {
+		if value != nil { // a <remove> has no place in MKCALENDAR
+			out[name] = value
 		}
 	}
 	return out, nil

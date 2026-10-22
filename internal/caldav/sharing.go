@@ -3,11 +3,12 @@ package caldav
 import (
 	"bytes"
 	"encoding/xml"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
 	"calserver/internal/dav"
 	davxml "calserver/internal/dav/xml"
 )
@@ -149,6 +150,8 @@ type SharingPlugin struct {
 	// Notifier, when non-nil, is told about every sharee a {cs}share request
 	// newly granted a usable local share, so it can email them.
 	Notifier ShareNotifier
+	// Now stamps invite notifications; nil uses time.Now (tests pin it).
+	Now func() time.Time
 
 	server *dav.Server
 }
@@ -179,10 +182,21 @@ func (p *SharingPlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bo
 	if err != nil {
 		return false, nil
 	}
-	body, err := readBody(r)
+	// Only calendars and calendar homes take sharing POSTs; leave every other
+	// body unread for the plugins after this one.
+	switch node.(type) {
+	case *Calendar, *CalendarHome:
+	default:
+		return false, nil
+	}
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	if err != nil {
 		return true, err
 	}
+	// A body that is not a sharing document belongs to a later plugin, which
+	// reads r.Body itself: hand it back intact.
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	root, err := rootName(body)
 	if err != nil {
 		return true, dav.ErrBadRequest("%s", err)
@@ -230,28 +244,36 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	}
 	// Resolve local principals by calendar user address.
 	for i := range sharees {
-		sharees[i].Principal = p.principalForAddress(sharees[i].Href)
+		sharees[i].Principal = principalForAddress(p.server, sharees[i].Href)
 	}
 	changes, err := sharing.UpdateInvites(calNode.Info.ID, sharees)
 	if err != nil {
 		return err
 	}
-	// Drop an invite-notification into each added local sharee's inbox, so
-	// their client's notification feed surfaces the share (like sabre).
+	// Drop an invite-notification into the inbox of each local sharee the
+	// committed result keeps, so their client's notification feed surfaces
+	// the share (like sabre). The request's raw entries are not used: a set
+	// overridden by a later remove, or a duplicate spelling, did not share
+	// anything. The share has committed, so a failed notification is logged
+	// rather than failing the request.
 	if notif, ok := calNode.backend.(NotificationsBackend); ok {
-		for _, sharee := range sharees {
-			if sharee.Access == AccessNoAccess || sharee.Principal == "" {
+		for _, c := range changes {
+			if c.Principal == "" || c.Principal == calNode.Owner() {
 				continue
 			}
-			_ = notif.AddNotification(sharee.Principal, InviteNotification{
-				ID:           notificationID(calPath, sharee.Href),
-				DTStamp:      requestTime(r),
+			err := notif.AddNotification(c.Principal, InviteNotification{
+				ID:           notificationID(calPath, c.Href),
+				DTStamp:      p.now(),
 				HostURL:      calPath,
 				Organizer:    calNode.Owner(),
-				Access:       sharee.Access,
+				Access:       c.Access,
 				InviteStatus: InviteNoResponse,
-				Summary:      sharee.Comment,
+				Summary:      c.Comment,
 			})
+			if err != nil {
+				slog.Warn("share invite notification not stored",
+					"calendar", calPath, "principal", c.Principal, "err", err)
+			}
 		}
 	}
 	// Email each newly usable local sharee (best effort, never fails the
@@ -326,13 +348,9 @@ func sameSharee(cur, s Sharee) bool {
 // must apply the same normalization inside their own transaction.
 func FinalSharees(sharees []Sharee, owner string) []Sharee { return finalSharees(sharees, owner) }
 
-// requestTime returns a deterministic timestamp when available (parity/tests
-// pin it), else now.
-func requestTime(r *http.Request) time.Time {
-	if v := r.Header.Get("X-Test-Now"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			return t
-		}
+func (p *SharingPlugin) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
 	}
 	return time.Now()
 }
@@ -378,12 +396,13 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 		// /calendars/user1 yields /calendars/<returned-path>. The request path
 		// already carries the BaseURI, so a request-relative return keeps the
 		// prefix — an absolute (leading-slash) return would drop it.
-		resolved := resolveHref(r.URL.Path, url)
+		body, err := xml.Marshal(sharedAsXML{Href: resolveHref(r.URL.Path, url)})
+		if err != nil {
+			return err
+		}
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
-		_, err = w.Write([]byte(xml.Header +
-			`<cs:shared-as xmlns:d="DAV:" xmlns:cs="` + davxml.NSCalendarServer + `">` +
-			`<d:href>` + xmlEscapeText(resolved) + `</d:href></cs:shared-as>`))
+		_, err = w.Write(append([]byte(xml.Header), body...))
 		return err
 	}
 	w.WriteHeader(http.StatusOK)
@@ -417,33 +436,48 @@ func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path str
 	return true, nil
 }
 
-// principalForAddress finds a principal by calendar user address (shared
-// with the scheduling plugin's logic).
-func (p *SharingPlugin) principalForAddress(address string) string {
-	principals, err := p.server.Tree.NodeForPath("principals")
-	if err != nil {
-		return ""
+// sharedAsXML is the {cs}shared-as answer to an accepted invite.
+type sharedAsXML struct {
+	XMLName xml.Name `xml:"http://calendarserver.org/ns/ shared-as"`
+	Href    string   `xml:"DAV: href"`
+}
+
+// hrefXML is an element whose only child is a {DAV:}href.
+type hrefXML struct {
+	Href string `xml:"DAV: href"`
+}
+
+// shareAccessXML is a {cs}access element: read-write or read.
+type shareAccessXML struct {
+	ReadWrite *struct{} `xml:"http://calendarserver.org/ns/ read-write"`
+	Read      *struct{} `xml:"http://calendarserver.org/ns/ read"`
+}
+
+func accessXML(access int) shareAccessXML {
+	if access == AccessReadWrite {
+		return shareAccessXML{ReadWrite: &struct{}{}}
 	}
-	coll, ok := principals.(dav.Collection)
-	if !ok {
-		return ""
+	return shareAccessXML{Read: &struct{}{}}
+}
+
+// inviteStatusXML holds the one {cs}invite-* element naming an invite status.
+type inviteStatusXML struct {
+	Accepted   *struct{} `xml:"http://calendarserver.org/ns/ invite-accepted"`
+	Declined   *struct{} `xml:"http://calendarserver.org/ns/ invite-declined"`
+	Invalid    *struct{} `xml:"http://calendarserver.org/ns/ invite-invalid"`
+	NoResponse *struct{} `xml:"http://calendarserver.org/ns/ invite-noresponse"`
+}
+
+func statusXML(status int) inviteStatusXML {
+	switch status {
+	case InviteAccepted:
+		return inviteStatusXML{Accepted: &struct{}{}}
+	case InviteDeclined:
+		return inviteStatusXML{Declined: &struct{}{}}
+	case InviteInvalid:
+		return inviteStatusXML{Invalid: &struct{}{}}
 	}
-	children, err := coll.Children()
-	if err != nil {
-		return ""
-	}
-	for _, child := range children {
-		ph, isPrincipal := child.(acl.PrincipalHolder)
-		if !isPrincipal {
-			continue
-		}
-		for _, candidate := range ph.AlternateURISet() {
-			if strings.EqualFold(candidate, address) {
-				return ph.PrincipalURL()
-			}
-		}
-	}
-	return ""
+	return inviteStatusXML{NoResponse: &struct{}{}}
 }
 
 type shareXML struct {
@@ -524,15 +558,6 @@ func resolveHref(requestPath, href string) string {
 		base = base[:i+1]
 	}
 	return base + href
-}
-
-func readBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(r.Body); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func rootName(body []byte) (xml.Name, error) {

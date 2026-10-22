@@ -132,7 +132,7 @@ func TestIMipSendAsOrganizer(t *testing.T) {
 		t.Errorf("envelope sender = %q, want server@example.org", mailer.from)
 	}
 	email := string(mailer.msg)
-	if !strings.Contains(email, "From: User One <user1@example.org>") {
+	if !strings.Contains(email, `From: "User One" <user1@example.org>`) {
 		t.Errorf("From header should carry the organizer:\n%s", email)
 	}
 	if strings.Contains(email, "Reply-To:") {
@@ -168,7 +168,7 @@ func TestIMipSendAsOrganizerMalformedSender(t *testing.T) {
 		t.Errorf("envelope sender = %q, want server@example.org", mailer.from)
 	}
 	email := string(mailer.msg)
-	if !strings.Contains(email, "From: server@example.org") {
+	if !strings.Contains(email, "From: <server@example.org>") {
 		t.Errorf("From should fall back to the server address:\n%s", email)
 	}
 	if !strings.Contains(email, "Reply-To: not-an-email") {

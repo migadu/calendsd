@@ -1,7 +1,6 @@
 package caldav
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -139,50 +138,46 @@ func (nn *NotificationNode) LastModified() time.Time { return nn.invite.DTStamp 
 func (nn *NotificationNode) ContentType() string     { return "application/xml" }
 
 func (nn *NotificationNode) body(baseURI string) []byte {
-	cs := "http://calendarserver.org/ns/"
-	var b bytes.Buffer
-	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
-	b.WriteString(`<cs:notification xmlns:d="DAV:" xmlns:cs="` + cs + `">` + "\n")
-	b.WriteString("  <cs:dtstamp>" + nn.invite.DTStamp.UTC().Format("20060102T150405Z") + "</cs:dtstamp>\n")
-	b.WriteString("  <cs:invite-notification>\n")
-	b.WriteString("    <cs:uid>" + xmlEsc(nn.invite.ID) + "</cs:uid>\n")
-	b.WriteString("    <d:href>" + xmlEsc(baseURI+nn.principalURI+"/") + "</d:href>\n")
-	switch nn.invite.InviteStatus {
-	case InviteAccepted:
-		b.WriteString("    <cs:invite-accepted/>\n")
-	case InviteDeclined:
-		b.WriteString("    <cs:invite-declined/>\n")
-	default:
-		b.WriteString("    <cs:invite-noresponse/>\n")
+	doc := notificationXML{DTStamp: nn.invite.DTStamp.UTC().Format("20060102T150405Z")}
+	doc.Invite = inviteNotificationXML{
+		UID:     nn.invite.ID,
+		Href:    baseURI + nn.principalURI + "/",
+		Status:  statusXML(nn.invite.InviteStatus),
+		HostURL: hrefXML{Href: baseURI + nn.invite.HostURL},
+		Summary: nn.invite.Summary,
+		Access:  accessXML(nn.invite.Access),
 	}
-	b.WriteString("    <cs:hosturl><d:href>" + xmlEsc(baseURI+nn.invite.HostURL) + "</d:href></cs:hosturl>\n")
-	if nn.invite.Summary != "" {
-		b.WriteString("    <cs:summary>" + xmlEsc(nn.invite.Summary) + "</cs:summary>\n")
+	if doc.Invite.Status.Invalid != nil { // a notification is never "invalid"
+		doc.Invite.Status = statusXML(InviteNoResponse)
 	}
-	b.WriteString("    <cs:access>")
-	if nn.invite.Access == AccessReadWrite {
-		b.WriteString("<cs:read-write/>")
-	} else {
-		b.WriteString("<cs:read/>")
-	}
-	b.WriteString("</cs:access>\n")
-	b.WriteString("    <cs:organizer><d:href>" + xmlEsc(baseURI+nn.invite.Organizer+"/") + "</d:href>")
-	if nn.invite.OrganizerName != "" {
-		b.WriteString("<cs:common-name>" + xmlEsc(nn.invite.OrganizerName) + "</cs:common-name>")
-	}
-	b.WriteString("</cs:organizer>\n")
-	b.WriteString("  </cs:invite-notification>\n")
-	b.WriteString("</cs:notification>\n")
-	return b.Bytes()
+	doc.Invite.Organizer.Href = baseURI + nn.invite.Organizer + "/"
+	doc.Invite.Organizer.CommonName = nn.invite.OrganizerName
+	out, _ := xml.Marshal(doc) // plain strings only: cannot fail
+	return append([]byte(xml.Header), out...)
+}
+
+// notificationXML is a stored invite notification as served to the sharee.
+type notificationXML struct {
+	XMLName xml.Name              `xml:"http://calendarserver.org/ns/ notification"`
+	DTStamp string                `xml:"http://calendarserver.org/ns/ dtstamp"`
+	Invite  inviteNotificationXML `xml:"http://calendarserver.org/ns/ invite-notification"`
+}
+
+type inviteNotificationXML struct {
+	UID       string `xml:"http://calendarserver.org/ns/ uid"`
+	Href      string `xml:"DAV: href"`
+	Status    inviteStatusXML
+	HostURL   hrefXML        `xml:"http://calendarserver.org/ns/ hosturl"`
+	Summary   string         `xml:"http://calendarserver.org/ns/ summary,omitempty"`
+	Access    shareAccessXML `xml:"http://calendarserver.org/ns/ access"`
+	Organizer struct {
+		Href       string `xml:"DAV: href"`
+		CommonName string `xml:"http://calendarserver.org/ns/ common-name,omitempty"`
+	} `xml:"http://calendarserver.org/ns/ organizer"`
 }
 
 // storedNotificationGet is served by the GetHandlerHook in the plugin, which
 // has the base URI. NotificationNode itself carries the data.
-
-func xmlEsc(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
-	return r.Replace(s)
-}
 
 // MemoryNotificationsBackend is an in-memory notification store.
 type MemoryNotificationsBackend struct {

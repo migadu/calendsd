@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -87,12 +88,12 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 	// direct free-busy-query.
 	var payloads [][]byte
 	if !calNode.transparent() {
-		objects, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		objects, err := calNode.QueryObjects("", start, end)
 		if err != nil {
 			return err
 		}
 		for _, obj := range objects {
-			payloads = append(payloads, obj.CalendarData)
+			payloads = append(payloads, obj.Data())
 		}
 	}
 	result, err := ical.GenerateFreeBusy(payloads, start, end, p.calendarTimeZone(path), time.Now())
@@ -144,7 +145,8 @@ func (p *Plugin) calendarTimeZone(calendarPath string) *time.Location {
 func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
 	query, err := ParseCalendarQuery(body)
 	if err != nil {
-		if _, isDAV := err.(*dav.Error); isDAV {
+		var davErr *dav.Error
+		if errors.As(err, &davErr) {
 			return err
 		}
 		return dav.ErrBadRequest("%s", err)
@@ -214,7 +216,12 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 		}
 	}
 
-	return p.writeObjectResponses(r.Context(), w, matches, query.Props, query.Expand, query.JSON, loc)
+	refs := make([]objectRef, len(matches))
+	for i, m := range matches {
+		refs[i] = objectRef{path: m}
+	}
+	return p.writeObjectResponses(r.Context(), w, refs, query.Props, query.Expand, query.JSON,
+		func(string) *time.Location { return loc })
 }
 
 func (p *Plugin) objectMatches(obj *CalendarObject, query *CalendarQuery, v *Validator) (bool, error) {
@@ -237,34 +244,57 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 	if err != nil {
 		return dav.ErrBadRequest("%s", err)
 	}
-	var paths []string
+	var refs []objectRef
 	for _, href := range query.Hrefs {
 		// Normalize each href through the same base-stripping logic as the
 		// request path (gopath.Clean + base-prefix enforcement) rather than a
 		// bare TrimPrefix, so hrefs outside the mount are rejected instead of
-		// silently resolved.
+		// silently resolved. A rejected href is answered 404, like a missing
+		// object, rather than dropped from the response.
 		path, err := p.server.ResolveHref(href)
 		if err != nil {
+			refs = append(refs, objectRef{href: href})
 			continue
 		}
-		paths = append(paths, path)
+		refs = append(refs, objectRef{path: path})
 	}
-	loc := time.UTC
-	if query.Expand != nil && len(paths) > 0 {
-		calendarPath, _ := pathutil.Split(paths[0])
-		loc = p.calendarTimeZone(calendarPath)
+	// The hrefs may span calendars, so each is expanded in its own
+	// calendar's timezone.
+	zones := map[string]*time.Location{}
+	locFor := func(objPath string) *time.Location {
+		calendarPath, _ := pathutil.Split(objPath)
+		loc, seen := zones[calendarPath]
+		if !seen {
+			loc = p.calendarTimeZone(calendarPath)
+			zones[calendarPath] = loc
+		}
+		return loc
 	}
-	return p.writeObjectResponses(r.Context(), w, paths, query.Props, query.Expand, query.JSON, loc)
+	return p.writeObjectResponses(r.Context(), w, refs, query.Props, query.Expand, query.JSON, locFor)
 }
 
-// writeObjectResponses builds the multistatus for matched object paths,
-// applying calendar-data expansion when requested.
-func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, paths []string, props []xml.Name, expand *TimeRange, asJSON bool, loc *time.Location) error {
+// objectRef is one entry of a report's answer: an object's tree path, or for
+// a multiget href that names no path on this server, only the href as sent.
+type objectRef struct {
+	path string
+	href string
+}
+
+// writeObjectResponses builds the multistatus for matched objects, applying
+// calendar-data expansion (in the timezone locFor gives for the object's
+// path) when requested.
+func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, refs []objectRef, props []xml.Name, expand *TimeRange, asJSON bool, locFor func(string) *time.Location) error {
 	ms := &davxml.MultiStatus{}
-	for _, objPath := range paths {
+	for _, ref := range refs {
+		if ref.path == "" {
+			ms.Responses = append(ms.Responses, davxml.Response{Href: ref.href, Status: http.StatusNotFound})
+			continue
+		}
+		objPath := ref.path
 		responses, err := p.server.PropertiesForPath(ctx, objPath, props, 0)
 		if err != nil {
-			if dav.AsError(err).Status == http.StatusNotFound {
+			var davErr *dav.Error
+			if errors.As(err, &davErr) && davErr.Status == http.StatusNotFound {
 				ms.Responses = append(ms.Responses, davxml.Response{
 					Href:   p.server.BaseURI + objPath,
 					Status: http.StatusNotFound,
@@ -275,7 +305,7 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 		}
 		for _, resp := range responses {
 			if expand != nil {
-				if err := expandResponseData(&resp, expand, loc); err != nil {
+				if err := expandResponseData(&resp, expand, locFor(objPath)); err != nil {
 					return err
 				}
 			}

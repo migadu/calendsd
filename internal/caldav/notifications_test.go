@@ -1,9 +1,13 @@
 package caldav_test
 
 import (
+	"encoding/xml"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -108,10 +112,132 @@ func TestSharingNotificationRoundTrip(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(item, "invite-notification") {
 		t.Fatalf("notification GET = %d:\n%s", w.Code, item)
 	}
-	for _, want := range []string{"<cs:read-write/>", "Join my calendar", "/calendars/user1/cal1", "principals/user1"} {
+	for _, want := range []string{`<read-write xmlns="http://calendarserver.org/ns/">`, "Join my calendar", "/calendars/user1/cal1", "principals/user1"} {
 		if !strings.Contains(item, want) {
 			t.Errorf("notification body missing %q:\n%s", want, item)
 		}
+	}
+}
+
+// TestShareNotificationsFollowCommittedResult: a set overridden by a remove
+// in the same POST shares nothing, so it must not notify; a sharee named
+// twice is notified once, with the access that was committed.
+func TestShareNotificationsFollowCommittedResult(t *testing.T) {
+	backend, servers := sharedSharing()
+	user1 := servers["principals/user1"]
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	  <cs:remove><d:href>mailto:user2@example.org</d:href></cs:remove>
+	</cs:share>`
+	if w := req(t, user1, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	if n := backend.Notifications["principals/user2"]; len(n) != 0 {
+		t.Fatalf("set+remove left %d notifications, want 0", len(n))
+	}
+
+	share = `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	  <cs:set><d:href>MAILTO:User2@Example.org</d:href><cs:read-write/></cs:set>
+	</cs:share>`
+	if w := req(t, user1, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	n := backend.Notifications["principals/user2"]
+	if len(n) != 1 || n[0].Access != caldav.AccessReadWrite {
+		t.Fatalf("notifications = %+v, want one read-write invite", n)
+	}
+}
+
+// TestShareNotificationClock: the invite's DTSTAMP comes from the plugin's
+// clock; a client cannot choose it with a request header.
+func TestShareNotificationClock(t *testing.T) {
+	email := xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{email: "user1@example.org"}},
+		{URI: "principals/user2", Props: map[xmlNM]any{email: "user2@example.org"}},
+	}}
+	backend := &caldav.MockSharingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "cal1", PrincipalURI: "principals/user1",
+	}}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+	now := time.Date(2026, 5, 4, 3, 2, 1, 0, time.UTC)
+	srv.AddPlugin(&caldav.SharingPlugin{Now: func() time.Time { return now }})
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	</cs:share>`
+	w := req(t, srv, "POST", "/calendars/user1/cal1", share,
+		"Content-Type", "text/xml", "X-Test-Now", "2001-01-01T00:00:00Z")
+	if w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	n := backend.Notifications["principals/user2"]
+	if len(n) != 1 || !n[0].DTStamp.Equal(now) {
+		t.Fatalf("notifications = %+v, want one stamped %v", n, now)
+	}
+}
+
+// resolvingPrincipals is a principal backend with an indexed address lookup;
+// it counts full listings, which the lookup must make unnecessary.
+type resolvingPrincipals struct {
+	*acl.MemoryBackend
+	listings, lookups int
+}
+
+func (b *resolvingPrincipals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
+	b.listings++
+	return b.MemoryBackend.PrincipalsByPrefix(prefix)
+}
+
+func (b *resolvingPrincipals) PrincipalByAddress(prefix, address string) (string, error) {
+	b.lookups++
+	if prefix == "principals" && strings.EqualFold(address, "mailto:user2@example.org") {
+		return "principals/user2", nil
+	}
+	return "", nil
+}
+
+// TestShareResolvesThroughAddressResolver: a principal backend with an
+// address lookup resolves sharees without listing every principal.
+func TestShareResolvesThroughAddressResolver(t *testing.T) {
+	email := xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}
+	principals := &resolvingPrincipals{MemoryBackend: &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{email: "user1@example.org"}},
+		{URI: "principals/user2", Props: map[xmlNM]any{email: "user2@example.org"}},
+	}}}
+	backend := &caldav.MockSharingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "cal1", PrincipalURI: "principals/user1",
+	}}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+	srv.AddPlugin(&caldav.SharingPlugin{})
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:User2@example.org</d:href></cs:set>
+	</cs:share>`
+	if w := req(t, srv, "POST", "/calendars/user1/cal1", share, "Content-Type", "text/xml"); w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	if got := backend.Shares[caldav.CalendarID{Calendar: "1"}]; len(got) != 1 || got[0].Principal != "principals/user2" {
+		t.Fatalf("shares = %+v, want user2 resolved", got)
+	}
+	if principals.lookups == 0 || principals.listings != 0 {
+		t.Errorf("lookups = %d, listings = %d; want the lookup and no listing", principals.lookups, principals.listings)
 	}
 }
 
@@ -139,15 +265,69 @@ func TestInvitePropertyListsSharees(t *testing.T) {
 		t.Fatalf("invite PROPFIND = %d:\n%s", w.Code, body)
 	}
 	for _, want := range []string{
-		"<cs:invite>", "mailto:user2@example.org", "User Two", "<cs:read-write/>",
-		"mailto:guest@example.org", "<cs:read/>", "<cs:invite-noresponse/>",
+		"<cs:invite>", "mailto:user2@example.org", "User Two",
+		`<read-write xmlns="http://calendarserver.org/ns/">`,
+		"mailto:guest@example.org", `<read xmlns="http://calendarserver.org/ns/">`,
+		`<invite-noresponse xmlns="http://calendarserver.org/ns/">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("invite property missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Count(body, "<cs:user>") != 2 {
-		t.Errorf("want 2 <cs:user> entries, got:\n%s", body)
+	if strings.Count(body, `<user xmlns="http://calendarserver.org/ns/">`) != 2 {
+		t.Errorf("want 2 {cs}user entries, got:\n%s", body)
+	}
+}
+
+// TestInvitePropertyIsWellFormed: a stored sharee name with characters XML
+// cannot carry still yields a parseable multistatus.
+func TestInvitePropertyIsWellFormed(t *testing.T) {
+	backend, servers := sharedSharing()
+	backend.Shares[caldav.CalendarID{Calendar: "1"}] = []caldav.Sharee{{
+		Href: "mailto:x@example.org", CommonName: "A & <B>\x01", Access: caldav.AccessRead,
+	}}
+	w := req(t, servers["principals/user1"], "PROPFIND", "/calendars/user1/cal1",
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:invite/></d:prop></d:propfind>`,
+		"Depth", "0")
+	if w.Code != 207 {
+		t.Fatalf("invite PROPFIND = %d:\n%s", w.Code, w.Body.String())
+	}
+	dec := xml.NewDecoder(strings.NewReader(w.Body.String()))
+	for {
+		if _, err := dec.Token(); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("multistatus is not well-formed: %v\n%s", err, w.Body.String())
+		}
+	}
+}
+
+// bodyReader is a POST handler registered after the sharing plugin; it
+// records the body it gets.
+type bodyReader struct{ got string }
+
+func (b *bodyReader) PluginName() string           { return "body-reader" }
+func (b *bodyReader) Init(*dav.Server)             {}
+func (b *bodyReader) Methods(path string) []string { return []string{"POST"} }
+func (b *bodyReader) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
+	raw, err := io.ReadAll(r.Body)
+	b.got = string(raw)
+	w.WriteHeader(http.StatusNoContent)
+	return true, err
+}
+
+// TestSharingLeavesOtherPostBodies: an XML POST to a calendar that is not a
+// sharing document reaches the next plugin with its body intact.
+func TestSharingLeavesOtherPostBodies(t *testing.T) {
+	_, servers := sharedSharing()
+	srv := servers["principals/user1"]
+	next := &bodyReader{}
+	srv.AddPlugin(next)
+
+	body := `<?xml version="1.0"?><x:other xmlns:x="urn:example"/>`
+	w := req(t, srv, "POST", "/calendars/user1/cal1", body, "Content-Type", "application/xml")
+	if w.Code != http.StatusNoContent || next.got != body {
+		t.Fatalf("POST = %d, next plugin got %q; want 204 and the full body", w.Code, next.got)
 	}
 }
 
@@ -171,7 +351,7 @@ func TestInviteReplySharedAsBaseURI(t *testing.T) {
 	body := w.Body.String()
 	// The mock returns "calendars/blabla/calendar", resolved against the
 	// request path /dav/calendars/user2/ — so the href must start with /dav/.
-	if !strings.Contains(body, "<d:href>/dav/calendars/user2/calendars/blabla/calendar</d:href>") {
+	if !strings.Contains(body, `<href xmlns="DAV:">/dav/calendars/user2/calendars/blabla/calendar</href>`) {
 		t.Errorf("shared-as href did not carry the BaseURI:\n%s", body)
 	}
 }

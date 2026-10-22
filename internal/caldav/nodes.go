@@ -308,6 +308,29 @@ func (c *Calendar) QueryObjects(componentType string, start, end time.Time) ([]*
 	return out, nil
 }
 
+// ObjectByUID returns the calendar's object carrying uid, or nil. A backend
+// implementing UIDLookup answers from its index; otherwise every object is
+// loaded and parsed.
+func (c *Calendar) ObjectByUID(uid string) (*CalendarObject, error) {
+	if lookup, ok := c.backend.(UIDLookup); ok {
+		obj, err := lookup.CalendarObjectByUID(c.Info.ID, uid)
+		if err != nil || obj == nil {
+			return nil, err
+		}
+		return NewCalendarObject(c.backend, c.Info, *obj), nil
+	}
+	objs, err := c.backend.CalendarObjects(c.Info.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, obj := range objs {
+		if d, err := ical.Denormalize(obj.CalendarData); err == nil && d.UID == uid {
+			return NewCalendarObject(c.backend, c.Info, obj), nil
+		}
+	}
+	return nil, nil
+}
+
 func (c *Calendar) ChildExists(name string) bool {
 	obj, err := c.backend.CalendarObject(c.Info.ID, name)
 	return err == nil && obj != nil
@@ -382,35 +405,31 @@ func (c *Calendar) inviteProperty() (davxml.Raw, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var b strings.Builder
+	var users []inviteUserXML
 	for _, s := range sharees {
 		// The owner's own row (and any not-shared marker) is not a sharee.
 		if s.Access == AccessSharedOwner || s.Access == AccessNotShared {
 			continue
 		}
-		b.WriteString("<cs:user><d:href>" + xmlEscapeText(s.Href) + "</d:href>")
-		if s.CommonName != "" {
-			b.WriteString("<cs:common-name>" + xmlEscapeText(s.CommonName) + "</cs:common-name>")
-		}
-		switch s.InviteStatus {
-		case InviteAccepted:
-			b.WriteString("<cs:invite-accepted/>")
-		case InviteDeclined:
-			b.WriteString("<cs:invite-declined/>")
-		case InviteInvalid:
-			b.WriteString("<cs:invite-invalid/>")
-		default:
-			b.WriteString("<cs:invite-noresponse/>")
-		}
-		b.WriteString("<cs:access>")
-		if s.Access == AccessReadWrite {
-			b.WriteString("<cs:read-write/>")
-		} else {
-			b.WriteString("<cs:read/>")
-		}
-		b.WriteString("</cs:access></cs:user>")
+		users = append(users, inviteUserXML{
+			Href: s.Href, CommonName: s.CommonName,
+			Status: statusXML(s.InviteStatus), Access: accessXML(s.Access),
+		})
 	}
-	return davxml.Raw(b.String()), true
+	raw, err := xml.Marshal(users)
+	if err != nil {
+		return nil, false
+	}
+	return davxml.Raw(raw), true
+}
+
+// inviteUserXML is one sharee of the {cs}invite property.
+type inviteUserXML struct {
+	XMLName    xml.Name `xml:"http://calendarserver.org/ns/ user"`
+	Href       string   `xml:"DAV: href"`
+	CommonName string   `xml:"http://calendarserver.org/ns/ common-name,omitempty"`
+	Status     inviteStatusXML
+	Access     shareAccessXML `xml:"http://calendarserver.org/ns/ access"`
 }
 
 func (c *Calendar) PropPatch(pp *dav.PropPatch) {

@@ -61,7 +61,7 @@ func (p *SchedulePlugin) asyncSendsOffloaded() bool {
 // once the send settles; local delivery stays synchronous either way (it is a
 // fast storage write, and a local attendee should see the change at once).
 func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, objectPath string) {
-	if p.principalForAddress(msg.Recipient) != "" {
+	if principalForAddress(p.server, msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
 	} else {
 		for _, plugin := range p.server.Plugins() {
@@ -94,7 +94,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool,
 // scheduleLocalDelivery drops the message into the recipient's inbox and
 // updates their calendar copy. Port of sabre's scheduleLocalDelivery.
 func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Message) {
-	principalURI := p.principalForAddress(msg.Recipient)
+	principalURI := principalForAddress(p.server, msg.Recipient)
 	if principalURI == "" {
 		msg.ScheduleStatus = "3.7;Could not find principal."
 		return
@@ -120,27 +120,17 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 
 	// Locate an existing copy by UID across the recipient's calendars.
 	var existingObj *CalendarObject
-	var existingPath string
 	home, _ := p.server.Tree.NodeForPath(homePath)
 	if coll, ok := home.(dav.Collection); ok {
 		children, _ := coll.Children()
-	searchLoop:
 		for _, child := range children {
 			calNode, isCal := child.(*Calendar)
 			if !isCal {
 				continue
 			}
-			objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
-			if err != nil {
-				continue
-			}
-			for _, obj := range objs {
-				if d, err := ical.Denormalize(obj.CalendarData); err == nil && d.UID == msg.UID {
-					o := NewCalendarObject(calNode.backend, calNode.Info, obj)
-					existingObj = o
-					existingPath = homePath + "/" + calNode.Name() + "/" + obj.URI
-					break searchLoop
-				}
+			if obj, err := calNode.ObjectByUID(msg.UID); err == nil && obj != nil {
+				existingObj = obj
+				break
 			}
 		}
 	}
@@ -174,7 +164,6 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 				msg.ScheduleStatus = "5.2;Could not update the recipient calendar"
 				return
 			}
-			_ = existingPath
 		} else {
 			calendarNode, err := p.server.Tree.NodeForPath(defaultCalendar)
 			if err != nil {
@@ -297,15 +286,15 @@ func (p *SchedulePlugin) hasConflict(principalURI string, data []byte) bool {
 		if !isCal {
 			continue
 		}
-		objs, err := calNode.backend.CalendarObjects(calNode.Info.ID)
+		objs, err := calNode.QueryObjects("", start, end)
 		if err != nil {
 			continue
 		}
 		for _, obj := range objs {
-			if od, err := ical.Denormalize(obj.CalendarData); err == nil && od.UID == d.UID {
+			if od, err := ical.Denormalize(obj.Data()); err == nil && od.UID == d.UID {
 				continue // rescheduling the same booking is not a conflict
 			}
-			payloads = append(payloads, obj.CalendarData)
+			payloads = append(payloads, obj.Data())
 		}
 	}
 	if len(payloads) == 0 {

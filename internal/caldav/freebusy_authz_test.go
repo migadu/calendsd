@@ -140,3 +140,32 @@ func TestFreeBusyQueryReportCrossDomain(t *testing.T) {
 		t.Fatalf("cross-domain free-busy-query = %d, want 403:\n%s", w.Code, w.Body.String())
 	}
 }
+
+// TestFreeBusyOrganizerParamsQuoted: the request's ORGANIZER is echoed with
+// its parameters quoted, so a CN containing a comma stays one value.
+func TestFreeBusyOrganizerParamsQuoted(t *testing.T) {
+	srv := freeBusyServer("principals/user2")
+	vfb := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VFREEBUSY\r\nUID:fb-probe\r\nDTSTART:20260801T000000Z\r\nDTEND:20261001T000000Z\r\n" +
+		"ORGANIZER;CN=\"Two, User\":mailto:user2@example.org\r\n" +
+		"ATTENDEE:mailto:user1@example.org\r\n" +
+		"END:VFREEBUSY\r\nEND:VCALENDAR\r\n"
+	post := httptest.NewRequest("POST", "/calendars/user2/outbox", strings.NewReader(vfb))
+	post.Header.Set("Content-Type", "text/calendar")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, post)
+	if w.Code != 200 {
+		t.Fatalf("outbox POST = %d, want 200:\n%s", w.Code, w.Body.String())
+	}
+	body := strings.ReplaceAll(w.Body.String(), "&#34;", `"`)
+	body = strings.ReplaceAll(body, "&quot;", `"`)
+	for _, want := range []string{
+		`ORGANIZER;CN="Two, User":mailto:user2@example.org`,
+		"UID:fb-probe",
+		"ATTENDEE:mailto:user1@example.org",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("response missing %q:\n%s", want, body)
+		}
+	}
+}

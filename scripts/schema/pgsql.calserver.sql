@@ -508,3 +508,9 @@ BEGIN
         END IF;
     END LOOP;
 END $$;
+
+-- review-fixes B: indexed lookups the CalDAV layer uses instead of listing
+-- every principal (storage.Principals.PrincipalByAddress) or loading every
+-- object of a calendar (storage.CalDAV.CalendarObjectByUID).
+CREATE INDEX IF NOT EXISTS principals_lower_email ON principals (lower(email));
+CREATE INDEX IF NOT EXISTS calendarobjects_calendarid_uid ON calendarobjects (calendarid, uid);
