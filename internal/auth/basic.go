@@ -48,7 +48,7 @@ func (b *BasicBackend) Check(r *http.Request) (string, bool, string) {
 	return b.prefix() + username, true, ""
 }
 
-func (b *BasicBackend) Challenge(h http.Header) {
+func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) {
 	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
 }
 

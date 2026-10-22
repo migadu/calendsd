@@ -162,7 +162,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, reason)
 			return
 		}
-		h.auth.Challenge(w.Header())
+		h.auth.Challenge(w.Header(), r)
 		writeError(w, http.StatusUnauthorized, reason)
 		return
 	}

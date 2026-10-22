@@ -18,8 +18,8 @@ type Backend interface {
 	// Check returns the authenticated principal path (e.g.
 	// "principals/admin") or ok=false with a human-readable reason.
 	Check(r *http.Request) (principal string, ok bool, reason string)
-	// Challenge adds WWW-Authenticate headers for a 401 response.
-	Challenge(h http.Header)
+	// Challenge adds WWW-Authenticate headers for a 401 response to r.
+	Challenge(h http.Header, r *http.Request)
 }
 
 // Plugin authenticates every request before dispatch, recording the
@@ -149,7 +149,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		"remote", remoteAddr(r), "reason", strings.Join(reasons, "; "))
 
 	for _, b := range p.backends {
-		b.Challenge(w.Header())
+		b.Challenge(w.Header(), r)
 	}
 	msg := "No authentication backends were configured on this server."
 	if len(reasons) > 0 {

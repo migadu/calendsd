@@ -85,7 +85,9 @@ func (fakeAuth) Check(r *http.Request) (string, bool, string) {
 	return "principals/" + strings.ToLower(user), true, ""
 }
 
-func (fakeAuth) Challenge(h http.Header) { h.Add("WWW-Authenticate", `Basic realm="test"`) }
+func (fakeAuth) Challenge(h http.Header, _ *http.Request) {
+	h.Add("WWW-Authenticate", `Basic realm="test"`)
+}
 
 type env struct {
 	t    *testing.T

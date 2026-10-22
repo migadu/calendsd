@@ -222,7 +222,7 @@ func (*provisionError) Error() string { return "boom" }
 func TestRcptdChallenge(t *testing.T) {
 	b := NewRcptdBackend("CalDAV", "http://unused", "", 0)
 	h := http.Header{}
-	b.Challenge(h)
+	b.Challenge(h, httptest.NewRequest("GET", "/", nil))
 	if got, want := h.Get("WWW-Authenticate"), `Basic realm="CalDAV", charset="UTF-8"`; got != want {
 		t.Errorf("challenge = %q, want %q", got, want)
 	}

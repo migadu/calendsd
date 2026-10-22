@@ -52,7 +52,9 @@ func (stallAuth) Check(r *http.Request) (string, bool, string) {
 	return "", false, "authentication service is unreachable"
 }
 
-func (stallAuth) Challenge(h http.Header) { h.Add("WWW-Authenticate", `Basic realm="test"`) }
+func (stallAuth) Challenge(h http.Header, _ *http.Request) {
+	h.Add("WWW-Authenticate", `Basic realm="test"`)
+}
 
 func serveTimed(t *testing.T, h http.Handler) (*httptest.ResponseRecorder, time.Duration) {
 	t.Helper()
@@ -103,7 +105,9 @@ func (downAuth) Check(*http.Request) (string, bool, string) {
 	return "", false, auth.ReasonUnreachable
 }
 
-func (downAuth) Challenge(h http.Header) { h.Add("WWW-Authenticate", `Basic realm="test"`) }
+func (downAuth) Challenge(h http.Header, _ *http.Request) {
+	h.Add("WWW-Authenticate", `Basic realm="test"`)
+}
 
 // An rcptd outage is a 503 without a challenge: webmail must not re-prompt
 // for a password that was never checked.

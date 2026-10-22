@@ -25,7 +25,7 @@ func (s stubBackend) Check(*http.Request) (string, bool, string) {
 	}
 	return "", false, "no"
 }
-func (stubBackend) Challenge(http.Header) {}
+func (stubBackend) Challenge(http.Header, *http.Request) {}
 
 // TestPluginTombstoneGate: a soft-deleted account with valid credentials is
 // rejected with 403 and counted as blocked, while a live account and a nil

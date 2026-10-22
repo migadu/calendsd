@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"calserver/internal/dav"
 )
@@ -47,45 +48,93 @@ func TestBasicBackend(t *testing.T) {
 	}
 }
 
-func TestDigestBackend(t *testing.T) {
-	const (
-		realm    = "SabreDAV"
-		username = "admin"
-		password = "admin"
-		nonce    = "abc123"
-		cnonce   = "0a4f113b"
-		nc       = "00000001"
-		uri      = "/calendars/admin/"
-	)
-	b := &DigestBackend{
-		Realm: realm,
+// digestBackend authenticates admin/admin in realm SabreDAV.
+func digestBackend() *DigestBackend {
+	return &DigestBackend{
+		Realm: "SabreDAV",
 		HashA1: func(r, u string) (string, bool) {
-			if u == username {
-				return DigestA1(username, r, password), true
+			if u == "admin" {
+				return DigestA1("admin", r, "admin"), true
 			}
 			return "", false
 		},
 	}
+}
 
-	a1 := DigestA1(username, realm, password)
-	a2 := md5hex("PROPFIND:" + uri)
+// issueNonce returns the nonce of a fresh challenge from b.
+func issueNonce(t *testing.T, b *DigestBackend) string {
+	t.Helper()
+	h := http.Header{}
+	b.Challenge(h, httptest.NewRequest("GET", "/", nil))
+	_, rest, _ := strings.Cut(h.Get("WWW-Authenticate"), `nonce="`)
+	nonce, _, _ := strings.Cut(rest, `"`)
+	return nonce
+}
+
+// digestRequest builds a request to method target carrying admin/admin
+// credentials for nonce, nc and the given digest uri.
+func digestRequest(method, target, uri, nonce, nc, password string) *http.Request {
+	const cnonce = "0a4f113b"
+	a1 := DigestA1("admin", "SabreDAV", password)
+	a2 := md5hex(method + ":" + uri)
 	response := md5hex(a1 + ":" + nonce + ":" + nc + ":" + cnonce + ":auth:" + a2)
-
-	r := httptest.NewRequest("PROPFIND", uri, nil)
+	r := httptest.NewRequest(method, target, nil)
 	r.Header.Set("Authorization", fmt.Sprintf(
-		`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
-		username, realm, nonce, uri, nc, cnonce, response))
-	principal, ok, reason := b.Check(r)
+		`Digest username="admin", realm="SabreDAV", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
+		nonce, uri, nc, cnonce, response))
+	return r
+}
+
+func TestDigestBackend(t *testing.T) {
+	b := digestBackend()
+	const uri = "/calendars/admin/"
+	nonce := issueNonce(t, b)
+
+	principal, ok, reason := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000001", "admin"))
 	if !ok || principal != "principals/admin" {
 		t.Errorf("Check = (%q, %v, %q), want (principals/admin, true)", principal, ok, reason)
 	}
+	// The same nonce with a higher count is the normal client pattern.
+	if _, ok, reason := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000002", "admin")); !ok {
+		t.Errorf("next nonce count rejected: %q", reason)
+	}
+	// A wrong password must fail.
+	if _, ok, _ := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000003", "wrong")); ok {
+		t.Error("wrong password accepted")
+	}
+}
 
-	// A tampered response must fail.
-	r.Header.Set("Authorization", fmt.Sprintf(
-		`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
-		username, realm, nonce, uri, nc, cnonce, md5hex("wrong")))
-	if _, ok, _ := b.Check(r); ok {
-		t.Error("tampered digest response accepted")
+// TestDigestReplayProtection: a captured request cannot be replayed, pointed
+// at another path, or forged with a nonce the server never issued, and an
+// expired nonce yields stale=true.
+func TestDigestReplayProtection(t *testing.T) {
+	b := digestBackend()
+	const uri = "/calendars/admin/"
+	nonce := issueNonce(t, b)
+	captured := digestRequest("PROPFIND", uri, uri, nonce, "00000001", "admin")
+	if _, ok, reason := b.Check(captured); !ok {
+		t.Fatalf("first use rejected: %q", reason)
+	}
+	if _, ok, _ := b.Check(captured); ok {
+		t.Error("replayed request accepted")
+	}
+	if _, ok, _ := b.Check(digestRequest("PROPFIND", "/calendars/other/", uri, nonce, "00000005", "admin")); ok {
+		t.Error("credentials for one uri accepted on another path")
+	}
+	if _, ok, _ := b.Check(digestRequest("PROPFIND", uri, uri, "abc123", "00000001", "admin")); ok {
+		t.Error("unissued nonce accepted")
+	}
+
+	later := time.Now().Add(nonceTTL + time.Minute)
+	b.now = func() time.Time { return later }
+	expired := digestRequest("PROPFIND", uri, uri, nonce, "00000009", "admin")
+	if _, ok, _ := b.Check(expired); ok {
+		t.Error("expired nonce accepted")
+	}
+	h := http.Header{}
+	b.Challenge(h, expired)
+	if !strings.HasSuffix(h.Get("WWW-Authenticate"), ",stale=true") {
+		t.Errorf("challenge after an expired nonce = %q, want stale=true", h.Get("WWW-Authenticate"))
 	}
 }
 
@@ -132,11 +181,12 @@ func TestDigestBackendRejections(t *testing.T) {
 }
 
 // TestDigestChallenge: the 401 challenge advertises Digest with the realm,
-// qop=auth, the md5-of-realm opaque, and a fresh random nonce per challenge.
+// qop=auth, the md5-of-realm opaque, and a fresh nonce per challenge.
 func TestDigestChallenge(t *testing.T) {
 	b := &DigestBackend{Realm: "SabreDAV"}
+	r := httptest.NewRequest("GET", "/", nil)
 	h := http.Header{}
-	b.Challenge(h)
+	b.Challenge(h, r)
 	got := h.Get("WWW-Authenticate")
 	if !strings.HasPrefix(got, `Digest realm="SabreDAV",qop="auth",nonce="`) {
 		t.Errorf("challenge = %q, want a Digest challenge for realm SabreDAV with qop=auth", got)
@@ -145,7 +195,7 @@ func TestDigestChallenge(t *testing.T) {
 		t.Errorf("challenge = %q, want opaque=md5(realm)", got)
 	}
 	h2 := http.Header{}
-	b.Challenge(h2)
+	b.Challenge(h2, r)
 	if h2.Get("WWW-Authenticate") == got {
 		t.Error("two challenges produced the same nonce; want a fresh random one")
 	}
@@ -219,20 +269,8 @@ func TestSubmissionSecretStash(t *testing.T) {
 	})
 
 	t.Run("digest stashes nothing", func(t *testing.T) {
-		const realm, user, pass = "SabreDAV", "admin", "admin"
-		const nonce, cnonce, nc, uri = "abc123", "0a4f113b", "00000001", "/"
-		b := &DigestBackend{Realm: realm, HashA1: func(rlm, u string) (string, bool) {
-			if u == user {
-				return DigestA1(user, rlm, pass), true
-			}
-			return "", false
-		}}
-		a2 := md5hex("PROPFIND:" + uri)
-		response := md5hex(DigestA1(user, realm, pass) + ":" + nonce + ":" + nc + ":" + cnonce + ":auth:" + a2)
-		r := httptest.NewRequest("PROPFIND", uri, nil)
-		r.Header.Set("Authorization", fmt.Sprintf(
-			`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
-			user, realm, nonce, uri, nc, cnonce, response))
+		b := digestBackend()
+		r := digestRequest("PROPFIND", "/", "/", issueNonce(t, b), "00000001", "admin")
 		r = r.WithContext(dav.ContextWithPrincipal(r.Context(), ""))
 		if proceed, err := NewPlugin(b).BeforeMethod(httptest.NewRecorder(), r); !proceed || err != nil {
 			t.Fatalf("Digest login rejected: proceed=%v err=%v", proceed, err)

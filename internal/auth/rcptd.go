@@ -147,7 +147,7 @@ func Unavailable(reason string) bool {
 	return reason == ReasonUnreachable || reason == ReasonUnavailable
 }
 
-func (b *RcptdBackend) Challenge(h http.Header) {
+func (b *RcptdBackend) Challenge(h http.Header, _ *http.Request) {
 	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
 }
 
