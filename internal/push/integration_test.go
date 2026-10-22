@@ -236,6 +236,92 @@ func TestDispatchDeliversAndDedups(t *testing.T) {
 	}
 }
 
+// behindSubscription creates a calendar with one change and a subscription
+// that has not seen it, returning the store and the dispatch key.
+func behindSubscription(t *testing.T, db *sql.DB) (*Store, string) {
+	t.Helper()
+	backend := &storage.CalDAV{DB: db}
+	id, err := backend.CreateCalendar("principals/alice", "home", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.CreateCalendarObject(id, "e.ics", []byte(sampleICS)); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{DB: db}
+	if _, err := store.Upsert(Subscription{
+		Token: "t", Kind: "calendar", CollectionID: id.Calendar,
+		CollectionPath: "calendars/alice/home", PrincipalURI: "principals/alice",
+		PushResource: "https://push.example/a", P256dh: "PUB", AuthSecret: "AUTH",
+	}, 0, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	return store, "calendar:" + id.Calendar
+}
+
+// TestDispatchRetriesTemporaryFailure: a 429 or 5xx from the push service
+// asks for a retry and leaves the subscription behind, so the retry delivers.
+func TestDispatchRetriesTemporaryFailure(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_push_retry")
+	store, key := behindSubscription(t, db)
+	sender := &fakeSender{}
+	w := &Worker{cfg: Config{TopicSecret: "s"}, store: store, sender: sender,
+		checker: okChecker{}, log: slog.Default()}
+	ctx := context.Background()
+
+	for _, status := range []int{429, 503} {
+		sender.status = status
+		if !w.dispatch(ctx, key) {
+			t.Errorf("status %d: dispatch did not ask for a retry", status)
+		}
+	}
+	sender.status = 201
+	if w.dispatch(ctx, key) {
+		t.Error("a delivered dispatch asked for a retry")
+	}
+	if sender.count != 3 {
+		t.Errorf("deliveries = %d, want 3 (each failure left the subscription behind)", sender.count)
+	}
+}
+
+// TestListenReconcilesOnConnect: a change committed while the worker was not
+// listening is delivered as soon as it listens, without a NOTIFY; and listen
+// returns promptly on cancel.
+func TestListenReconcilesOnConnect(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_push_reconcile")
+	store, _ := behindSubscription(t, db)
+	sender := &fakeSender{status: 201}
+	w := &Worker{cfg: Config{TopicSecret: "s"}, store: store, sender: sender,
+		checker: okChecker{}, log: slog.Default(), dsn: testDSN("calserver_f_push_reconcile")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	housekeeping := time.NewTicker(time.Hour)
+	defer housekeeping.Stop()
+	done := make(chan error, 1)
+	go func() { done <- w.listen(ctx, housekeeping) }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		sender.mu.Lock()
+		n := sender.count
+		sender.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("deliveries = %d, want 1 from the reconcile on LISTEN", n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done: // nil or the reader's context error; Run ignores either
+	case <-time.After(5 * time.Second):
+		t.Fatal("listen did not return after cancel")
+	}
+}
+
 const sampleICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" +
 	"BEGIN:VEVENT\r\nUID:evt-1\r\nDTSTAMP:20240101T000000Z\r\nDTSTART:20240101T120000Z\r\n" +
 	"SUMMARY:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"

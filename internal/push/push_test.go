@@ -6,7 +6,34 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestRetrySetBacksOff: a failing key is retried after each of retryDelays in
+// turn, then left to the reconcile; a success forgets it.
+func TestRetrySetBacksOff(t *testing.T) {
+	r := newRetrySet()
+	now := time.Unix(0, 0)
+	for i, d := range retryDelays {
+		r.record("calendar:1", true, now)
+		if got := r.takeDue(now.Add(d - time.Second)); len(got) != 0 {
+			t.Fatalf("retry %d due early: %v", i, got)
+		}
+		if got := r.takeDue(now.Add(d)); len(got) != 1 {
+			t.Fatalf("retry %d not due after %s: %v", i, d, got)
+		}
+	}
+	r.record("calendar:1", true, now) // out of delays
+	if len(r.due) != 0 || len(r.attempts) != 0 {
+		t.Errorf("after the last delay: due=%v attempts=%v, want both empty", r.due, r.attempts)
+	}
+
+	r.record("calendar:2", true, now)
+	r.record("calendar:2", false, now)
+	if len(r.due) != 0 || len(r.attempts) != 0 {
+		t.Errorf("after a success: due=%v attempts=%v, want both empty", r.due, r.attempts)
+	}
+}
 
 func TestTopicDeterministicAndDistinct(t *testing.T) {
 	cfg := Config{TopicSecret: "s3cr3t"}
