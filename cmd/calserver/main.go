@@ -11,6 +11,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -108,6 +109,10 @@ func main() {
 		go serveMetrics(metricsAddrV, set)
 	}
 
+	// background tracks what must finish before the process exits once ctx
+	// is cancelled: the contacts API's drain, the push worker, the job queue.
+	var background sync.WaitGroup
+
 	// The webmail contacts API: its own loopback listener, sharing the DAV
 	// server's database and credential backend, never mounted on the DAV
 	// port. Needs the database — there is nothing to serve in-memory.
@@ -115,13 +120,21 @@ func main() {
 	case apiAddrV != "" && contactsAPI == nil:
 		slog.Warn("api-addr set but no database configured; the contacts API is not started", "addr", apiAddrV)
 	case contactsAPI != nil:
-		go serveContactsAPI(ctx, apiAddrV, contactsAPI)
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			serveContactsAPI(ctx, apiAddrV, contactsAPI)
+		}()
 	}
 
 	// Deliver WebDAV-Push notifications in the background (advertisement and
 	// registration already work through the plugin; this drives delivery).
 	if pushWorker != nil {
-		go pushWorker.Run(ctx)
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			pushWorker.Run(ctx)
+		}()
 	}
 
 	// Process durable scheduling sends (per-user retries + relay-native sends).
@@ -129,6 +142,12 @@ func main() {
 	// shutdown. Without this, enqueued sends would never run.
 	if jobQueue != nil {
 		jobQueue.Start(ctx)
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			<-ctx.Done()
+			jobQueue.Wait()
+		}()
 	}
 
 	httpSrv := &http.Server{
@@ -149,8 +168,11 @@ func main() {
 
 	// Shut the HTTP server down when a termination signal cancels ctx, so the
 	// listener stops and the push worker's ctx (shared) unwinds its LISTEN
-	// connection cleanly.
+	// connection cleanly. ListenAndServe returns as soon as Shutdown starts;
+	// shutDone closes once in-flight requests have drained.
+	shutDone := make(chan struct{})
 	go func() {
+		defer close(shutDone)
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -173,10 +195,29 @@ func main() {
 		slog.Error("server exited", "err", err)
 		os.Exit(1)
 	}
+	<-shutDone
+	waitBackground(&background, 30*time.Second)
+}
+
+// waitBackground waits for the background services to finish after ctx is
+// cancelled — running jobs settle, the push worker closes its connection —
+// but no longer than limit, so one stuck send cannot hold the process.
+func waitBackground(wg *sync.WaitGroup, limit time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(limit):
+		slog.Warn("shutdown: background work still running; exiting anyway", "waited", limit)
+	}
 }
 
 // serveContactsAPI runs the contacts API listener until ctx is cancelled,
-// then shuts it down gracefully. It exits the process on a bind failure, the
+// then shuts it down gracefully, returning once in-flight requests have
+// drained. It exits the process on a bind failure, the
 // same posture as the metrics listener: a configured listener that silently
 // is not there is worse than a crash at startup.
 func serveContactsAPI(ctx context.Context, addr string, h http.Handler) {
@@ -189,7 +230,9 @@ func serveContactsAPI(ctx context.Context, addr string, h http.Handler) {
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+	shutDone := make(chan struct{})
 	go func() {
+		defer close(shutDone)
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -202,6 +245,7 @@ func serveContactsAPI(ctx context.Context, addr string, h http.Handler) {
 		slog.Error("contacts api server exited", "err", err)
 		os.Exit(1)
 	}
+	<-shutDone
 }
 
 // serveMetrics runs the metrics/pprof listener. It exits the process on

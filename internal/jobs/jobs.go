@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -121,6 +122,7 @@ type Queue struct {
 	registry map[string]Handler
 	log      *slog.Logger
 	wake     chan struct{}
+	running  sync.WaitGroup // Start's goroutines, for Wait
 }
 
 // New builds a queue over db. Register handlers before Start.
@@ -273,18 +275,32 @@ func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generatio
 }
 
 // Start runs the claim loops, the LISTEN wake, and the sweep tick until ctx is
-// cancelled. Safe to `go q.Start(ctx)`; it never returns an error the caller
-// must act on. Register all handlers first.
+// cancelled. It spawns its goroutines and returns; it never returns an error
+// the caller must act on. Register all handlers first, and call Wait after
+// cancelling ctx so in-flight jobs settle before the process exits.
 func (q *Queue) Start(ctx context.Context) {
 	for _, queue := range q.cfg.Queues {
 		for i := 0; i < q.cfg.Workers; i++ {
-			go q.workerLoop(ctx, queue)
+			q.goRun(func() { q.workerLoop(ctx, queue) })
 		}
 	}
-	go q.sweepLoop(ctx)
+	q.goRun(func() { q.sweepLoop(ctx) })
 	if q.cfg.DSN != "" {
-		go q.listenLoop(ctx)
+		q.goRun(func() { q.listenLoop(ctx) })
 	}
+}
+
+// Wait blocks until every goroutine Start spawned has returned: after ctx is
+// cancelled, once each running job's handler has returned and its outcome is
+// recorded.
+func (q *Queue) Wait() { q.running.Wait() }
+
+func (q *Queue) goRun(fn func()) {
+	q.running.Add(1)
+	go func() {
+		defer q.running.Done()
+		fn()
+	}()
 }
 
 // workerLoop claims and processes jobs for one queue until ctx is cancelled,

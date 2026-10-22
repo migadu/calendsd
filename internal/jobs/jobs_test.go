@@ -399,6 +399,40 @@ func TestEnqueueCredentialWithoutKeyring(t *testing.T) {
 	}
 }
 
+// TestWaitSettlesInFlightJob: after the queue's ctx is cancelled, Wait returns
+// only once a running handler has returned and its outcome is recorded, so a
+// shutdown does not leave the row 'executing' for the reclaim sweep.
+func TestWaitSettlesInFlightJob(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_jobs_wait")
+	q := newTestQueue(t, db)
+	started := make(chan struct{})
+	q.Register("imip_send", func(ctx context.Context, j Job) error {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(100 * time.Millisecond) // a send unwinding after cancel
+		return ctx.Err()
+	})
+	if err := q.Enqueue(context.Background(), "imip_send",
+		imipArgs("u8", "mailto:w@x.test", "REQUEST", "0", "20260101T000000Z")); err != nil {
+		t.Fatal(err)
+	}
+	id := lastJobID(t, db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	q.Start(ctx)
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		cancel()
+		t.Fatal("handler never started")
+	}
+	cancel()
+	q.Wait()
+	if r := getJob(t, db, id); r.state != "available" || r.attempt != 1 {
+		t.Errorf("after Wait: state=%q attempt=%d, want available/1 (rescheduled)", r.state, r.attempt)
+	}
+}
+
 // TestSettleIgnoresStaleClaim: a handler that outlives its claim — the job was
 // reclaimed and claimed again, or cancelled — must not settle the row the
 // newer claim (or the operator) now owns.
