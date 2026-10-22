@@ -97,6 +97,8 @@ type memFile struct {
 	parent   *memColl
 	// sizeOverride, when set, is returned by Size (use -1 for "unknown").
 	sizeOverride *int64
+	// seekable makes Get return a seekable body (BytesBody).
+	seekable bool
 }
 
 func (f *memFile) Name() string            { return f.name }
@@ -113,6 +115,9 @@ func (f *memFile) Delete() error {
 }
 
 func (f *memFile) Get() (io.ReadCloser, error) {
+	if f.seekable {
+		return BytesBody(f.contents), nil
+	}
 	return io.NopCloser(bytes.NewReader(f.contents)), nil
 }
 
@@ -358,6 +363,34 @@ func TestBrowserEncodesHrefs(t *testing.T) {
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if body := rec.Body.String(); !strings.Contains(body, `href="/a%3Fb%23c.txt"`) {
 		t.Errorf("browser href not path-encoded:\n%s", body)
+	}
+}
+
+// A seekable body is served through http.ServeContent: ranges work, and an
+// If-Range with a weak validator never matches (RFC 7233 §3.2 requires a
+// strong comparison), so the full entity comes back.
+func TestGetSeekableBodyServesRanges(t *testing.T) {
+	file := &memFile{name: "f.txt", contents: []byte("0123456789"), etag: `"t"`, seekable: true}
+	s := NewServer("/", newMemColl("root", file))
+
+	get := func(hdr ...string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/f.txt", nil)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("Range", "bytes=2-4"); rec.Code != http.StatusPartialContent || rec.Body.String() != "234" ||
+		rec.Header().Get("Content-Range") != "bytes 2-4/10" {
+		t.Errorf("range GET = %d %q %q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Range"))
+	}
+	if rec := get("Range", "bytes=2-4", "If-Range", `W/"t"`); rec.Code != http.StatusOK || rec.Body.String() != "0123456789" {
+		t.Errorf("weak If-Range GET = %d %q, want the full entity", rec.Code, rec.Body.String())
+	}
+	if rec := get(); rec.Code != http.StatusOK || rec.Body.String() != "0123456789" || rec.Header().Get("ETag") != `"t"` {
+		t.Errorf("plain GET = %d %q etag %q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
 	}
 }
 

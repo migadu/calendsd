@@ -3,6 +3,7 @@
 package dav
 
 import (
+	"bytes"
 	"encoding/xml"
 	"io"
 	"time"
@@ -41,7 +42,8 @@ type Collection interface {
 // File is a leaf node carrying a payload. Port of sabre's IFile.
 type File interface {
 	Node
-	// Get returns the file payload.
+	// Get returns the file payload. A payload that is also an io.Seeker
+	// (see BytesBody) is served with http.ServeContent.
 	Get() (io.ReadCloser, error)
 	// Put replaces the file payload. The returned etag, if non-empty,
 	// must be surrounded by double-quotes.
@@ -76,3 +78,13 @@ type PropNode interface {
 	// for the mutations it supports.
 	PropPatch(pp *PropPatch)
 }
+
+// BytesBody wraps an in-memory payload as a File.Get body. It is seekable,
+// so GET serves it with http.ServeContent.
+func BytesBody(data []byte) io.ReadCloser {
+	return bytesBody{bytes.NewReader(data)}
+}
+
+type bytesBody struct{ *bytes.Reader }
+
+func (bytesBody) Close() error { return nil }

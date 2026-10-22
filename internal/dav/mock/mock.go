@@ -4,7 +4,6 @@
 package mock
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -127,7 +126,7 @@ func (f *File) SetName(name string) error {
 func (f *File) LastModified() time.Time { return f.lastModified }
 
 func (f *File) Get() (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(f.contents)), nil
+	return dav.BytesBody(f.contents), nil
 }
 
 func (f *File) Put(data io.Reader) (string, error) {

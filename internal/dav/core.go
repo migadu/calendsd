@@ -220,18 +220,6 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	// A negative size means unknown (streaming nodes): no Content-Length
 	// and no range support, like sabre with a null getSize().
 	size := file.Size()
-	var hasRange bool
-	var start, end int64
-	if size >= 0 {
-		start, end, hasRange, err = parseRange(r.Header.Get("Range"), size)
-		if err != nil {
-			return true, err
-		}
-		if hasRange && ignoreRange(r.Header.Get("If-Range"), h) {
-			hasRange = false
-		}
-	}
-
 	if headOnly {
 		if size >= 0 {
 			h.Set("Content-Length", strconv.FormatInt(size, 10))
@@ -250,6 +238,20 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 		w.WriteHeader(http.StatusOK)
 		_, err = io.Copy(w, body)
 		return true, err
+	}
+	if rs, ok := body.(io.ReadSeeker); ok {
+		// Range, If-Range (against the validators set above) and
+		// Content-Length; the other preconditions already passed.
+		http.ServeContent(w, r, "", file.LastModified(), rs)
+		return true, nil
+	}
+
+	start, end, hasRange, err := parseRange(r.Header.Get("Range"), size)
+	if err != nil {
+		return true, err
+	}
+	if hasRange && ignoreRange(r.Header.Get("If-Range"), h) {
+		hasRange = false
 	}
 
 	if hasRange {
