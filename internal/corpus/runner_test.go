@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"calserver/internal/dav/xml/xmltest"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"testing"
 
 	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
 )
 
 // unreplayable lists tests whose behavior depends on event listeners the PHP
@@ -354,8 +354,8 @@ func diffBodies(got, want string) string {
 		return ""
 	}
 	if looksLikeXML(got) && looksLikeXML(want) {
-		cGot, errG := davxml.CanonicalizeFunc(strings.NewReader(got), canonicalizeEmbedded)
-		cWant, errW := davxml.CanonicalizeFunc(strings.NewReader(want), canonicalizeEmbedded)
+		cGot, errG := xmltest.CanonicalizeFunc(strings.NewReader(got), canonicalizeEmbedded)
+		cWant, errW := xmltest.CanonicalizeFunc(strings.NewReader(want), canonicalizeEmbedded)
 		if errG == nil && errW == nil {
 			if cGot != cWant {
 				return fmt.Sprintf("XML bodies differ:\n--- ours ---\n%s\n--- sabre ---\n%s", cGot, cWant)

@@ -1,6 +1,9 @@
-package davxml
+// Package xmltest compares DAV XML documents semantically, for tests: the
+// corpus runner and the davxml marshalling tests.
+package xmltest
 
 import (
+	davxml "calserver/internal/dav/xml"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -124,14 +127,14 @@ func (n *xnode) normalize() {
 
 func (n *xnode) sortUnorderedSets() {
 	switch {
-	case n.name == xml.Name{Space: NSDav, Local: "multistatus"}:
+	case n.name == xml.Name{Space: davxml.NSDav, Local: "multistatus"}:
 		// Responses are an unordered set; key by first href.
 		sort.SliceStable(n.children, func(i, j int) bool {
 			return n.children[i].sortKey() < n.children[j].sortKey()
 		})
-	case n.name == xml.Name{Space: NSDav, Local: "prop"}:
+	case n.name == xml.Name{Space: davxml.NSDav, Local: "prop"}:
 		sort.SliceStable(n.children, func(i, j int) bool {
-			return Clark(n.children[i].name) < Clark(n.children[j].name)
+			return davxml.Clark(n.children[i].name) < davxml.Clark(n.children[j].name)
 		})
 	}
 }
@@ -139,22 +142,22 @@ func (n *xnode) sortUnorderedSets() {
 // sortKey orders {DAV:}response elements: the href text, falling back to the
 // element name for non-response children like sync-token.
 func (n *xnode) sortKey() string {
-	if (n.name == xml.Name{Space: NSDav, Local: "response"}) {
+	if (n.name == xml.Name{Space: davxml.NSDav, Local: "response"}) {
 		for _, c := range n.children {
-			if (c.name == xml.Name{Space: NSDav, Local: "href"}) {
+			if (c.name == xml.Name{Space: davxml.NSDav, Local: "href"}) {
 				return "response\x00" + c.text
 			}
 		}
 	}
-	return Clark(n.name)
+	return davxml.Clark(n.name)
 }
 
 func (n *xnode) write(b *strings.Builder, depth int) {
 	indent := strings.Repeat(" ", depth)
 	b.WriteString(indent)
-	b.WriteString(Clark(n.name))
+	b.WriteString(davxml.Clark(n.name))
 	for _, a := range n.attrs {
-		fmt.Fprintf(b, " @%s=%q", Clark(a.Name), a.Value)
+		fmt.Fprintf(b, " @%s=%q", davxml.Clark(a.Name), a.Value)
 	}
 	if n.text != "" {
 		fmt.Fprintf(b, " %q", n.text)
