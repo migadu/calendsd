@@ -50,8 +50,7 @@ func main() {
 	if configPath != "" {
 		cfg, err := config.Load(configPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to load config %s: %v\n", configPath, err)
-			os.Exit(1)
+			fatalf("Failed to load config %s: %v", configPath, err)
 		}
 		globalConfig = *cfg
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -17,29 +16,25 @@ import (
 func handleStats(args []string) {
 	flags := flag.NewFlagSet("stats", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	changes := flags.Int("changes", 10, "Recent change-log rows to show per change table (0 disables)")
 	flags.Parse(args)
 
 	q := openAdminQueries(*dsnOverride)
 	counts, err := q.Counts()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to count tables: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to count tables: %v", err)
 	}
 	var recent []storage.AdminChange
 	if *changes > 0 {
 		recent, err = q.RecentChanges(*changes)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to load recent changes: %v\n", err)
-			os.Exit(1)
+			fatalf("Failed to load recent changes: %v", err)
 		}
 	}
 
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(struct {
+		printJSON(struct {
 			Counts        *storage.AdminCounts  `json:"counts"`
 			RecentChanges []storage.AdminChange `json:"recentChanges"`
 		}{counts, recent})

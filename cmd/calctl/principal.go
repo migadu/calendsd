@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -21,8 +20,7 @@ import (
 // carve-out, exactly like the admin panel's Phase C endpoints.
 func handlePrincipal(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: calctl principal <list|add|edit|remove|auth> [options]")
-		os.Exit(1)
+		fatalf("Usage: calctl principal <list|add|edit|remove|auth> [options]")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -43,8 +41,7 @@ func handlePrincipal(args []string) {
 	case "auth":
 		handlePrincipalAuth(rest)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown principal subcommand: %s (want list, add, edit, remove, delete, restore, purge-expired, or auth)\n", sub)
-		os.Exit(1)
+		fatalf("Unknown principal subcommand: %s (want list, add, edit, remove, delete, restore, purge-expired, or auth)", sub)
 	}
 }
 
@@ -59,26 +56,22 @@ func handlePrincipalAuth(args []string) {
 	password := flags.String("password", "", "Password to verify (or use --password-stdin)")
 	passwordStdin := flags.Bool("password-stdin", false, "Read the password from the first line of stdin")
 	realm := flags.String("realm", realmDefault(), "Auth realm to compute the digest under; must match the server's")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	pw := resolvePassword(*password, *passwordStdin)
 	if pw == "" {
-		fmt.Fprintln(os.Stderr, "A password is required: pass --password or --password-stdin.")
-		os.Exit(1)
+		fatalf("A password is required: pass --password or --password-stdin.")
 	}
 	q := openAdminQueries(*dsnOverride)
 	user, err := q.UserForPrincipal("principals/" + username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to look up user: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to look up user: %v", err)
 	}
 
 	res := admin.CheckCredentials(user, username, pw, *realm)
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(res)
+		printJSON(res)
 	} else {
 		fmt.Println(res.Note)
 	}
@@ -90,24 +83,21 @@ func handlePrincipalAuth(args []string) {
 func handlePrincipalList(args []string) {
 	flags := flag.NewFlagSet("principal list", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(args)
 
 	q := openAdminQueries(*dsnOverride)
 	principals, err := (&storage.Principals{DB: q.DB}).PrincipalsByPrefix("principals")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to list principals: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to list principals: %v", err)
 	}
 	diags, err := q.AuthDiagnostics()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to cross-check users: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to cross-check users: %v", err)
 	}
 	deletions, err := (&storage.AdminWrites{DB: q.DB}).Deletions()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to list pending deletions: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to list pending deletions: %v", err)
 	}
 	purgeDate := map[string]string{}
 	for _, d := range deletions {
@@ -121,9 +111,7 @@ func handlePrincipalList(args []string) {
 	sort.Slice(rows, func(i, j int) bool { return rows[i].URI < rows[j].URI })
 
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(rows)
+		printJSON(rows)
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -146,19 +134,17 @@ func handlePrincipalAdd(args []string) {
 	password := flags.String("password", "", "Password (or use --password-stdin)")
 	passwordStdin := flags.Bool("password-stdin", false, "Read the password from the first line of stdin")
 	realm := flags.String("realm", realmDefault(), "Auth realm baked into the digesta1 hash; must match the server's")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	pw := resolvePassword(*password, *passwordStdin)
 	if pw == "" {
-		fmt.Fprintln(os.Stderr, "A password is required: pass --password or --password-stdin.")
-		os.Exit(1)
+		fatalf("A password is required: pass --password or --password-stdin.")
 	}
 	q := openAdminQueries(*dsnOverride)
 	writes := &storage.AdminWrites{DB: q.DB}
 	if err := writes.CreateUser(username, auth.DigestA1(username, *realm, pw), *email, *name); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create user: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to create user: %v", err)
 	}
 	fmt.Printf("Created user %s and principals/%s (with proxy sub-principals) under realm %s.\n",
 		username, username, *realm)
@@ -172,7 +158,7 @@ func handlePrincipalEdit(args []string) {
 	password := flags.String("password", "", "New password (or use --password-stdin)")
 	passwordStdin := flags.Bool("password-stdin", false, "Read the new password from the first line of stdin")
 	realm := flags.String("realm", realmDefault(), "Auth realm baked into the digesta1 hash; must match the server's")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	// Only flags given explicitly change anything, so an omitted --email is
@@ -190,28 +176,24 @@ func handlePrincipalEdit(args []string) {
 		}
 	})
 	if newEmail == nil && newName == nil && !setPassword {
-		fmt.Fprintln(os.Stderr, "Nothing to change: pass --email, --name, --password, or --password-stdin.")
-		os.Exit(1)
+		fatalf("Nothing to change: pass --email, --name, --password, or --password-stdin.")
 	}
 
 	q := openAdminQueries(*dsnOverride)
 	writes := &storage.AdminWrites{DB: q.DB}
 	if newEmail != nil || newName != nil {
 		if err := writes.UpdatePrincipal("principals/"+username, newEmail, newName); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to update principal: %v\n", err)
-			os.Exit(1)
+			fatalf("Failed to update principal: %v", err)
 		}
 		fmt.Printf("Updated principals/%s.\n", username)
 	}
 	if setPassword {
 		pw := resolvePassword(*password, *passwordStdin)
 		if pw == "" {
-			fmt.Fprintln(os.Stderr, "A password is required with --password/--password-stdin.")
-			os.Exit(1)
+			fatalf("A password is required with --password/--password-stdin.")
 		}
 		if err := writes.SetPassword(username, auth.DigestA1(username, *realm, pw)); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to set password: %v\n", err)
-			os.Exit(1)
+			fatalf("Failed to set password: %v", err)
 		}
 		fmt.Printf("Password reset for %s under realm %s.\n", username, *realm)
 	}
@@ -222,7 +204,7 @@ func handlePrincipalRemove(args []string) {
 	flags := flag.NewFlagSet("principal remove", flag.ExitOnError)
 	confirm := flags.Bool("confirm", false, "Actually delete (required)")
 	cascade := flags.Bool("cascade", false, "Also delete the user's owned calendars and address books (otherwise removal refuses while any collection remains)")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	if !*confirm {
@@ -230,8 +212,7 @@ func handlePrincipalRemove(args []string) {
 		if *cascade {
 			what = "all owned calendars and address books, plus the users row and principal triple"
 		}
-		fmt.Fprintf(os.Stderr, "This deletes %s for %q. Re-run with --confirm.\n", what, username)
-		os.Exit(1)
+		fatalf("This deletes %s for %q. Re-run with --confirm.", what, username)
 	}
 	writes := &storage.AdminWrites{DB: openAdminQueries(*dsnOverride).DB}
 	remove := writes.DeleteUser
@@ -239,8 +220,7 @@ func handlePrincipalRemove(args []string) {
 		remove = writes.DeleteUserCascade
 	}
 	if err := remove(username); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to remove: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to remove: %v", err)
 	}
 	if *cascade {
 		fmt.Printf("Removed user %s, principals/%s (with proxy sub-principals), and all owned calendars/address books.\n",
@@ -261,7 +241,7 @@ func handlePrincipalDelete(args []string) {
 	in := flags.Int("in", 0, "Days to keep the account before purge (default: [retention].deleted_days, then 30)")
 	reason := flags.String("reason", "", "Optional note stored with the tombstone")
 	confirm := flags.Bool("confirm", false, "Actually schedule the deletion (required)")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	days := config.RetentionDays(*in)
@@ -275,8 +255,7 @@ func handlePrincipalDelete(args []string) {
 	}
 	q := openAdminQueries(*dsnOverride)
 	if err := (&storage.AdminWrites{DB: q.DB}).ScheduleDelete(username, days, *reason); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to schedule deletion: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to schedule deletion: %v", err)
 	}
 	fmt.Printf("Scheduled %s for deletion in %d day(s). It can no longer log in; restore with `calctl principal restore %s`.\n",
 		username, days, username)
@@ -286,13 +265,12 @@ func handlePrincipalDelete(args []string) {
 func handlePrincipalRestore(args []string) {
 	username, rest := takeUsername("restore", args)
 	flags := flag.NewFlagSet("principal restore", flag.ExitOnError)
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(rest)
 
 	q := openAdminQueries(*dsnOverride)
 	if err := (&storage.AdminWrites{DB: q.DB}).CancelDelete(username); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to restore: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to restore: %v", err)
 	}
 	fmt.Printf("Restored %s; the account can log in again.\n", username)
 }
@@ -302,15 +280,14 @@ func handlePrincipalRestore(args []string) {
 func handlePrincipalPurgeExpired(args []string) {
 	flags := flag.NewFlagSet("principal purge-expired", flag.ExitOnError)
 	dryRun := flags.Bool("dry-run", false, "List accounts due for purge without deleting them")
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	flags.Parse(args)
 
 	writes := &storage.AdminWrites{DB: openAdminQueries(*dsnOverride).DB}
 	if *dryRun {
 		due, err := writes.ExpiredDeletions()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to list expired deletions: %v\n", err)
-			os.Exit(1)
+			fatalf("Failed to list expired deletions: %v", err)
 		}
 		for _, d := range due {
 			fmt.Printf("would purge %s (scheduled %s, due %s)\n",
@@ -321,8 +298,7 @@ func handlePrincipalPurgeExpired(args []string) {
 	}
 	purged, err := writes.PurgeExpired()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Purge failed after removing %d account(s): %v\n", len(purged), err)
-		os.Exit(1)
+		fatalf("Purge failed after removing %d account(s): %v", len(purged), err)
 	}
 	for _, d := range purged {
 		fmt.Printf("purged %s\n", d.Username)
@@ -335,8 +311,7 @@ func handlePrincipalPurgeExpired(args []string) {
 // subcommand).
 func takeUsername(sub string, args []string) (string, []string) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintf(os.Stderr, "Usage: calctl principal %s <username> [options]\n", sub)
-		os.Exit(1)
+		fatalf("Usage: calctl principal %s <username> [options]", sub)
 	}
 	return args[0], args[1:]
 }
@@ -354,17 +329,9 @@ func resolvePassword(flagValue string, fromStdin bool) string {
 	if fromStdin {
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil && line == "" {
-			fmt.Fprintf(os.Stderr, "Failed to read password from stdin: %v\n", err)
-			os.Exit(1)
+			fatalf("Failed to read password from stdin: %v", err)
 		}
 		return strings.TrimRight(line, "\r\n")
 	}
 	return flagValue
-}
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

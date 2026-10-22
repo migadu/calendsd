@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"os"
 	"time"
@@ -36,9 +35,7 @@ func handleHealth(args []string) {
 	results := health.Run(ctx, opts)
 
 	if *jsonOutput {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(results)
+		printJSON(results)
 	} else {
 		health.PrintTable(os.Stdout, results)
 	}

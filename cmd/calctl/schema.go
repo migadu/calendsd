@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
 	"time"
 
 	"calserver/internal/storage"
@@ -17,11 +16,10 @@ import (
 // a database without it.
 func handleSchema(args []string) {
 	if len(args) == 0 || args[0] != "apply" {
-		fmt.Fprintln(os.Stderr, "Usage: calctl schema apply [--db DSN] [--timeout DUR] [--lock-timeout DUR]")
-		os.Exit(1)
+		fatalf("Usage: calctl schema apply [--db DSN] [--timeout DUR] [--lock-timeout DUR]")
 	}
 	flags := flag.NewFlagSet("schema apply", flag.ExitOnError)
-	dsnOverride := flags.String("db", "", "Postgres DSN (default: [database] dsn)")
+	dsnOverride := dbFlag(flags)
 	timeout := flags.Duration("timeout", 2*time.Minute, "Give up on the whole run after this long")
 	lockTimeout := flags.Duration("lock-timeout", 5*time.Second, "Fail instead of waiting longer than this for any one table lock, which would block writes meanwhile (0 = wait)")
 	flags.Parse(args[1:])
@@ -30,12 +28,10 @@ func handleSchema(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	if err := storage.ApplySchema(ctx, q.DB, *lockTimeout); err != nil {
-		fmt.Fprintf(os.Stderr, "Applying the calserver schema failed, nothing was changed: %v\n", err)
-		os.Exit(1)
+		fatalf("Applying the calserver schema failed, nothing was changed: %v", err)
 	}
 	if err := q.SchemaPresent(); err != nil {
-		fmt.Fprintf(os.Stderr, "Schema applied, but a table is still missing: %v\n", err)
-		os.Exit(1)
+		fatalf("Schema applied, but a table is still missing: %v", err)
 	}
 	fmt.Printf("calserver schema is up to date (%d extension tables).\n", len(schema.Tables()))
 }
