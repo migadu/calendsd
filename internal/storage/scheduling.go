@@ -6,8 +6,8 @@ import (
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"calserver/internal/acl"
 	"calserver/internal/caldav"
@@ -108,8 +108,8 @@ func (b *CalDAV) FreeBusyVisibility(principalURI string) (acl.FreeBusyVisibility
 	var audience string
 	var allowed []string
 	err := b.DB.QueryRow(
-		`SELECT audience, array_to_json(allowed)::text FROM free_busy_visibility WHERE principal = $1`,
-		principalURI).Scan(&audience, jsonStrings{&allowed})
+		`SELECT audience, allowed FROM free_busy_visibility WHERE principal = $1`,
+		principalURI).Scan(&audience, textArray(&allowed))
 	if err == sql.ErrNoRows {
 		return acl.FreeBusyVisibility{}, nil
 	}
@@ -124,15 +124,13 @@ func (b *CalDAV) SetFreeBusyVisibility(principalURI string, v acl.FreeBusyVisibi
 	if v.Hidden {
 		audience = "nobody"
 	}
-	allowed, err := json.Marshal(append([]string{}, v.Allowed...))
-	if err != nil {
-		return err
-	}
-	_, err = b.DB.Exec(`
+	// Non-nil, so an empty list is '{}' rather than NULL in the NOT NULL column.
+	allowed := append([]string{}, v.Allowed...)
+	_, err := b.DB.Exec(`
 INSERT INTO free_busy_visibility (principal, audience, allowed)
-VALUES ($1, $2, ARRAY(SELECT json_array_elements_text($3::json)))
+VALUES ($1, $2, $3::text[])
 ON CONFLICT (principal) DO UPDATE SET audience = $2, allowed = EXCLUDED.allowed, updated_at = now()`,
-		principalURI, audience, string(allowed))
+		principalURI, audience, allowed)
 	return err
 }
 
@@ -141,22 +139,10 @@ func (b *CalDAV) DeleteFreeBusyVisibility(principalURI string) error {
 	return err
 }
 
-// jsonStrings scans a JSON array of strings (array_to_json of a TEXT[]),
-// which avoids depending on a driver-specific array type.
-type jsonStrings struct{ dst *[]string }
-
-func (j jsonStrings) Scan(src any) error {
-	var raw []byte
-	switch v := src.(type) {
-	case string:
-		raw = []byte(v)
-	case []byte:
-		raw = v
-	case nil:
-		*j.dst = nil
-		return nil
-	default:
-		return fmt.Errorf("jsonStrings: unsupported %T", src)
-	}
-	return json.Unmarshal(raw, j.dst)
+// textArray scans a TEXT[] column into dst with pgx's own array codec;
+// database/sql hands arrays over as their text form, which this decodes.
+// A Map is cheap to make (the type registry behind it is shared) and not
+// safe for concurrent use, so each scan gets its own.
+func textArray(dst *[]string) sql.Scanner {
+	return pgtype.NewMap().SQLScanner(dst)
 }

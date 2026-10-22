@@ -800,18 +800,14 @@ func truncateRunes(s string, n int) string {
 }
 
 func writeLedger(ctx context.Context, tx *sql.Tx, principalURI string, req ImportRequest, res ImportResult) error {
-	// source_users goes in as a literal rather than a driver-encoded slice, so
-	// the column type is decided here and not by whatever the pgx type map does
-	// with a Go slice today.
+	// source_users goes in as a pgx-encoded array, cast so the column type is
+	// decided here; non-nil, so no source ids is '{}' rather than NULL.
 	//
 	// cards_written accumulates across runs — it answers "how many cards has
 	// the migration ever written for this principal", which a re-run that
 	// writes nothing must not reset to zero. cards_total, cards_skipped and
 	// the rest describe the last visit.
-	ids := make([]string, len(req.SourceUsers))
-	for i, id := range req.SourceUsers {
-		ids[i] = strconv.FormatInt(int64(id), 10)
-	}
+	ids := append([]int32{}, req.SourceUsers...)
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO contact_import (principal, source_users, book_id, book_uri, bundle_digest,
                             exporter_ver, cards_total, cards_written, cards_skipped,
@@ -829,7 +825,7 @@ ON CONFLICT (principal) DO UPDATE
        synctoken     = excluded.synctoken,
        run_id        = excluded.run_id,
        imported_at   = excluded.imported_at`,
-		principalURI, "{"+strings.Join(ids, ",")+"}", res.BookID, req.BookURI, req.Digest,
+		principalURI, ids, res.BookID, req.BookURI, req.Digest,
 		req.ExporterVer, res.CardsTotal, res.CardsCreated+res.CardsUpdated, res.CardsSkipped,
 		res.SyncToken, req.RunID)
 	if err != nil {

@@ -7,12 +7,64 @@ package storage_test
 import (
 	"encoding/xml"
 	"errors"
+	"reflect"
 	"testing"
 
+	"calserver/internal/acl"
 	"calserver/internal/caldav"
 	"calserver/internal/dav"
 	"calserver/internal/storage"
 )
+
+// TestArrayColumnsRoundTrip pins the TEXT[] / INT[] columns now bound and
+// scanned as native pgx arrays (they went through array_to_json and a
+// hand-built literal): values with array-literal metacharacters survive, and
+// an empty list is stored as '{}', not NULL.
+func TestArrayColumnsRoundTrip(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_d_arrays")
+	cal := &storage.CalDAV{DB: db}
+	awkward := []string{"principals/a,b", `mailto:"q"@x`, "{brace}", "NULL", `back\slash`, ""}
+	if err := cal.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{Allowed: awkward}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cal.FreeBusyVisibility("principals/alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Allowed, awkward) {
+		t.Errorf("Allowed round trip = %q, want %q", got.Allowed, awkward)
+	}
+	if err := cal.SetFreeBusyVisibility("principals/alice", acl.FreeBusyVisibility{Hidden: true}); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT allowed::text FROM free_busy_visibility WHERE principal = 'principals/alice'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "{}" {
+		t.Errorf("empty allowed list stored as %q, want {}", stored)
+	}
+
+	// The import ledger's source_users, with and without ids.
+	imp := &storage.ContactImport{DB: db}
+	for principal, ids := range map[string][]int32{
+		"two@example.org":  {7, -9},
+		"none@example.org": nil,
+	} {
+		req := baseRequest(principal, []storage.ImportCard{card("a", "A")})
+		req.SourceUsers = ids
+		mustImport(t, imp, req)
+		var users string
+		if err := db.QueryRow(`SELECT source_users::text FROM contact_import WHERE principal = $1`,
+			"principals/"+principal).Scan(&users); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{"two@example.org": "{7,-9}", "none@example.org": "{}"}[principal]
+		if users != want {
+			t.Errorf("%s: source_users = %q, want %q", principal, users, want)
+		}
+	}
+}
 
 // TestWritesToMissingRowsAreNotFound covers updates and deletes that matched
 // no row (the object vanished between the caller's lookup and the write)
