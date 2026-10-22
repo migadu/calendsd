@@ -3,13 +3,13 @@
 package caldav
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -112,10 +112,10 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	// ATTENDEE set to the recipient).
 	var idProps []string
 	if uid := vfb.Props.Get("UID"); uid != nil && uid.Value != "" {
-		idProps = append(idProps, "UID:"+uid.Value)
+		idProps = appendPropLine(idProps, uid)
 	}
 	if org := vfb.Props.Get("ORGANIZER"); org != nil {
-		idProps = append(idProps, formatICalProp(org))
+		idProps = appendPropLine(idProps, org)
 	}
 
 	var b strings.Builder
@@ -134,7 +134,7 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {
-			extra := append(append([]string{}, idProps...), "ATTENDEE:"+att.Value)
+			extra := appendPropLine(append([]string{}, idProps...), &goical.Prop{Name: "ATTENDEE", Value: att.Value})
 			fb, readable, err := p.freeBusyForPrincipal(r.Context(), checker, principal, start.UTC(), end.UTC(), extra...)
 			if err != nil {
 				status = "5.0;Internal error"
@@ -255,25 +255,20 @@ func (p *SchedulePlugin) availabilityFor(name string) []byte {
 	return data
 }
 
-// formatICalProp serializes an iCalendar property to a single unfolded content
-// line ("NAME;PARAM=value:value"), preserving parameters so a cloned ORGANIZER
-// keeps its CN.
-func formatICalProp(prop *goical.Prop) string {
-	var b strings.Builder
-	b.WriteString(prop.Name)
-	// Emit parameters in a stable order for deterministic output.
-	names := make([]string, 0, len(prop.Params))
-	for name := range prop.Params {
-		names = append(names, name)
+// appendPropLine appends prop as a content line, serialized by go-ical so
+// parameter values with ";:," are quoted (an ORGANIZER CN like "Doe, Jane"
+// stays one parameter) and long lines are folded. A property go-ical refuses
+// to encode (a parameter value with a DQUOTE) is left out.
+func appendPropLine(lines []string, prop *goical.Prop) []string {
+	comp := goical.NewComponent("X")
+	comp.Props.Add(&goical.Prop{Name: prop.Name, Params: prop.Params, Value: prop.Value})
+	var buf bytes.Buffer
+	if err := goical.NewEncoder(&buf).Encode(&goical.Calendar{Component: comp}); err != nil {
+		return lines
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		for _, v := range prop.Params[name] {
-			b.WriteString(";" + name + "=" + v)
-		}
-	}
-	b.WriteString(":" + prop.Value)
-	return b.String()
+	line := strings.TrimPrefix(buf.String(), "BEGIN:X\r\n")
+	line = strings.TrimSuffix(line, "\r\nEND:X\r\n")
+	return append(lines, line)
 }
 
 func xmlEscapeText(s string) string {
