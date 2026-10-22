@@ -32,6 +32,12 @@ Rules for every workstream:
 
 ## Phase 1 — security and data loss (land first, own commits)
 
+**Status: S1–S10 done** (branch `review-fixes`). S2 grew while fixing it:
+`carddav.Card` had no ACL, so the sabre default (`{DAV:}all` for
+authenticated) let any user GET/PUT another user's contacts. Cards now carry
+the owner ACL and the default ACL is `{DAV:}read`. S7 changed
+`auth.Backend.Challenge` to take the request (for `stale=true`).
+
 Prod column: **live** = reachable with the ansible role's defaults
 (`roles/calserver/defaults/main.yml`: rcptd mode, so Basic-only; browser on;
 push off; temp-file filter not templated, off by default). **latent** = only
