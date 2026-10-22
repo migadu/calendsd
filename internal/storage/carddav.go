@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/xml"
-	"errors"
 	"strconv"
 	"strings"
 
@@ -139,7 +138,7 @@ func (b *CardDAV) UpdateAddressBook(id string, pp *dav.PropPatch) {
 				args...)); err != nil {
 				return err
 			}
-			return abAddChange(tx, id, "", 2)
+			return recordChange(tx, addressBookLog, id, "", 2)
 		})
 		return nil, err == nil
 	})
@@ -200,7 +199,7 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5)`,
 			addressBookID, uri, data, etag, len(data)); err != nil {
 			return err
 		}
-		return abAddChange(tx, addressBookID, uri, 1)
+		return recordChange(tx, addressBookLog, addressBookID, uri, 1)
 	})
 	if err != nil {
 		return "", err
@@ -218,7 +217,7 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 			data, etag, len(data), addressBookID, uri)); err != nil {
 			return err
 		}
-		return abAddChange(tx, addressBookID, uri, 2)
+		return recordChange(tx, addressBookLog, addressBookID, uri, 2)
 	})
 	if err != nil {
 		return "", err
@@ -257,7 +256,7 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 			return nil
 		}
 		matched = true
-		return abAddChange(tx, addressBookID, uri, 2)
+		return recordChange(tx, addressBookLog, addressBookID, uri, 2)
 	})
 	if err != nil || !matched {
 		return "", false, err
@@ -270,7 +269,7 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 // transaction of four statements regardless of how many cards there are —
 // not two per card, which for the 20,782-card book would be 40k round trips
 // under the book's row lock. All the change rows share one synctoken and the
-// token moves once, which is what abAddChange does per card, batched; a
+// token moves once, which is what recordChange does per card, batched; a
 // client syncing from an older token sees every uri as deleted either way.
 // Returns how many were removed. The book itself stays.
 func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
@@ -316,119 +315,8 @@ func (b *CardDAV) DeleteCard(addressBookID, uri string) error {
 			`DELETE FROM cards WHERE addressbookid = $1 AND uri = $2`, addressBookID, uri)); err != nil {
 			return err
 		}
-		return abAddChange(tx, addressBookID, uri, 3)
+		return recordChange(tx, addressBookLog, addressBookID, uri, 3)
 	})
-}
-
-func (b *CardDAV) ChangesForAddressBook(addressBookID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
-	defer b.Metrics.DBOpTimer("changes_for_addressbook")()
-	// Same shape as the calendar sync transcription.
-	if syncToken == "" {
-		var current sql.NullInt64
-		if err := b.DB.QueryRow(`SELECT synctoken FROM addressbooks WHERE id = $1`, addressBookID).Scan(&current); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil // unknown address book: no change info
-			}
-			return nil, err // surface real DB errors instead of masking them
-		}
-		out := &dav.ChangeSet{SyncToken: strconv.FormatInt(current.Int64, 10)}
-		rows, err := b.DB.Query(`SELECT uri FROM cards WHERE addressbookid = $1`, addressBookID)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var uri string
-			if err := rows.Scan(&uri); err != nil {
-				return nil, err
-			}
-			out.Added = append(out.Added, uri)
-		}
-		return out, rows.Err()
-	}
-
-	since, err := strconv.ParseInt(syncToken, 10, 64)
-	if err != nil {
-		return nil, nil // invalid token
-	}
-	query := `SELECT uri, operation, synctoken FROM addressbookchanges
-	           WHERE synctoken >= $1 AND addressbookid = $2 ORDER BY synctoken`
-	if limit > 0 {
-		// One extra row detects truncation, like sabre.
-		query += " LIMIT " + strconv.Itoa(limit+1)
-	}
-	rows, err := b.DB.Query(query, since, addressBookID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	type change struct {
-		operation int
-		synctoken int64
-	}
-	// Last change per uri wins, in first-seen order (PHP assoc semantics).
-	changes := map[string]change{}
-	var order []string
-	for rows.Next() {
-		var uri string
-		var c change
-		if err := rows.Scan(&uri, &c.operation, &c.synctoken); err != nil {
-			return nil, err
-		}
-		if _, seen := changes[uri]; !seen {
-			order = append(order, uri)
-		}
-		changes[uri] = c
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	out := &dav.ChangeSet{SyncToken: syncToken}
-	var currentToken int64
-	for count, uri := range order {
-		if limit > 0 && count >= limit {
-			out.Truncated = true
-			break
-		}
-		c := changes[uri]
-		// The client-facing token is one past the last synced change.
-		if c.synctoken+1 > currentToken {
-			currentToken = c.synctoken + 1
-			out.SyncToken = strconv.FormatInt(currentToken, 10)
-		}
-		switch c.operation {
-		case 1:
-			out.Added = append(out.Added, uri)
-		case 2:
-			out.Modified = append(out.Modified, uri)
-		case 3:
-			out.Deleted = append(out.Deleted, uri)
-		}
-	}
-	return out, nil
-}
-
-// abAddChange records an address book change and bumps the synctoken under a
-// row lock (same anti-race treatment as calendars).
-func abAddChange(tx *sql.Tx, addressBookID, uri string, operation int) error {
-	var token int64
-	if err := tx.QueryRow(
-		`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, addressBookID).Scan(&token); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`
-INSERT INTO addressbookchanges (uri, synctoken, addressbookid, operation)
-VALUES ($1, $2, $3, $4)`, uri, token, addressBookID, operation); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+1, addressBookID); err != nil {
-		return err
-	}
-	// WebDAV-Push notification (see addChange in sync.go for the rationale).
-	_, err := tx.Exec(`SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
-	return err
 }
 
 func cardETag(data []byte) string {

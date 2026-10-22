@@ -122,7 +122,7 @@ VALUES ($1, $2, $3, extract(epoch from now())::int, $4, $5, $6, $7, $8, $9)`,
 			d.FirstOccurrence, d.LastOccurrence, d.UID); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 1)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 1)
 	})
 	if err != nil {
 		return "", err
@@ -150,7 +150,7 @@ UPDATE calendarobjects
 			d.UID, id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 2)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 2)
 	})
 	if err != nil {
 		return "", err
@@ -165,6 +165,6 @@ func (b *CalDAV) DeleteCalendarObject(id caldav.CalendarID, objectURI string) er
 			id.Calendar, objectURI)); err != nil {
 			return err
 		}
-		return addChange(tx, id.Calendar, objectURI, 3)
+		return recordChange(tx, calendarLog, id.Calendar, objectURI, 3)
 	})
 }

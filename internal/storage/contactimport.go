@@ -529,7 +529,7 @@ SELECT c.uri
 // lock is what makes the ledger comparison mean anything: without it a DAV
 // client could write between this read and the diff, and the import would
 // overwrite that edit believing the book untouched since the last run.
-// Client writes lock the same row (abAddChange), so they wait for the import.
+// Client writes lock the same row (recordChange), so they wait for the import.
 func bookSyncToken(ctx context.Context, tx *sql.Tx, bookID int64) (int64, bool, error) {
 	var token int64
 	err := tx.QueryRowContext(ctx,
@@ -620,7 +620,7 @@ func (c *ContactImport) copyCards(ctx context.Context, conn *sql.Conn, bookID in
 
 // diffCards is the re-run path: compare, then write only what genuinely
 // changed. A blind re-upsert would produce correct rows and still be wrong —
-// CreateCard and UpdateCard each call abAddChange, which locks the book row,
+// CreateCard and UpdateCard each call recordChange, which locks the book row,
 // inserts a change row, bumps the synctoken and fires pg_notify. Re-running
 // blind is millions of change rows and a push notification per card telling
 // every device to re-download everything.
@@ -644,7 +644,7 @@ VALUES ($1, $2, $3, $4, $5, $6)`,
 				bookID, card.URI, card.Data, mtime, etag, len(card.Data)); err != nil {
 				return fmt.Errorf("inserting card %s: %w", card.URI, err)
 			}
-			if err := abAddChange(tx, strconv.FormatInt(bookID, 10), card.URI, 1); err != nil {
+			if err := recordChange(tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 1); err != nil {
 				return err
 			}
 			res.CardsCreated++
@@ -663,7 +663,7 @@ UPDATE cards SET carddata = $1, lastmodified = $2, etag = $3, size = $4
 				card.Data, mtime, etag, len(card.Data), bookID, card.URI); err != nil {
 				return fmt.Errorf("updating card %s: %w", card.URI, err)
 			}
-			if err := abAddChange(tx, strconv.FormatInt(bookID, 10), card.URI, 2); err != nil {
+			if err := recordChange(tx, addressBookLog, strconv.FormatInt(bookID, 10), card.URI, 2); err != nil {
 				return err
 			}
 			res.CardsUpdated++

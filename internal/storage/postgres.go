@@ -280,7 +280,7 @@ func (b *CalDAV) UpdateCalendar(id caldav.CalendarID, pp *dav.PropPatch) {
 				strings.Join(assignments, ", "), len(args)), args...)); err != nil {
 				return err
 			}
-			return addChange(tx, id.Calendar, "", 2)
+			return recordChange(tx, calendarLog, id.Calendar, "", 2)
 		})
 		return nil, err == nil
 	})
