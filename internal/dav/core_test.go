@@ -360,3 +360,32 @@ func TestBrowserEncodesHrefs(t *testing.T) {
 		t.Errorf("browser href not path-encoded:\n%s", body)
 	}
 }
+
+// A failed extended MKCOL lists its properties in a fixed order, not in map
+// iteration order.
+func TestExtendedMkcolFailureIsDeterministic(t *testing.T) {
+	body := `<?xml version="1.0"?><d:mkcol xmlns:d="DAV:" xmlns:x="urn:x"><d:set><d:prop>` +
+		`<d:resourcetype><d:collection/></d:resourcetype>` +
+		`<x:e>1</x:e><x:c>1</x:c><x:a>1</x:a><x:d>1</x:d><x:b>1</x:b>` +
+		`</d:prop></d:set></d:mkcol>`
+	var first string
+	for i := range 20 {
+		s := NewServer("/", newMemColl("root"))
+		req := httptest.NewRequest("MKCOL", "/new/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/xml")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMultiStatus {
+			t.Fatalf("status = %d, want 207:\n%s", rec.Code, rec.Body.String())
+		}
+		got := rec.Body.String()
+		if i == 0 {
+			first = got
+			if a, e := strings.Index(got, "<x1:a/>"), strings.Index(got, "<x1:e/>"); a < 0 || e < a {
+				t.Fatalf("properties not sorted:\n%s", got)
+			}
+		} else if got != first {
+			t.Fatalf("response differs between runs:\n%s\nvs\n%s", first, got)
+		}
+	}
+}

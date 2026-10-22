@@ -457,20 +457,7 @@ func (c *CorePlugin) proppatch(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	// One propstat per status code, properties in request order.
-	byStatus := map[int][]davxml.Property{}
-	var statuses []int
-	for _, n := range update.Names {
-		status := result[n]
-		if _, seen := byStatus[status]; !seen {
-			statuses = append(statuses, status)
-		}
-		byStatus[status] = append(byStatus[status], davxml.Property{Name: n})
-	}
-	resp := davxml.Response{Href: c.server.BaseURI + encodePath(path)}
-	for _, s := range statuses {
-		resp.Propstats = append(resp.Propstats, davxml.Propstat{Status: s, Props: byStatus[s]})
-	}
+	resp := propstatResponse(c.server.Href(path), update.Names, result)
 
 	h := w.Header()
 	h.Set("Content-Type", "application/xml; charset=utf-8")
@@ -482,6 +469,25 @@ func (c *CorePlugin) proppatch(w http.ResponseWriter, r *http.Request) error {
 	w.WriteHeader(http.StatusMultiStatus)
 	_, err = w.Write(body)
 	return err
+}
+
+// propstatResponse renders per-property results as one response with one
+// propstat per status code, statuses and properties in the order of names.
+func propstatResponse(href string, names []xml.Name, result map[xml.Name]int) davxml.Response {
+	byStatus := map[int][]davxml.Property{}
+	var statuses []int
+	for _, n := range names {
+		status := result[n]
+		if _, seen := byStatus[status]; !seen {
+			statuses = append(statuses, status)
+		}
+		byStatus[status] = append(byStatus[status], davxml.Property{Name: n})
+	}
+	resp := davxml.Response{Href: href}
+	for _, s := range statuses {
+		resp.Propstats = append(resp.Propstats, davxml.Propstat{Status: s, Props: byStatus[s]})
+	}
+	return resp
 }
 
 func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
@@ -654,8 +660,9 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	// the collection is rolled back and the failed statuses reported,
 	// mirroring sabre's createCollection.
 	if len(extraProps) > 0 {
+		names := sortedNames(extraProps)
 		result, err := c.server.UpdateProperties(r.Context(), path, &davxml.PropertyUpdate{
-			Names:  keysOf(extraProps),
+			Names:  names,
 			Values: extraProps,
 		})
 		if err != nil {
@@ -669,7 +676,8 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		}
 		if failed {
 			_ = c.server.Tree.Delete(path)
-			return c.writePropStatusResponse(w, path, extraProps, result)
+			resp := propstatResponse(c.server.Href(path), names, result)
+			return writeMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
 		}
 	}
 	w.Header().Set("Content-Length", "0")
@@ -677,31 +685,25 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func keysOf(m map[xml.Name]any) []xml.Name {
+// sortedNames returns the keys of m sorted by namespace, then local name, so
+// responses listing them are deterministic.
+func sortedNames(m map[xml.Name]any) []xml.Name {
 	out := make([]xml.Name, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+	slices.SortFunc(out, func(a, b xml.Name) int {
+		if c := strings.Compare(a.Space, b.Space); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Local, b.Local)
+	})
 	return out
 }
 
-// writePropStatusResponse renders a per-property status multistatus (used by
-// failed extended MKCOL).
-func (c *CorePlugin) writePropStatusResponse(w http.ResponseWriter, path string, props map[xml.Name]any, result map[xml.Name]int) error {
-	byStatus := map[int][]davxml.Property{}
-	var statuses []int
-	for name := range props {
-		status := result[name]
-		if _, seen := byStatus[status]; !seen {
-			statuses = append(statuses, status)
-		}
-		byStatus[status] = append(byStatus[status], davxml.Property{Name: name})
-	}
-	resp := davxml.Response{Href: c.server.BaseURI + encodePath(path)}
-	for _, s := range statuses {
-		resp.Propstats = append(resp.Propstats, davxml.Propstat{Status: s, Props: byStatus[s]})
-	}
-	out, err := (&davxml.MultiStatus{Responses: []davxml.Response{resp}}).Marshal()
+// writeMultiStatus writes ms as a 207 response.
+func writeMultiStatus(w http.ResponseWriter, ms *davxml.MultiStatus) error {
+	out, err := ms.Marshal()
 	if err != nil {
 		return err
 	}
