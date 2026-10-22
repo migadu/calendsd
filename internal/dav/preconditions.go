@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // checkPreconditions evaluates If-Match / If-None-Match / If-Modified-Since /
@@ -88,7 +89,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 				if etag != "" {
 					w.Header().Set("ETag", etag)
 				}
-				if r.Method == "GET" {
+				if r.Method == http.MethodGet || r.Method == http.MethodHead {
 					w.WriteHeader(http.StatusNotModified)
 					return false, nil
 				}
@@ -97,16 +98,32 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 		}
 	}
 
-	// If-None-Match only suppresses If-Modified-Since (sabre parity);
-	// If-Unmodified-Since and the If: header are still evaluated below.
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" && r.Header.Get("If-None-Match") == "" {
-		if date, parseErr := http.ParseTime(ims); parseErr == nil {
-			if node == nil {
-				if node, err = s.Tree.NodeForPath(path); err != nil {
-					return false, err
+	// The date conditions need the target; a missing one has no
+	// modification date, so they do not apply (the method handler decides
+	// what a missing target means).
+	lastModified := func() (time.Time, error) {
+		if node == nil {
+			node, err = s.Tree.NodeForPath(path)
+			if err != nil {
+				if AsError(err).Status == http.StatusNotFound {
+					return time.Time{}, nil
 				}
+				return time.Time{}, err
 			}
-			if lastMod := node.LastModified(); !lastMod.IsZero() && !lastMod.After(date) {
+		}
+		return node.LastModified(), nil
+	}
+
+	// If-Modified-Since applies to GET and HEAD only, and If-None-Match
+	// overrides it (RFC 7232 §3.3).
+	if ims := r.Header.Get("If-Modified-Since"); ims != "" && r.Header.Get("If-None-Match") == "" &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		if date, parseErr := http.ParseTime(ims); parseErr == nil {
+			lastMod, err := lastModified()
+			if err != nil {
+				return false, err
+			}
+			if !lastMod.IsZero() && !lastMod.After(date) {
 				w.Header().Set("Last-Modified", lastMod.UTC().Format(http.TimeFormat))
 				w.WriteHeader(http.StatusNotModified)
 				return false, nil
@@ -114,14 +131,14 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 		}
 	}
 
-	if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
+	// If-Match overrides If-Unmodified-Since (RFC 7232 §3.4).
+	if ius := r.Header.Get("If-Unmodified-Since"); ius != "" && r.Header.Get("If-Match") == "" {
 		if date, parseErr := http.ParseTime(ius); parseErr == nil {
-			if node == nil {
-				if node, err = s.Tree.NodeForPath(path); err != nil {
-					return false, err
-				}
+			lastMod, err := lastModified()
+			if err != nil {
+				return false, err
 			}
-			if lastMod := node.LastModified(); !lastMod.IsZero() && lastMod.After(date) {
+			if !lastMod.IsZero() && lastMod.After(date) {
 				return false, ErrPreconditionFailed("An If-Unmodified-Since header was specified, but the entity has been changed since the specified date.")
 			}
 		}
