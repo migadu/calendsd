@@ -12,17 +12,17 @@ import (
 )
 
 // DefaultConfigPaths are the locations searched, in order, for a config file
-// when -config is not given explicitly. Kept in sync with calctl so every
-// binary that reads calserver's config discovers it the same way.
+// when -config is not given explicitly. Every binary that reads calserver's
+// config (calserver, calctl) discovers it through FindDefaultConfig.
 var DefaultConfigPaths = []string{
 	"/etc/calserver/config.toml",
 	"/usr/local/etc/calserver/config.toml",
 	"config.toml",
 }
 
-// findDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
+// FindDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
 // when none is present (so an unconfigured in-memory server still starts).
-func findDefaultConfig() string {
+func FindDefaultConfig() string {
 	for _, p := range DefaultConfigPaths {
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -123,7 +123,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 		// config without repeating -config on every invocation.
 		path := *configPath
 		if path == "" {
-			path = findDefaultConfig()
+			path = FindDefaultConfig()
 		}
 		if path != "" {
 			c, err := Load(path)

@@ -93,14 +93,14 @@ func TestFindDefaultConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	if got := findDefaultConfig(); got != "" {
+	if got := FindDefaultConfig(); got != "" {
 		t.Fatalf("expected no config in empty dir, got %q", got)
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[database]\ndsn = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := findDefaultConfig(); got != "config.toml" {
+	if got := FindDefaultConfig(); got != "config.toml" {
 		t.Fatalf("expected config.toml to be discovered, got %q", got)
 	}
 }

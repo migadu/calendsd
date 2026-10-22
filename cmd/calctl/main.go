@@ -5,9 +5,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"calserver/internal/config"
 	"calserver/internal/version"
@@ -24,47 +24,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	if os.Args[1] == "-v" || os.Args[1] == "-version" || os.Args[1] == "--version" || os.Args[1] == "version" {
+	if os.Args[1] == "-v" || os.Args[1] == "-version" || os.Args[1] == "--version" {
 		printVersion()
 		os.Exit(0)
 	}
 
-	if os.Args[1] == "help" || os.Args[1] == "--help" || os.Args[1] == "-h" {
-		printUsage()
-		os.Exit(0)
-	}
-
-	// Find --config flag and command, collect subcommand args.
-	command := ""
-	configPath := ""
-	var subArgs []string
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--config" && i+1 < len(os.Args) {
-			configPath = os.Args[i+1]
-			i++
-		} else if !strings.HasPrefix(os.Args[i], "-") && command == "" {
-			command = os.Args[i]
-		} else {
-			subArgs = append(subArgs, os.Args[i])
-		}
-	}
-
+	configPath, command, subArgs := parseGlobal(flag.ExitOnError, os.Args[1:])
 	if command == "" {
 		printUsage()
 		os.Exit(1)
 	}
 
+	if command == "help" {
+		printUsage()
+		os.Exit(0)
+	}
+	if command == "version" {
+		printVersion()
+		os.Exit(0)
+	}
+
 	if configPath == "" {
-		for _, p := range []string{
-			"/etc/calserver/config.toml",
-			"/usr/local/etc/calserver/config.toml",
-			"config.toml",
-		} {
-			if _, err := os.Stat(p); err == nil {
-				configPath = p
-				break
-			}
-		}
+		configPath = config.FindDefaultConfig()
 	}
 	if configPath != "" {
 		cfg, err := config.Load(configPath)
@@ -99,6 +80,23 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+// parseGlobal splits the command line into calctl's global flags, the
+// command, and the subcommand's own arguments. Global flags come before the
+// command and everything after it belongs to the subcommand, so a subcommand
+// flag is never taken for a global one, nor a flag's value for the command.
+func parseGlobal(onError flag.ErrorHandling, args []string) (configPath, command string, subArgs []string) {
+	global := flag.NewFlagSet("calctl", onError)
+	global.Usage = printUsage
+	path := global.String("config", "", "path to the calserver config file")
+	if err := global.Parse(args); err != nil {
+		return "", "", nil
+	}
+	if global.NArg() == 0 {
+		return *path, "", nil
+	}
+	return *path, global.Arg(0), global.Args()[1:]
 }
 
 func printVersion() {
