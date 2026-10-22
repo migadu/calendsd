@@ -104,7 +104,17 @@ func main() {
 	ver, commit, built := version.Info()
 	slog.Info("calclient listening", "addr", *addr, "target", targetURL.String(),
 		"version", ver, "commit", commit, "built", built)
-	if err := http.ListenAndServe(*addr, withAccessLog(mux)); err != nil {
+	// Only header and idle timeouts: the proxied DAV bodies and responses can
+	// be large or slow, so a whole-request deadline would cut them off, but a
+	// client that never finishes its headers or parks an idle connection
+	// should not hold a goroutine forever.
+	httpSrv := &http.Server{
+		Addr:              *addr,
+		Handler:           withAccessLog(mux),
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
 		slog.Error("listen", "err", err)
 		os.Exit(1)
 	}
