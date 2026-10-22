@@ -12,24 +12,16 @@ import (
 	"strings"
 )
 
-// levels maps the accepted names to slog levels. Case-insensitive.
-var levels = map[string]slog.Level{
-	"debug": slog.LevelDebug,
-	"info":  slog.LevelInfo,
-	"warn":  slog.LevelWarn,
-	"error": slog.LevelError,
-}
-
-// ParseLevel maps a level name to an slog.Level. An empty string means the
-// default (info); any other unrecognised name is an error rather than a silent
+// parseLevel maps a level name (debug, info, warn, error; any case) to an
+// slog.Level via slog's own parser. An empty string means the default
+// (info); any other unrecognised name is an error rather than a silent
 // fallback, so a typo in the config fails loudly.
-func ParseLevel(name string) (slog.Level, error) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return slog.LevelInfo, nil
+func parseLevel(name string) (slog.Level, error) {
+	lvl := slog.LevelInfo
+	if name = strings.TrimSpace(name); name == "" {
+		return lvl, nil
 	}
-	lvl, ok := levels[name]
-	if !ok {
+	if err := lvl.UnmarshalText([]byte(name)); err != nil {
 		return 0, fmt.Errorf("unknown log level %q (want debug, info, warn, or error)", name)
 	}
 	return lvl, nil
@@ -45,7 +37,7 @@ func Setup(level string) error {
 	if level == "" {
 		level = os.Getenv("CALSERVER_LOG_LEVEL")
 	}
-	lvl, err := ParseLevel(level)
+	lvl, err := parseLevel(level)
 	if err != nil {
 		return err
 	}
