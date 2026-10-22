@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -309,12 +310,20 @@ func takeID(args []string) (int64, []string) {
 		fmt.Fprintln(os.Stderr, "A job id is required as the first argument.")
 		os.Exit(1)
 	}
-	var id int64
-	if _, err := fmt.Sscan(args[0], &id); err != nil || id <= 0 {
+	id, ok := parseJobID(args[0])
+	if !ok {
 		fmt.Fprintf(os.Stderr, "Invalid job id %q (want a positive integer).\n", args[0])
 		os.Exit(1)
 	}
 	return id, args[1:]
+}
+
+// parseJobID accepts a positive decimal id and nothing else. Not fmt.Sscan:
+// it stops at the first non-digit and honours base prefixes, so "12abc" or
+// "0x1f" would silently address some other job.
+func parseJobID(s string) (int64, bool) {
+	id, err := strconv.ParseInt(s, 10, 64)
+	return id, err == nil && id > 0
 }
 
 // parseAt accepts an RFC3339 timestamp or a leading-'+' Go duration relative to now.
