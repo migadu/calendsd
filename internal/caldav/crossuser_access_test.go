@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"encoding/xml"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -118,5 +119,47 @@ func TestCrossUserMultigetDoesNotLeak(t *testing.T) {
 	// ...and its href must be reported forbidden, not served.
 	if !strings.Contains(w.Body.String(), "403 Forbidden") {
 		t.Fatalf("cross-user multiget did not deny the foreign href with 403:\n%s", w.Body.String())
+	}
+}
+
+// TestReadOnlyShareeExportIsRedacted: a read-only sharee's ?export serves
+// CONFIDENTIAL/PRIVATE events redacted, exactly as their GET of the object
+// does, whether or not the export is time-filtered.
+func TestReadOnlyShareeExportIsRedacted(t *testing.T) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/user2"}}}
+	backend := &caldav.MockBackend{}
+	id := caldav.CalendarID{Calendar: "1", Instance: "2"}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: id, URI: "shared", PrincipalURI: "principals/user2", ShareAccess: caldav.AccessRead,
+		Props: map[xml.Name]any{{Space: "http://sabredav.org/ns", Local: "read-only"}: "1"},
+	}}
+	backend.Objects = map[caldav.CalendarID]map[string]*caldav.ObjectInfo{
+		id: {"therapy.ics": &caldav.ObjectInfo{URI: "therapy.ics", CalendarData: []byte(
+			"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +
+				"BEGIN:VEVENT\r\nUID:conf-evt\r\nDTSTAMP:20260101T000000Z\r\n" +
+				"DTSTART:20260901T100000Z\r\nDTEND:20260901T110000Z\r\nCLASS:CONFIDENTIAL\r\n" +
+				"SUMMARY:Therapy appointment\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")}},
+	}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user2"))
+	srv.AddPlugin(&acl.Plugin{})
+	srv.AddPlugin(&caldav.Plugin{})
+
+	for _, query := range []string{"?export", "?export&start=1788000000&end=1790000000"} {
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, httptest.NewRequest("GET", "/calendars/user2/shared/"+query, nil))
+		if w.Code != 200 {
+			t.Fatalf("sharee %s = %d, want 200:\n%s", query, w.Code, w.Body.String())
+		}
+		body := w.Body.String()
+		if strings.Contains(body, "Therapy") {
+			t.Errorf("sharee %s leaked a CONFIDENTIAL summary:\n%s", query, body)
+		}
+		if !strings.Contains(body, "conf-evt") {
+			t.Errorf("sharee %s dropped the event instead of redacting it:\n%s", query, body)
+		}
 	}
 }

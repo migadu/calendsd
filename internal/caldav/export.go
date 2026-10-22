@@ -143,6 +143,9 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 	exportAll := start.IsZero() && end.IsZero() && componentType == ""
 	var out [][]byte
 	for _, obj := range objects {
+		// Serve each object as this view sees it, so a read-only sharee's
+		// export is redacted like their GET.
+		data := (&CalendarObject{calendar: calNode.Info, obj: obj}).viewData()
 		if len(out) >= maxExportObjects {
 			return nil, dav.ErrForbidden(
 				"This calendar has too many objects to export at once (limit %d); narrow the export with start= and end= parameters.",
@@ -157,7 +160,7 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 				Name:      name,
 				TimeRange: &TimeRange{Start: start, End: end},
 			}}}
-			cal, err := ical.Decode(obj.CalendarData)
+			cal, err := ical.Decode(data)
 			if err != nil {
 				continue
 			}
@@ -167,7 +170,7 @@ func (p *Plugin) exportBlobs(calNode *Calendar, path string, start, end time.Tim
 				continue
 			}
 		}
-		out = append(out, obj.CalendarData)
+		out = append(out, data)
 	}
 	return out, nil
 }
