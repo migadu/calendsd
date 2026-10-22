@@ -984,9 +984,10 @@ func unescapePath(p string) (string, error) {
 			return "", err
 		}
 		// gopath.Clean ran before decoding, so a segment that decodes to
-		// ".", ".." or "" would smuggle a traversal past normalization.
-		// Reject it rather than let it reach a backend as a literal name.
-		if dec == "." || dec == ".." || dec == "" {
+		// ".", ".." or "", or one holding an encoded "/", would smuggle a
+		// traversal past normalization. Reject it rather than let it reach
+		// a backend as a literal name.
+		if dec == "." || dec == ".." || dec == "" || strings.Contains(dec, "/") {
 			return "", ErrForbidden("Path contains invalid encoded segment %q", seg)
 		}
 		segs[i] = dec

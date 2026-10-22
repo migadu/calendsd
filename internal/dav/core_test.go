@@ -258,6 +258,46 @@ func TestPutRejectsPercentEncodedDotDotSegment(t *testing.T) {
 	}
 }
 
+// An encoded "/" inside a segment survives the pre-decode Clean, so
+// /coll/a%2F..%2F..%2Fx would reach the tree as the segment "a/../../x".
+func TestPutRejectsEncodedSlashInSegment(t *testing.T) {
+	coll := newMemColl("coll")
+	root := newMemColl("root", coll)
+	s := NewServer("/", root)
+
+	req := httptest.NewRequest("PUT", "/coll/a%2F..%2F..%2Fx", strings.NewReader("evil"))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("PUT with an encoded slash = %d, want 403", rec.Code)
+	}
+	if len(coll.children) != 0 || root.ChildExists("x") {
+		t.Errorf("PUT with an encoded slash created a node")
+	}
+}
+
+func TestMoveOverwriteFiresUnbindHooksForDestination(t *testing.T) {
+	src := &memFile{name: "src.txt", contents: []byte("source"), etag: `"s"`}
+	dst := &memFile{name: "dst.txt", contents: []byte("dest"), etag: `"d"`}
+	root := newMemColl("root", src, dst)
+	s := NewServer("/", root)
+	hooks := &unbindRecorder{}
+	s.AddPlugin(hooks)
+
+	req := httptest.NewRequest("MOVE", "/src.txt", nil)
+	req.Header.Set("Destination", "/dst.txt")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("MOVE with overwrite = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	if !slices.Contains(hooks.before, "dst.txt") {
+		t.Errorf("BeforeUnbind not fired for overwritten MOVE destination (fired: %v)", hooks.before)
+	}
+}
+
 // A stored object served with an ETag but no cache directive can be handed
 // back stale by an intermediate/browser cache, and the stale ETag then fails
 // the client's next If-Match PUT with a 412. GET and HEAD must carry a
