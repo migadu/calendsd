@@ -11,7 +11,6 @@ import (
 
 	"calserver/internal/acl"
 	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
 )
 
 // Principals is the principal backend over the sabre schema. Port of
@@ -20,8 +19,17 @@ type Principals struct {
 	DB *sql.DB
 }
 
+// PrincipalsByPrefix lists the principals directly under prefix (one more
+// path segment, so not the proxy sub-principals), filtered in SQL rather
+// than by reading the whole table.
 func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) {
-	rows, err := p.DB.Query(`SELECT uri, email, displayname FROM principals`)
+	under, deeper := "%", "%/%" // prefix "": URIs with no slash at all
+	if prefix != "" {
+		under = escapeLike(prefix) + "/%"
+		deeper = under + "/%"
+	}
+	rows, err := p.DB.Query(`SELECT uri, email, displayname FROM principals
+ WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'`, under, deeper)
 	if err != nil {
 		return nil, err
 	}
@@ -32,9 +40,7 @@ func (p *Principals) PrincipalsByPrefix(prefix string) ([]acl.Principal, error) 
 		if err != nil {
 			return nil, err
 		}
-		if parent, _ := pathutil.Split(principal.URI); parent == prefix {
-			out = append(out, *principal)
-		}
+		out = append(out, *principal)
 	}
 	return out, rows.Err()
 }
