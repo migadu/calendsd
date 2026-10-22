@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"calserver/internal/carddav"
 	"calserver/internal/storage"
 )
 
@@ -212,24 +213,20 @@ func (h *Handler) readCard(w http.ResponseWriter, r *http.Request) ([]byte, pars
 		return nil, parsedCard{}, false
 	}
 	data := normalizeCRLF([]byte(strings.TrimSpace(body.VCard) + "\n"))
-	if !strings.HasPrefix(string(data), "BEGIN:VCARD") {
-		writeError(w, http.StatusBadRequest, "vcard must start with BEGIN:VCARD")
-		return nil, parsedCard{}, false
-	}
-	p, err := parseSingleCard(data)
-	if errors.Is(err, errTrailingCard) {
+	p, err := parseSubmittedCard(data)
+	switch {
+	case errors.Is(err, carddav.ErrCardTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "vcard is too large")
+	case errors.Is(err, carddav.ErrNotSingleCard):
 		writeError(w, http.StatusBadRequest, "vcard must contain exactly one card")
-		return nil, parsedCard{}, false
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "vcard does not parse: "+err.Error())
-		return nil, parsedCard{}, false
-	}
-	if p.UID == "" {
+	case errors.Is(err, carddav.ErrNoUID):
 		writeError(w, http.StatusBadRequest, "vcard has no UID")
-		return nil, parsedCard{}, false
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "vcard does not parse: "+err.Error())
+	default:
+		return data, p, true
 	}
-	return data, p, true
+	return nil, parsedCard{}, false
 }
 
 // createTarget resolves the book a new card lands in: the default (webmail)

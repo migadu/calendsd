@@ -147,6 +147,25 @@ func TestCardPutValidation(t *testing.T) {
 	if w.Code != 201 && w.Code != 204 {
 		t.Errorf("PUT of valid vCard = %d, want 201/204:\n%s", w.Code, w.Body.String())
 	}
+
+	// The checks the contacts API applies hold for DAV too: exactly one card,
+	// nothing around it, a UID, and at most max-resource-size bytes.
+	for name, tc := range map[string]struct {
+		body string
+		want int
+	}{
+		"two cards":     {good + strings.Replace(good, "new1", "new2", 1), 415},
+		"trailing text": {good + "garbage\r\n", 415},
+		"leading text":  {"garbage\r\n" + good, 415},
+		"no uid":        {strings.Replace(good, "UID:new1\r\n", "", 1), 415},
+		"too large": {strings.Replace(good, "FN:New Person",
+			"FN:"+strings.Repeat("x", carddav.MaxCardSize), 1), 403},
+	} {
+		w := do(t, srv, "PUT", "/addressbooks/admin/book1/bad.vcf", tc.body, "Content-Type", "text/vcard")
+		if w.Code != tc.want {
+			t.Errorf("%s: PUT = %d, want %d:\n%.300s", name, w.Code, tc.want, w.Body.String())
+		}
+	}
 }
 
 // TestAddressbookQueryLimit covers <card:limit><card:nresults> truncation
