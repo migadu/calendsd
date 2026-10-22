@@ -76,3 +76,13 @@ func TestParseMkcalendar(t *testing.T) {
 		t.Error("a {DAV:}mkcol root was accepted as MKCALENDAR")
 	}
 }
+
+// Only set > prop sets properties; a remove block at creation is ignored.
+func TestParseMkcalendarIgnoresRemove(t *testing.T) {
+	_, props, err := ParseMkcalendar([]byte(`<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+ <D:remove><D:prop><D:displayname/></D:prop></D:remove>
+</C:mkcalendar>`))
+	if err != nil || len(props) != 0 {
+		t.Errorf("remove block = %v, %v; want no properties", props, err)
+	}
+}

@@ -61,8 +61,10 @@ func parseCreateBody(body []byte, root xml.Name) (resourceType []xml.Name, haveR
 				return nil, false, nil, xml.UnmarshalError("expected " + Clark(root) + " root")
 			case depth == 0:
 				rootSeen = true
-			case depth == 3:
-				// A property element inside set > prop.
+			case depth == 3 && stack[1] == xml.Name{Space: NSDav, Local: "set"} && stack[2] == xml.Name{Space: NSDav, Local: "prop"}:
+				// A property element inside set > prop. Anything else at this
+				// depth (a <remove>, which has no meaning at creation) is
+				// walked past like any other element.
 				if (name == xml.Name{Space: NSDav, Local: "resourcetype"}) {
 					haveResourceType = true
 					types, err := parseResourceType(dec)
