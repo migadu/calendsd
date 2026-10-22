@@ -3,6 +3,7 @@ package caldav_test
 import (
 	"encoding/xml"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -298,6 +299,35 @@ func TestInvitePropertyIsWellFormed(t *testing.T) {
 		} else if err != nil {
 			t.Fatalf("multistatus is not well-formed: %v\n%s", err, w.Body.String())
 		}
+	}
+}
+
+// bodyReader is a POST handler registered after the sharing plugin; it
+// records the body it gets.
+type bodyReader struct{ got string }
+
+func (b *bodyReader) PluginName() string           { return "body-reader" }
+func (b *bodyReader) Init(*dav.Server)             {}
+func (b *bodyReader) Methods(path string) []string { return []string{"POST"} }
+func (b *bodyReader) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
+	raw, err := io.ReadAll(r.Body)
+	b.got = string(raw)
+	w.WriteHeader(http.StatusNoContent)
+	return true, err
+}
+
+// TestSharingLeavesOtherPostBodies: an XML POST to a calendar that is not a
+// sharing document reaches the next plugin with its body intact.
+func TestSharingLeavesOtherPostBodies(t *testing.T) {
+	_, servers := sharedSharing()
+	srv := servers["principals/user1"]
+	next := &bodyReader{}
+	srv.AddPlugin(next)
+
+	body := `<?xml version="1.0"?><x:other xmlns:x="urn:example"/>`
+	w := req(t, srv, "POST", "/calendars/user1/cal1", body, "Content-Type", "application/xml")
+	if w.Code != http.StatusNoContent || next.got != body {
+		t.Fatalf("POST = %d, next plugin got %q; want 204 and the full body", w.Code, next.got)
 	}
 }
 

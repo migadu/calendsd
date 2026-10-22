@@ -3,6 +3,7 @@ package caldav
 import (
 	"bytes"
 	"encoding/xml"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -181,10 +182,21 @@ func (p *SharingPlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bo
 	if err != nil {
 		return false, nil
 	}
-	body, err := readBody(r)
+	// Only calendars and calendar homes take sharing POSTs; leave every other
+	// body unread for the plugins after this one.
+	switch node.(type) {
+	case *Calendar, *CalendarHome:
+	default:
+		return false, nil
+	}
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	if err != nil {
 		return true, err
 	}
+	// A body that is not a sharing document belongs to a later plugin, which
+	// reads r.Body itself: hand it back intact.
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	root, err := rootName(body)
 	if err != nil {
 		return true, dav.ErrBadRequest("%s", err)
@@ -546,15 +558,6 @@ func resolveHref(requestPath, href string) string {
 		base = base[:i+1]
 	}
 	return base + href
-}
-
-func readBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(r.Body); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func rootName(body []byte) (xml.Name, error) {
