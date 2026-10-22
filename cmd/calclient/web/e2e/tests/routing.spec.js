@@ -2,7 +2,7 @@
 // + web/cal/js/router.js). The grid view, navigated date, and agenda filter live
 // in /cal/calendar/<view>/<date>[?q=…]; events are addressable at
 // /cal/event/<uid>[/edit]. Everything must survive a reload and a deep load, so
-// these drive the real browser against a live calserver + calclient.
+// these drive the real browser against a live calendsd + calclient.
 const { test, expect } = require('@playwright/test');
 const { login, deleteEventsContaining } = require('./helpers');
 

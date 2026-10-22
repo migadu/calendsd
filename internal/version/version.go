@@ -1,4 +1,4 @@
-// Package version carries the build identity shared by every calserver
+// Package version carries the build identity shared by every calendsd
 // binary. The Makefile injects the values via -ldflags -X; a plain
 // `go build` falls back to the VCS metadata the Go toolchain embeds on its
 // own (buildvcs), so `<binary> -version` is never entirely blank.
@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 )
 
-// Stamped via -ldflags "-X calserver/internal/version.Version=..." (see the
+// Stamped via -ldflags "-X calendsd/internal/version.Version=..." (see the
 // Makefile). Version also surfaces as the calserver_build_info metric label.
 var (
 	Version = "dev" // git describe --always --dirty
@@ -50,7 +50,7 @@ func Info() (version, commit, date string) {
 }
 
 // String renders the -version line for the named binary, e.g.
-// "calserver 4430a12 (commit 4430a12, built 2026-07-30T06:51:00Z)".
+// "calendsd 4430a12 (commit 4430a12, built 2026-07-30T06:51:00Z)".
 func String(binary string) string {
 	version, commit, date := Info()
 	return fmt.Sprintf("%s %s (commit %s, built %s)", binary, version, commit, date)

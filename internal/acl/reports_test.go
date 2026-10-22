@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 type xmlName = xml.Name

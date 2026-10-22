@@ -9,7 +9,7 @@ import (
 )
 
 // resolveWith runs SharedServerFlags against a fresh default FlagSet and the
-// given config file contents, as calserver and calctl panel do at startup.
+// given config file contents, as calendsd and calctl panel do at startup.
 func resolveWith(t *testing.T, content string) (*Merged, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.toml")

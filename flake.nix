@@ -1,5 +1,5 @@
 {
-  description = "calserver — Go CalDAV server co-existing with sabre/dav on one Postgres";
+  description = "calendsd — Go CalDAV server co-existing with sabre/dav on one Postgres";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

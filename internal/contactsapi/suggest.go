@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // suggestions is GetSuggestions: ranked {email, name} pairs for the address

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // TestPrincipalsByPrefix pins the listing now filtered in SQL: direct

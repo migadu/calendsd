@@ -1,13 +1,13 @@
 # iMIP — Emailing Scheduling Messages
 
 When an attendee (or organizer) on a scheduling operation is not a local
-principal, calserver delivers the iTIP message (`REQUEST`, `REPLY`, `CANCEL`)
+principal, calendsd delivers the iTIP message (`REQUEST`, `REPLY`, `CANCEL`)
 by email — "iMIP". There are two ways it can send, selected by config under
 `[scheduling.imip]`.
 
 ## Two send paths
 
-**Shared relay (`smtp`)** — the classic behavior. calserver hands the message
+**Shared relay (`smtp`)** — the classic behavior. calendsd hands the message
 to one SMTP relay. The envelope sender (`MAIL FROM`) is always the server's own
 `sender` address; `send_as_organizer` optionally puts the organizer/attendee in
 the `From` header, but the message is *not* authenticated as anyone and only
@@ -23,7 +23,7 @@ Both may be configured together: `submission` handles user-originated mail, and
 
 ## Division of responsibility (per-user submission)
 
-calserver deliberately does **not** sign, rewrite, or rate-limit. It:
+calendsd deliberately does **not** sign, rewrite, or rate-limit. It:
 
 - **Authenticates as the user.** The SMTP AUTH identity is the CalDAV login; the
   password is the one presented on the triggering request. It is never logged, and
@@ -44,14 +44,14 @@ calserver deliberately does **not** sign, rewrite, or rate-limit. It:
 The **submission server** (e.g. a mizu_out tier) owns everything else:
 
 - **`allowed_from`** — which `From` addresses the authenticated account may use
-  (calserver's own check is defense-in-depth; this is the real backstop).
+  (calendsd's own check is defense-in-depth; this is the real backstop).
 - **DKIM signing** for the user's domain, so the mail passes DMARC.
 - **Rate / sending limits** — because the message is authenticated as the user,
   it is metered against *their* limits, not a shared relay's.
 
 ## The Core rule: the logged-in user is always the sender
 
-For every message, calserver classifies the sender:
+For every message, calendsd classifies the sender:
 
 1. **The logged-in user** (sender ∈ their address set) → submitted as them.
 2. **An auto-schedule resource** (a room; no interactive login) → relayed
@@ -117,7 +117,7 @@ rather than going out unmetered. Recovery, in order of preference:
   unmetered override (relays via the server) when it doesn't. `calctl doctor`'s
   `imip-pending-stale` check surfaces objects stuck at `1.0` with no delivery job.
 
-**Multiple calserver nodes.** The per-attendee status write-back is serialized
+**Multiple calendsd nodes.** The per-attendee status write-back is serialized
 across processes by a Postgres advisory lock, so additional nodes' workers can't
 clobber one another's patches.
 
@@ -140,5 +140,5 @@ For durable delivery, `credential_key` is the base64 of a random 32-byte key
 it. Keep it out of DB backups — that separation is its whole security value.
 `[scheduling.imip.queue]` optionally tunes the background sweeps (`reclaim_after`
 > the SMTP timeout, `credential_ttl`, `retention`, `workers`); each empty/zero
-value uses a built-in default. The durable queue runs whenever calserver has a
+value uses a built-in default. The durable queue runs whenever calendsd has a
 database; the in-memory server (no DB) sends synchronously.

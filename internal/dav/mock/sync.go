@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // SimpleFile is a read-only file: deletion and renaming are forbidden, like

@@ -1,14 +1,14 @@
 package storage_test
 
 // Doctor scan-cap tests against a scratch Postgres with the sabre schema
-// plus the calserver extension tables. Postgres-only; skips when the dev
+// plus the calendsd extension tables. Postgres-only; skips when the dev
 // Postgres isn't reachable.
 
 import (
 	"fmt"
 	"testing"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // TestDoctorScanCapInSQL pins the scan cap at its boundaries now that the

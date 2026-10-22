@@ -20,7 +20,7 @@ func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*go
 	ResolveNonIANATZIDs(cal)
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
-	out.Props.SetText(goical.PropProductID, "-//calserver//calserver//EN")
+	out.Props.SetText(goical.PropProductID, "-//calendsd//calendsd//EN")
 	out.Props.SetText("CALSCALE", "GREGORIAN")
 	// Other calendar-level properties (X-WR-CALNAME, ...) survive
 	// expansion, like vobject.

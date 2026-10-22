@@ -11,14 +11,14 @@ import (
 	goical "github.com/emersion/go-ical"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
 )
 
 type spyUserMailer struct {

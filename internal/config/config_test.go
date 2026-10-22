@@ -12,7 +12,7 @@ func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `
-# calserver config
+# calendsd config
 [server]
 addr = ":9090"            # inline comment
 metrics_addr = "127.0.0.1:9464"

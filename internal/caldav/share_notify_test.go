@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
 )
 
 // captureNotifier records every notice the sharing plugin hands over.

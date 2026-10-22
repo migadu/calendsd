@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/storage"
 )
 
 func TestAdminQueries(t *testing.T) {

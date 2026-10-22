@@ -27,7 +27,7 @@ interoperate for free.
 
 - **Own table, no sabre-owned table changes.** sabre is no longer a rollback
   target, so availability doesn't have to be a dead property in the shared
-  `propertystorage` table. It gets its own calserver table,
+  `propertystorage` table. It gets its own calendsd table,
   `calendar_availability` (§3.1), in `scripts/schema/pgsql.calserver.sql`.
   Nothing changes in `users`, `principals`, `calendarinstances` or
   `propertystorage`.

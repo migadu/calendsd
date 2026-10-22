@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 )
 
 // DigestBackend authenticates HTTP Digest credentials (RFC 2617, MD5 +

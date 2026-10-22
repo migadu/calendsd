@@ -1,4 +1,4 @@
-// Package config loads calserver settings from a TOML file. It parses the
+// Package config loads calendsd settings from a TOML file. It parses the
 // small subset of TOML the config uses (comments, [section] and [a.b] tables,
 // and string/bool/integer/string-array values) without a third-party
 // dependency. Command-line flags override any value set here.
@@ -33,7 +33,7 @@ func DecodeIMipCredentialKey(b64 string) ([]byte, error) {
 	return k, nil
 }
 
-// Config is the full calserver configuration, matching config.toml.example.
+// Config is the full calendsd configuration, matching config.toml.example.
 // Zero values mean "unset" so callers can tell a real value from a default.
 type Config struct {
 	Server struct {
@@ -74,7 +74,7 @@ type Config struct {
 	Database struct {
 		DSN string
 		// Connection-pool bounds. All optional; zero/empty means the
-		// storage.DefaultPool value. Tune these when calserver shares a
+		// storage.DefaultPool value. Tune these when calendsd shares a
 		// Postgres with a live sabre instance and load could otherwise open
 		// too many connections.
 		MaxOpenConns int
@@ -143,7 +143,7 @@ type Config struct {
 		AutoSchedulePrefixes []string
 	}
 	// Admin holds admin panel (`calctl panel`) settings. Only the panel reads them;
-	// calserver ignores the section. Command-line flags override these.
+	// calendsd ignores the section. Command-line flags override these.
 	Admin struct {
 		// AuthFile is the htpasswd file (bcrypt entries, htpasswd -B) of admin
 		// logins. Required for the panel to start; -admin-auth overrides it.

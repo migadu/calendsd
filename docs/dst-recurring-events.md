@@ -376,7 +376,7 @@ Where the implementation refines or departs from the text above:
   and pass the self-check.
 - **Sabre parity.** Injection is a `caldav.Plugin` option, off in the zero
   value, so the sabre corpus composition keeps storing bodies as sent; the
-  calserver composition turns it on. The ETag change moves toward sabre.
+  calendsd composition turns it on. The ETag change moves toward sabre.
 - **Coverage** treats a `COUNT` series as unbounded (a superset; COUNT isn't
   evaluated). Definitions are cached open-ended from the start of the
   earliest requested year, one per zone. A bounded object in a zone whose

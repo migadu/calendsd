@@ -1,6 +1,6 @@
 package main
 
-// `calctl contacts` — the calserver half of the webmail contacts migration
+// `calctl contacts` — the calendsd half of the webmail contacts migration
 // (docs/snappymail-calserver-contacts.md). The other half is
 // scripts/snappymail-export-contacts.php in the ansible repo, which produces
 // the bundle this reads.
@@ -25,7 +25,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 func handleContacts(ctx context.Context, args []string) {
@@ -145,7 +145,7 @@ func handleContactsImport(ctx context.Context, args []string) {
 // openImportDB takes its own pool rather than inheriting storage.DefaultPool,
 // which is sized for a CLI doing one query. One connection per worker plus a
 // little headroom, and never more than the default cap, so a parallel import
-// cannot crowd out the live calserver on the shared Postgres.
+// cannot crowd out the live calendsd on the shared Postgres.
 func openImportDB(ctx context.Context, dsnOverride string, workers int) *sql.DB {
 	dsn := dsnFor(dsnOverride)
 	if dsn == "" {

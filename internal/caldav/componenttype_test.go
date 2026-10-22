@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // An events-only calendar (supported-calendar-component-set = VEVENT) accepts a

@@ -16,10 +16,10 @@ import (
 	"strconv"
 	"strings"
 
-	"calserver/internal/auth"
-	"calserver/internal/config"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/config"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/storage"
 )
 
 // Writes is the §1 carve-out surface; *storage.AdminWrites implements it,

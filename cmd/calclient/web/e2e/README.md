@@ -1,6 +1,6 @@
 # calweb end-to-end tests (Playwright)
 
-Drives the real calweb UI in a browser against a live calserver + calclient,
+Drives the real calweb UI in a browser against a live calendsd + calclient,
 which `global-setup.js` builds from source and runs against the shared dev
 Postgres. calclient serves the working tree (`-dev-assets`), so the tests
 exercise your local edits with no rebuild of the web assets.
@@ -10,7 +10,7 @@ exercise your local edits with no rebuild of the web assets.
 Everything comes from the flake's devShell — Go, Node, and the Playwright
 browsers (via `pkgs.playwright-driver`, no download):
 
-    nix develop            # from the calserver module root; sets PLAYWRIGHT_BROWSERS_PATH
+    nix develop            # from the calendsd module root; sets PLAYWRIGHT_BROWSERS_PATH
     scripts/dev-db.sh start # the shared dev Postgres the setup builds against
 
 The browsers are pinned by Nix, so `@playwright/test` in package.json must match
@@ -42,7 +42,7 @@ install needed).
 ## Layout
 
     playwright.config.js   config; server lifecycle via global setup/teardown
-    global-setup.js        build + start calserver/calclient, wait for ready
+    global-setup.js        build + start calendsd/calclient, wait for ready
     global-teardown.js     stop them
     tests/helpers.js       login + settings helpers
     tests/*.spec.js        specs (edit dialog, grid/now-line, free-busy)

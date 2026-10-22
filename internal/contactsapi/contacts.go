@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"calserver/internal/carddav"
-	"calserver/internal/storage"
+	"calendsd/internal/carddav"
+	"calendsd/internal/storage"
 )
 
 // contact is the wire form of one card. id is the cards row's serial — a

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 )
 
 // WrapMetrics records request count, duration, and in-flight gauge for every

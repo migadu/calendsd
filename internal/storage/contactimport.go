@@ -678,7 +678,7 @@ UPDATE cards SET carddata = $1, lastmodified = $2, etag = $3, size = $4
 		}
 		delete(existing, card.URI)
 	}
-	// Whatever is left is in calserver and not in the bundle: the exact
+	// Whatever is left is in calendsd and not in the bundle: the exact
 	// delete-candidate set. Reported, never acted on.
 	for uri := range existing {
 		res.Orphans = append(res.Orphans, uri)

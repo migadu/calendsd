@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"calserver/internal/config"
+	"calendsd/internal/config"
 )
 
 func TestOptionsFromConfig(t *testing.T) {
@@ -194,7 +194,7 @@ func deadAddr(t *testing.T) string {
 // table back, header included.
 func TestPrintTableColorKeepsAlignment(t *testing.T) {
 	results := []Result{
-		{Component: "calserver", Status: Healthy, Endpoint: "http://127.0.0.1:8080/", Message: "ok", Duration: "1ms"},
+		{Component: "calendsd", Status: Healthy, Endpoint: "http://127.0.0.1:8080/", Message: "ok", Duration: "1ms"},
 		{Component: "database[10.10.3.50:5433]", Status: Unhealthy, Message: "refused", Duration: "2s"},
 		{Component: "jobs", Status: Degraded, Message: "1 due", Duration: "0s"},
 		{Component: "rcptd", Status: Unhealthy, Message: "bearer token rejected — check the token", Duration: "1ms"},

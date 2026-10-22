@@ -1,5 +1,5 @@
 # Curated CalDAVTester files that exercise standards-based CalDAV/CardDAV
-# behaviour calserver implements. Paths are relative to scripts/tests/ in the
+# behaviour calendsd implements. Paths are relative to scripts/tests/ in the
 # CalDAVTester checkout. Lines starting with # are ignored.
 #
 # Excluded on purpose: Calendar-Server-only extensions (proxy, managed

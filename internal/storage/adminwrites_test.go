@@ -1,15 +1,15 @@
 package storage_test
 
 // AdminWrites regression tests against a scratch Postgres with the sabre
-// schema plus the calserver extension tables. Postgres-only; skips when the
+// schema plus the calendsd extension tables. Postgres-only; skips when the
 // dev Postgres isn't reachable.
 
 import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	"calendsd/internal/storage"
 )
 
 // TestPurgeExpiredKeepsTombstoneOnFailedCascade covers PurgeExpired claiming

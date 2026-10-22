@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 )
 
 func attemptsWant(lines ...string) string {

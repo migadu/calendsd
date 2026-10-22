@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"calserver/internal/health"
+	"calendsd/internal/health"
 )
 
 // healthTimeout bounds the one-shot database work of the read-only commands

@@ -7,23 +7,23 @@ import (
 	"os"
 	"time"
 
-	"calserver/internal/admin"
-	"calserver/internal/config"
-	"calserver/internal/dav"
-	"calserver/internal/logging"
-	"calserver/internal/server"
-	"calserver/internal/storage"
-	"calserver/internal/version"
+	"calendsd/internal/admin"
+	"calendsd/internal/config"
+	"calendsd/internal/dav"
+	"calendsd/internal/logging"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
+	"calendsd/internal/version"
 )
 
-// defaultPanelAddr is loopback and clear of calserver's own listeners: 8080
+// defaultPanelAddr is loopback and clear of calendsd's own listeners: 8080
 // DAV, 8081 the contacts API, 8090 rcptd, 8091 calclient.
 const defaultPanelAddr = "127.0.0.1:8092"
 
 // handlePanel runs `calctl panel`, the admin panel (ADMIN-PLAN.md): a
-// read-first debugging UI over the same shared sabre database calserver
+// read-first debugging UI over the same shared sabre database calendsd
 // serves. It takes the same config file and Calendar-Server flags as
-// calserver — resolved through the same config.SharedServerFlags code — so
+// calendsd — resolved through the same config.SharedServerFlags code — so
 // the effective-config echo on the dashboard matches the server's startup log
 // line by construction.
 //
@@ -127,7 +127,7 @@ func handlePanel(args []string, configPath string) {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	// Same line calserver logs: drift shows as a string diff (§2).
+	// Same line calendsd logs: drift shows as a string diff (§2).
 	slog.Info("effective config", "config", cfg.Canonical())
 	ver, commit, built := version.Info()
 	slog.Info("admin panel listening", "addr", listenAddr, "readonly", *readonly,

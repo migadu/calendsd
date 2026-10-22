@@ -1,7 +1,7 @@
 package contactsapi_test
 
 // Contacts API tests against a scratch Postgres carrying the sabre schema and
-// calserver's extension tables (contact_frecency lives there). Skips when the
+// calendsd's extension tables (contact_frecency lives there). Skips when the
 // dev Postgres is not reachable, like the storage tests.
 //
 // The auth backend is a fake: the API's contract with it is the auth.Backend
@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/auth"
-	"calserver/internal/contactsapi"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/contactsapi"
+	"calendsd/internal/storage"
 )
 
 func repoRoot() string {
@@ -358,7 +358,7 @@ func TestCreateTargetIsSoleBookWhenNoWebmail(t *testing.T) {
 	e.principal("carol@example.org")
 	const carol = "carol@example.org"
 	cardDAV := &storage.CardDAV{DB: e.db}
-	// A native calserver user: one book, made by DAV auto-provisioning.
+	// A native calendsd user: one book, made by DAV auto-provisioning.
 	if _, err := cardDAV.CreateAddressBook(t.Context(), "principals/carol@example.org", "addressbook", nil); err != nil {
 		t.Fatal(err)
 	}

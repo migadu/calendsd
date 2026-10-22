@@ -10,7 +10,7 @@ import (
 )
 
 // AdvisoryLocker serializes the per-object SCHEDULE-STATUS write-back across
-// processes, so durable iMIP workers on different calserver nodes patching the
+// processes, so durable iMIP workers on different calendsd nodes patching the
 // same calendar object don't clobber each other. It layers a Postgres session
 // advisory lock (cluster-wide) on top of the in-process striped mutexes
 // (same-node): the advisory lock is the mutex, held only for the brief
@@ -95,7 +95,7 @@ func discardConn(conn *sql.Conn) {
 
 // advisoryKey maps an object path to a stable 64-bit advisory-lock key. The
 // bigint advisory-lock space is separate from the (int,int) space, so this
-// namespace is calserver-private as long as no other code uses the bigint form.
+// namespace is calendsd-private as long as no other code uses the bigint form.
 func advisoryKey(path string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("caldav-writeback:"))

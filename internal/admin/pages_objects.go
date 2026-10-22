@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/carddav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/carddav"
+	"calendsd/internal/storage"
 )
 
 // --- Object browser (§3.4) ---

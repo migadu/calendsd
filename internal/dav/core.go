@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // CorePlugin implements the baseline WebDAV protocol behavior, mirroring

@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // Plugin implements access control: principal properties, principal reports,

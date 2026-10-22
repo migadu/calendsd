@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	davxml "calserver/internal/dav/xml"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // TempFileFilterPlugin intercepts the garbage files operating systems and
@@ -28,7 +28,7 @@ import (
 //
 // The files are never deleted automatically; point DataDir at something an
 // external sweep prunes (sabre suggests a 24h expiry). Opt-in, like sabre's
-// example server which adds it explicitly — calserver core does not run it by
+// example server which adds it explicitly — calendsd core does not run it by
 // default so the pinned corpus (sabre's own unit suite, which has no temp
 // filter) is unaffected.
 type TempFileFilterPlugin struct {

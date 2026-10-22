@@ -1,6 +1,6 @@
 package push
 
-// End-to-end tests against a scratch Postgres loaded with the sabre + calserver
+// End-to-end tests against a scratch Postgres loaded with the sabre + calendsd
 // schema. Skips automatically when the dev Postgres isn't reachable, like the
 // storage package's Postgres tests. Internal (package push) so it can drive the
 // unexported dispatch path directly.
@@ -22,7 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 func testDSN(dbName string) string {
@@ -35,7 +35,7 @@ func repoRoot() string {
 }
 
 // openScratchDB builds a fresh database from the sabre schema plus the
-// calserver extension schema (which defines push_subscriptions).
+// calendsd extension schema (which defines push_subscriptions).
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
 	t.Helper()
 	if os.Getenv("PGHOST") == "" {

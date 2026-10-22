@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"calserver/internal/acl"
-	"calserver/internal/caldav"
+	"calendsd/internal/acl"
+	"calendsd/internal/caldav"
 )
 
 // SchedulingObjects reads a principal's schedule inbox from the shared

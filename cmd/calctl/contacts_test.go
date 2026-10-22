@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // A report that cannot be written must surface from close, not vanish: the

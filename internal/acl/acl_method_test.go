@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
+	"calendsd/internal/acl"
 )
 
 // TestACLMethodEmptyBody: an ACL request with no body is a 400, matching

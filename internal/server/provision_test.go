@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // stalledPrincipals is a Principals store whose every query hangs until its

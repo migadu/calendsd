@@ -1,8 +1,8 @@
--- calserver extension schema: tables sabre/dav's PDO backend does not define.
+-- calendsd extension schema: tables sabre/dav's PDO backend does not define.
 --
 -- Sabre's CalDAV\Backend\PDO implements SharingSupport but deliberately leaves
 -- NotificationSupport (the notification inbox + shareReply) and calendar
--- publishing unimplemented, so its schema has no home for them. calserver
+-- publishing unimplemented, so its schema has no home for them. calendsd
 -- fills those gaps here.
 --
 -- Every object below is a NEW table: a live sabre instance running against the
@@ -147,7 +147,7 @@ CREATE INDEX IF NOT EXISTS deleted_principals_purge_after_ix
 -- endpoint): a client POSTs a {https://bitfire.at/webdav-push}push-register body
 -- to a calendar/addressbook collection and the dispatcher (internal/push) sends
 -- an encrypted Web Push message when that collection's synctoken changes. This
--- is a NEW calserver-only table; a co-resident sabre never references it.
+-- is a NEW calendsd-only table; a co-resident sabre never references it.
 --
 -- collection_id is the numeric calendars.id / addressbooks.id (as text) the
 -- pg_notify('dav_push', 'calendar:<id>') payload carries. token is the opaque,
@@ -177,7 +177,7 @@ CREATE INDEX IF NOT EXISTS push_subscriptions_lookup
     ON push_subscriptions (collection_kind, collection_id);
 
 
--- Durable background-job queue (JOB-QUEUE-PLAN.md). A NEW calserver-only table;
+-- Durable background-job queue (JOB-QUEUE-PLAN.md). A NEW calendsd-only table;
 -- a co-resident sabre never references it. Oban-shaped so a future Elixir/Oban
 -- migration is a column mapping. iMIP send is the first (and, for now, only)
 -- worker: it survives a process restart the in-memory SendQueue could not.
@@ -238,13 +238,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS jobs_latest_ix ON jobs (
 
 
 -- Per-recipient-domain notification policy. A domain operator opts its users
--- in to calserver emails that are not part of CalDAV itself; a domain with no
+-- in to calendsd emails that are not part of CalDAV itself; a domain with no
 -- row gets the defaults, so nothing changes until an admin inserts one. Keyed
 -- on the RECIPIENT's email domain, stored lowercased. Edited by SQL/ansible.
 --   share_notify  'email' = email a local user when a calendar is newly
 --                 shared with them (docs/share-invite-email.md)
 --   local_notify  reserved for docs/local-attendee-email.md (not yet read)
--- A NEW calserver-only table; a co-resident sabre never references it.
+-- A NEW calendsd-only table; a co-resident sabre never references it.
 CREATE TABLE IF NOT EXISTS domain_scheduling_policy (
     domain       TEXT        NOT NULL PRIMARY KEY CHECK (domain = lower(domain)),
     local_notify TEXT        NOT NULL DEFAULT 'inbox_only'
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS domain_scheduling_policy (
 -- own tests never share two calendars with one principal, so it went unseen.
 -- Real integrity is still enforced by calendarinstances_principaluri_calendarid
 -- (a calendar can't be bound into a home twice) and _principaluri_uri (unique
--- instance path); nothing in calserver or sabre depends on this index, so
+-- instance path); nothing in calendsd or sabre depends on this index, so
 -- dropping it is safe for a co-resident sabre and fixes the same bug for it.
 DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
 
@@ -301,7 +301,7 @@ DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
 -- until the block above was applied. A bulk import that creates a book per
 -- principal hits it directly.
 --
--- deleted_principals was added by calserver (SOFT-DELETE-PLAN.md) with column
+-- deleted_principals was added by calendsd (SOFT-DELETE-PLAN.md) with column
 -- widths copied from the pre-widening sabre schema, so it would refuse the
 -- soft-delete of exactly the long-address accounts the block above unblocked.
 --
@@ -313,7 +313,7 @@ DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
 -- suggestions (docs/snappymail-calserver-contacts.md). SnappyMail's own driver
 -- keeps this as a prop_frec column on its normalized property rows, which has
 -- no home in sabre's schema — sabre stores whole vCards and nothing per
--- address. A NEW calserver-only table; a co-resident sabre never references it.
+-- address. A NEW calendsd-only table; a co-resident sabre never references it.
 --
 -- email is the lowercased address and the ranking key. SnappyMail's IncFrec
 -- matches prop_value case-sensitively, so `Bob@x` and `bob@x` accumulate two
@@ -350,7 +350,7 @@ CREATE INDEX IF NOT EXISTS contact_frecency_rank_ix
 -- Import ledger for the webmail contacts migration: one row per principal
 -- whose contacts `calctl contacts import` has landed
 -- (docs/snappymail-calserver-contacts.md § Making the import re-runnable). A
--- NEW calserver-only table; a co-resident sabre never references it.
+-- NEW calendsd-only table; a co-resident sabre never references it.
 --
 -- The row is what makes a re-run a no-op instead of a duplication. Two stored
 -- values decide it: bundle_digest (did the source change?) and synctoken (did
@@ -393,7 +393,7 @@ CREATE INDEX IF NOT EXISTS contact_import_run_ix ON contact_import (run_id);
 -- A principal's working hours (VAVAILABILITY-PLAN.md §3): the RFC 7953
 -- calendar-availability property of their schedule inbox, one VCALENDAR per
 -- principal with CRLF line endings. Outbox free-busy reports the time outside
--- these hours as BUSY-UNAVAILABLE. A NEW calserver-only table, keyed by the
+-- these hours as BUSY-UNAVAILABLE. A NEW calendsd-only table, keyed by the
 -- principal URI like contact_frecency; AdminWrites' user deletes remove the
 -- row and the doctor flags one whose principal is gone.
 CREATE TABLE IF NOT EXISTS calendar_availability (
@@ -453,7 +453,7 @@ DELETE FROM propertystorage ps
 -- (VAVAILABILITY-PLAN.md §10): 'domain' (everyone in their mail domain, the
 -- default when there is no row) or 'nobody', plus principals that may always
 -- see it. Enforced by the read-free-busy ACE of every calendar. A NEW
--- calserver-only table; AdminWrites' user deletes remove the principal's row
+-- calendsd-only table; AdminWrites' user deletes remove the principal's row
 -- and drop it from everyone's allowed list.
 CREATE TABLE IF NOT EXISTS free_busy_visibility (
     principal  VARCHAR(320) PRIMARY KEY,           -- 'principals/alice@example.org'

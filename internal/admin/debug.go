@@ -11,10 +11,10 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/caldav"
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/storage"
 )
 
 // --- Scheduling debugger (§3.6) ---

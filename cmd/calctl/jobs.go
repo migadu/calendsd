@@ -13,7 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"calserver/internal/jobs"
+	"calendsd/internal/jobs"
 )
 
 // handleJobs dispatches the generic `calctl jobs` subcommands: read-only

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"calserver/internal/acl"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // Principals is the principal backend over the sabre schema. Port of

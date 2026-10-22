@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run Apple's CalDAVTester conformance suite against a local calserver.
+# Run Apple's CalDAVTester conformance suite against a local calendsd.
 #
 #   direnv exec . scripts/caldavtester/run.sh          # run the curated list
 #   direnv exec . scripts/caldavtester/run.sh CalDAV/put.xml   # one file
@@ -9,7 +9,7 @@
 # CalDAVTester is Python 2 only and Python 2 is EOL, so this builds a py2.7
 # interpreter from the nixos-26.05 channel (allowing the insecure package) and
 # checks out CalDAVTester + pycalendar under .dev/. It seeds user01/user02 into
-# the shared dev database, starts a calserver bound to 127.0.0.1:$PORT, and
+# the shared dev database, starts a calendsd bound to 127.0.0.1:$PORT, and
 # replays each test file. Because the suite assumes Calendar-Server-style
 # auto-provisioning (a default calendar/addressbook that returns after
 # DELETEALL), the accounts are re-seeded before every file.
@@ -47,7 +47,7 @@ if [ ! -d "$WORK/pycalendar/.git" ]; then
     git clone --depth 1 https://github.com/apple/ccs-pycalendar.git "$WORK/pycalendar"
 fi
 
-echo "==> tailoring serverinfo.xml for calserver"
+echo "==> tailoring serverinfo.xml for calendsd"
 "$PY2" "$HERE/serverinfo-overrides.py" \
     "$WORK/caldavtester/scripts/server/serverinfo.xml" 127.0.0.1 "$PORT"
 
@@ -58,10 +58,10 @@ seed() { psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$HERE/seed.sql"; }
 echo "==> seeding test accounts"
 seed
 
-echo "==> building calserver"
-go build -o "$WORK/calserver" ./cmd/calserver
+echo "==> building calendsd"
+go build -o "$WORK/calendsd" ./cmd/calendsd
 
-"$WORK/calserver" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
+"$WORK/calendsd" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
     -browser -auto-schedule-prefixes resource,location -principals-readable -auto-provision -per-user-props -expand-groups \
     >"$WORK/server.log" 2>&1 &
 SRV=$!

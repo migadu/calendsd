@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/auth"
-	"calserver/internal/contactsapi"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/contactsapi"
+	"calendsd/internal/storage"
 )
 
 // stalledDB returns a *sql.DB whose every query hangs until its context ends.

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // Working hours (VAVAILABILITY-PLAN.md §3): the inbox's calendar-availability

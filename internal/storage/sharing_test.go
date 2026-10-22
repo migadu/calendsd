@@ -1,7 +1,7 @@
 package storage_test
 
 // Calendar-sharing backend tests against a scratch Postgres with the sabre
-// schema plus the calserver extension tables. Exercises every sharing surface
+// schema plus the calendsd extension tables. Exercises every sharing surface
 // storage.CalDAV implements:
 //
 //   - SharingSupport      — the invite list a {cs}share POST drives.
@@ -23,12 +23,12 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/storage"
 )
 
-// sharingDB builds a scratch database (sabre schema + calserver extensions)
+// sharingDB builds a scratch database (sabre schema + calendsd extensions)
 // seeded with Alice (owner of one calendar) plus Bob and Carol as candidate
 // sharees, and returns the backend over it.
 func sharingDB(t *testing.T, dbName string) *storage.CalDAV {
@@ -92,7 +92,7 @@ const (
 // stores the invitee's address in share_href and their principal in
 // principaluri — both identical for every calendar shared with that person —
 // that index made the SECOND share to a given sharee fail with a duplicate-key
-// error. The calserver extension schema drops it; sharing two calendars with
+// error. The calendsd extension schema drops it; sharing two calendars with
 // one person must now succeed and surface both in their home.
 func TestShareTwoCalendarsWithOnePerson(t *testing.T) {
 	backend := sharingDB(t, "calserver_sharing_two")

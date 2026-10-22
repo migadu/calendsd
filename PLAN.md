@@ -42,7 +42,7 @@ Define the target so we don't port all 34k lines. Recommended MVP scope for a **
 Keep sabre's proven object model; make it idiomatic Go. The core abstraction is a **tree of nodes** addressed by URL path, plus a **plugin/middleware chain** on the HTTP handler.
 
 ```
-cmd/calserver/main.go        wiring, config, listen
+cmd/calendsd/main.go        wiring, config, listen
 internal/dav/                WebDAV core (port of lib/DAV)
   server.go                  http.Handler; method dispatch; PROPFIND/PROPPATCH engine
   tree.go                    path -> node resolution, MOVE/COPY/DELETE
@@ -204,9 +204,9 @@ Define a Go `Backend` interface matching `BackendInterface.php` (`CreateCalendar
 
 **Phase 6 — Sharing/subscriptions (optional)**
 
-**Known gaps — Calendar-Server infrastructure we do not provide (surfaced by the full CalDAVTester sweep).** Running the entire Apple CalDAVTester suite (`make caldavtester-full`, all ~193 files) leaves ~64 files in the **ERROR** state — they fail in their `<start>` provisioning and never run a single assertion, because their fixtures assume Calendar-Server features that calserver (a sabre-lineage server) does not implement. These are *expected non-runners, not test failures*. To make those files runnable we would need to build, roughly in order of leverage:
+**Known gaps — Calendar-Server infrastructure we do not provide (surfaced by the full CalDAVTester sweep).** Running the entire Apple CalDAVTester suite (`make caldavtester-full`, all ~193 files) leaves ~64 files in the **ERROR** state — they fail in their `<start>` provisioning and never run a single assertion, because their fixtures assume Calendar-Server features that calendsd (a sabre-lineage server) does not implement. These are *expected non-runners, not test failures*. To make those files runnable we would need to build, roughly in order of leverage:
 
-- **Server-side implicit scheduling / iMIP inbox delivery** — the `CalDAV/implicit*.xml` family (auto-processing of invites into attendee inboxes, PARTSTAT changes propagating back to the organizer, schedule-tag, auto-accept). calserver has the iTIP broker + outbox POST + inbox nodes, but not the auto-delivery semantics these tests drive (they PUT an event as the organizer and expect the server to materialize inbox items on each attendee automatically).
+- **Server-side implicit scheduling / iMIP inbox delivery** — the `CalDAV/implicit*.xml` family (auto-processing of invites into attendee inboxes, PARTSTAT changes propagating back to the organizer, schedule-tag, auto-accept). calendsd has the iTIP broker + outbox POST + inbox nodes, but not the auto-delivery semantics these tests drive (they PUT an event as the organizer and expect the server to materialize inbox items on each attendee automatically).
 - **Group principals** — bookable/gatewayed `groups/` principals with membership; several `implicit*group*` and `sharing-groups*` files provision a group at start.
 - **Resource & location principals** — auto-accepting `resources/`/`locations/` principals (rooms, projectors) with proxy-driven booking; `implicitauto*`/scheduling files depend on them.
 - **Proxy membership management** — calendar-proxy principals *and* ACE enforcement of delegation already exist; what's missing is Calendar Server's runtime membership management (PROPPATCH/POST of `group-member-set` on the proxy sub-principals) that `sharing-proxies.xml`/`implicitproxy.xml` use to provision delegates at start.

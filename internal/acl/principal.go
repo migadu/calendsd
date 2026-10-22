@@ -6,9 +6,9 @@ import (
 	"io"
 	"time"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // PrincipalHolder marks nodes representing a principal (sabre's IPrincipal).
@@ -29,14 +29,14 @@ type ACE struct {
 	Protected bool
 }
 
-// SameDomain is a calserver extension pseudo-principal (not in sabre): it
+// SameDomain is a calendsd extension pseudo-principal (not in sabre): it
 // matches an authenticated principal whose email-address domain equals the
 // node owner's email-address domain. A principal without an email address
 // never matches (and never grants), so the ACE fails closed on principals
 // like proxy sub-principals that carry no address.
 const SameDomain = "{urn:x-calserver}same-domain"
 
-// FreeBusyAudience is a calserver extension pseudo-principal for
+// FreeBusyAudience is a calendsd extension pseudo-principal for
 // read-free-busy: it matches whoever the node owner's free-busy visibility
 // lets in (VAVAILABILITY-PLAN.md §10): the owner, anyone on the owner's
 // Allowed list (directly or through a group), and, unless the owner chose

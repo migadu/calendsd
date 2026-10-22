@@ -415,7 +415,7 @@ func instancesDiffer(oldSt, newSt *attendeeState) bool {
 func requestMessage(info *eventSummary, att *attendeeState) *goical.Calendar {
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
-	setPlainProp(out.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlainProp(out.Props, goical.PropProductID, "-//calendsd//calendsd//EN")
 	setPlainProp(out.Props, "METHOD", "REQUEST")
 	for _, comp := range info.cal.Children {
 		if comp.Name == goical.CompTimezone {
@@ -453,7 +453,7 @@ func requestMessage(info *eventSummary, att *attendeeState) *goical.Calendar {
 func cancelMessage(info *eventSummary, href, name string) *goical.Calendar {
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
-	setPlainProp(out.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlainProp(out.Props, goical.PropProductID, "-//calendsd//calendsd//EN")
 	setPlainProp(out.Props, "METHOD", "CANCEL")
 	ev := goical.NewComponent(goical.CompEvent)
 	setPlainProp(ev.Props, goical.PropUID, info.uid)
@@ -578,7 +578,7 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 
 	reply := goical.NewCalendar()
 	reply.Props.SetText(goical.PropVersion, "2.0")
-	setPlainProp(reply.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlainProp(reply.Props, goical.PropProductID, "-//calendsd//calendsd//EN")
 	setPlainProp(reply.Props, "METHOD", "REPLY")
 	if newInfo != nil {
 		for _, comp := range newInfo.cal.Children {

@@ -8,8 +8,8 @@ import (
 	"encoding/xml"
 	"strings"
 
-	"calserver/internal/dav"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	"calendsd/internal/pathutil"
 )
 
 // Principal is one principal's identity and properties.

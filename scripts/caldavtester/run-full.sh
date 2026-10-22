@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the ENTIRE CalDAVTester suite (all ~193 files) against calserver and print
+# Run the ENTIRE CalDAVTester suite (all ~193 files) against calendsd and print
 # a categorized breakdown. Companion to run.sh (which runs a curated subset).
 #
 #   direnv exec . scripts/caldavtester/run-full.sh
@@ -8,7 +8,7 @@
 # starts a FRESH server per file so cumulative resource use can't cascade the
 # back half into false errors. A file that kills its fresh server is reported as
 # CRASH (a real bug), distinct from ERROR (its <start> provisioning needs
-# Calendar-Server infrastructure — groups, resources, proxies — that calserver
+# Calendar-Server infrastructure — groups, resources, proxies — that calendsd
 # does not provide).
 #
 # Categories: PASS (all ran green) · PARTIAL (mixed) · FAIL (ran, all failed) ·
@@ -43,8 +43,8 @@ git -C "$WORK/caldavtester" checkout -- scripts/server/serverinfo.xml
     "$WORK/caldavtester/scripts/server/serverinfo.xml" 127.0.0.1 "$PORT"
 
 "$ROOT/scripts/dev-db.sh" start >/dev/null
-echo "==> building calserver"
-go build -o "$WORK/calserver" ./cmd/calserver
+echo "==> building calendsd"
+go build -o "$WORK/calendsd" ./cmd/calendsd
 
 export PYTHONPATH="$WORK/pycalendar/src:$WORK/caldavtester"
 cd "$WORK/caldavtester"
@@ -58,7 +58,7 @@ pass=0; partial=0; failc=0; errc=0; skip=0; crash=0
 while IFS= read -r f; do
     [ -z "$f" ] && continue
     psql -q -d "$PGDATABASE" -f "$HERE/seed.sql" >/dev/null 2>&1
-    "$WORK/calserver" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
+    "$WORK/calendsd" -addr "127.0.0.1:$PORT" -db "$DSN" -realm SabreDAV \
         -browser -auto-schedule-prefixes resource,location -principals-readable -auto-provision -per-user-props -expand-groups >"$WORK/srv.log" 2>&1 &
     SRV=$!
     sleep 0.8

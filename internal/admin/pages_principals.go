@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/storage"
 )
 
 // --- Dashboard (§3.1) ---

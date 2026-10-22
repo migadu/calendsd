@@ -1,7 +1,7 @@
 package caldav_test
 
 // Postgres-backed test for AdvisoryLocker: two instances sharing one database
-// stand in for two calserver nodes, and must not both hold the per-object
+// stand in for two calendsd nodes, and must not both hold the per-object
 // write-back lock at once. Skips when the dev Postgres isn't reachable.
 
 import (
@@ -13,7 +13,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"calserver/internal/caldav"
+	"calendsd/internal/caldav"
 )
 
 func openLockDB(t *testing.T, dbName string) *sql.DB {

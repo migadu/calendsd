@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // subscriptionsPrefix is the base-relative path space subscription resources

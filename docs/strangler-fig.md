@@ -1,4 +1,4 @@
-# Strangler-fig migration: routing traffic from sabre to calserver
+# Strangler-fig migration: routing traffic from sabre to calendsd
 
 Both servers run against the same Postgres database (PLAN.md §5), so the Go
 server can take over incrementally: front both with a reverse proxy and move
@@ -27,7 +27,7 @@ example.com {
         redir / 301
     }
     handle @reads {
-        reverse_proxy calserver:8080
+        reverse_proxy calendsd:8080
     }
     handle {
         # PUT, DELETE, PROPPATCH, MKCOL, MKCALENDAR, COPY, MOVE, ACL
@@ -41,11 +41,11 @@ nginx equivalent of the method split:
 ```nginx
 map $request_method $calendar_backend {
     default            http://sabre-php:80;
-    GET                http://calserver:8080;
-    HEAD               http://calserver:8080;
-    OPTIONS            http://calserver:8080;
-    PROPFIND           http://calserver:8080;
-    REPORT             http://calserver:8080;
+    GET                http://calendsd:8080;
+    HEAD               http://calendsd:8080;
+    OPTIONS            http://calendsd:8080;
+    PROPFIND           http://calendsd:8080;
+    REPORT             http://calendsd:8080;
 }
 server {
     location /.well-known/caldav { return 301 /; }
@@ -57,7 +57,7 @@ server {
 
 ```caddyfile
 example.com {
-    reverse_proxy calserver:8080
+    reverse_proxy calendsd:8080
 }
 ```
 

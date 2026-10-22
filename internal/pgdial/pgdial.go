@@ -1,5 +1,5 @@
 // Package pgdial parses a Postgres DSN into a pgx connection config with the
-// failover-oriented defaults every calserver connection shares: the pool, the
+// failover-oriented defaults every calendsd connection shares: the pool, the
 // WebDAV-Push LISTEN connection and the job queue's LISTEN connection.
 //
 // The DSN may name several hosts ("host=a,b,c port=5433"), and pgx tries them

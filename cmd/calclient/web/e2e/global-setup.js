@@ -1,4 +1,4 @@
-// Builds calserver + calclient and starts them against the shared dev Postgres,
+// Builds calendsd + calclient and starts them against the shared dev Postgres,
 // so the specs run end-to-end against the real server. PIDs are written to
 // .pids for global-teardown. Requires `scripts/dev-db.sh start` beforehand.
 const { execFileSync, spawn } = require('child_process');
@@ -29,14 +29,14 @@ function waitFor(url, timeoutMs = 20_000) {
 module.exports = async () => {
   fs.mkdirSync(BIN, { recursive: true });
   try {
-    execFileSync('go', ['build', '-o', path.join(BIN, 'calserver'), './cmd/calserver'], { cwd: ROOT, stdio: 'inherit' });
+    execFileSync('go', ['build', '-o', path.join(BIN, 'calendsd'), './cmd/calendsd'], { cwd: ROOT, stdio: 'inherit' });
     execFileSync('go', ['build', '-o', path.join(BIN, 'calclient'), './cmd/calclient'], { cwd: ROOT, stdio: 'inherit' });
   } catch (e) {
     throw new Error('go build failed — is the Go toolchain available?\n' + e.message);
   }
 
   const outLog = fs.openSync(path.join(__dirname, '.server.log'), 'w');
-  const srv = spawn(path.join(BIN, 'calserver'),
+  const srv = spawn(path.join(BIN, 'calendsd'),
     // -auto-schedule-prefixes marks the seeded resource*/location* principals as
     // rooms (so the attendee-picker room tag can be exercised); -principals-readable
     // lets the directory search return their details. Both match the caldavtester

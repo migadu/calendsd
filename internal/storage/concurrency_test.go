@@ -19,8 +19,8 @@ import (
 	"sync"
 	"testing"
 
-	"calserver/internal/caldav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	"calendsd/internal/storage"
 )
 
 func TestSyncTokenConcurrency(t *testing.T) {

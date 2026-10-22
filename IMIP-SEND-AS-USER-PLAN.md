@@ -28,7 +28,7 @@ the "sender" of a scheduling message *is* an identity in the message — the
 means:
 
 > **The logged-in user must be the `ORGANIZER`/replying `ATTENDEE` of any
-> message calserver sends as them, and the email `From:` equals that identity.**
+> message calendsd sends as them, and the email `From:` equals that identity.**
 
 Enforce it by **validating** that the scheduling sender is one of the logged-in
 user's own addresses — **not** by rewriting `From:`. The `From:` header and the
@@ -55,15 +55,15 @@ the authorization to a single check —
   `SendAsOrganizer` flag only rewrites the `From:` header and relies on the
   relay to DKIM-sign — it never authenticates as the user (effectively
   trusted-relay spoofing) and does not count against the user's limits.
-- **Auth**: calserver authenticates CalDAV users via HTTP **Basic against
+- **Auth**: calendsd authenticates CalDAV users via HTTP **Basic against
   rcptd's `/auth`** (Dovecot hashes) — `internal/server/server.go` ~line 258.
 - **mizu_out submission** (`:465` implicit TLS / `:587` STARTTLS,
   `type: submission`) authenticates users against the **same rcptd `/auth`**
   endpoint, enforces an **`allowed_from` CDB**, DKIM-signs, and rate-limits.
   So mizu_out already does the full MUA-submission job.
-- **The insight**: "send as the logged-in user" = make calserver an SMTP
+- **The insight**: "send as the logged-in user" = make calendsd an SMTP
   **submission client to `mizu_out`, authenticating as the user**. Same identity
-  source, downstream DKIM/SPF/DMARC/limits, no spoofing. calserver already
+  source, downstream DKIM/SPF/DMARC/limits, no spoofing. calendsd already
   receives the user's password on the CalDAV Basic request that triggers the
   send, so the credential is in hand.
 - **Structural enabler**: `SchedulePlugin.deliver(r *http.Request, msg)`
@@ -101,9 +101,9 @@ the authorization to a single check —
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Credential model | **Reuse the user's CalDAV Basic password** | mizu_out only does plaintext verification via rcptd `/auth` (no SASL/SCRAM/CRAM), so hash-auth is impossible (a hash used to log in is just pass-the-hash). A master/service credential was rejected: it is a standing skeleton key (send-as-anyone) = far larger blast radius. Reusing the password adds no new class of secret — calserver already receives and verifies it on every Basic request. |
+| Credential model | **Reuse the user's CalDAV Basic password** | mizu_out only does plaintext verification via rcptd `/auth` (no SASL/SCRAM/CRAM), so hash-auth is impossible (a hash used to log in is just pass-the-hash). A master/service credential was rejected: it is a standing skeleton key (send-as-anyone) = far larger blast radius. Reusing the password adds no new class of secret — calendsd already receives and verifies it on every Basic request. |
 | Fallback when per-user submission can't happen | **Fail with an iTIP schedule-status** | No shared-relay fallback: relaying would bypass the user's sending limits, contradicting the goal. Client sees non-delivery. |
-| Sender identity | **The logged-in user must be the message sender** (Core rule): `msg.Sender ∈ addressesForPrincipal(dav.Principal(r))`, matched against **any** of the principal's resolved addresses (not just the primary) | Any of a principal's own addresses/aliases is legitimate; restricting to the primary would reject an organizer who used a valid alias as `ORGANIZER`. Validate — never rewrite `From:` — so `From:` and in-body `ORGANIZER` stay one identity. calserver's check is defense-in-depth; mizu_out's `allowed_from` CDB is the real backstop. Cross-account/shared identities still deferred. |
+| Sender identity | **The logged-in user must be the message sender** (Core rule): `msg.Sender ∈ addressesForPrincipal(dav.Principal(r))`, matched against **any** of the principal's resolved addresses (not just the primary) | Any of a principal's own addresses/aliases is legitimate; restricting to the primary would reject an organizer who used a valid alias as `ORGANIZER`. Validate — never rewrite `From:` — so `From:` and in-body `ORGANIZER` stay one identity. calendsd's check is defense-in-depth; mizu_out's `allowed_from` CDB is the real backstop. Cross-account/shared identities still deferred. |
 | Delegated-organizer PUT (sender is another *human*, not the logged-in user) | **v1: reject with an iTIP schedule-status; do not send** | The logged-in user is not the organizer, so the Core rule forbids sending as them, and we have no credential for the real organizer. Silently relaying would bypass the organizer's send limits and mismatch `From:`/`ORGANIZER`. Proper delegation is the iTIP `ORGANIZER` + `SENT-BY` project (v2+). |
 | Resource-originated replies (auto-scheduled rooms) | **v1: relay through the legacy `server` sender for these, and only these, sends** | The sender is a login-less resource with no reusable password and no per-user send-limit to meter, so the "count against limits" goal doesn't apply. Detect it with a **positive** resource/non-login test on the sender principal (not "sender ≠ request principal", which would also catch delegated humans). Relaying keeps rooms able to notify remote organizers. A dedicated per-resource submission credential is the v2 cleanup. |
 
@@ -238,7 +238,7 @@ One test per Core-rule branch (§4), plus mechanics:
 
 ### 8. Docs
 Update `config.toml.example` and add a scheduling note: DKIM, `allowed_from`,
-and rate-limits are mizu_out's responsibility; calserver presents a `From`
+and rate-limits are mizu_out's responsibility; calendsd presents a `From`
 within the user's allowed set and authenticates as the user.
 
 ## Risks / follow-ups

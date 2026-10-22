@@ -1,4 +1,4 @@
-// Stops the calserver + calclient processes global-setup started.
+// Stops the calendsd + calclient processes global-setup started.
 const fs = require('fs');
 const path = require('path');
 

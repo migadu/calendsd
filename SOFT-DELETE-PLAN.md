@@ -21,7 +21,7 @@ and scheduling delivery) is a **non-goal** here — see §10.
 
 ## 1. Hard constraints
 
-- **No sabre-schema divergence.** The new state lives in a table calserver
+- **No sabre-schema divergence.** The new state lives in a table calendsd
   owns (`scripts/schema/pgsql.calserver.sql`), not in new columns on `users`
   or `principals`. Those tables stay byte-for-byte sabre-compatible, matching
   the `AdminWrites` carve-out rationale.
@@ -93,7 +93,7 @@ Add a `[retention]` section. Files:
 - `internal/config/shared.go` `resolve()` (lines 52-113): map
   `cfg.Retention.DeletedDays` → `Server.RetentionDays`, applying the default:
   `if n <= 0 { n = 30 }`. Expose one helper `retentionDays(cfg) int` so
-  calserver-admin and calctl share the same defaulting.
+  calendsd-admin and calctl share the same defaulting.
 
 `calctl` reads `globalConfig.Retention.DeletedDays` directly (it already holds
 a `config.Config`); the admin app reads `App.Config.RetentionDays`.
@@ -275,8 +275,8 @@ No in-process scheduler — the purge is a `calctl` invocation, matching the
 FreeBSD + ansible deployment. Add to the ansible role a daily job:
 
 ```cron
-# /usr/local/etc/cron.d/calserver-purge  (or a periodic(8) script)
-17 3 * * *  calserver  /usr/local/bin/calctl principal purge-expired >> /var/log/calserver/purge.log 2>&1
+# /usr/local/etc/cron.d/calendsd-purge  (or a periodic(8) script)
+17 3 * * *  calendsd  /usr/local/bin/calctl principal purge-expired >> /var/log/calserver/purge.log 2>&1
 ```
 
 - Idempotent and safe to run often; only tombstones past `purge_after` act.

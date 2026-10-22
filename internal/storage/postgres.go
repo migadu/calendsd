@@ -19,11 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/metrics"
-	"calserver/internal/pgdial"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/metrics"
+	"calendsd/internal/pgdial"
 )
 
 // syncTokenPrefix is sabre's Sync\Plugin::SYNCTOKEN_PREFIX; the ctag/token

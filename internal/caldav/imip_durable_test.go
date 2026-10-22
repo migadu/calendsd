@@ -16,9 +16,9 @@ import (
 	"sync"
 	"testing"
 
-	"calserver/internal/caldav"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
+	"calendsd/internal/caldav"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
 )
 
 // fakeDurable records Enqueue calls without a database, to assert the enqueue-

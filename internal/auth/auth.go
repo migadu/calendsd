@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/dav"
-	"calserver/internal/metrics"
+	"calendsd/internal/dav"
+	"calendsd/internal/metrics"
 )
 
 // Backend verifies request credentials. Port of sabre's
@@ -224,7 +224,7 @@ func credentialParsed(r *http.Request) bool {
 // remoteAddr reports the client address for a log line. When the request came
 // through the calclient reverse proxy, r.RemoteAddr is the proxy's loopback
 // address, so surface the proxy-supplied X-Forwarded-For too — untrusted (a
-// client can forge it when it reaches calserver directly), but the only way to
+// client can forge it when it reaches calendsd directly), but the only way to
 // see the real client behind the proxy.
 func remoteAddr(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

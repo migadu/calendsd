@@ -1,4 +1,4 @@
-// Package metrics defines every Prometheus instrument calserver exports in
+// Package metrics defines every Prometheus instrument calendsd exports in
 // one place, so names, labels, and buckets stay auditable (METRICS-PLAN.md).
 // All series are named calserver_* and live on the Set's own registry, never
 // the client library's global default.

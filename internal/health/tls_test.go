@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/config"
+	"calendsd/internal/config"
 )
 
 // TestCheckServerVerifiesCertName serves the DAV listener with a certificate

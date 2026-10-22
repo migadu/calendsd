@@ -10,17 +10,17 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/acl"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // Free-busy visibility (VAVAILABILITY-PLAN.md §10): who may see the owner's
 // busy time and working hours, as a live, owner-only property of the
 // schedule inbox. The ACL plugin enforces it through acl.FreeBusyAudience.
-const nsCalserver = "urn:x-calserver"
+const nsCalendsd = "urn:x-calserver"
 
-var freeBusyVisibilityName = xml.Name{Space: nsCalserver, Local: "free-busy-visibility"}
+var freeBusyVisibilityName = xml.Name{Space: nsCalendsd, Local: "free-busy-visibility"}
 
 // maxFreeBusyAllowed bounds the allowed list (every non-owner read-free-busy
 // check scans it).
@@ -50,8 +50,8 @@ func (p *SchedulePlugin) renderVisibility(v acl.FreeBusyVisibility) davxml.Raw {
 	if v.Hidden {
 		audience = "nobody"
 	}
-	b.WriteString(`<audience xmlns="` + nsCalserver + `">` + audience + `</audience>`)
-	b.WriteString(`<allow xmlns="` + nsCalserver + `">`)
+	b.WriteString(`<audience xmlns="` + nsCalendsd + `">` + audience + `</audience>`)
+	b.WriteString(`<allow xmlns="` + nsCalendsd + `">`)
 	for _, entry := range v.Allowed {
 		href := entry
 		if !strings.HasPrefix(entry, "mailto:") {
@@ -144,7 +144,7 @@ func (p *SchedulePlugin) parseVisibility(ctx context.Context, fragment []byte, o
 			path = append(path, t.Name)
 			text.Reset()
 			switch {
-			case len(path) == 2 && t.Name.Space == nsCalserver && (t.Name.Local == "audience" || t.Name.Local == "allow"):
+			case len(path) == 2 && t.Name.Space == nsCalendsd && (t.Name.Local == "audience" || t.Name.Local == "allow"):
 			case len(path) == 3 && path[1].Local == "allow" && t.Name == xml.Name{Space: davxml.NSDav, Local: "href"}:
 			case len(path) == 1:
 			default:

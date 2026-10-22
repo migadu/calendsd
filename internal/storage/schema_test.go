@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 func TestApplySchema(t *testing.T) {

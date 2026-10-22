@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 	"shared/passwd"
 )
 

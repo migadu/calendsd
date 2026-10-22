@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	davxml "calserver/internal/dav/xml"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // SyncTokenPrefix is the client-facing token prefix, identical to sabre's

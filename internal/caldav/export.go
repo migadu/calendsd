@@ -11,8 +11,8 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
 )
 
 // handleExport implements sabre's ICSExportPlugin: GET ?export on a calendar
@@ -186,7 +186,7 @@ func (p *Plugin) exportBlobs(ctx context.Context, calNode *Calendar, path string
 func mergeCalendars(info CalendarInfo, blobs [][]byte) (*goical.Calendar, error) {
 	merged := goical.NewCalendar()
 	setPlain(merged.Props, goical.PropVersion, "2.0")
-	setPlain(merged.Props, goical.PropProductID, "-//calserver//calserver//EN")
+	setPlain(merged.Props, goical.PropProductID, "-//calendsd//calendsd//EN")
 	setPlain(merged.Props, "CALSCALE", "GREGORIAN")
 	if v, ok := info.Props[xmlNameDav("displayname")].(string); ok {
 		setPlain(merged.Props, "X-WR-CALNAME", v)

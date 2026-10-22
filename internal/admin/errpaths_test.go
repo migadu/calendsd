@@ -14,13 +14,13 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	"calendsd/internal/storage"
 )
 
 var errBoom = errors.New("boom")

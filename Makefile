@@ -1,4 +1,4 @@
-# calserver developer tasks.
+# calendsd developer tasks.
 #
 # Run inside the nix dev shell (direnv loads it on cd into the repo), or prefix
 # any target with `direnv exec . `, e.g. `direnv exec . make test`.
@@ -11,9 +11,9 @@ REALM ?= SabreDAV
 VERSION   ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS    = -ldflags "-X calserver/internal/version.Version=$(VERSION) \
-             -X calserver/internal/version.Commit=$(COMMIT) \
-             -X calserver/internal/version.Date=$(BUILDTIME)"
+LDFLAGS    = -ldflags "-X calendsd/internal/version.Version=$(VERSION) \
+             -X calendsd/internal/version.Commit=$(COMMIT) \
+             -X calendsd/internal/version.Date=$(BUILDTIME)"
 # DSN for the shared dev Postgres started by scripts/dev-db.sh.
 DB    ?= postgres://$(USER)@/calserver?host=$(CURDIR)/.dev/pg
 
@@ -34,13 +34,13 @@ CLIENT_ADDR ?= 127.0.0.1:8091
         caldavtester caldavtester-full clean
 
 dev: build db-start $(ADMIN_AUTH) ## Start the dev DB and all three servers: CalDAV/CardDAV + admin panel + demo client (default)
-	@echo "calserver (CalDAV/CardDAV) → http://$(ADDR)"
+	@echo "calendsd (CalDAV/CardDAV) → http://$(ADDR)"
 	@echo "calctl panel (admin)       → http://$(ADMIN_ADDR)  (login $(ADMIN_USER) / $(ADMIN_PASS))"
 	@echo "calweb (end-user UI)       → http://$(CLIENT_ADDR)/cal/  (login admin / admin; 'make seed' adds demo data)"
 	@echo "calclient (protocol UI)    → http://$(CLIENT_ADDR)/app/"
 	@echo "Ctrl-C stops all servers."
 	@trap 'kill 0' EXIT INT TERM; \
-	 ./bin/calserver -addr $(ADDR) -db "$(DB)" -realm $(REALM) & \
+	 ./bin/calendsd -addr $(ADDR) -db "$(DB)" -realm $(REALM) & \
 	 ./bin/calctl panel -addr $(ADMIN_ADDR) -db "$(DB)" -realm $(REALM) \
 	   -admin-auth $(ADMIN_AUTH) & \
 	 ./bin/calclient -addr $(CLIENT_ADDR) -target http://127.0.0.1:8080 & \
@@ -52,7 +52,7 @@ $(ADMIN_AUTH):
 	htpasswd -cbB $@ $(ADMIN_USER) $(ADMIN_PASS)
 
 run: build db-start ## Build and run only the CalDAV/CardDAV server against the dev DB
-	./bin/calserver -addr $(ADDR) -db "$(DB)" -realm $(REALM)
+	./bin/calendsd -addr $(ADDR) -db "$(DB)" -realm $(REALM)
 
 client: build ## Run the calclient demo web client, proxying to the dev server
 	./bin/calclient -addr $(CLIENT_ADDR) -target http://127.0.0.1:8080
@@ -67,12 +67,12 @@ help: ## Show available targets
 all: vet test ## Vet then run the full Go test suite
 
 build: ## Build the server, demo-client, and CLI (incl. admin panel) binaries into bin/
-	$(GO) build $(LDFLAGS) -o bin/calserver ./cmd/calserver
+	$(GO) build $(LDFLAGS) -o bin/calendsd ./cmd/calendsd
 	$(GO) build $(LDFLAGS) -o bin/calclient ./cmd/calclient
 	$(GO) build $(LDFLAGS) -o bin/calctl ./cmd/calctl
 
 freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64, consumed by the ansible calserver role)
-	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calserver-freebsd-amd64 ./cmd/calserver
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calendsd-freebsd-amd64 ./cmd/calendsd
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calclient-freebsd-amd64 ./cmd/calclient
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calctl-freebsd-amd64 ./cmd/calctl
 

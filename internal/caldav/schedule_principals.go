@@ -9,10 +9,10 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/acl"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/acl"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // defaultCalendarPath picks the principal's first VEVENT-capable calendar,

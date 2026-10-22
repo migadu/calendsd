@@ -1,5 +1,5 @@
 // calclient serves the demo web client and reverse-proxies DAV requests to a
-// calserver, so the browser talks to one origin and CORS never comes into
+// calendsd, so the browser talks to one origin and CORS never comes into
 // play (CalDAV needs PROPFIND/REPORT/MKCALENDAR/PROPPATCH/MOVE, which a
 // cross-origin page cannot send without preflight support the server does
 // not offer).
@@ -18,8 +18,8 @@ import (
 	"path"
 	"time"
 
-	"calserver/internal/logging"
-	"calserver/internal/version"
+	"calendsd/internal/logging"
+	"calendsd/internal/version"
 )
 
 // Only the three served asset trees — never `web` wholesale, which would pull
@@ -30,7 +30,7 @@ var webFS embed.FS
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8091", "listen address for the client UI and proxy")
-	target := flag.String("target", "http://127.0.0.1:8080", "base URL of the calserver to proxy DAV requests to")
+	target := flag.String("target", "http://127.0.0.1:8080", "base URL of the calendsd to proxy DAV requests to")
 	devAssets := flag.String("dev-assets", "", "serve client assets from this directory instead of the embedded copy (for iterating without rebuilds)")
 	logLevel := flag.String("log-level", "", "log verbosity: debug, info, warn, or error (default info). When empty, $CALSERVER_LOG_LEVEL applies")
 	showVersion := version.Flags()
@@ -168,7 +168,7 @@ func noCacheAssets(next http.Handler) http.Handler {
 }
 
 // withAccessLog logs one line per request. calclient authenticates nothing
-// itself — it proxies to calserver and even strips the challenge on 401s — so
+// itself — it proxies to calendsd and even strips the challenge on 401s — so
 // without this a wrong login was invisible on the client side. A proxied 401/403
 // (a rejected login) logs at Warn so it shows at the default level; everything
 // else logs at Debug to stay quiet for the static-asset traffic.

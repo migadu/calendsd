@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // mkcalendar creates a calendar collection (RFC 4791 §5.3.1).

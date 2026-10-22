@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/caldav/ical"
+	"calendsd/internal/caldav/ical"
 )
 
 const confidentialEvent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +

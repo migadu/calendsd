@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/metrics"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/metrics"
 )
 
 // Server is the WebDAV protocol engine: an http.Handler dispatching methods

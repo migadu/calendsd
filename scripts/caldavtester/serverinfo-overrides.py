@@ -1,12 +1,12 @@
 #!/usr/bin/env python2.7
 # Rewrite an upstream CalDAVTester serverinfo.xml in place so it targets a
-# calserver instance (sabre URL layout) instead of Apple Calendar Server.
+# calendsd instance (sabre URL layout) instead of Apple Calendar Server.
 #
 #   python2.7 serverinfo-overrides.py [--full] <path-to-serverinfo.xml> [host] [port]
 #
 # Changes: host/port and the substitution building blocks that map
 # CalDAVTester's __uids__/GUID paths onto sabre's /calendars/<user>/ layout.
-# By default the <features> list is trimmed to what calserver implements, so
+# By default the <features> list is trimmed to what calendsd implements, so
 # only applicable files run (the curated harness). With --full the upstream
 # feature list is kept and the wait loop is shortened, so the ENTIRE suite runs
 # and you see the raw pass/skip/fail spread (the full sweep).
@@ -32,7 +32,7 @@ if full:
     s = re.sub(r"<waitcount>.*?</waitcount>", "<waitcount>5</waitcount>", s, count=1)
     s = re.sub(r"<waitdelay>.*?</waitdelay>", "<waitdelay>0.1</waitdelay>", s, count=1)
 
-# Only the features calserver actually implements. This gates which test
+# Only the features calendsd actually implements. This gates which test
 # files (and sub-tests) run, so listing an unsupported feature just yields
 # noise failures.
 features = """	<features>
@@ -63,7 +63,7 @@ if not full:
 remaps = [
     (r"(<key>\$principals_users:</key>\s*<value>)[^<]*(</value>)",
      r"\g<1>$principalcollection:\g<2>"),
-    # calserver exposes principals as /principals/<user>/, not the Calendar
+    # calendsd exposes principals as /principals/<user>/, not the Calendar
     # Server __uids__/GUID form, so current-user-principal and expand-property
     # compare against the users path.
     (r"(<key>\$principaluri%d:</key>\s*<value>)[^<]*(</value>)",

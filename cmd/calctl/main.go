@@ -1,4 +1,4 @@
-// Command calctl is the calserver management CLI, following the mqctl /
+// Command calctl is the calendsd management CLI, following the mqctl /
 // rcptctl convention in the sibling services: a small subcommand tool that
 // reads the same config.toml as the server and answers operational questions
 // (starting with connectivity health) from the command line.
@@ -12,12 +12,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"calserver/internal/config"
-	"calserver/internal/version"
+	"calendsd/internal/config"
+	"calendsd/internal/version"
 )
 
 // globalConfig holds the loaded config file; all-zero when no file was found
-// (calserver itself runs fine on flags alone, so calctl falls back to the
+// (calendsd itself runs fine on flags alone, so calctl falls back to the
 // built-in defaults instead of failing).
 var globalConfig config.Config
 
@@ -95,7 +95,7 @@ func main() {
 func parseGlobal(onError flag.ErrorHandling, args []string) (configPath, command string, subArgs []string) {
 	global := flag.NewFlagSet("calctl", onError)
 	global.Usage = printUsage
-	path := global.String("config", "", "path to the calserver config file")
+	path := global.String("config", "", "path to the calendsd config file")
 	if err := global.Parse(args); err != nil {
 		return "", "", nil
 	}
@@ -110,23 +110,23 @@ func printVersion() {
 }
 
 func printUsage() {
-	fmt.Print(`calctl — calserver management CLI
+	fmt.Print(`calctl — calendsd management CLI
 
 Usage:
   calctl [--config PATH] <command> [options]
 
 Global Options:
-  --config PATH    Path to calserver config file (default: first of
+  --config PATH    Path to calendsd config file (default: first of
                    /etc/calserver/config.toml,
                    /usr/local/etc/calserver/config.toml, ./config.toml;
                    built-in defaults when none exists)
 
 Commands:
   health [--json] [--url URL] [--db DSN] [--timeout D]
-                                           Check calserver and everything it depends on: DAV and
+                                           Check calendsd and everything it depends on: DAV and
                                            contacts-API listeners, the database (each node of a
                                            multi-host DSN), the daemon's pool, the job queue, rcptd
-  panel [-addr A] [-admin-auth FILE] [-readonly=false] [calserver flags]
+  panel [-addr A] [-admin-auth FILE] [-readonly=false] [calendsd flags]
                                            Serve the admin panel (default 127.0.0.1:8092; Basic auth
                                            from [admin].auth_file, an htpasswd -B file)
   stats [--json] [--db DSN] [--changes N]  Show row counts and recent change-log activity
@@ -168,7 +168,7 @@ Commands:
   contacts summary [--run-id UUID] [--json] Totals from the import ledger, plus the orphaned
                                            address book check (exit 1 on findings)
   schema apply [--db DSN] [--timeout DUR] [--lock-timeout DUR]
-                                           Apply the calserver extension schema built into this
+                                           Apply the calendsd extension schema built into this
                                            binary; re-runnable, all or nothing (the deploy runs it)
   version                                  Show version information
 

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/storage"
 )
 
 func TestCalendarAvailability(t *testing.T) {

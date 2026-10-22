@@ -1,7 +1,7 @@
 package jobs
 
 // Postgres-backed tests for the durable queue. They build a scratch database
-// from the sabre + calserver schema (the jobs table lives in the calserver
+// from the sabre + calendsd schema (the jobs table lives in the calendsd
 // extension schema) and drive the claim → process → settle state machine
 // directly, so outcomes are deterministic without racing the worker goroutines.
 // Skips automatically when the dev Postgres isn't reachable, like the storage

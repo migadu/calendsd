@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // Share access levels and invite statuses, mirroring sabre's

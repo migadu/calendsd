@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/metrics"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/metrics"
 )
 
 // CardDAV is the address book backend over the sabre schema. Port of

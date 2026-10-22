@@ -13,9 +13,9 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/pathutil"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/pathutil"
 )
 
 // ExternalDeliverer delivers to non-local recipients (iMip email). Returns
@@ -152,7 +152,7 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 	}
 
 	// The raw iTIP message lands in the inbox.
-	fileName := "calserver-" + randomToken() + ".ics"
+	fileName := "calendsd-" + randomToken() + ".ics"
 	if _, err := inbox.CreateFile(r.Context(), fileName, strings.NewReader(string(ical.EncodeLenient(msg.Calendar)))); err != nil {
 		msg.ScheduleStatus = "5.2;Could not deliver to local inbox"
 		return
@@ -225,7 +225,7 @@ func (p *SchedulePlugin) autoProcess(r *http.Request, msg *ical.Message, princip
 			msg.ScheduleStatus = "5.2;Could not find the default calendar"
 			return
 		}
-		fileName := "calserver-" + randomToken() + ".ics"
+		fileName := "calendsd-" + randomToken() + ".ics"
 		if _, err := coll.CreateFile(r.Context(), fileName, strings.NewReader(string(serialized))); err != nil {
 			msg.ScheduleStatus = "5.2;Could not deliver to the default calendar"
 			return

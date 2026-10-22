@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav"
+	"calendsd/internal/caldav"
 )
 
 // selfSignedTLS returns a *tls.Config usable as both server (Certificates) and

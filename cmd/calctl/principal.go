@@ -10,11 +10,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"calserver/internal/admin"
-	"calserver/internal/auth"
-	"calserver/internal/config"
-	"calserver/internal/server"
-	"calserver/internal/storage"
+	"calendsd/internal/admin"
+	"calendsd/internal/auth"
+	"calendsd/internal/config"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
 )
 
 // handlePrincipal dispatches the principal subcommands. Reads go through the

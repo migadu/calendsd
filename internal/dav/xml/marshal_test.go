@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/dav/xml/xmltest"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/dav/xml/xmltest"
 )
 
 // TestMultistatusMarshal: our writer's output must be semantically equal to

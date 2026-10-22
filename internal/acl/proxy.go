@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // UserPrincipalNode is a user principal that also acts as a collection hosting

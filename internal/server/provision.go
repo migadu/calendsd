@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // provisioner creates a principal on a user's first successful login, for auth

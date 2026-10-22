@@ -378,7 +378,7 @@ func TestAvailabilityNonIANAFloatingExdate(t *testing.T) {
 // 4.ics, 19.ics, with $now.year.0 = 2026 and $now.year.1 = 2027): Montreal
 // weekday hours and a one-hour US/Eastern event. CalendarServer expects
 // BUSY 17:00Z/PT1H and BUSY-UNAVAILABLE 00:00Z–14:00Z and 22:00Z–24:00Z on
-// one line; calserver writes the same periods in sabre's format, which is
+// one line; calendsd writes the same periods in sabre's format, which is
 // why the suite itself still fails this test (scripts/caldavtester/README.md).
 func TestGenerateFreeBusyCalDAVTesterAvailability(t *testing.T) {
 	montreal := []string{

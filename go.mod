@@ -1,4 +1,4 @@
-module calserver
+module calendsd
 
 go 1.26.4
 

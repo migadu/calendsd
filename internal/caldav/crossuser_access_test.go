@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 // These tests lock in that the cross-user read paths which do NOT carry their

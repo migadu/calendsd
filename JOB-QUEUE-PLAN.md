@@ -264,7 +264,7 @@ Additive table in `scripts/schema/pgsql.calserver.sql`. Per-user durability need
 **no separate table** — the credential is columns on the job, nulled on terminal.
 
 ```sql
--- Durable background-job queue. NEW calserver-only table; a co-resident sabre
+-- Durable background-job queue. NEW calendsd-only table; a co-resident sabre
 -- never references it. Oban-shaped (see JOB-QUEUE-PLAN.md).
 -- INVARIANTS: (1) args is inspectable JSONB and MUST NOT contain a secret (D8);
 -- the submission credential lives ONLY in enc_credential, encrypted (D12).
@@ -454,18 +454,18 @@ logged, unmetered override for when no usable credential survives).
 
 ## Forward-compat with Oban (mapping)
 
-`worker "imip_send"` → `"Calserver.Workers.ImipSend"`; `args` unchanged;
+`worker "imip_send"` → `"Calendsd.Workers.ImipSend"`; `args` unchanged;
 `state` text→enum (same names); `attempt`/`max_attempts`/`scheduled_at`/
 `attempted_at` same; `last_error` → `errors` (wrap); `queue`/`priority`/`meta`/
 `tags` defaults. **`enc_credential`/`enc_nonce`/`key_id` have no Oban column** —
 they'd move to `meta` (still not plaintext) or a sibling table; the Elixir worker
 decrypts with the same config key. D5b (the synchronous / manual-resend fallback)
-is calserver-side and unaffected. Cutover: boot Oban on the same DB, stop the Go
+is calendsd-side and unaffected. Cutover: boot Oban on the same DB, stop the Go
 consumer.
 
 ## Implementation steps
 
-1. **Schema.** `jobs` table + indexes (incl. dedup) in the calserver schema.
+1. **Schema.** `jobs` table + indexes (incl. dedup) in the calendsd schema.
    Additive-only.
 2. **`internal/jobs` package.** Queue/Register/Enqueue/Start/Discard; AEAD
    encrypt-on-enqueue / decrypt-on-claim (key from config); claim-then-release
@@ -537,7 +537,7 @@ consumer.
   silently half-fails; sweep + test are not optional.
 - **Multi-node write-back (handled).** Per-object write-backs serialize
   cross-node via a Postgres advisory lock (`AdvisoryLocker`), not just the
-  in-process `objectLocks` — safe to add calserver nodes. See *Write-back
+  in-process `objectLocks` — safe to add calendsd nodes. See *Write-back
   concurrency*.
 - **Per-user off-path delivery needs the encryption key.** Without a key (or a DB)
   per-user sends are synchronous on the request path — they still deliver, but

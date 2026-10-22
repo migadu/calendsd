@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"calserver/internal/storage"
-	"calserver/scripts/schema"
+	"calendsd/internal/storage"
+	"calendsd/scripts/schema"
 )
 
-// handleSchema applies the calserver extension schema embedded in this
+// handleSchema applies the calendsd extension schema embedded in this
 // binary (scripts/schema/pgsql.calserver.sql). The deploy runs it before
 // restarting the server, so a release that adds a table never starts against
 // a database without it.
@@ -28,10 +28,10 @@ func handleSchema(ctx context.Context, args []string) {
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 	if err := storage.ApplySchema(ctx, q.DB, *lockTimeout); err != nil {
-		fatalf("Applying the calserver schema failed, nothing was changed: %v", err)
+		fatalf("Applying the calendsd schema failed, nothing was changed: %v", err)
 	}
 	if err := q.SchemaPresent(ctx); err != nil {
 		fatalf("Schema applied, but a table is still missing: %v", err)
 	}
-	fmt.Printf("calserver schema is up to date (%d extension tables).\n", len(schema.Tables()))
+	fmt.Printf("calendsd schema is up to date (%d extension tables).\n", len(schema.Tables()))
 }

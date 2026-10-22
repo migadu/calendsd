@@ -3,7 +3,7 @@
 package xmltest
 
 import (
-	davxml "calserver/internal/dav/xml"
+	davxml "calendsd/internal/dav/xml"
 	"encoding/xml"
 	"errors"
 	"fmt"

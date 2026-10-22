@@ -19,7 +19,7 @@ date_default_timezone_set('UTC');
 require __DIR__.'/../dav/vendor/autoload.php';
 
 $socketDir = getenv('PGHOST') ?: __DIR__.'/../.dev/pg';
-$database = getenv('PGDATABASE') ?: 'calserver';
+$database = getenv('PGDATABASE') ?: 'calendsd';
 $pdo = new PDO(sprintf('pgsql:host=%s;dbname=%s', $socketDir, $database));
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 

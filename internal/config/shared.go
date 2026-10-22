@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/server"
-	"calserver/internal/storage"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
 )
 
 // DefaultConfigPaths are the locations searched, in order, for a config file
-// when -config is not given explicitly. Every binary that reads calserver's
-// config (calserver, calctl) discovers it through FindDefaultConfig.
+// when -config is not given explicitly. Every binary that reads calendsd's
+// config (calendsd, calctl) discovers it through FindDefaultConfig.
 var DefaultConfigPaths = []string{
 	"/etc/calserver/config.toml",
 	"/usr/local/etc/calserver/config.toml",
@@ -86,7 +86,7 @@ func (m *Merged) Bool(name string, flagVal, fileVal bool) bool {
 }
 
 // SharedServerFlags registers the flags that define the DAV server's
-// effective configuration on the default FlagSet. calserver and
+// effective configuration on the default FlagSet. calendsd and
 // `calctl panel` both resolve through this one function, so the two
 // processes can never drift in how they turn identical inputs into a
 // server.Config — the property the Canonical() config echo depends on
@@ -119,7 +119,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	return func() (*Merged, error) {
 		m := &Merged{Set: map[string]bool{}}
 		// An explicit -config wins; otherwise fall back to the well-known
-		// locations so `calserver`/`calctl panel` pick up an installed
+		// locations so `calendsd`/`calctl panel` pick up an installed
 		// config without repeating -config on every invocation.
 		path := *configPath
 		if path == "" {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	davxml "calserver/internal/dav/xml"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // PropFind tracks requested properties and their resolved values for one

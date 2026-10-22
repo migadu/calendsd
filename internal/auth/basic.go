@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 )
 
 // BasicBackend authenticates HTTP Basic credentials. The validator receives

@@ -11,7 +11,7 @@ func ics(lines ...string) []byte {
 	all := append([]string{
 		"BEGIN:VCALENDAR",
 		"VERSION:2.0",
-		"PRODID:-//calserver//test//EN",
+		"PRODID:-//calendsd//test//EN",
 	}, lines...)
 	all = append(all, "END:VCALENDAR", "")
 	return []byte(strings.Join(all, "\r\n"))

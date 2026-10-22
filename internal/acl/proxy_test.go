@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 func proxyServer(t *testing.T, backend *acl.MemoryBackend, loginAs string) *dav.Server {

@@ -28,7 +28,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calserver/internal/pgdial"
+	"calendsd/internal/pgdial"
 )
 
 // notifyChannel is the LISTEN/NOTIFY channel an Enqueue pings so an idle worker

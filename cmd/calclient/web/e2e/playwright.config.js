@@ -1,4 +1,4 @@
-// Playwright config for the calweb UI. global-setup builds and starts calserver
+// Playwright config for the calweb UI. global-setup builds and starts calendsd
 // + calclient against the shared dev Postgres (start it first with
 // `scripts/dev-db.sh start`); global-teardown stops them. calclient runs with
 // -dev-assets pointing at the working tree, so tests exercise the live source.

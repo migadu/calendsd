@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // TestDigestA1SeedCompatibility pins the digesta1 convention against the

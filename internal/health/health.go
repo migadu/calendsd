@@ -1,6 +1,6 @@
 // Package health is the connectivity and liveness report behind
-// `calctl health`: one row per component the running calserver depends on,
-// probed the way calserver itself reaches it and graded healthy, degraded or
+// `calctl health`: one row per component the running calendsd depends on,
+// probed the way calendsd itself reaches it and graded healthy, degraded or
 // unhealthy. The row shape and the table follow mqctl/rcptctl in the sibling
 // services, so the same eyes and the same --json consumers read all three.
 //
@@ -30,9 +30,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calserver/internal/config"
-	"calserver/internal/pgdial"
-	"calserver/internal/storage"
+	"calendsd/internal/config"
+	"calendsd/internal/pgdial"
+	"calendsd/internal/storage"
 )
 
 // DefaultTimeout bounds each check.
@@ -157,7 +157,7 @@ func loopback(addr, defaultPort string) string {
 }
 
 // Run performs every configured check and returns the rows in a fixed order:
-// calserver, contacts-api, database, database[node]…, db-pool, jobs, rcptd.
+// calendsd, contacts-api, database, database[node]…, db-pool, jobs, rcptd.
 func Run(ctx context.Context, o Options) []Result {
 	if o.Timeout <= 0 {
 		o.Timeout = DefaultTimeout
@@ -339,7 +339,7 @@ func checkServer(ctx context.Context, o Options) Result {
 	}
 	resp, err := o.get(ctx, http.MethodOptions, o.ServerURL, nil)
 	if err != nil {
-		return t.result("calserver", Unhealthy, o.ServerURL, err.Error())
+		return t.result("calendsd", Unhealthy, o.ServerURL, err.Error())
 	}
 	resp.Body.Close()
 	msg := fmt.Sprintf("responding (HTTP %d)", resp.StatusCode)
@@ -349,7 +349,7 @@ func checkServer(ctx context.Context, o Options) Result {
 	case resp.StatusCode == http.StatusUnauthorized:
 		msg = "responding (auth required)"
 	}
-	return t.result("calserver", Healthy, o.ServerURL, msg)
+	return t.result("calendsd", Healthy, o.ServerURL, msg)
 }
 
 // withServerName copies c with its transport verifying TLS against name
@@ -394,7 +394,7 @@ func checkContactsAPI(ctx context.Context, o Options) Result {
 	}
 }
 
-// checkDatabase opens a pool the way calserver does, confirms the schema, and
+// checkDatabase opens a pool the way calendsd does, confirms the schema, and
 // reads the job queue. It returns the database row and, when the database is
 // usable, the jobs row.
 func checkDatabase(ctx context.Context, o Options) []Result {
@@ -416,7 +416,7 @@ func checkDatabase(ctx context.Context, o Options) []Result {
 		return []Result{t.result("database", Unhealthy, "", "schema check failed: "+err.Error())}
 	}
 	return []Result{
-		t.result("database", Healthy, "", "connected, sabre and calserver schema present"),
+		t.result("database", Healthy, "", "connected, sabre and calendsd schema present"),
 		checkJobs(ctx, o, db),
 	}
 }
@@ -466,7 +466,7 @@ func singleHost(base *pgx.ConnConfig, host string, port uint16, keepTLS bool) *p
 	return c
 }
 
-// checkNodes connects to every host of a multi-host DSN on its own. calserver
+// checkNodes connects to every host of a multi-host DSN on its own. calendsd
 // tries the hosts in order, so a node that drops traffic costs each fresh
 // connection a full connect_timeout before the next is tried — invisible in
 // the database row, which only proves that *some* host answers.
@@ -530,7 +530,7 @@ func checkNode(ctx context.Context, o Options, n node) Result {
 	return t.result(component, Healthy, "", "connected, "+role)
 }
 
-// poolStats are the database/sql pool gauges calserver exports under
+// poolStats are the database/sql pool gauges calendsd exports under
 // db_name="calserver".
 type poolStats struct {
 	open, inUse, idle, maxOpen, waits float64
@@ -539,7 +539,7 @@ type poolStats struct {
 }
 
 // checkPool reads the running daemon's own pool from /metrics: the one view
-// of calserver's database access that a fresh connection from here cannot
+// of calendsd's database access that a fresh connection from here cannot
 // give. A pool pinned at its cap is requests queueing for a connection.
 func checkPool(ctx context.Context, o Options) Result {
 	t := startTimer()
@@ -650,7 +650,7 @@ SELECT count(*) FILTER (WHERE state = 'available' AND scheduled_at <= now()),
 // .invalid is reserved (RFC 2606), so the healthy answer is a 404.
 const rcptdProbeAddress = "calctl-health-probe@health.invalid"
 
-// checkRcptd probes the /auth endpoint calserver's rcptd backend calls, with
+// checkRcptd probes the /auth endpoint calendsd's rcptd backend calls, with
 // an address that cannot exist, and maps the statuses the way the backend
 // does: 404 proves a working service as well as 200; 401 is our token
 // rejected; 503 is rcptd's transient table fault.

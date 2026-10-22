@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // openAdminQueries connects to the shared Postgres database and returns the

@@ -129,7 +129,7 @@ or invitations URL today. Add one route:
   so subsequent renders do not keep unhiding the calendar or reopening the
   panel. Keep the target in the URL so a reload or account switch can retry it.
 
-The absolute base comes from a new calserver flag:
+The absolute base comes from a new calendsd flag:
 
 ```
 -web-url https://calendar.migadu.com   # calclient origin for links in emails; empty disables share emails
@@ -215,7 +215,7 @@ reads `Invites` before starting its transaction. Change the transaction flow:
 Use the same owner-instance lock before `ShareReply` changes or deletes a
 sharee instance, keeping lock order consistent. Unshare through `UpdateInvites`
 already takes it. The existing unique principal/calendar constraint remains a
-backstop. Locks coordinate participating calserver writers; a co-resident sabre
+backstop. Locks coordinate participating calendsd writers; a co-resident sabre
 writer does not automatically follow this protocol. Do not claim concurrency
 guarantees across those writers without a shared locking strategy.
 

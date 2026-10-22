@@ -118,7 +118,7 @@ Owns S3 (incl. the `ShareAccess` fill in `storage/postgres.go`), S4, S10, plus:
 - NULL etag: `coalesce(etag, md5(data))` in the column lists; `QueryRow` + `ErrNoRows` for single-row reads.
 
 ### E. `cmd/*`, `admin`, `server`, `config`, `health`, `metrics`, `logging`, `corpus`
-(Does not touch shutdown in `cmd/calserver/main.go`, which belongs to F.)
+(Does not touch shutdown in `cmd/calendsd/main.go`, which belongs to F.)
 - `cmd/calclient/main.go:107`: `http.Server` with `ReadHeaderTimeout`/`IdleTimeout`.
 - `internal/health/health.go:96`: set the TLS `ServerName` for the local probe.
 - `admin/auth.go:53`: lazy `dummyHash` (`sync.OnceValue`).
@@ -133,7 +133,7 @@ Owns S3 (incl. the `ShareAccess` fill in `storage/postgres.go`), S4, S10, plus:
 - `cmd/calctl/contacts.go:456`: typed JSON summary; check NDJSON write/close errors.
 - Minor: one status-recorder ResponseWriter with `Unwrap()`; `logging.ParseLevel` → `slog.Level.UnmarshalText`; `ndjsonScanner` uses `bytes.TrimSpace(s.Bytes())`; admin `propfind` reuses `davRequest`; `propPatch`/`provision` reuse `writeGate`.
 
-### F. `carddav`, `contactsapi`, `auth`, `jobs`, `push` (+ shutdown in `cmd/calserver/main.go`)
+### F. `carddav`, `contactsapi`, `auth`, `jobs`, `push` (+ shutdown in `cmd/calendsd/main.go`)
 Owns S5, S7, plus:
 - Graceful shutdown: `main` waits for `Shutdown` to finish; `jobs.Queue` gets `Wait()` (WaitGroup); also wait for the push worker.
 - Job settle: `WHERE id=$1 AND state='executing' AND attempt=$2`; refuse to requeue `executing`.
@@ -149,7 +149,7 @@ Cross-workstream touch points (keep edits minimal and local):
 - `internal/storage/postgres.go`: B fills `ShareAccess`; D owns the rest.
 - `internal/storage/` new file: B adds the address/UID lookup; schema changes go through D.
 - `internal/auth/digest.go`: D changes the `HashA1` field type; F owns the rest.
-- `cmd/calserver/main.go`: F owns shutdown; E owns the rest.
+- `cmd/calendsd/main.go`: F owns shutdown; E owns the rest.
 - `auth.Check` callers outside F's packages are updated by F.
 - `Server.Path` callers in B's and F's packages are updated by A, last.
 

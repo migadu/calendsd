@@ -10,8 +10,8 @@ import (
 	"errors"
 	"strconv"
 
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
 )
 
 // changeLog names the tables behind one kind of synced collection.

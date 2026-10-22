@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 // Privilege is one node of the supported-privilege tree (RFC 3744 §5.3).

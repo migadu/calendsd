@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/acl"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/acl"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 var (
@@ -26,7 +26,7 @@ type Plugin struct {
 	// AddVTimezones attaches a generated VTIMEZONE to a PUT that uses an IANA
 	// TZID without defining it (RFC 5545 §3.6.5; docs/dst-recurring-events.md
 	// §5). Off by default, matching sabre, which stores such bodies as sent;
-	// the calserver composition turns it on.
+	// the calendsd composition turns it on.
 	AddVTimezones bool
 
 	server *dav.Server

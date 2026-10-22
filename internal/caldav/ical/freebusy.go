@@ -87,7 +87,7 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 	writeLine := func(s string) { b.WriteString(s + "\r\n") }
 	writeLine("BEGIN:VCALENDAR")
 	writeLine("VERSION:2.0")
-	writeLine("PRODID:-//calserver//calserver//EN")
+	writeLine("PRODID:-//calendsd//calendsd//EN")
 	writeLine("CALSCALE:GREGORIAN")
 	writeLine("BEGIN:VFREEBUSY")
 	writeLine("DTSTART:" + start.UTC().Format(stamp))

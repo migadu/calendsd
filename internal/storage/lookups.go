@@ -9,7 +9,7 @@ import (
 	"errors"
 	"strings"
 
-	"calserver/internal/caldav"
+	"calendsd/internal/caldav"
 )
 
 var (

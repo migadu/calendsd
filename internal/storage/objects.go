@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"calserver/internal/caldav"
-	"calserver/internal/caldav/ical"
+	"calendsd/internal/caldav"
+	"calendsd/internal/caldav/ical"
 )
 
 // objectColumns surfaces a legacy row's NULL etag as the md5 of its data, the

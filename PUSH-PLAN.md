@@ -4,7 +4,7 @@ Status: **implemented** (milestones 1–4). Server: `internal/push/` (plugin,
 store, worker, sender), pg_notify trigger in `internal/storage/{sync,carddav}.go`,
 config in `[push]`, schema `push_subscriptions` in
 `scripts/schema/pgsql.calserver.sql`, wired in `internal/server/server.go` +
-`cmd/calserver/main.go`. Web client: `cmd/calclient/web/shared/push.js` +
+`cmd/calendsd/main.go`. Web client: `cmd/calclient/web/shared/push.js` +
 `push-sw.js`, a Push section in the explorer's sync panel, and an "Instant
 updates" toggle in the calweb settings. Unit + Postgres integration tests in
 `internal/push/`. Milestone 5 (metrics, self-change suppression, VAPID
@@ -346,7 +346,7 @@ Handle responses:
 - `404/410` (endpoint gone) → **prune** the subscription.
 - `429`/`5xx` → honor `Retry-After`, bounded retry with backoff.
 
-### 5.8 Worker & lifecycle — `internal/push/worker.go` + `cmd/calserver/main.go`
+### 5.8 Worker & lifecycle — `internal/push/worker.go` + `cmd/calendsd/main.go`
 - Uses a **dedicated `pgx.Conn`** (not the `database/sql` pool from
   `storage/postgres.go`) because `LISTEN` needs a pinned connection; loop on
   `conn.WaitForNotification(ctx)`.
@@ -360,7 +360,7 @@ Handle responses:
 - **Housekeeping tick**: periodic `DELETE FROM push_subscriptions WHERE expires <
   now()`.
 - Spawn as `go pushWorker.Run(ctx)` in `main()` next to `serveMetrics`
-  (`cmd/calserver/main.go:121-141`). Add a `context.WithCancel` + signal handler for
+  (`cmd/calendsd/main.go:121-141`). Add a `context.WithCancel` + signal handler for
   graceful shutdown — currently `main.go` has none, so introduce a minimal one.
 
 ---

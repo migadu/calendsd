@@ -54,7 +54,7 @@ func LoadHTPasswd(path string) (map[string]string, error) {
 // made on first use, so calctl commands other than the panel do not pay a
 // bcrypt hash at startup just for importing this package.
 var dummyHash = sync.OnceValue(func() string {
-	h, err := bcrypt.GenerateFromPassword([]byte("calserver-admin-dummy"), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte("calendsd-admin-dummy"), bcrypt.DefaultCost)
 	if err != nil {
 		panic(err)
 	}
@@ -86,7 +86,7 @@ func BasicAuth(creds map[string]string, next http.Handler) http.Handler {
 		}
 		err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass))
 		if !ok || !known || err != nil {
-			w.Header().Set("WWW-Authenticate", `Basic realm="calserver-admin", charset="UTF-8"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="calendsd-admin", charset="UTF-8"`)
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}

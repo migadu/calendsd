@@ -1,13 +1,13 @@
 # =============================================================================
-# calserver configuration
+# calendsd configuration
 # =============================================================================
 # Copy this file to config.toml and pass it with -config config.toml.
 #
-#   calserver -config config.toml
+#   calendsd -config config.toml
 #
 # Every value here is optional and shown with its built-in default. Any value
 # left out falls back to that default. Command-line flags OVERRIDE the file:
-# `calserver -config config.toml -addr :9000` uses :9000 regardless of what
+# `calendsd -config config.toml -addr :9000` uses :9000 regardless of what
 # [server].addr says. Unknown keys are rejected at startup rather than silently
 # ignored, so a typo fails fast.
 
@@ -47,7 +47,7 @@ web_url = ""            # calclient origin that emails link to, e.g.
                         # 'email' for the recipient's domain.
 
 # TLS / HTTPS. Leave both empty to serve plain HTTP (terminate TLS in front,
-# e.g. behind a reverse proxy). Basic/Digest send credentials, so if calserver
+# e.g. behind a reverse proxy). Basic/Digest send credentials, so if calendsd
 # is edge-facing, set both to enable HTTPS here.
 [server.tls]
 cert = ""               # Path to the TLS certificate (PEM). Enables HTTPS.
@@ -58,7 +58,7 @@ key = ""                # Path to the TLS private key (PEM). Required with cert.
 # By default, Basic/Digest logins are verified against the users.digesta1 column
 # in the database. Set url below to instead authenticate against an rcptd
 # daemon's /auth endpoint: rcptd serves the user's Dovecot password hashes and
-# calserver verifies the password locally (the same source of truth as the mail
+# calendsd verifies the password locally (the same source of truth as the mail
 # stack). This mode is Basic-only (rcptd serves no digesta1, so Digest is
 # disabled) — front the server with TLS, and pair with
 # calendarserver.auto_provision below so first-time logins get a principal and
@@ -77,7 +77,7 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 # server (no persistence) for WebDAV/litmus testing only.
 [database]
 dsn = ""                # e.g. "postgres://user@localhost/calserver?sslmode=disable"
-# For a cluster, list every node and calserver fails over between them in
+# For a cluster, list every node and calendsd fails over between them in
 # order: "host=10.0.0.1,10.0.0.2,10.0.0.3 port=5433 dbname=calserver ...".
 # Each host gets connect_timeout seconds (default 5) before the next is tried.
 # Behind pgbouncer the database must be pooled in session mode: the push and
@@ -202,7 +202,7 @@ auto_schedule_prefixes = []  # e.g. ["resource", "location"]
 # ADMIN PANEL
 # =============================================================================
 # Settings read only by `calctl panel` (the read-first debugging UI); the
-# calserver daemon ignores this section. The panel reuses this file's [database]
+# calendsd daemon ignores this section. The panel reuses this file's [database]
 # DSN, so running it on the server host needs only the admin credentials here.
 # Command-line flags (-admin-auth, -addr) override these values.
 [admin]
@@ -233,7 +233,7 @@ deleted_days = 30           # Days to keep a soft-deleted account before purge.
 # encrypted Web Push (RFC 8030/8291) authenticated with VAPID (RFC 8292).
 # Note: iOS/macOS Calendar do NOT support WebDAV-Push and are unaffected.
 #
-# Generate the VAPID keypair once, e.g. `calserver push-keys` or the npm
+# Generate the VAPID keypair once, e.g. `calendsd push-keys` or the npm
 # `web-push generate-vapid-keys`, and a random topic_secret (e.g.
 # `openssl rand -base64 32`). The private key and topic secret are SECRETS:
 # keep this file out of version control and readable only by the service user.

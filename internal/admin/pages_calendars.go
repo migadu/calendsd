@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // --- Calendar & address book inspectors (§3.3) ---

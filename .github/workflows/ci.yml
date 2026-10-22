@@ -31,7 +31,7 @@ jobs:
         run: |
           nix develop -c sh -c '
             set -e
-            go run ./cmd/calserver -addr :8085 &
+            go run ./cmd/calendsd -addr :8085 &
             SERVER=$!
             sleep 1
             litmus http://127.0.0.1:8085/ | tee litmus.log || true

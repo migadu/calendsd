@@ -1,7 +1,7 @@
 package corpus
 
 import (
-	"calserver/internal/dav/xml/xmltest"
+	"calendsd/internal/dav/xml/xmltest"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // unreplayable lists tests whose behavior depends on event listeners the PHP

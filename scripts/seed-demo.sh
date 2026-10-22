@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Seeds demo data into the running dev calserver, focused on bob's account so
+# Seeds demo data into the running dev calendsd, focused on bob's account so
 # calweb has a populated calendar and contacts on first login (bob/bob):
 # a Work and a Private calendar with events (incl. a recurrence and a
 # multi-day all-day event), a Contacts book, and one pending invitation sent

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"calserver/internal/pathutil"
+	"calendsd/internal/pathutil"
 )
 
 // DepthInfinity is the parsed value of "Depth: infinity".

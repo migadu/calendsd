@@ -15,7 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/bcrypt"
 
-	"calserver/internal/metrics"
+	"calendsd/internal/metrics"
 )
 
 // fakeRcptd stands in for the rcptd /auth endpoint. It serves a fixed

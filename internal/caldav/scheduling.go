@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/dav"
+	"calendsd/internal/acl"
+	"calendsd/internal/dav"
 )
 
 // SchedulingObjectInfo is one message in a principal's schedule inbox.

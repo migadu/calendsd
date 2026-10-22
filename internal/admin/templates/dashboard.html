@@ -1,7 +1,7 @@
 {{define "dashboard"}}{{template "head"}}
 <h1>Dashboard</h1>
 <p><code>{{.ConfigLine}}</code><br>
-<span class="muted">Compare against the calserver startup log line "effective config" — any difference is config drift.</span>
+<span class="muted">Compare against the calendsd startup log line "effective config" — any difference is config drift.</span>
 {{if .ReadOnly}}<br><span class="ok">read-only mode</span>{{else}}<br><span class="warn">write actions enabled</span>{{end}}</p>
 
 <h2>Counts</h2>

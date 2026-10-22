@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"calserver/scripts/schema"
+	"calendsd/scripts/schema"
 )
 
 // AdminQueries bundles the read-only SQL the admin panel needs beyond the

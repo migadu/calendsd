@@ -1,4 +1,4 @@
-# calserver
+# calendsd
 
 A Go CalDAV server ported from [sabre/dav](https://sabre.io/), designed to run
 **alongside a live sabre-dav instance against the same Postgres database**.
@@ -16,7 +16,7 @@ Postgres 16, sqlc) is on PATH.
 ```sh
 scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), sabre schema loaded
 php -S 127.0.0.1:8081 scripts/sabre-server.php   # reference sabre instance
-go run ./cmd/calserver -db "postgres:///calserver?host=$PGHOST"  # Go server (default :8080)
+go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # Go server (default :8080)
 ```
 
 Credentials: `admin` / `admin` (Basic or Digest, realm `SabreDAV` — the realm
@@ -45,7 +45,7 @@ go run ./cmd/calctl panel -db "postgres:///calserver?host=$PGHOST" \
   -admin-auth admin-auth.htpasswd       # binds 127.0.0.1:8092
 ```
 
-Run it with the **same config file / Calendar-Server flags as calserver**
+Run it with the **same config file / Calendar-Server flags as calendsd**
 (both processes resolve them through the same code and log an identical
 `effective config` line — the dashboard echoes it so drift is a string
 diff). Basic auth resends the password on every request: keep the listener
@@ -78,15 +78,15 @@ calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
 
 | Component | Probe | Not healthy when |
 |---|---|---|
-| `calserver` | unauthenticated `OPTIONS` on the DAV listener | no HTTP answer |
+| `calendsd` | unauthenticated `OPTIONS` on the DAV listener | no HTTP answer |
 | `contacts-api` | unauthenticated `GET /api/v1/health` on `api_addr` (401 is healthy) | no answer, or no auth backend |
-| `database` | a pool opened the way calserver opens it, plus the schema check | unreachable or schema missing; degraded when no DSN |
+| `database` | a pool opened the way calendsd opens it, plus the schema check | unreachable or schema missing; degraded when no DSN |
 | `database[host:port]` | each host of a multi-host DSN on its own (only when there are several) | degraded when some nodes fail, unhealthy when all do |
 | `db-pool` | the running daemon's `go_sql_*` gauges from `metrics_addr` | degraded when in-use reaches the cap |
 | `jobs` | due, stuck-executing and discarded rows in the job queue | degraded when due work is >10m old or a claim is >15m old |
 | `rcptd` | `/auth` with a probe address (404 is healthy) | token rejected or no answer; degraded on 503 |
 
-The per-node rows exist because calserver tries a multi-host DSN in order:
+The per-node rows exist because calendsd tries a multi-host DSN in order:
 a node that silently drops traffic costs each new connection a full
 `connect_timeout`, which the `database` row (some host answered) hides.
 
@@ -102,7 +102,7 @@ and Go pprof on a second plain-HTTP listener (METRICS-PLAN.md has the full
 design and metric inventory):
 
 ```sh
-calserver -config config.toml -metrics-addr 127.0.0.1:9464
+calendsd -config config.toml -metrics-addr 127.0.0.1:9464
 curl -s http://127.0.0.1:9464/metrics | grep calserver_
 go tool pprof http://127.0.0.1:9464/debug/pprof/profile
 ```
@@ -115,7 +115,7 @@ request data, so cardinality stays bounded. Sample scrape config:
 
 ```yaml
 scrape_configs:
-  - job_name: calserver
+  - job_name: calendsd
     static_configs:
       - targets: ["127.0.0.1:9464"]
 ```

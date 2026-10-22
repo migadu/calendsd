@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // ErrNotFound is returned when an update or delete matched no row — the

@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/auth"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/storage"
 )
 
 // Options tune the API. Zero values take the documented defaults.

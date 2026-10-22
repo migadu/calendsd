@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/auth"
-	"calserver/internal/server"
-	"calserver/internal/storage"
+	"calendsd/internal/auth"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
 )
 
 const (
@@ -56,7 +56,7 @@ func TestParity(t *testing.T) {
 	if len(sqlFiles) == 0 {
 		t.Fatal("no schema files found")
 	}
-	// The calserver extension tables are additive; loading them into the
+	// The calendsd extension tables are additive; loading them into the
 	// parity database (which a live sabre also runs against) proves sabre is
 	// unaffected by their presence.
 	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))

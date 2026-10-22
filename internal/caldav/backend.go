@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // CalendarID addresses a calendar by the sabre backend convention: the

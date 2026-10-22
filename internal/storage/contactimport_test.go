@@ -1,7 +1,7 @@
 package storage_test
 
 // Contacts-import regression tests against a scratch Postgres carrying both the
-// sabre schema and calserver's extension tables. Postgres-only (no php/sabre
+// sabre schema and calendsd's extension tables. Postgres-only (no php/sabre
 // needed), skipping automatically when the dev Postgres isn't reachable, like
 // the CardDAV and concurrency tests.
 //
@@ -23,11 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // openContactsScratchDB creates a fresh database from sabre's schema files plus
-// calserver's extension schema (which is where contact_import and
+// calendsd's extension schema (which is where contact_import and
 // contact_frecency live) and opens it.
 func openContactsScratchDB(t *testing.T, dbName string) *sql.DB {
 	t.Helper()
@@ -268,7 +268,7 @@ func TestContactImportDiffsOnlyWhatChanged(t *testing.T) {
 	}
 }
 
-// TestContactImportNeverDeletes: a card present in calserver but absent from
+// TestContactImportNeverDeletes: a card present in calendsd but absent from
 // the bundle is reported as a delete candidate and left alone. The importer
 // cannot tell "the user deleted this in calclient yesterday" from "this was
 // tombstoned in SnappyMail after the export", and guessing wrong destroys data.
@@ -361,7 +361,7 @@ func TestContactImportRefusals(t *testing.T) {
 	})
 
 	t.Run("master login form", func(t *testing.T) {
-		// rcptd accepts user@domain@MASTER and calserver forwards any string,
+		// rcptd accepts user@domain@MASTER and calendsd forwards any string,
 		// so an unguarded import would mint a junk principal from a submission
 		// credential.
 		res := mustImport(t, imp, baseRequest("dave@example.org@master", []storage.ImportCard{card("c1", "One")}))

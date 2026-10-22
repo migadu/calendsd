@@ -1,4 +1,4 @@
-// Package admin implements the calserver admin panel (ADMIN-PLAN.md): a
+// Package admin implements the calendsd admin panel (ADMIN-PLAN.md): a
 // read-first debugging UI over the shared sabre database. Every page is a
 // thin HTML layer over a JSON endpoint; data comes from the same backend
 // interfaces the DAV server uses plus the read-only storage.AdminQueries
@@ -9,12 +9,12 @@ import (
 	"context"
 	"net/http"
 
-	"calserver/internal/acl"
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	"calserver/internal/server"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
 )
 
 // Store is the read-only aggregate access the panel needs beyond the

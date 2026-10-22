@@ -1,4 +1,4 @@
-# calweb — an end-user web calendar & contacts UI for calserver
+# calweb — an end-user web calendar & contacts UI for calendsd
 
 > **Status: implemented.** Served at `/cal/` by `cmd/calclient`; `/` redirects
 > there. The invite accept flow, expanded-range queries (incl. all-day and

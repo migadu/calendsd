@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"calserver/internal/caldav"
+	"calendsd/internal/caldav"
 )
 
 // TestMockBackendConcurrentUse: every mock method takes the same lock, so

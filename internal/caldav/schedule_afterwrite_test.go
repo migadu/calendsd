@@ -16,11 +16,11 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/acl"
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	davxml "calendsd/internal/dav/xml"
 )
 
 type recordingMailer struct {

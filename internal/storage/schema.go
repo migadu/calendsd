@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"calserver/scripts/schema"
+	"calendsd/scripts/schema"
 )
 
 // ApplySchema runs the embedded pgsql.calserver.sql against db. Without
@@ -31,6 +31,6 @@ func ApplySchema(ctx context.Context, db *sql.DB, lockTimeout time.Duration) err
 		return err
 	}
 	defer conn.ExecContext(context.Background(), "RESET lock_timeout")
-	_, err = conn.ExecContext(ctx, schema.Calserver)
+	_, err = conn.ExecContext(ctx, schema.Calendsd)
 	return err
 }

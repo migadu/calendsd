@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 // twoUserServer builds a CardDAV server where user1 and user2 each own an

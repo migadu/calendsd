@@ -11,10 +11,10 @@ import (
 	"sort"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/storage"
 )
 
 // TestArrayColumnsRoundTrip pins the TEXT[] / INT[] columns now bound and

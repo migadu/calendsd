@@ -1,5 +1,5 @@
 // Package logging configures the process-wide slog logger from a level name,
-// so calserver, calctl, and calclient share one way to turn a
+// so calendsd, calctl, and calclient share one way to turn a
 // config/flag/env string into a verbosity. Without this every binary used
 // slog's built-in default (a text handler pinned at Info on stderr) with no
 // way to raise or lower it.

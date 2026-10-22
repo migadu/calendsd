@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // CalendarRoot is the /calendars collection: one CalendarHome per principal.

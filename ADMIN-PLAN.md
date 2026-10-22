@@ -1,4 +1,4 @@
-# Plan: Admin Panel for calserver
+# Plan: Admin Panel for calendsd
 
 ## 0. Purpose
 
@@ -18,7 +18,7 @@ that risks sabre co-existence.
   sync token, change log, or ETag go through the existing backend interfaces
   (`caldav.Backend`, `carddav.Backend`, `acl.Backend`, `dav.PropStorageBackend`)
   so both servers stay correct. **One carve-out**: `users` and `principals`
-  have no backend write path anywhere in calserver (auth.Backend is
+  have no backend write path anywhere in calendsd (auth.Backend is
   read-only) and carry no sync state, so user/principal creation and
   password reset go through a new, narrowly scoped `storage.AdminWrites`
   type (§4) — plain SQL in sabre-parity style, nothing else touches it.
@@ -29,10 +29,10 @@ that risks sabre co-existence.
 
 ## 2. Architecture
 
-**Standalone binary: `cmd/calserver-admin`**, with the logic in a new
+**Standalone binary: `cmd/calendsd-admin`**, with the logic in a new
 `internal/admin` package.
 
-Key insight: calserver is stateless — all state lives in Postgres. The admin
+Key insight: calendsd is stateless — all state lives in Postgres. The admin
 app imports the same internal packages, calls the same `server.New(db, config)`
 composition against the same DSN, and can therefore run simulations through
 the *identical* production code paths. Separation costs almost nothing and
@@ -189,7 +189,7 @@ auditable. Everything else reuses existing types (`acl.Principal`,
 
 | Phase | Scope | Risk |
 |-------|-------|------|
-| **A** | Standalone binary, auth, dashboard, principal inspector, calendar/addressbook inspector, object browser | Pure reads; zero parity risk; most of the debugging value — **implemented** (`cmd/calserver-admin`, `internal/admin`, `storage.AdminQueries`) |
+| **A** | Standalone binary, auth, dashboard, principal inspector, calendar/addressbook inspector, object browser | Pure reads; zero parity risk; most of the debugging value — **implemented** (`cmd/calendsd-admin`, `internal/admin`, `storage.AdminQueries`) |
 | **B** | Privilege simulator, scheduling/sync debugger, doctor | Still read-only; simulated requests through the plugin chain — **implemented** (`server.NewLoggedIn`, `internal/admin/{simulate,debug}.go`, `storage` doctor) |
 | **C** | Gated write actions (§3.8) + parity tests proving sabre sees admin-made changes correctly (extend the `PARITY=1` harness) | Writes; guarded by backends (plus the audited `AdminWrites` carve-out) + parity tests — **implemented** (`storage.AdminWrites`, `internal/admin/writes.go`, `TestParity/AdminMadeUserWorksInSabre`) |
 
@@ -201,4 +201,4 @@ auditable. Everything else reuses existing types (`acl.Principal`,
 - Doctor checks get fixture-based tests (seed a mock/DB with each broken
   invariant, assert the finding).
 - Phase C: parity tests on a live dev DB (`make db-start`), asserting sabre
-  and calserver both observe admin mutations with correct sync tokens.
+  and calendsd both observe admin mutations with correct sync tokens.

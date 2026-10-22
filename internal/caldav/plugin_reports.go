@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/pathutil"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/pathutil"
 )
 
 type freeBusyQueryXML struct {

@@ -9,18 +9,18 @@ import (
 	"regexp"
 )
 
-// Calserver is the text of pgsql.calserver.sql. Every statement in it is
+// Calendsd is the text of pgsql.calserver.sql. Every statement in it is
 // conditional, so applying it again is a no-op.
 //
 //go:embed pgsql.calserver.sql
-var Calserver string
+var Calendsd string
 
 var createTable = regexp.MustCompile(`(?m)^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)`)
 
 // Tables lists the tables pgsql.calserver.sql creates, in file order.
 func Tables() []string {
 	var tables []string
-	for _, m := range createTable.FindAllStringSubmatch(Calserver, -1) {
+	for _, m := range createTable.FindAllStringSubmatch(Calendsd, -1) {
 		tables = append(tables, m[1])
 	}
 	return tables

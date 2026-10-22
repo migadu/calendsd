@@ -1,4 +1,4 @@
-// Package server composes the full calserver DAV server from a shared sabre
+// Package server composes the full calendsd DAV server from a shared sabre
 // Postgres database: tree (principals + calendars), auth, ACL, and CalDAV
 // plugins. Mirrors scripts/sabre-server.php so both servers expose the same
 // feature set during parity testing.
@@ -18,16 +18,16 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
-	"calserver/internal/contactsapi"
-	"calserver/internal/dav"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
-	"calserver/internal/push"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
+	"calendsd/internal/contactsapi"
+	"calendsd/internal/dav"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
+	"calendsd/internal/push"
+	"calendsd/internal/storage"
 )
 
 // DefaultRealm is the auth realm when none is configured. It must never
@@ -162,7 +162,7 @@ type PushConfig struct {
 }
 
 // Canonical renders the effective configuration as one deterministic line.
-// Both calserver and the admin panel (`calctl panel`) log it at startup, and
+// Both calendsd and the admin panel (`calctl panel`) log it at startup, and
 // the dashboard echoes its own copy, so config drift between the two processes
 // (which would make the admin privilege simulator lie) reduces to comparing
 // two strings (ADMIN-PLAN.md §2). Values are normalized the way the server

@@ -9,7 +9,7 @@
 -- serverinfo-overrides.py for the mapping).
 --
 -- The suite assumes a Calendar-Server-style auto-provisioned default
--- calendar/addressbook that regenerates after DELETEALL. calserver (like sabre)
+-- calendar/addressbook that regenerates after DELETEALL. calendsd (like sabre)
 -- never auto-recreates collections, so these must exist up front and be
 -- re-seeded between destructive test files (the runners do this). Every insert
 -- is idempotent so re-seeding is cheap and safe.

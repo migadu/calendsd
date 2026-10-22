@@ -1,4 +1,4 @@
-// Command calserver runs the Go CalDAV server against the shared sabre
+// Command calendsd runs the Go CalDAV server against the shared sabre
 // Postgres database.
 package main
 
@@ -15,16 +15,16 @@ import (
 	"syscall"
 	"time"
 
-	"calserver/internal/config"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	"calserver/internal/jobs"
-	"calserver/internal/logging"
-	"calserver/internal/metrics"
-	"calserver/internal/push"
-	"calserver/internal/server"
-	"calserver/internal/storage"
-	"calserver/internal/version"
+	"calendsd/internal/config"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	"calendsd/internal/jobs"
+	"calendsd/internal/logging"
+	"calendsd/internal/metrics"
+	"calendsd/internal/push"
+	"calendsd/internal/server"
+	"calendsd/internal/storage"
+	"calendsd/internal/version"
 )
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version.String("calserver"))
+		fmt.Println(version.String("calendsd"))
 		return
 	}
 

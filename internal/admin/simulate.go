@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"strings"
 
-	"calserver/internal/acl"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // adminViewPrincipal matches the AdminPrincipals list hardcoded in

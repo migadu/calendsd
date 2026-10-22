@@ -1,14 +1,14 @@
-# calclient — a small CalDAV/CardDAV demo client for calserver
+# calclient — a small CalDAV/CardDAV demo client for calendsd
 
 ## Context
 
-`calserver` is a full-featured CalDAV/CardDAV server (a Go port of sabre/dav) with a
+`calendsd` is a full-featured CalDAV/CardDAV server (a Go port of sabre/dav) with a
 large protocol surface: discovery, calendar/contact CRUD, `calendar-query` /
 `multiget` / `free-busy-query` / `sync-collection` / `addressbook-query` REPORTs,
 iTIP scheduling with inbox/outbox and iMIP, calendar sharing, proxy delegation,
 notifications, webcal subscriptions, whole-collection export, RFC 5995 Add-Member,
 and ACL/privilege introspection. Today the only ways to see these work are `curl`,
-the parity/corpus test suites, and the separate read-only `calserver-admin` panel —
+the parity/corpus test suites, and the separate read-only `calendsd-admin` panel —
 there is no interactive client that exercises the *client-facing* protocol.
 
 This plan adds a **small, vanilla-JS web client** that drives the server the way a
@@ -21,13 +21,13 @@ blocked CORS preflight when the page and the API are **same-origin**. We therefo
 ship a tiny Go binary (`cmd/calclient`) that serves the static client **and**
 reverse-proxies DAV requests to a configurable target server. The browser only ever
 talks to `calclient` → same-origin → no CORS, no preflight, no server changes.
-Chosen over embedding in `calserver` so the DAV server stays untouched and the
+Chosen over embedding in `calendsd` so the DAV server stays untouched and the
 client can point at any local or remote server.
 
 ## Architecture
 
 ```
-browser ──same-origin──> cmd/calclient ──reverse proxy──> calserver (-target)
+browser ──same-origin──> cmd/calclient ──reverse proxy──> calendsd (-target)
    │                          │
    └ vanilla JS (fetch)       ├ GET /app/*        → embedded static assets
      DAV requests to /        └ everything else   → proxied to -target
@@ -45,7 +45,7 @@ browser ──same-origin──> cmd/calclient ──reverse proxy──> calser
 
 ## Component 1 — `cmd/calclient` (Go proxy, ~120 lines, stdlib only)
 
-New package under the existing `calserver` module; imports only stdlib
+New package under the existing `calendsd` module; imports only stdlib
 (`embed`, `flag`, `net/http`, `net/http/httputil`, `net/url`, `log/slog`). No
 dependency on `internal/*`, keeping it decoupled.
 
@@ -122,7 +122,7 @@ as a protocol explorer without separate code.
   (color/description via PROPPATCH), PUTs a plain event, a recurring event,
   and an invite with ATTENDEE bob (exercises inbox delivery +
   SCHEDULE-STATUS), and creates a `contacts` addressbook with two vCards.
-- **Server flags for a full demo**: run `calserver` with the Calendar-Server
+- **Server flags for a full demo**: run `calendsd` with the Calendar-Server
   behaviors on so every panel has something to show:
   `-auto-provision -per-user-props -expand-groups -principals-readable`
   (and `-auto-schedule-prefixes resource` to demo auto-booking).
@@ -135,7 +135,7 @@ as a protocol explorer without separate code.
 - **Second principal for sharing/delegation/iTIP**: the dev DB
   (`scripts/dev-db.sh`) seeds only `admin`. Sharing, proxy delegation, and
   local iTIP need a target user. Add an optional seed for a `bob`/`bob`
-  principal — simplest via the existing `calserver-admin` write action
+  principal — simplest via the existing `calendsd-admin` write action
   (`storage.AdminWrites.CreateUser`) run with `-readonly=false`, or a small
   `INSERT` appended to the `load_schema()` block in `scripts/dev-db.sh` mirroring
   what `CreateUser` does: a users row with `digesta1 = md5("bob:SabreDAV:bob")`
@@ -147,9 +147,9 @@ as a protocol explorer without separate code.
 
 ## Verification
 
-1. `make build` (builds `calserver`, `calserver-admin`, `calclient`).
-2. `make dev` (starts DB + calserver + admin + calclient; add the demo flags
-   above to the calserver line for the full feature set), then `make seed`
+1. `make build` (builds `calendsd`, `calendsd-admin`, `calclient`).
+2. `make dev` (starts DB + calendsd + admin + calclient; add the demo flags
+   above to the calendsd line for the full feature set), then `make seed`
    in a second terminal for demo data.
 3. Open `http://127.0.0.1:8091/app/`, log in as `admin`/`admin`.
 4. Walk each panel; confirm in the raw-exchange drawer that the expected
@@ -169,7 +169,7 @@ as a protocol explorer without separate code.
      `/calendars/bob/inbox/` and `SCHEDULE-STATUS` is set on admin's copy.
    - Contacts: create an addressbook, PUT a vCard, `addressbook-query` text-match
      finds it, `?export` downloads a merged vCard.
-5. Cross-check anything ambiguous against `calserver-admin` (same DB) and the
+5. Cross-check anything ambiguous against `calendsd-admin` (same DB) and the
    `curl` patterns in the existing tests. Caveat: calendar color/description/
    timezone set via `PROPPATCH` land in dead-property storage (the
    propertystorage table), not the `calendarinstances` columns — they round-trip

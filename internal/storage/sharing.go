@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/caldav"
+	"calendsd/internal/caldav"
 )
 
 // CalDAV satisfies the CalDAV sharing backends so the SharingPlugin's
 // {cs}share / invite-reply / publish POSTs mutate real state, and the
 // notification inbox is served from Postgres. SharingSupport lives on the
 // sabre calendarinstances table; the notification inbox and publish state use
-// the additive calserver extension tables (scripts/schema/pgsql.calserver.sql)
+// the additive calendsd extension tables (scripts/schema/pgsql.calserver.sql)
 // that a live sabre on the same database never touches.
 var (
 	_ caldav.SharingSupport       = (*CalDAV)(nil)
@@ -423,7 +423,7 @@ func ownerCalendarFromHref(href string) (principalURI, uri string, ok bool) {
 }
 
 // NotificationsForPrincipal returns a principal's invite notifications, newest
-// last. Read from the calserver notifications table.
+// last. Read from the calendsd notifications table.
 func (b *CalDAV) NotificationsForPrincipal(ctx context.Context, principalURI string) ([]caldav.InviteNotification, error) {
 	rows, err := b.DB.QueryContext(ctx, `
 SELECT entryid, dtstamp, hosturl, organizer, organizername, access, invitestatus, summary
@@ -477,7 +477,7 @@ func (b *CalDAV) DeleteNotification(ctx context.Context, principalURI, id string
 }
 
 // SetPublishStatus publishes or unpublishes a calendar. Publishing mints an
-// opaque public URI stored in the calserver calendarpublications table;
+// opaque public URI stored in the calendsd calendarpublications table;
 // unpublishing removes the row. Port of the calendarserver publish POST that
 // sabre's PDO backend leaves unimplemented.
 func (b *CalDAV) SetPublishStatus(ctx context.Context, id caldav.CalendarID, value bool) error {

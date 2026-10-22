@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	davxml "calendsd/internal/dav/xml"
 )
 
 type xmlName = xml.Name

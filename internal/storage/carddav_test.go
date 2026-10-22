@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"testing"
 
-	"calserver/internal/dav"
-	"calserver/internal/storage"
+	"calendsd/internal/dav"
+	"calendsd/internal/storage"
 )
 
 // openCardDAVScratchDB creates a fresh database from sabre's schema files and

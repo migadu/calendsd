@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/caldav"
-	"calserver/internal/carddav"
+	"calendsd/internal/caldav"
+	"calendsd/internal/carddav"
 )
 
 // --- corpus.go ---

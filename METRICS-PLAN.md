@@ -1,11 +1,11 @@
-# Plan: Prometheus Metrics for calserver
+# Plan: Prometheus Metrics for calendsd
 
 ## 0. Purpose
 
 Answer "is the service healthy, and if not, where is it degrading" from a
 scrape instead of log spelunking: request rates and latency, auth failures,
 rcptd availability, Postgres pool saturation, sync behavior, and iMIP
-delivery. These map to the ways calserver actually fails in practice:
+delivery. These map to the ways calendsd actually fails in practice:
 
 - rcptd down or slow → every login stalls or errors
 - auth failure spikes → brute force or a misconfigured client
@@ -14,7 +14,7 @@ delivery. These map to the ways calserver actually fails in practice:
 - iMIP sends failing silently → "invitations don't arrive"
 
 **Non-goals**: tracing, per-user/per-calendar breakdowns (cardinality;
-that's the admin panel's job), metrics for `calserver-admin` itself (low
+that's the admin panel's job), metrics for `calendsd-admin` itself (low
 traffic, basic-auth'd, logs suffice), pushgateway/remote-write, dashboards
 (out of tree — flatmail ansible owns Prometheus/Grafana config).
 
@@ -50,7 +50,7 @@ New package **`internal/metrics`**:
   and config are today: explicit arguments through `server.New`, the auth
   plugin constructor, and the storage backends. No globals.
 
-**Listener** in `cmd/calserver/main.go`: when `server.metrics_addr` is
+**Listener** in `cmd/calendsd/main.go`: when `server.metrics_addr` is
 set, start a second plain-HTTP `http.Server` on that address serving
 `GET /metrics` plus `/debug/pprof/*` (net/http/pprof — same privacy
 posture, zero cardinality, and it answers the CPU questions a histogram
@@ -232,7 +232,7 @@ Version stamped via `-ldflags "-X main.version=..."`; `dev` when unset.
    classifier + tests. No wiring yet; `go vet`/tests green.
 2. **Listener + config** — `server.metrics_addr` key in `internal/config`
    (flag `-metrics-addr`, strict-keys allowlist entry), second server in a
-   goroutine in `cmd/calserver/main.go` serving `/metrics` +
+   goroutine in `cmd/calendsd/main.go` serving `/metrics` +
    `/debug/pprof/*`, exit on bind failure, `config.toml.example` entry
    with the firewalling note, `build_info` version stamp. Scrape works,
    shows only runtime metrics.

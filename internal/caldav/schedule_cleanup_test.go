@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav/ical"
+	"calendsd/internal/caldav/ical"
 )
 
 // A PUT that stashes a deferred send in InterceptWrite but never reaches

@@ -14,7 +14,7 @@ import (
 	"github.com/emersion/go-vcard"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"calserver/internal/caldav/ical"
+	"calendsd/internal/caldav/ical"
 )
 
 // ChangeLog returns the change rows of one collection, newest first.

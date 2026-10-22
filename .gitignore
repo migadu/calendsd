@@ -6,6 +6,7 @@
 dav/vendor/
 
 # go
+/calendsd
 /calserver
 /bin/
 *.test

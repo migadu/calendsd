@@ -27,10 +27,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"calserver/internal/acl"
-	davxml "calserver/internal/dav/xml"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
+	"calendsd/internal/acl"
+	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
 )
 
 // ShareNotifier emails a local principal that a calendar was shared with them.

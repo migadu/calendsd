@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	"calendsd/internal/storage"
 )
 
 func TestCalendarQueryPrefilter(t *testing.T) {

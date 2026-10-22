@@ -1,7 +1,7 @@
 package storage_test
 
 // Indexed lookups (lookups.go) against a scratch Postgres with the sabre
-// schema plus the calserver extensions. Postgres-only; skips when the dev
+// schema plus the calendsd extensions. Postgres-only; skips when the dev
 // Postgres isn't reachable.
 
 import (
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // lookupsDB builds a scratch database with the full schema, runs seed, and

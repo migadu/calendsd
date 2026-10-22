@@ -10,7 +10,7 @@ import (
 	"encoding/xml"
 	"sort"
 
-	"calserver/internal/dav"
+	"calendsd/internal/dav"
 )
 
 // AddressBookInfo describes one address book of a principal.

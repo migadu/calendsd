@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/dav"
-	davxml "calserver/internal/dav/xml"
+	"calendsd/internal/acl"
+	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 )
 
 // AddressBookRoot is the /addressbooks collection: one home per principal.

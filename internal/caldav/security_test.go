@@ -10,12 +10,12 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 // TestIMipHeaderInjectionStripped verifies that CR/LF in attacker-controlled

@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"calserver/internal/caldav/ical"
-	"calserver/internal/dav"
-	"calserver/internal/jobs"
-	"calserver/internal/metrics"
+	"calendsd/internal/caldav/ical"
+	"calendsd/internal/dav"
+	"calendsd/internal/jobs"
+	"calendsd/internal/metrics"
 )
 
 // Mailer sends an email. Implementations wrap SMTP or a test spy.

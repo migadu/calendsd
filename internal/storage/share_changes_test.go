@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/caldav"
-	"calserver/internal/storage"
+	"calendsd/internal/caldav"
+	"calendsd/internal/storage"
 )
 
 func bobSet(access int) caldav.Sharee {

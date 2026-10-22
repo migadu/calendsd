@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
-	"calserver/internal/storage"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
+	"calendsd/internal/storage"
 )
 
 // Fake store additions for Phase B.

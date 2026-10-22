@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"calserver/internal/acl"
-	"calserver/internal/auth"
-	"calserver/internal/caldav"
-	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
+	"calendsd/internal/acl"
+	"calendsd/internal/auth"
+	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
+	"calendsd/internal/dav/mock"
 )
 
 // sharedSharing builds two servers (one per actor) over one shared backend,

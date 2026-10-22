@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"calserver/internal/storage"
+	"calendsd/internal/storage"
 )
 
 // handleStats prints the admin dashboard's overview from the command line:
