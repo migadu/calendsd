@@ -60,7 +60,8 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 		// An outage, not wrong credentials: "error", so it doesn't read as a
 		// brute force.
 		b.Metrics.AuthAttempt("digest", "error")
-		return "", false, "Authentication backend unavailable"
+		return "", &serverError{msg: "Authentication backend unavailable",
+			err: errors.Join(ErrUnavailable, err)}
 	}
 	if a1 == "" {
 		b.Metrics.AuthAttempt("digest", "bad_credentials")
