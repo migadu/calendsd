@@ -91,13 +91,6 @@ func NewRcptdBackend(realm, rcptdURL, token string, ttl time.Duration) *RcptdBac
 	}
 }
 
-func (b *RcptdBackend) prefix() string {
-	if b.PrincipalPrefix != "" {
-		return b.PrincipalPrefix
-	}
-	return "principals/"
-}
-
 func (b *RcptdBackend) client() *http.Client {
 	if b.HTTP != nil {
 		return b.HTTP
@@ -118,7 +111,7 @@ func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 		b.Metrics.AuthAttempt("rcptd", outcome)
 		return "", err
 	}
-	principal := b.prefix() + username
+	principal := principalPath(b.PrincipalPrefix, username)
 	if b.Provision != nil {
 		if err := b.Provision(r.Context(), principal, username); err != nil {
 			// Fail closed: an authenticated user with no principal would hit
@@ -134,9 +127,7 @@ func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 	return principal, nil
 }
 
-func (b *RcptdBackend) Challenge(h http.Header, _ *http.Request) {
-	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
-}
+func (b *RcptdBackend) Challenge(h http.Header, _ *http.Request) { basicChallenge(h, b.Realm) }
 
 // verify returns a typed outcome for the attempts metric and, when the
 // credentials are not valid, why. "user unknown" and "wrong password"

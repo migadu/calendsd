@@ -26,11 +26,19 @@ type BasicBackend struct {
 	Metrics *metrics.Set
 }
 
-func (b *BasicBackend) prefix() string {
-	if b.PrincipalPrefix != "" {
-		return b.PrincipalPrefix
+// principalPath is a backend's principal for username: its PrincipalPrefix,
+// by default "principals/", like sabre, plus the username.
+func principalPath(prefix, username string) string {
+	if prefix == "" {
+		prefix = "principals/"
 	}
-	return "principals/"
+	return prefix + username
+}
+
+// basicChallenge adds the Basic challenge for realm, which every Basic
+// backend sends.
+func basicChallenge(h http.Header, realm string) {
+	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", realm))
 }
 
 // errNoBasic is a Basic backend's Check failure for a request without Basic
@@ -50,12 +58,10 @@ func (b *BasicBackend) Check(r *http.Request) (string, error) {
 		return "", ErrBadCredentials
 	}
 	b.Metrics.AuthAttempt("basic", "ok")
-	return b.prefix() + username, nil
+	return principalPath(b.PrincipalPrefix, username), nil
 }
 
-func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) {
-	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
-}
+func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) { basicChallenge(h, b.Realm) }
 
 // DigestA1 computes md5(username:realm:password) — the digesta1 convention
 // shared with sabre's users table (PLAN.md §5). It lets Basic credentials be

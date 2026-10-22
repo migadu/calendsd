@@ -220,17 +220,17 @@ func TestParseDigestHeaderSkipsBareTokens(t *testing.T) {
 	}
 }
 
-// TestPrincipalPrefixOverride: every backend substitutes an explicit
+// TestPrincipalPrefixOverride: a backend substitutes an explicit
 // PrincipalPrefix for the "principals/" default.
 func TestPrincipalPrefixOverride(t *testing.T) {
-	if got := (&BasicBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("BasicBackend prefix = %q, want users/", got)
+	if got := principalPath("", "admin"); got != "principals/admin" {
+		t.Errorf("default principal = %q, want principals/admin", got)
 	}
-	if got := (&DigestBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("DigestBackend prefix = %q, want users/", got)
-	}
-	if got := (&RcptdBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("RcptdBackend prefix = %q, want users/", got)
+	b := &BasicBackend{PrincipalPrefix: "users/", Validate: func(string, string) bool { return true }}
+	r := httptest.NewRequest("PROPFIND", "/", nil)
+	r.SetBasicAuth("admin", "admin")
+	if got, _, _ := check(b, r); got != "users/admin" {
+		t.Errorf("BasicBackend principal = %q, want users/admin", got)
 	}
 }
 

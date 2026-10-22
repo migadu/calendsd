@@ -40,13 +40,6 @@ type DigestBackend struct {
 	now     func() time.Time      // test clock; nil means time.Now
 }
 
-func (b *DigestBackend) prefix() string {
-	if b.PrincipalPrefix != "" {
-		return b.PrincipalPrefix
-	}
-	return "principals/"
-}
-
 // errNoDigest is a Digest backend's Check failure for a request without
 // Digest credentials.
 var errNoDigest = errors.New("No 'Authorization: Digest' header found. Either the client didn't send one, or the server is misconfigured")
@@ -109,7 +102,7 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 		return "", errors.New("Digest nonce count reused")
 	}
 	b.Metrics.AuthAttempt("digest", "ok")
-	return b.prefix() + username, nil
+	return principalPath(b.PrincipalPrefix, username), nil
 }
 
 // nonceTTL is how long an issued nonce is accepted. Clients reuse a nonce
