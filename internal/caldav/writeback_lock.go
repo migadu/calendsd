@@ -53,7 +53,7 @@ func (a *AdvisoryLocker) Lock(ctx context.Context, path string) func() {
 	if wait <= 0 {
 		wait = defaultAdvisoryWait
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	conn, err := a.DB.Conn(ctx)
 	if err != nil {
@@ -70,6 +70,8 @@ func (a *AdvisoryLocker) Lock(ctx context.Context, path string) func() {
 	}
 	return func() {
 		defer localUnlock()
+		// Released on a fresh context: the lock must go even when the
+		// caller's context has ended.
 		ctx, cancel := context.WithTimeout(context.Background(), wait)
 		defer cancel()
 		// Release the advisory lock before returning the connection to the pool,
