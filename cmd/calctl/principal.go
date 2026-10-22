@@ -2,9 +2,7 @@ package main
 
 import (
 	"bufio"
-	"crypto/subtle"
 	"encoding/json"
-	"encoding/xml"
 	"flag"
 	"fmt"
 	"os"
@@ -12,9 +10,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"calserver/internal/admin"
 	"calserver/internal/auth"
 	"calserver/internal/config"
-	davxml "calserver/internal/dav/xml"
 	"calserver/internal/storage"
 )
 
@@ -50,15 +48,6 @@ func handlePrincipal(args []string) {
 	}
 }
 
-// authOutcome is the JSON shape of `principal auth` (named after rcptctl's
-// auth command), mirroring the admin panel's CheckCredentialsResult (§3.2).
-type authOutcome struct {
-	Found            bool   `json:"found"`
-	DigestWellFormed bool   `json:"digestWellFormed"`
-	Match            bool   `json:"match"`
-	Note             string `json:"note"`
-}
-
 // handlePrincipalAuth is the offline credential check the admin panel
 // carries for §3.2: digesta1 is an opaque md5, so a realm mismatch shows up
 // only by recomputing the digest under the configured realm with a known
@@ -85,25 +74,7 @@ func handlePrincipalAuth(args []string) {
 		os.Exit(1)
 	}
 
-	res := authOutcome{}
-	switch {
-	case user == nil:
-		res.Note = "no users row — this account cannot log in"
-	case !wellFormedDigest(user.DigestA1):
-		res.Found = true
-		res.Note = "digesta1 is not a 32-char md5 hex — auth always fails"
-	default:
-		res.Found, res.DigestWellFormed = true, true
-		res.Match = subtle.ConstantTimeCompare(
-			[]byte(auth.DigestA1(username, *realm, pw)), []byte(user.DigestA1)) == 1
-		if res.Match {
-			res.Note = "credentials valid under realm " + *realm
-		} else {
-			res.Note = "no match under realm " + *realm +
-				" — wrong password, or the hash was minted under a different realm"
-		}
-	}
-
+	res := admin.CheckCredentials(user, username, pw, *realm)
 	if *jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -114,31 +85,6 @@ func handlePrincipalAuth(args []string) {
 	if !res.Match {
 		os.Exit(1)
 	}
-}
-
-// wellFormedDigest matches the admin panel's check: 32 lowercase hex chars.
-func wellFormedDigest(digest string) bool {
-	if len(digest) != 32 {
-		return false
-	}
-	for _, c := range digest {
-		if !strings.ContainsRune("0123456789abcdef", c) {
-			return false
-		}
-	}
-	return true
-}
-
-// principalRow is the list/JSON shape: the principals columns plus whether a
-// users row exists (groups and resources have none and cannot log in).
-type principalRow struct {
-	URI         string `json:"uri"`
-	DisplayName string `json:"displayName,omitempty"`
-	Email       string `json:"email,omitempty"`
-	HasUser     bool   `json:"hasUser"`
-	// Deletion is the purge date (YYYY-MM-DD) when this principal is
-	// soft-deleted, empty otherwise.
-	Deletion string `json:"deletion,omitempty"`
 }
 
 func handlePrincipalList(args []string) {
@@ -158,10 +104,6 @@ func handlePrincipalList(args []string) {
 		fmt.Fprintf(os.Stderr, "Failed to cross-check users: %v\n", err)
 		os.Exit(1)
 	}
-	noUser := map[string]bool{}
-	for _, p := range diags.PrincipalsWithoutUser {
-		noUser[p] = true
-	}
 	deletions, err := (&storage.AdminWrites{DB: q.DB}).Deletions()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to list pending deletions: %v\n", err)
@@ -172,16 +114,9 @@ func handlePrincipalList(args []string) {
 		purgeDate[d.Principal] = d.PurgeAfter.Format("2006-01-02")
 	}
 
-	rows := make([]principalRow, 0, len(principals))
-	for _, p := range principals {
-		row := principalRow{URI: p.URI, HasUser: !noUser[p.URI], Deletion: purgeDate[p.URI]}
-		if v, ok := p.Props[xml.Name{Space: davxml.NSDav, Local: "displayname"}].(string); ok {
-			row.DisplayName = v
-		}
-		if v, ok := p.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}].(string); ok {
-			row.Email = v
-		}
-		rows = append(rows, row)
+	rows := admin.PrincipalRows(principals, diags)
+	for i := range rows {
+		rows[i].Deletion = purgeDate[rows[i].URI]
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].URI < rows[j].URI })
 
