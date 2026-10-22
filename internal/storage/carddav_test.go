@@ -170,3 +170,59 @@ func TestSearchPrincipalsEscapesLike(t *testing.T) {
 		t.Errorf("SearchPrincipals(\"j_doe\") = %v, want [principals/jdoe] only — '_' must match literally, not as a LIKE wildcard", got)
 	}
 }
+
+// TestDeleteAllCardsSyncsUnderALimit covers DeleteAllCards stamping every
+// change row with one synctoken: a sync REPORT with a limit that cut through
+// those rows resumed from one past that token and never reported the rest of
+// the deletions.
+func TestDeleteAllCardsSyncsUnderALimit(t *testing.T) {
+	db := openCardDAVScratchDB(t, "calserver_d_deleteall")
+	backend := &storage.CardDAV{DB: db}
+
+	id, err := backend.CreateAddressBook("principals/admin", "contacts", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a.vcf", "b.vcf", "c.vcf"}
+	for _, uri := range want {
+		if _, err := backend.CreateCard(id, uri, []byte(fmt.Sprintf(testVCF, uri, uri))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	initial, err := backend.ChangesForAddressBook(id, "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := backend.DeleteAllCards(id); err != nil || n != 3 {
+		t.Fatalf("DeleteAllCards = %d, %v; want 3", n, err)
+	}
+
+	// Page through the changes one at a time, as a client with a limit does.
+	var deleted []string
+	token := initial.SyncToken
+	for range 10 {
+		cs, err := backend.ChangesForAddressBook(id, token, 1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted = append(deleted, cs.Deleted...)
+		token = cs.SyncToken
+		if !cs.Truncated {
+			break
+		}
+	}
+	if !reflect.DeepEqual(deleted, want) {
+		t.Fatalf("paged sync reported deletions %v, want %v", deleted, want)
+	}
+	// A later write must not reuse any of the deletions' tokens.
+	if _, err := backend.CreateCard(id, "d.vcf", []byte(fmt.Sprintf(testVCF, "d", "d"))); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := backend.ChangesForAddressBook(id, token, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cs.Added, []string{"d.vcf"}) || len(cs.Deleted) != 0 {
+		t.Fatalf("changes after the paged sync = %+v, want only d.vcf added", cs)
+	}
+}

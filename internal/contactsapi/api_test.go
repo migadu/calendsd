@@ -660,11 +660,11 @@ func TestDeleteAllIsScopedToTheWebmailBook(t *testing.T) {
 	if res.Deleted != 2 || res.Book != "webmail" {
 		t.Errorf("delete all = %+v, want 2 from webmail", res)
 	}
-	// One change row per deleted card, so a synced client learns of each, and
-	// the token moved — once, in four statements, not two per card.
+	// One change row per deleted card, so a synced client learns of each, each
+	// with its own token, so the token moved past both.
 	changesAfter, tokenAfter := counters()
-	if changesAfter-changesBefore != 2 || tokenAfter != tokenBefore+1 {
-		t.Errorf("delete-all: change rows +%d (want 2), synctoken %d → %d (want +1)",
+	if changesAfter-changesBefore != 2 || tokenAfter != tokenBefore+2 {
+		t.Errorf("delete-all: change rows +%d (want 2), synctoken %d → %d (want +2)",
 			changesAfter-changesBefore, tokenBefore, tokenAfter)
 	}
 	// An empty book: nothing deleted, nothing logged, token untouched.

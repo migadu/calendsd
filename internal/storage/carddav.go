@@ -268,9 +268,10 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 // row per card so a synced client learns of each deletion, in one
 // transaction of four statements regardless of how many cards there are —
 // not two per card, which for the 20,782-card book would be 40k round trips
-// under the book's row lock. All the change rows share one synctoken and the
-// token moves once, which is what recordChange does per card, batched; a
-// client syncing from an older token sees every uri as deleted either way.
+// under the book's row lock. Each change row gets its own synctoken, as
+// recordChange would give it, and the token moves past the last: a sync
+// REPORT with a limit resumes from one past the last change it returned, so
+// rows sharing a token would be skipped once a limit split them.
 // Returns how many were removed. The book itself stays.
 func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
 	n := 0
@@ -280,12 +281,10 @@ func (b *CardDAV) DeleteAllCards(addressBookID string) (int, error) {
 			`SELECT synctoken FROM addressbooks WHERE id = $1 FOR UPDATE`, addressBookID).Scan(&token); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`
+		res, err := tx.Exec(`
+WITH gone AS (DELETE FROM cards WHERE addressbookid = $1 RETURNING id, uri)
 INSERT INTO addressbookchanges (uri, synctoken, addressbookid, operation)
-SELECT uri, $2, $1, 3 FROM cards WHERE addressbookid = $1`, addressBookID, token); err != nil {
-			return err
-		}
-		res, err := tx.Exec(`DELETE FROM cards WHERE addressbookid = $1`, addressBookID)
+SELECT uri, $2 + row_number() OVER (ORDER BY id) - 1, $1, 3 FROM gone`, addressBookID, token)
 		if err != nil {
 			return err
 		}
@@ -297,7 +296,7 @@ SELECT uri, $2, $1, 3 FROM cards WHERE addressbookid = $1`, addressBookID, token
 		if n == 0 {
 			return nil // nothing changed: leave the token and the listeners alone
 		}
-		if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+1, addressBookID); err != nil {
+		if _, err := tx.Exec(`UPDATE addressbooks SET synctoken = $1 WHERE id = $2`, token+deleted, addressBookID); err != nil {
 			return err
 		}
 		_, err = tx.Exec(`SELECT pg_notify('dav_push', $1)`, "addressbook:"+addressBookID)
