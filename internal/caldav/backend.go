@@ -55,7 +55,9 @@ type ObjectInfo struct {
 	Component string
 }
 
-// QuotedETag returns the object's ETag surrounded by quotes.
+// QuotedETag returns the object's ETag surrounded by quotes. The Postgres
+// backend always supplies one; for an object without (the in-memory backends,
+// test fixtures) it is the md5 of the data, the same value storage derives.
 func (o *ObjectInfo) QuotedETag() string {
 	if o.ETag != "" {
 		return o.ETag

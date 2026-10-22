@@ -32,7 +32,9 @@ type CardInfo struct {
 	Size          int64
 }
 
-// QuotedETag returns the card's ETag surrounded by quotes.
+// QuotedETag returns the card's ETag surrounded by quotes. The Postgres
+// backend always supplies one; for a card without (the in-memory backends,
+// test fixtures) it is the md5 of the data, the same value storage derives.
 func (c *CardInfo) QuotedETag() string {
 	if c.ETag != "" {
 		return c.ETag
