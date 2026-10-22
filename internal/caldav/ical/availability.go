@@ -437,7 +437,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 	if err != nil {
 		return nil, invalidAvailability("AVAILABLE DTSTART: %v", err)
 	}
-	dur, err := masterDurationIn(ruleComp, ruleComp.Props.Get(goical.PropDateTimeStart), dtstart)
+	endOf, err := occurrenceEnd(ruleComp, ruleComp.Props.Get(goical.PropDateTimeStart), dtstart)
 	if err != nil {
 		return nil, invalidAvailability("AVAILABLE: %v", err)
 	}
@@ -467,7 +467,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 		if !more {
 			break
 		}
-		s, e := place(occ), place(occ.Add(dur))
+		s, e := place(occ), place(endOf(occ))
 		if !s.Before(end) {
 			break
 		}

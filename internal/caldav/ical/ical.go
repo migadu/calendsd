@@ -95,6 +95,31 @@ func IsRecurring(comp *goical.Component) bool {
 	return comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) != nil
 }
 
+// overridesOf maps the RECURRENCE-ID instants (read in loc) of master's
+// overrides, the other components in cal of its type and UID, to them.
+// Overrides whose RECURRENCE-ID doesn't parse are left out.
+func overridesOf(cal *goical.Calendar, master *goical.Component, loc *time.Location) map[int64]*goical.Component {
+	uid := ""
+	if p := master.Props.Get(goical.PropUID); p != nil {
+		uid = p.Value
+	}
+	out := map[int64]*goical.Component{}
+	for _, child := range cal.Children {
+		if child == master || child.Name != master.Name {
+			continue
+		}
+		if p := child.Props.Get(goical.PropUID); p == nil || p.Value != uid {
+			continue
+		}
+		if rid := child.Props.Get(goical.PropRecurrenceID); rid != nil {
+			if t, err := rid.DateTime(loc); err == nil {
+				out[t.Unix()] = child
+			}
+		}
+	}
+	return out
+}
+
 // ComponentType returns the first non-VTIMEZONE component name (VEVENT, VTODO,
 // VJOURNAL, …), or "" if the calendar has none. This is the type CalDAV
 // filters and validates against supported-calendar-component-set.

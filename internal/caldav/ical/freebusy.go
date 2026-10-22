@@ -57,15 +57,14 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 			continue // unparseable objects contribute nothing, like sabre
 		}
 		resolveNonIANATZIDs(cal)
-		overridden := overriddenSlots(cal, loc)
 		for _, comp := range cal.Children {
 			switch comp.Name {
 			case goical.CompEvent:
-				var skip map[int64]bool
+				var overrides map[int64]*goical.Component
 				if comp.Props.Get(goical.PropRecurrenceID) == nil {
-					skip = overridden[uidOf(comp)]
+					overrides = overridesOf(cal, comp, loc)
 				}
-				p, err := eventBusyPeriods(comp, start, end, loc, skip)
+				p, err := eventBusyPeriods(comp, start, end, loc, overrides)
 				if err != nil {
 					return nil, err
 				}
@@ -197,42 +196,10 @@ func parseFreeBusyPeriodEnd(start time.Time, s string) (time.Time, error) {
 	return parseFreeBusyTime(s)
 }
 
-// overriddenSlots maps each UID to the occurrences (by unix start) that have
-// a RECURRENCE-ID override of their own.
-func overriddenSlots(cal *goical.Calendar, loc *time.Location) map[string]map[int64]bool {
-	out := map[string]map[int64]bool{}
-	for _, comp := range cal.Children {
-		if comp.Name != goical.CompEvent {
-			continue
-		}
-		rid := comp.Props.Get(goical.PropRecurrenceID)
-		if rid == nil {
-			continue
-		}
-		t, err := rid.DateTime(loc)
-		if err != nil {
-			continue
-		}
-		uid := uidOf(comp)
-		if out[uid] == nil {
-			out[uid] = map[int64]bool{}
-		}
-		out[uid][t.Unix()] = true
-	}
-	return out
-}
-
-func uidOf(comp *goical.Component) string {
-	if p := comp.Props.Get(goical.PropUID); p != nil {
-		return p.Value
-	}
-	return ""
-}
-
 // eventBusyPeriods lists a VEVENT's busy time in [start, end). A master
 // leaves out the occurrences in overridden: each override counts on its own,
 // at its own time and with its own TRANSP and STATUS.
-func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location, overridden map[int64]bool) ([]busyPeriod, error) {
+func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location, overridden map[int64]*goical.Component) ([]busyPeriod, error) {
 	if transp := comp.Props.Get("TRANSP"); transp != nil && strings.EqualFold(transp.Value, "TRANSPARENT") {
 		return nil, nil
 	}
@@ -276,7 +243,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return nil, err
 	}
 	if !IsRecurring(comp) {
-		if overridden[dtstart.Unix()] {
+		if overridden[dtstart.Unix()] != nil {
 			return nil, nil
 		}
 		if p := clamp(dtstart, endOf(dtstart)); p != nil {
@@ -299,7 +266,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if !more || !occStart.Before(end) {
 			break
 		}
-		if overridden[occStart.Unix()] {
+		if overridden[occStart.Unix()] != nil {
 			continue
 		}
 		if p := clamp(occStart, endOf(occStart)); p != nil {

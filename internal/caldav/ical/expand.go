@@ -237,42 +237,34 @@ func utcInstance(comp *goical.Component, start, end time.Time, loc *time.Locatio
 	return inst, true, nil
 }
 
+// setUTCDateTime writes t as a UTC date-time into comp's first name property,
+// dropping its TZID and VALUE and keeping its other params.
 func setUTCDateTime(comp *goical.Component, name string, t time.Time) {
-	props := comp.Props.Values(name)
-	prop := goical.NewProp(name)
-	if len(props) > 0 {
-		// Preserve position/other params by editing the existing prop.
-		prop = &props[0]
-	}
-	prop.Params.Del(goical.PropTimezoneID)
-	prop.Params.Del("VALUE")
-	prop.Value = t.UTC().Format("20060102T150405Z")
-	if len(props) > 0 {
-		props[0] = *prop
-		comp.Props[name] = props
-	} else {
-		comp.Props.Set(prop)
-	}
+	setDateProp(comp, name, t.UTC().Format("20060102T150405Z"), "")
 }
 
 // setDateValue writes a DATE-valued property (all-day), keeping VALUE=DATE and
 // the calendar date in loc, dropping any TZID. t is the occurrence start in the
 // calendar's location, whose date is the wanted calendar day.
 func setDateValue(comp *goical.Component, name string, t time.Time) {
-	props := comp.Props.Values(name)
-	prop := goical.NewProp(name)
-	if len(props) > 0 {
-		prop = &props[0]
-	}
-	prop.Params.Del(goical.PropTimezoneID)
-	prop.Params.Set("VALUE", "DATE")
-	prop.Value = t.Format("20060102")
-	if len(props) > 0 {
-		props[0] = *prop
+	setDateProp(comp, name, t.Format("20060102"), "DATE")
+}
+
+// setDateProp sets the value of comp's first name property (adding one if
+// there is none) and its VALUE parameter (none for ""), dropping any TZID.
+func setDateProp(comp *goical.Component, name, value, valueType string) {
+	props := comp.Props[name]
+	if len(props) == 0 {
+		props = []goical.Prop{*goical.NewProp(name)}
 		comp.Props[name] = props
-	} else {
-		comp.Props.Set(prop)
 	}
+	props[0].Params.Del(goical.PropTimezoneID)
+	if valueType == "" {
+		props[0].Params.Del("VALUE")
+	} else {
+		props[0].Params.Set("VALUE", valueType)
+	}
+	props[0].Value = value
 }
 
 // cloneComponent deep-copies a component.
@@ -281,11 +273,7 @@ func cloneComponent(src *goical.Component) *goical.Component {
 	for name, props := range src.Props {
 		copied := make([]goical.Prop, len(props))
 		for i, p := range props {
-			cp := goical.Prop{Name: p.Name, Value: p.Value, Params: goical.Params{}}
-			for k, vs := range p.Params {
-				cp.Params[k] = append([]string(nil), vs...)
-			}
-			copied[i] = cp
+			copied[i] = cloneProp(p)
 		}
 		dst.Props[name] = copied
 	}
