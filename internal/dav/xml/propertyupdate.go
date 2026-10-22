@@ -105,7 +105,7 @@ func parsePropValue(dec *xml.Decoder, start xml.StartElement) (any, error) {
 			fragment.WriteString("</" + t.Name.Local + ">")
 		case xml.CharData:
 			text.Write(t)
-			fragment.WriteString(escapeXMLText(string(t)))
+			fragment.WriteString(escapeText(string(t)))
 		}
 	}
 }
@@ -115,7 +115,7 @@ func parsePropValue(dec *xml.Decoder, start xml.StartElement) (any, error) {
 func writeSelfContainedStart(b *strings.Builder, t xml.StartElement) {
 	b.WriteString("<" + t.Name.Local)
 	if t.Name.Space != "" {
-		b.WriteString(` xmlns="` + escapeXMLAttr(t.Name.Space) + `"`)
+		b.WriteString(` xmlns="` + escapeText(t.Name.Space) + `"`)
 	}
 	for _, attr := range t.Attr {
 		if attr.Name.Space == "xmlns" || (attr.Name.Space == "" && attr.Name.Local == "xmlns") {
@@ -126,20 +126,10 @@ func writeSelfContainedStart(b *strings.Builder, t xml.StartElement) {
 			// the full URI-in-clark form is not valid XML, so skip the
 			// namespace (matching how sabre's fragment storage behaves
 			// for undeclared attribute prefixes).
-			b.WriteString(" " + attr.Name.Local + `="` + escapeXMLAttr(attr.Value) + `"`)
+			b.WriteString(" " + attr.Name.Local + `="` + escapeText(attr.Value) + `"`)
 			continue
 		}
-		b.WriteString(" " + attr.Name.Local + `="` + escapeXMLAttr(attr.Value) + `"`)
+		b.WriteString(" " + attr.Name.Local + `="` + escapeText(attr.Value) + `"`)
 	}
 	b.WriteString(">")
-}
-
-func escapeXMLText(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
-}
-
-func escapeXMLAttr(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", `"`, "&quot;")
-	return r.Replace(s)
 }

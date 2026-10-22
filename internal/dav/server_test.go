@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,45 @@ import (
 	"testing"
 	"time"
 )
+
+// WriteError's body is well-formed XML whatever the message holds, and
+// carries the preconditions in their own namespaces.
+func TestWriteErrorBody(t *testing.T) {
+	s := NewServer("/", testRoot())
+	rec := httptest.NewRecorder()
+	s.WriteError(rec, &Error{
+		Status:       http.StatusForbidden,
+		Exception:    `Sabre\DAV\Exception\Forbidden`,
+		Message:      `a <b> & "c" ]]>`,
+		Precondition: []xml.Name{{Space: "urn:ietf:params:xml:ns:caldav", Local: "valid-calendar-data"}},
+	})
+	var doc struct {
+		XMLName      xml.Name  `xml:"DAV: error"`
+		Precondition *struct{} `xml:"urn:ietf:params:xml:ns:caldav valid-calendar-data"`
+		Exception    string    `xml:"http://sabredav.org/ns exception"`
+		Message      string    `xml:"http://sabredav.org/ns message"`
+	}
+	if err := xml.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("error body is not XML: %v\n%s", err, rec.Body.String())
+	}
+	if doc.Precondition == nil || doc.Exception != `Sabre\DAV\Exception\Forbidden` || doc.Message != `a <b> & "c" ]]>` {
+		t.Errorf("error body = %+v:\n%s", doc, rec.Body.String())
+	}
+}
+
+// supported-method-set lists one supported-method element per allowed
+// method.
+func TestSupportedMethodSet(t *testing.T) {
+	s := NewServer("/", testRoot())
+	req := httptest.NewRequest("PROPFIND", "/", strings.NewReader(
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:supported-method-set/></d:prop></d:propfind>`))
+	req.Header.Set("Depth", "0")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if body := rec.Body.String(); !strings.Contains(body, `<d:supported-method name="PROPFIND"/>`) {
+		t.Errorf("supported-method-set missing PROPFIND:\n%s", body)
+	}
+}
 
 func TestOptions(t *testing.T) {
 	s := NewServer("/", testRoot())

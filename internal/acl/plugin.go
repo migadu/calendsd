@@ -318,7 +318,7 @@ func (p *Plugin) principalPropertySearchReport(body []byte, path string, w http.
 			ms.Responses = append(ms.Responses, responses...)
 		}
 	}
-	return writeMultiStatus(w, ms)
+	return p.server.WriteMultiStatus(w, ms)
 }
 
 // backendSearch runs a principal search against the collection at prefix.
@@ -339,36 +339,40 @@ func (p *Plugin) principalCollectionPrefixes() []string {
 	return []string{"principals"}
 }
 
+// principalSearchPropertySetXML is the principal-search-property-set report
+// body (RFC 3744 §9.5).
+type principalSearchPropertySetXML struct {
+	XMLName    xml.Name                     `xml:"DAV: principal-search-property-set"`
+	Properties []principalSearchPropertyXML `xml:"DAV: principal-search-property"`
+}
+
+type principalSearchPropertyXML struct {
+	Prop struct {
+		Name struct{ XMLName xml.Name }
+	} `xml:"DAV: prop"`
+	Description struct {
+		Lang string `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
+		Text string `xml:",chardata"`
+	} `xml:"DAV: description"`
+}
+
 func (p *Plugin) principalSearchPropertySetReport(w http.ResponseWriter) error {
-	var b bytes.Buffer
-	b.WriteString(xml.Header)
-	b.WriteString(`<d:principal-search-property-set xmlns:d="DAV:" xmlns:s="` + davxml.NSSabreDAV + `">` + "\n")
+	var doc principalSearchPropertySetXML
 	for _, sp := range principalSearchProps {
-		b.WriteString(" <d:principal-search-property>\n  <d:prop>\n")
-		b.WriteString("   " + emptyElement(sp.name) + "\n")
-		b.WriteString("  </d:prop>\n")
-		b.WriteString(`  <d:description xml:lang="en">` + xmlEscape(sp.description) + "</d:description>\n")
-		b.WriteString(" </d:principal-search-property>\n")
+		var prop principalSearchPropertyXML
+		prop.Prop.Name.XMLName = sp.name
+		prop.Description.Lang = "en"
+		prop.Description.Text = sp.description
+		doc.Properties = append(doc.Properties, prop)
 	}
-	b.WriteString("</d:principal-search-property-set>\n")
+	out, err := xml.MarshalIndent(doc, "", " ")
+	if err != nil {
+		return err
+	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, err := w.Write(b.Bytes())
+	_, err = w.Write(append([]byte(xml.Header), append(out, '\n')...))
 	return err
-}
-
-// emptyElement renders a clark-name as an empty prefixed element.
-func emptyElement(n xml.Name) string {
-	prefix := "d"
-	if n.Space == davxml.NSSabreDAV {
-		prefix = "s"
-	}
-	return "<" + prefix + ":" + n.Local + "/>"
-}
-
-func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
 }
 
 type expandPropertyXML struct {
@@ -398,7 +402,7 @@ func (p *Plugin) expandPropertyReport(body []byte, path string, w http.ResponseW
 	if err != nil {
 		return err
 	}
-	return writeMultiStatus(w, &davxml.MultiStatus{Responses: responses})
+	return p.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: responses})
 }
 
 func (p *Plugin) expandProperties(ctx context.Context, path string, requested []expandPropEntry, depth int) ([]davxml.Response, error) {
@@ -587,7 +591,7 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 			})
 		}
 	}
-	return writeMultiStatus(w, ms)
+	return p.server.WriteMultiStatus(w, ms)
 }
 
 // okHrefs extracts the 200-status Href value of a property from a response.
@@ -654,16 +658,5 @@ func (p *Plugin) aclPrincipalPropSetReport(body []byte, path string, w http.Resp
 		}
 		ms.Responses = append(ms.Responses, responses...)
 	}
-	return writeMultiStatus(w, ms)
-}
-
-func writeMultiStatus(w http.ResponseWriter, ms *davxml.MultiStatus) error {
-	body, err := ms.Marshal()
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(body)
-	return err
+	return p.server.WriteMultiStatus(w, ms)
 }

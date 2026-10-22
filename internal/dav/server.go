@@ -3,7 +3,6 @@ package dav
 import (
 	"context"
 	"encoding/xml"
-	"fmt"
 	"net/http"
 	"net/url"
 	gopath "path"
@@ -272,25 +271,41 @@ func (s *Server) WriteError(w http.ResponseWriter, err error) {
 		h.Set("Allow", strings.Join(s.AllowedMethods(""), ", "))
 	}
 	w.WriteHeader(de.Status)
-	var pre strings.Builder
+	body := errorBody{Exception: de.Exception, Message: de.Message}
 	for _, name := range de.Precondition {
-		// A self-closing precondition element carrying its own namespace,
-		// like sabre's exception::serialize output.
-		fmt.Fprintf(&pre, "  <x:%s xmlns:x=\"%s\"/>\n",
-			xmlEscape(name.Local), xmlEscape(name.Space))
+		body.Precondition = append(body.Precondition, emptyElement{XMLName: name})
 	}
-	fmt.Fprintf(w, xml.Header+
-		"<d:error xmlns:d=\"DAV:\" xmlns:s=\"%s\">\n"+
-		"%s"+
-		"  <s:exception>%s</s:exception>\n"+
-		"  <s:message>%s</s:message>\n"+
-		"</d:error>\n",
-		davxml.NSSabreDAV, pre.String(), xmlEscape(de.Exception), xmlEscape(de.Message))
+	out, err := xml.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return
+	}
+	_, _ = w.Write(append([]byte(xml.Header), append(out, '\n')...))
 }
 
-func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
+// errorBody is the {DAV:}error document WriteError sends: the precondition
+// elements, then the sabre exception identity.
+type errorBody struct {
+	XMLName      xml.Name `xml:"DAV: error"`
+	Precondition []emptyElement
+	Exception    string `xml:"http://sabredav.org/ns exception"`
+	Message      string `xml:"http://sabredav.org/ns message"`
+}
+
+// emptyElement marshals as an empty element named by its XMLName.
+type emptyElement struct {
+	XMLName xml.Name
+}
+
+// WriteMultiStatus writes ms as a 207 Multi-Status response.
+func (s *Server) WriteMultiStatus(w http.ResponseWriter, ms *davxml.MultiStatus) error {
+	body, err := ms.Marshal()
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusMultiStatus)
+	_, err = w.Write(body)
+	return err
 }
 
 // PropertiesForPath runs the PROPFIND machinery for a path: depth 0 or 1,

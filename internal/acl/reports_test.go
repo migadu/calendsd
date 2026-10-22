@@ -71,11 +71,22 @@ func TestPrincipalSearchPropertySet(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status = %d", w.Code)
 	}
-	out := w.Body.String()
-	if !strings.Contains(out, "principal-search-property-set") ||
-		!strings.Contains(out, "<d:displayname/>") ||
-		!strings.Contains(out, "Display name") {
-		t.Errorf("search-property-set body wrong:\n%s", out)
+	var doc struct {
+		XMLName    xmlName `xml:"DAV: principal-search-property-set"`
+		Properties []struct {
+			Prop struct {
+				Names []struct{ XMLName xmlName } `xml:",any"`
+			} `xml:"DAV: prop"`
+			Description string `xml:"DAV: description"`
+		} `xml:"DAV: principal-search-property"`
+	}
+	if err := xml.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("search-property-set body: %v\n%s", err, w.Body.String())
+	}
+	if len(doc.Properties) == 0 || len(doc.Properties[0].Prop.Names) != 1 ||
+		doc.Properties[0].Prop.Names[0].XMLName != (xmlName{Space: "DAV:", Local: "displayname"}) ||
+		doc.Properties[0].Description != "Display name" {
+		t.Errorf("search-property-set body wrong:\n%s", w.Body.String())
 	}
 }
 

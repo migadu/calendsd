@@ -222,14 +222,7 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 		})
 	}
 
-	body, err := ms.Marshal()
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(body)
-	return err
+	return p.server.WriteMultiStatus(w, ms)
 }
 
 // syncResourceLabel maps a synced collection's path onto the closed resource

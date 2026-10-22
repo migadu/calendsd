@@ -263,16 +263,8 @@ func (p *TempFileFilterPlugin) propfind(w http.ResponseWriter, reqPath, loc stri
 			},
 		}},
 	}
-	body, err := (&davxml.MultiStatus{Responses: []davxml.Response{resp}}).Marshal()
-	if err != nil {
-		return false, err
-	}
-	h := w.Header()
-	h.Set("Content-Type", "application/xml; charset=utf-8")
-	h.Set("X-Sabre-Temp", "true")
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(body)
-	return false, err
+	w.Header().Set("X-Sabre-Temp", "true")
+	return false, p.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
 }
 
 // reserve accounts for a write of delta bytes and newFiles files, refusing it

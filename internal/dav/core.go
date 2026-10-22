@@ -416,17 +416,10 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	h := w.Header()
-	h.Set("Content-Type", "application/xml; charset=utf-8")
 	h.Set("Vary", "Brief,Prefer")
 	// iCal depends on DAV headers on PROPFIND responses, like sabre notes.
 	h.Set("DAV", strings.Join(c.server.Features(), ", "))
-	body, err := (&davxml.MultiStatus{Responses: responses}).Marshal()
-	if err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(body)
-	return err
+	return c.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: responses})
 }
 
 func (c *CorePlugin) proppatch(w http.ResponseWriter, r *http.Request) error {
@@ -458,17 +451,8 @@ func (c *CorePlugin) proppatch(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	resp := propstatResponse(c.server.Href(path), update.Names, result)
-
-	h := w.Header()
-	h.Set("Content-Type", "application/xml; charset=utf-8")
-	h.Set("Vary", "Brief,Prefer")
-	body, err := (&davxml.MultiStatus{Responses: []davxml.Response{resp}}).Marshal()
-	if err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(body)
-	return err
+	w.Header().Set("Vary", "Brief,Prefer")
+	return c.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
 }
 
 // propstatResponse renders per-property results as one response with one
@@ -677,7 +661,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		if failed {
 			_ = c.server.Tree.Delete(path)
 			resp := propstatResponse(c.server.Href(path), names, result)
-			return writeMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
+			return c.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: []davxml.Response{resp}})
 		}
 	}
 	w.Header().Set("Content-Length", "0")
@@ -699,18 +683,6 @@ func sortedNames(m map[xml.Name]any) []xml.Name {
 		return strings.Compare(a.Local, b.Local)
 	})
 	return out
-}
-
-// writeMultiStatus writes ms as a 207 response.
-func writeMultiStatus(w http.ResponseWriter, ms *davxml.MultiStatus) error {
-	out, err := ms.Marshal()
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(out)
-	return err
 }
 
 func (c *CorePlugin) copy(w http.ResponseWriter, r *http.Request) error {
@@ -962,14 +934,7 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 		return reports
 	})
 	pf.Handle(dav("supported-method-set"), func() any {
-		// Rendered as sabre emits it: <d:supported-method name="..."/>
-		// children (the d: prefix is always declared on the multistatus
-		// root).
-		var b strings.Builder
-		for _, m := range s.AllowedMethods(pf.Path()) {
-			fmt.Fprintf(&b, `<d:supported-method name="%s"/>`, m)
-		}
-		return davxml.Raw(b.String())
+		return davxml.SupportedMethodSet(s.AllowedMethods(pf.Path()))
 	})
 }
 

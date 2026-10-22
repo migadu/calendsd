@@ -35,6 +35,11 @@ type ReportSet []xml.Name
 // {DAV:}privilege wrapper per privilege name (RFC 3744 §5.4).
 type PrivilegeSet []xml.Name
 
+// SupportedMethodSet renders as {DAV:}supported-method-set content: one
+// {DAV:}supported-method element per method, named by its name attribute
+// (RFC 3253 §3.1.3).
+type SupportedMethodSet []string
+
 // ResponseList renders nested {DAV:}response elements inside a property,
 // used by expand-property to inline a referenced resource's properties.
 type ResponseList []Response
@@ -57,6 +62,7 @@ func (NameSet) isValue()               {}
 func (Href) isValue()                  {}
 func (ReportSet) isValue()             {}
 func (PrivilegeSet) isValue()          {}
+func (SupportedMethodSet) isValue()    {}
 func (ResponseList) isValue()          {}
 func (SupportedPrivilegeSet) isValue() {}
 
@@ -254,6 +260,12 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 			fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(n, prefix))
 		}
 		fmt.Fprintf(b, "</%s>\n", tag)
+	case SupportedMethodSet:
+		fmt.Fprintf(b, "    <%s>", tag)
+		for _, m := range v {
+			fmt.Fprintf(b, `<d:supported-method name="%s"/>`, escapeText(m))
+		}
+		fmt.Fprintf(b, "</%s>\n", tag)
 	case SupportedPrivilegeSet:
 		fmt.Fprintf(b, "    <%s>", tag)
 		for _, sp := range v {
@@ -303,6 +315,8 @@ func statusLine(code int) string {
 	return fmt.Sprintf("%d %s", code, http.StatusText(code))
 }
 
+// escapeText escapes s for XML character data and attribute values alike
+// (xml.EscapeText escapes quotes too). It is this package's only escaper.
 func escapeText(s string) string {
 	var b bytes.Buffer
 	if err := xml.EscapeText(&b, []byte(s)); err != nil {
