@@ -12,7 +12,10 @@ package health
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -62,6 +65,10 @@ type Options struct {
 	RcptdToken string
 	Timeout    time.Duration // per check; zero takes DefaultTimeout
 	HTTP       *http.Client  // nil uses a client without its own timeout (ctx bounds it)
+	// ServerName is the TLS name the DAV probe verifies when ServerURL is
+	// https. The probe dials loopback, which the certificate does not name,
+	// so it is taken from the certificate itself; empty uses the URL host.
+	ServerName string
 }
 
 // OptionsFromConfig derives every probe target from the same config file the
@@ -72,6 +79,9 @@ func OptionsFromConfig(cfg config.Config) Options {
 		DSN:        cfg.Database.DSN,
 		RcptdURL:   strings.TrimRight(cfg.Server.Rcptd.URL, "/"),
 		RcptdToken: cfg.Server.Rcptd.Token,
+	}
+	if cfg.Server.TLS.Cert != "" {
+		o.ServerName = certName(cfg.Server.TLS.Cert)
 	}
 	if o.RcptdToken == "" {
 		o.RcptdToken = os.Getenv("RCPTD_AUTH_TOKEN")
@@ -104,6 +114,33 @@ func ServerURL(cfg config.Config) string {
 		base = "/" + base
 	}
 	return scheme + "://" + loopback(addr, "8080") + base
+}
+
+// certName is the first name the PEM certificate at path is valid for, or ""
+// when it cannot be read (then the probe reports the TLS error it gets).
+func certName(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			return ""
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return ""
+		}
+		if len(leaf.DNSNames) > 0 {
+			return leaf.DNSNames[0]
+		}
+		return leaf.Subject.CommonName
+	}
 }
 
 // loopback rewrites a listen address into one a local client can dial.
@@ -297,6 +334,9 @@ func (c cancelOnClose) Close() error { err := c.ReadCloser.Close(); c.cancel(); 
 // HTTP answer proves it is up; auth usually answers 401 before DAV runs.
 func checkServer(ctx context.Context, o Options) Result {
 	t := startTimer()
+	if o.ServerName != "" {
+		o.HTTP = withServerName(o.HTTP, o.ServerName)
+	}
 	resp, err := o.get(ctx, http.MethodOptions, o.ServerURL, nil)
 	if err != nil {
 		return t.result("calserver", Unhealthy, o.ServerURL, err.Error())
@@ -310,6 +350,27 @@ func checkServer(ctx context.Context, o Options) Result {
 		msg = "responding (auth required)"
 	}
 	return t.result("calserver", Healthy, o.ServerURL, msg)
+}
+
+// withServerName copies c with its transport verifying TLS against name
+// instead of the dialed host. Only the DAV probe gets it: the other probes
+// share c and reach hosts the certificate does not cover.
+func withServerName(c *http.Client, name string) *http.Client {
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		if c.Transport != nil {
+			return c // a custom RoundTripper we cannot reconfigure
+		}
+		tr = http.DefaultTransport.(*http.Transport)
+	}
+	tr = tr.Clone()
+	if tr.TLSClientConfig == nil {
+		tr.TLSClientConfig = &tls.Config{}
+	}
+	tr.TLSClientConfig.ServerName = name
+	cc := *c
+	cc.Transport = tr
+	return &cc
 }
 
 // checkContactsAPI probes the webmail contacts listener without credentials.
