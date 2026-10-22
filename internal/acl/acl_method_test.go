@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"calserver/internal/acl"
 )
 
 // TestACLMethodEmptyBody: an ACL request with no body is a 400, matching
@@ -26,6 +28,34 @@ func TestACLMethodForbiddenOnFixedACL(t *testing.T) {
 	w := request(t, buildServer("principals/admin"), "ACL", "/calendars/user1/cal/", body)
 	if w.Code != 403 {
 		t.Errorf("ACL on fixed-ACL node = %d, want 403 (setACL unsupported):\n%s", w.Code, w.Body.String())
+	}
+}
+
+// TestACLForNodeIsEffectiveACL: ACLForNode reports the ACL privilege checks
+// evaluate — the default ACL for a node without its own, and the
+// authenticated-read grant on principals when that option is on — not only
+// the node's own ACEs.
+func TestACLForNodeIsEffectiveACL(t *testing.T) {
+	srv := buildServer("principals/admin")
+	plugin := srv.Plugin("acl").(*acl.Plugin)
+	plugin.PrincipalsReadableByAuthenticated = true
+
+	hasAuthRead := func(aces []acl.ACE) bool {
+		for _, ace := range aces {
+			if ace.Privilege == "{DAV:}read" && ace.Principal == "{DAV:}authenticated" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, path := range []string{"", "principals/user1"} {
+		node, err := srv.Tree.NodeForPath(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := plugin.ACLForNode(node); !hasAuthRead(got) {
+			t.Errorf("ACLForNode(%q) = %+v, want {DAV:}read for {DAV:}authenticated", path, got)
+		}
 	}
 }
 

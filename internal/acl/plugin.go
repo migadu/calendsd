@@ -82,17 +82,10 @@ func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// ACLForNode merges a node's own ACL with the admin ACEs, mirroring sabre's
-// Plugin::getACL.
+// ACLForNode returns the effective ACL of a node — the one privilege checks
+// evaluate (see nodeACL) — for the admin simulator's ACL view.
 func (p *Plugin) ACLForNode(node dav.Node) []ACE {
-	var acl []ACE
-	if holder, ok := node.(ACLHolder); ok {
-		acl = append(acl, holder.ACL()...)
-	}
-	for _, admin := range p.AdminPrincipals {
-		acl = append(acl, ACE{Privilege: "{DAV:}all", Principal: admin, Protected: true})
-	}
-	return acl
+	return p.nodeACL(node)
 }
 
 // PropFind implements dav.PropFindHook: read-gating, principal properties,
@@ -634,7 +627,7 @@ func (p *Plugin) aclPrincipalPropSetReport(body []byte, path string, w http.Resp
 	}
 	var principals []string
 	seen := map[string]bool{}
-	for _, ace := range p.ACLForNode(node) {
+	for _, ace := range p.nodeACL(node) {
 		// Pseudo-principals like {DAV:}owner carry no href.
 		if strings.HasPrefix(ace.Principal, "{") || seen[ace.Principal] {
 			continue
