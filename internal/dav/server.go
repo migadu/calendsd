@@ -456,8 +456,6 @@ func isCollectionNode(n Node) bool {
 	return ok
 }
 
-// encodePath percent-encodes a path, segment-preserving, like sabre's
-// HTTP\encodePath.
 // VisibleChildren lists a collection's children minus those a plugin hides
 // from the requester (e.g. domain-scoped principal listings). Every listing
 // goes through here, so a filtered child leaves no trace in any response.
@@ -474,6 +472,14 @@ func (s *Server) VisibleChildren(ctx context.Context, path string, coll Collecti
 	return children, nil
 }
 
+// Href renders a server-relative path as an href: the base URI plus the
+// percent-encoded path. ResolveHref is its inverse.
+func (s *Server) Href(path string) string {
+	return s.BaseURI + encodePath(path)
+}
+
+// encodePath percent-encodes a path, segment-preserving, like sabre's
+// HTTP\encodePath.
 func encodePath(p string) string {
 	segs := strings.Split(p, "/")
 	for i, seg := range segs {

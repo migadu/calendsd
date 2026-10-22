@@ -429,7 +429,10 @@ func (p *Plugin) expandProperties(ctx context.Context, path string, requested []
 				}
 				var nested []davxml.Response
 				for _, href := range hrefs {
-					childPath := strings.Trim(strings.TrimPrefix(href, p.server.BaseURI), "/")
+					childPath, err := p.server.ResolveHref(href)
+					if err != nil {
+						continue // not a resource on this server
+					}
 					sub, err := p.expandProperties(ctx, childPath, children, 0)
 					if err != nil {
 						return nil, err
@@ -547,13 +550,14 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 			return err
 		}
 		for _, cand := range candidates {
-			hrefs := okHrefs(cand, propName)
-			for _, href := range hrefs {
-				href = strings.Trim(strings.TrimPrefix(href, p.server.BaseURI), "/")
-				for _, principal := range currentPrincipals {
-					if href == principal {
-						matches = append(matches, strings.Trim(strings.TrimPrefix(cand.Href, p.server.BaseURI), "/"))
-					}
+			candPath, err := p.server.ResolveHref(cand.Href)
+			if err != nil {
+				continue
+			}
+			for _, href := range okHrefs(cand, propName) {
+				target, err := p.server.ResolveHref(href)
+				if err == nil && slices.Contains(currentPrincipals, target) {
+					matches = append(matches, candPath)
 				}
 			}
 		}
@@ -577,7 +581,7 @@ func (p *Plugin) principalMatchReport(body []byte, path string, w http.ResponseW
 			}
 		} else {
 			ms.Responses = append(ms.Responses, davxml.Response{
-				Href:   p.server.BaseURI + match,
+				Href:   p.server.Href(match),
 				Status: http.StatusOK,
 				Bare:   true,
 			})

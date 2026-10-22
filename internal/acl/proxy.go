@@ -1,9 +1,10 @@
 package acl
 
 import (
+	"bytes"
+	"context"
 	"encoding/xml"
 	"io"
-	"regexp"
 	"strings"
 	"time"
 
@@ -124,17 +125,9 @@ func (p *ProxyPrincipalNode) Props(names []xml.Name) (map[xml.Name]any, error) {
 	return out, nil
 }
 
-// PropPatch handles group-member-set writes: this is how a client (or the
-// calendar owner) configures who may act as their delegate.
-func (p *ProxyPrincipalNode) PropPatch(pp *dav.PropPatch) {
-	name := xml.Name{Space: davxml.NSDav, Local: "group-member-set"}
-	pp.Handle([]xml.Name{name}, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
-		if err := p.backend.SetGroupMemberSet(p.uri, parseHrefs(values[name])); err != nil {
-			return nil, false
-		}
-		return nil, true
-	})
-}
+// PropPatch claims nothing: group-member-set writes need the server to
+// resolve their hrefs, so the acl Plugin handles them (Plugin.PrePropPatch).
+func (p *ProxyPrincipalNode) PropPatch(pp *dav.PropPatch) {}
 
 // ACL grants the owning user full control of their own proxy settings.
 func (p *ProxyPrincipalNode) ACL() []ACE {
@@ -147,26 +140,65 @@ func (p *ProxyPrincipalNode) Owner() string {
 	return parent
 }
 
-var hrefRe = regexp.MustCompile(`(?i)<(?:[a-z0-9]+:)?href[^>]*>\s*([^<\s][^<]*?)\s*</(?:[a-z0-9]+:)?href\s*>`)
-
-// parseHrefs extracts principal paths from a group-member-set PROPPATCH value
-// (a fragment of <href> elements). Hrefs are normalized to bare principal paths
-// (leading/trailing slashes trimmed), matching how principals are stored.
-func parseHrefs(value any) []string {
-	var raw []byte
-	switch v := value.(type) {
-	case []byte:
-		raw = v
-	case string:
-		raw = []byte(v)
-	default:
+// PrePropPatch implements dav.PrePropPatchHook for proxy principals: a write
+// of group-member-set is how a client (or the calendar owner) configures who
+// may act as their delegate.
+func (p *Plugin) PrePropPatch(_ context.Context, _ string, node dav.Node, pp *dav.PropPatch) error {
+	proxy, ok := node.(*ProxyPrincipalNode)
+	if !ok {
 		return nil
 	}
+	name := xml.Name{Space: davxml.NSDav, Local: "group-member-set"}
+	pp.Handle([]xml.Name{name}, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+		members, err := p.parseHrefs(values[name])
+		if err != nil {
+			return nil, false
+		}
+		if err := proxy.backend.SetGroupMemberSet(proxy.uri, members); err != nil {
+			return nil, false
+		}
+		return nil, true
+	})
+	return nil
+}
+
+// parseHrefs resolves the {DAV:}href elements of a PROPPATCH value (a
+// self-contained XML fragment, see davxml.ParsePropertyUpdate) to
+// server-relative paths, the form principals are stored in. Text content
+// and removal carry no hrefs; an href outside the server fails.
+func (p *Plugin) parseHrefs(value any) ([]string, error) {
+	raw, ok := value.([]byte)
+	if !ok {
+		return nil, nil
+	}
+	dec := xml.NewDecoder(io.MultiReader(
+		strings.NewReader("<v>"), bytes.NewReader(raw), strings.NewReader("</v>")))
 	var out []string
-	for _, m := range hrefRe.FindAllSubmatch(raw, -1) {
-		if href := strings.Trim(string(m[1]), "/ \t\r\n"); href != "" {
-			out = append(out, href)
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok || start.Name != (xml.Name{Space: davxml.NSDav, Local: "href"}) {
+			continue
+		}
+		var href string
+		if err := dec.DecodeElement(&href, &start); err != nil {
+			return nil, err
+		}
+		if href = strings.TrimSpace(href); href == "" {
+			continue
+		}
+		path, err := p.server.ResolveHref(href)
+		if err != nil {
+			return nil, err
+		}
+		if path != "" {
+			out = append(out, path)
 		}
 	}
-	return out
 }

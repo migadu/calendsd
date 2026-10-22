@@ -80,6 +80,76 @@ func TestCalendarProxyDelegation(t *testing.T) {
 	}
 }
 
+// group-member-set hrefs resolve like any other href: the base URI is
+// stripped, absolute URLs and percent-escapes are understood, the DAV
+// namespace may carry any prefix, and an href outside the server fails.
+func TestProxyGroupMemberSetResolvesHrefs(t *testing.T) {
+	backend := &acl.MemoryBackend{
+		Principals: []acl.Principal{{URI: "principals/user1"}, {URI: "principals/user2"}, {URI: "principals/user 3"}},
+		Groups:     map[string][]string{},
+	}
+	root := mock.NewCollection("root")
+	pc := acl.NewPrincipalCollection(backend, "principals")
+	pc.Proxies = true
+	root.Attach(pc)
+	srv := dav.NewServer("/dav/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{})
+
+	patch := func(hrefs string) *httptest.ResponseRecorder {
+		return do(t, srv, "PROPPATCH", "/dav/principals/user1/calendar-proxy-write/",
+			`<?xml version="1.0"?><x:propertyupdate xmlns:x="DAV:"><x:set><x:prop>`+
+				`<x:group-member-set>`+hrefs+`</x:group-member-set>`+
+				`</x:prop></x:set></x:propertyupdate>`)
+	}
+	rec := patch(`<x:href>/dav/principals/user2/</x:href><x:href> https://cal.example/dav/principals/user%203/ </x:href>`)
+	if rec.Code != 207 || strings.Contains(rec.Body.String(), "403") {
+		t.Fatalf("PROPPATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+	members := backend.Groups["principals/user1/calendar-proxy-write"]
+	if len(members) != 2 || members[0] != "principals/user2" || members[1] != "principals/user 3" {
+		t.Errorf("group-member-set = %q, want [principals/user2 principals/user 3]", members)
+	}
+
+	rec = patch(`<x:href>/elsewhere/principals/user2/</x:href>`)
+	if !strings.Contains(rec.Body.String(), "403") {
+		t.Errorf("href outside the base was accepted: %s", rec.Body.String())
+	}
+	if members := backend.Groups["principals/user1/calendar-proxy-write"]; len(members) != 2 {
+		t.Errorf("failed PROPPATCH changed group-member-set to %q", members)
+	}
+}
+
+// principal-match on principal-property compares hrefs as resolved paths, so
+// it works under a non-root base URI and with percent-encoded names.
+func TestPrincipalMatchResolvesHrefs(t *testing.T) {
+	backend := &acl.MemoryBackend{
+		Principals: []acl.Principal{{URI: "principals/user 1"}, {URI: "principals/user2"}},
+		Groups:     map[string][]string{"principals/user 1/calendar-proxy-write": {"principals/user2"}},
+	}
+	root := mock.NewCollection("root")
+	pc := acl.NewPrincipalCollection(backend, "principals")
+	pc.Proxies = true
+	root.Attach(pc)
+	srv := dav.NewServer("/dav/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user2"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/user2"}})
+
+	rec := do(t, srv, "REPORT", "/dav/principals/user%201/",
+		`<?xml version="1.0"?><d:principal-match xmlns:d="DAV:">`+
+			`<d:principal-property><d:group-member-set/></d:principal-property>`+
+			`<d:prop><d:group-member-set/></d:prop>`+
+			`</d:principal-match>`)
+	if rec.Code != 207 {
+		t.Fatalf("REPORT = %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "<d:href>/dav/principals/user%201/calendar-proxy-write") ||
+		!strings.Contains(body, "/dav/principals/user2/") {
+		t.Errorf("principal-match missed the proxy group or its members:\n%s", body)
+	}
+}
+
 // calendar-proxy-write-for lists the principals a user may proxy for.
 func TestCalendarProxyWriteFor(t *testing.T) {
 	backend := &acl.MemoryBackend{
