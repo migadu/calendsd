@@ -112,3 +112,23 @@ func TestWellKnownRedirect(t *testing.T) {
 		t.Errorf("Location = %q, want /", got)
 	}
 }
+
+// Both well-known names redirect, and every other path reaches the DAV server
+// as sent: a doubled slash is normalized there, not bounced as a redirect.
+func TestWellKnownWrapperPassesOtherPathsThrough(t *testing.T) {
+	h := server.WrapWellKnown(testHandler(), "/")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("PROPFIND", "/.well-known/carddav", nil))
+	if w.Code != http.StatusMovedPermanently {
+		t.Errorf("carddav well-known = %d, want 301", w.Code)
+	}
+
+	req := httptest.NewRequest("PROPFIND", "/calendars//", strings.NewReader(
+		`<propfind xmlns="DAV:"><prop><resourcetype/></prop></propfind>`))
+	req.Header.Set("Depth", "0")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusMultiStatus {
+		t.Errorf("PROPFIND /calendars// = %d, want 207: %s", w.Code, w.Body.String())
+	}
+}

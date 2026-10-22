@@ -329,13 +329,20 @@ func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Q
 	return q
 }
 
-// WrapWellKnown adds the /.well-known/caldav → base-URI redirect.
+// WrapWellKnown adds the /.well-known/caldav and /.well-known/carddav →
+// base-URI redirects (RFC 6764). It matches the two paths itself rather than
+// through an http.ServeMux, which would redirect every unclean path (such as
+// "/calendars//") before the DAV server could normalize it, like sabre does.
 func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
-	mux := http.NewServeMux()
-	mux.Handle("/.well-known/caldav", http.RedirectHandler(baseURI, http.StatusMovedPermanently))
-	mux.Handle("/.well-known/carddav", http.RedirectHandler(baseURI, http.StatusMovedPermanently))
-	mux.Handle("/", h)
-	return mux
+	redirect := http.RedirectHandler(baseURI, http.StatusMovedPermanently)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/caldav", "/.well-known/carddav":
+			redirect.ServeHTTP(w, r)
+		default:
+			h.ServeHTTP(w, r)
+		}
+	})
 }
 
 // NewLoggedIn builds the production plugin stack with authentication
