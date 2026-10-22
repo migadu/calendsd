@@ -10,7 +10,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,14 +43,6 @@ func (m *Message) ScheduleStatusCode() string {
 	return code
 }
 
-// attendeeInfo captures one ATTENDEE property.
-type attendeeInfo struct {
-	href     string
-	name     string
-	partStat string
-	prop     goical.Prop
-}
-
 // eventSummary captures the scheduling-relevant view of an object, including
 // the per-instance (RECURRENCE-ID) attendee matrix sabre's broker needs.
 type eventSummary struct {
@@ -60,21 +52,20 @@ type eventSummary struct {
 	// orgScheduleAgent is the ORGANIZER's SCHEDULE-AGENT (RFC 6638 §7.1),
 	// uppercased; SERVER when absent. CLIENT suppresses server-side REPLYs.
 	orgScheduleAgent string
-	sequence         string
+	sequence         int
 	status           string
-	exdate           []string // sorted EXDATE values across all components
+	exdate           []goical.Prop // every EXDATE value, one per prop, sorted
 	master           *goical.Component
-	// instances maps a recurrence id ("master" or the RECURRENCE-ID value)
-	// to its VEVENT; instOrder preserves calendar order.
+	// instances maps a recurrence id (recurID: "" for the master) to its
+	// VEVENT; instOrder preserves calendar order.
 	instances map[string]*goical.Component
 	instOrder []string
-	// attendees is the flat, first-seen list (the reply applier reads it);
-	// perAtt/attOrder carry the per-instance participation matrix.
-	attendees []attendeeInfo
-	perAtt    map[string]*attendeeState
-	attOrder  []string
-	sigHash   string // significant-change fingerprint
-	cal       *goical.Calendar
+	// perAtt/attOrder carry the per-instance participation matrix, attOrder
+	// in first-seen order.
+	perAtt   map[string]*attendeeState
+	attOrder []string
+	sigHash  string // significant-change fingerprint
+	cal      *goical.Calendar
 }
 
 // attendeeState is one attendee's participation across instances.
@@ -104,12 +95,11 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 		return nil
 	}
 	out := &eventSummary{
-		cal: cal, sequence: "0", orgScheduleAgent: "SERVER",
+		cal: cal, orgScheduleAgent: "SERVER",
 		instances: map[string]*goical.Component{},
 		perAtt:    map[string]*attendeeState{},
 	}
-	flatSeen := map[string]bool{}
-	var exset, eventHashes []string
+	var eventHashes []string
 	for _, comp := range cal.Children {
 		if comp.Name != goical.CompEvent {
 			continue
@@ -117,7 +107,7 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 		rid := recurID(comp)
 		out.instances[rid] = comp
 		out.instOrder = append(out.instOrder, rid)
-		if rid == "master" || out.master == nil {
+		if rid == "" || out.master == nil {
 			out.master = comp
 		}
 		if p := comp.Props.Get(goical.PropUID); p != nil && out.uid == "" {
@@ -130,14 +120,15 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 				out.orgScheduleAgent = strings.ToUpper(agent)
 			}
 		}
-		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == "0" {
-			out.sequence = p.Value
-		}
-		if p := comp.Props.Get("STATUS"); p != nil {
-			out.status = strings.ToUpper(p.Value)
+		if p := comp.Props.Get("SEQUENCE"); p != nil && out.sequence == 0 {
+			out.sequence, _ = strconv.Atoi(strings.TrimSpace(p.Value))
 		}
 		for _, ex := range comp.Props.Values("EXDATE") {
-			exset = append(exset, splitList(ex.Value)...)
+			for _, v := range splitList(ex.Value) {
+				one := cloneProp(ex)
+				one.Value = v
+				out.exdate = append(out.exdate, one)
+			}
 		}
 		// Per-instance attendee participation.
 		for _, att := range comp.Props.Values("ATTENDEE") {
@@ -170,12 +161,6 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 			if strings.EqualFold(att.Params.Get("SCHEDULE-FORCE-SEND"), "REQUEST") {
 				st.forceSend = true
 			}
-			if !flatSeen[href] {
-				flatSeen[href] = true
-				out.attendees = append(out.attendees, attendeeInfo{
-					href: href, name: att.Params.Get("CN"), partStat: partStat, prop: att,
-				})
-			}
 		}
 		// Per-event significant-change hash.
 		var h strings.Builder
@@ -194,20 +179,105 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 	if out.master == nil {
 		return nil
 	}
-	sort.Strings(exset)
-	out.exdate = exset
-	sort.Strings(eventHashes)
+	// The event's status is the master's: a cancelled override cancels only
+	// its own occurrence, not the series.
+	if p := out.master.Props.Get("STATUS"); p != nil {
+		out.status = strings.ToUpper(p.Value)
+	}
+	slices.SortFunc(out.exdate, func(a, b goical.Prop) int { return strings.Compare(a.Value, b.Value) })
+	slices.Sort(eventHashes)
 	out.sigHash = strings.Join(eventHashes, "")
 	return out
 }
 
-// recurID returns a component's recurrence id: the RECURRENCE-ID value, or
-// "master" for the base instance.
+// recurID returns a component's recurrence id: the RECURRENCE-ID value, or ""
+// for the master.
 func recurID(comp *goical.Component) string {
 	if p := comp.Props.Get("RECURRENCE-ID"); p != nil {
 		return p.Value
 	}
-	return "master"
+	return ""
+}
+
+// recurrenceKey identifies the occurrence a RECURRENCE-ID names by its
+// instant, so UTC and TZID spellings of it match; a value that doesn't parse
+// is keyed by its text.
+func recurrenceKey(rid *goical.Prop) string {
+	if t, err := rid.DateTime(time.UTC); err == nil {
+		return strconv.FormatInt(t.Unix(), 10)
+	}
+	return rid.Value
+}
+
+// newOverride cuts the occurrence of master's series that rid names out as a
+// VEVENT of its own, or returns nil when the series has no such occurrence.
+func newOverride(master *goical.Component, rid *goical.Prop) *goical.Component {
+	at, err := rid.DateTime(time.UTC)
+	if err != nil {
+		return nil
+	}
+	dtstartProp := master.Props.Get(goical.PropDateTimeStart)
+	if dtstartProp == nil {
+		return nil
+	}
+	dtstart, err := dtstartProp.DateTime(time.UTC)
+	if err != nil {
+		return nil
+	}
+	set, err := recurrenceSet(master, time.UTC)
+	if err != nil || set == nil {
+		return nil
+	}
+	var occ time.Time
+	next := set.Iterator()
+	for i := 0; i < maxTimeRangeScan; i++ {
+		t, ok := next()
+		if !ok || t.After(at) {
+			break
+		}
+		if t.Equal(at) {
+			occ = t
+			break
+		}
+	}
+	if occ.IsZero() {
+		return nil
+	}
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
+	if err != nil {
+		return nil
+	}
+	ov := cloneComponent(master)
+	ov.Props.Del(goical.PropRecurrenceRule)
+	ov.Props.Del(goical.PropRecurrenceDates)
+	ov.Props.Del(goical.PropExceptionDates)
+	ov.Props.Set(occurrenceProp(goical.PropRecurrenceID, dtstartProp, occ))
+	ov.Props.Set(occurrenceProp(goical.PropDateTimeStart, dtstartProp, occ))
+	if dtend := master.Props.Get(goical.PropDateTimeEnd); dtend != nil {
+		ov.Props.Set(occurrenceProp(goical.PropDateTimeEnd, dtend, endOf(occ)))
+	}
+	return ov
+}
+
+// occurrenceProp writes t as property name in the form of like: a DATE, a
+// UTC time, or a local time in like's TZID (floating without one).
+func occurrenceProp(name string, like *goical.Prop, t time.Time) *goical.Prop {
+	p := cloneProp(*like)
+	p.Name = name
+	switch {
+	case like.ValueType() == goical.ValueDate || len(like.Value) == len("20060102"):
+		p.Value = t.Format("20060102")
+	case strings.HasSuffix(like.Value, "Z"):
+		p.Value = t.UTC().Format("20060102T150405Z")
+	default:
+		if tzid := like.Params.Get(goical.PropTimezoneID); tzid != "" {
+			if loc, err := time.LoadLocation(tzid); err == nil {
+				t = t.In(loc)
+			}
+		}
+		p.Value = t.Format("20060102T150405")
+	}
+	return &p
 }
 
 // splitList splits a comma-separated property value (EXDATE can carry many).
@@ -357,18 +427,18 @@ func requestMessage(info *eventSummary, att *attendeeState) *goical.Calendar {
 			continue
 		}
 		ev := cloneComponent(info.instances[rid])
-		if rid == "master" {
-			var exclude []string
+		if rid == "" {
+			var exclude []*goical.Prop
 			for _, other := range info.instOrder {
-				if other == "master" {
+				if other == "" {
 					continue
 				}
 				if _, ok := att.instances[other]; !ok {
-					exclude = append(exclude, other)
+					exclude = append(exclude, info.instances[other].Props.Get(goical.PropRecurrenceID))
 				}
 			}
 			if len(exclude) > 0 {
-				addExdate(ev, info.instances["master"], exclude)
+				addExdate(ev, exclude)
 			}
 			stripScheduleParams(ev)
 		}
@@ -478,15 +548,22 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 	}
 	// A newly-added EXDATE means the attendee dropped that occurrence: reply
 	// DECLINED for it, unless the master itself is declined.
-	if mi := byID["master"]; mi == nil || mi.newStatus != "DECLINED" {
-		var oldEx []string
+	// The EXDATE value, with its TZID or VALUE=DATE, is how the reply names
+	// the occurrence.
+	excluded := map[string]*goical.Prop{}
+	if mi := byID[""]; mi == nil || mi.newStatus != "DECLINED" {
+		oldEx := map[string]bool{}
 		if oldInfo != nil {
-			oldEx = oldInfo.exdate
+			for i := range oldInfo.exdate {
+				oldEx[recurrenceKey(&oldInfo.exdate[i])] = true
+			}
 		}
 		if newInfo != nil {
-			for _, ex := range newInfo.exdate {
-				if !containsStr(oldEx, ex) {
-					get(ex).newStatus = "DECLINED"
+			for i := range newInfo.exdate {
+				ex := &newInfo.exdate[i]
+				if !oldEx[recurrenceKey(ex)] {
+					get(ex.Value).newStatus = "DECLINED"
+					excluded[ex.Value] = ex
 				}
 			}
 		}
@@ -523,7 +600,7 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 		}
 		ev := goical.NewComponent(goical.CompEvent)
 		setPlainProp(ev.Props, goical.PropUID, base.uid)
-		setPlainProp(ev.Props, "SEQUENCE", base.sequence)
+		setPlainProp(ev.Props, "SEQUENCE", strconv.Itoa(base.sequence))
 		setPlainProp(ev.Props, "DTSTAMP", nowStamp())
 		src := instanceOf(newInfo, id)
 		if src == nil {
@@ -543,25 +620,19 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 			} else if summary != "" {
 				setPlainProp(ev.Props, "SUMMARY", summary)
 			}
-		} else {
-			// Instance known only from EXDATE: synthesize DTSTART from the id.
-			dt := goical.NewProp("DTSTART")
-			dt.Value = id
-			if isDateOnly(id) {
-				dt.Params.Set("VALUE", "DATE")
-			}
-			ev.Props.Set(dt)
+		} else if ex := excluded[id]; ex != nil {
+			// Instance known only from EXDATE: it starts at the excluded time.
+			ev.Props.Set(renamedProp(goical.PropDateTimeStart, ex))
 			if summary != "" {
 				setPlainProp(ev.Props, "SUMMARY", summary)
 			}
 		}
-		if id != "master" {
-			rec := goical.NewProp("RECURRENCE-ID")
-			rec.Value = id
-			if isDateOnly(id) {
-				rec.Params.Set("VALUE", "DATE")
+		if id != "" {
+			if rid := recurrenceIDOf(src); rid != nil {
+				ev.Props.Set(renamedProp(goical.PropRecurrenceID, rid))
+			} else if ex := excluded[id]; ex != nil {
+				ev.Props.Set(renamedProp(goical.PropRecurrenceID, ex))
 			}
-			ev.Props.Set(rec)
 		}
 		org := goical.NewProp("ORGANIZER")
 		org.Value = base.organizer
@@ -616,17 +687,20 @@ func instanceOf(info *eventSummary, id string) *goical.Component {
 	return info.instances[id]
 }
 
-func containsStr(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
+// recurrenceIDOf returns comp's RECURRENCE-ID, or nil (also for a nil comp).
+func recurrenceIDOf(comp *goical.Component) *goical.Prop {
+	if comp == nil {
+		return nil
 	}
-	return false
+	return comp.Props.Get(goical.PropRecurrenceID)
 }
 
-// isDateOnly reports whether a recurrence id looks like a DATE (no time part).
-func isDateOnly(id string) bool { return len(id) <= 8 && !strings.Contains(id, "T") }
+// renamedProp copies p, parameters included, under another name.
+func renamedProp(name string, p *goical.Prop) *goical.Prop {
+	cp := cloneProp(*p)
+	cp.Name = name
+	return &cp
+}
 
 func nowStamp() string { return time.Now().UTC().Format("20060102T150405Z") }
 
@@ -639,26 +713,43 @@ func cloneProp(p goical.Prop) goical.Prop {
 	return cp
 }
 
-// addExdate adds EXDATE entries (the ids of excluded occurrences) to a master
-// event, matching its DTSTART TZID and merging with any existing EXDATE.
-func addExdate(ev, master *goical.Component, exclude []string) {
-	tzid := ""
-	if ds := master.Props.Get("DTSTART"); ds != nil {
-		tzid = ds.Params.Get("TZID")
+// addExdate excludes the occurrences the given RECURRENCE-IDs name from a
+// master event. Each is written in the form of the master's first EXDATE, or
+// of its DTSTART when it has none, so it keeps the TZID or VALUE=DATE the
+// series uses whatever form the RECURRENCE-ID was written in.
+func addExdate(ev *goical.Component, rids []*goical.Prop) {
+	exdates := ev.Props[goical.PropExceptionDates]
+	var like *goical.Prop
+	if len(exdates) > 0 {
+		like = &exdates[0]
+	} else {
+		like = ev.Props.Get(goical.PropDateTimeStart)
 	}
-	joined := strings.Join(exclude, ",")
-	if existing := ev.Props.Get("EXDATE"); existing != nil {
-		merged := cloneProp(*existing)
-		merged.Value = merged.Value + "," + joined
-		ev.Props["EXDATE"] = []goical.Prop{merged}
+	values := make([]string, len(rids))
+	for i, rid := range rids {
+		values[i] = rid.Value
+		if t, err := rid.DateTime(time.UTC); err == nil && like != nil {
+			values[i] = occurrenceProp(goical.PropExceptionDates, like, t).Value
+		}
+	}
+	joined := strings.Join(values, ",")
+	if len(exdates) > 0 {
+		exdates[0].Value += "," + joined
 		return
 	}
-	ex := goical.NewProp("EXDATE")
-	ex.Value = joined
-	if tzid != "" {
-		ex.Params.Set("TZID", tzid)
+	ex := goical.NewProp(goical.PropExceptionDates)
+	if like != nil {
+		for _, name := range []string{goical.PropTimezoneID, "VALUE"} {
+			if v := like.Params.Get(name); v != "" {
+				ex.Params.Set(name, v)
+			}
+		}
+		if len(like.Value) == len("20060102") {
+			ex.Params.Set("VALUE", "DATE")
+		}
 	}
-	ev.Props["EXDATE"] = []goical.Prop{*ex}
+	ex.Value = joined
+	ev.Props[goical.PropExceptionDates] = []goical.Prop{*ex}
 }
 
 // StripForceSend removes SCHEDULE-FORCE-SEND from every ATTENDEE and ORGANIZER
@@ -719,7 +810,7 @@ func itipPayload(cal *goical.Calendar, method string) *goical.Calendar {
 	return out
 }
 
-// incSequence returns s+1 — the SEQUENCE a CANCEL carries so it reliably
+// incSequence returns n+1 — the SEQUENCE a CANCEL carries so it reliably
 // supersedes the last REQUEST an attendee received. RFC 5546 treats a
 // cancellation as a significant change: bumping SEQUENCE (not just DTSTAMP)
 // keeps the CANCEL "newer" even for recipients that collate on SEQUENCE alone.
@@ -727,8 +818,7 @@ func itipPayload(cal *goical.Calendar, method string) *goical.Calendar {
 // to stay in sync with — unlike a REQUEST, whose SEQUENCE the organizer's own
 // client owns and the server only echoes (bumping it here would desync the
 // stored event from what attendees hold and break REPLY matching).
-func incSequence(s string) string {
-	n, _ := strconv.Atoi(s)
+func incSequence(n int) string {
 	return strconv.Itoa(n + 1)
 }
 
@@ -755,45 +845,63 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 			return nil, nil
 		}
 		replyInfo := summarize(msg.Calendar, false)
-		if replyInfo == nil || len(replyInfo.attendees) == 0 {
+		if replyInfo == nil || len(replyInfo.attOrder) == 0 {
 			return nil, nil
 		}
-		replier := replyInfo.attendees[0]
+		replier := replyInfo.attOrder[0]
 		// SCHEDULE-STATUS comes from the reply's REQUEST-STATUS, defaulting
 		// to 2.0, and a reply clears RSVP (Broker::processMessageReply).
 		requestStatus := "2.0"
 		if p := replyInfo.master.Props.Get("REQUEST-STATUS"); p != nil {
 			requestStatus, _, _ = strings.Cut(p.Value, ";")
 		}
-		// Apply each reply instance's PARTSTAT to the existing VEVENT matched
-		// by RECURRENCE-ID (master reply -> master component, override reply ->
-		// matching override); a reply for an instance without its own existing
-		// component falls back to the master.
+		st := replyInfo.perAtt[replier]
+		if st == nil {
+			return existing, nil
+		}
+		// Apply each replied instance's PARTSTAT to the existing VEVENT for
+		// the same occurrence, matched by time rather than by how the
+		// RECURRENCE-ID is written (the attendee's client may use UTC where
+		// the organizer's copy has a TZID). A reply for an occurrence without
+		// its own VEVENT gets one, cut from the master, so the answer applies
+		// to that occurrence alone; the master's answer is never copied onto
+		// the overrides.
+		var master *goical.Component
+		byTime := map[string]*goical.Component{}
 		for _, comp := range existing.Children {
 			if comp.Name != goical.CompEvent {
 				continue
 			}
-			rid := recurID(comp)
-			partStat := ""
-			if st := replyInfo.perAtt[replier.href]; st != nil {
-				if ps, ok := st.instances[rid]; ok {
-					partStat = ps
-				} else if ps, ok := st.instances["master"]; ok {
-					partStat = ps
+			if rid := comp.Props.Get(goical.PropRecurrenceID); rid != nil {
+				byTime[recurrenceKey(rid)] = comp
+			} else if master == nil {
+				master = comp
+			}
+		}
+		for _, id := range st.order {
+			target := master
+			if id != "" {
+				rid := replyInfo.instances[id].Props.Get(goical.PropRecurrenceID)
+				key := recurrenceKey(rid)
+				if target = byTime[key]; target == nil && master != nil {
+					if target = newOverride(master, rid); target != nil {
+						existing.Children = append(existing.Children, target)
+						byTime[key] = target
+					}
 				}
 			}
-			if partStat == "" {
+			if target == nil {
 				continue
 			}
-			atts := comp.Props.Values("ATTENDEE")
+			atts := target.Props.Values("ATTENDEE")
 			for i := range atts {
-				if strings.EqualFold(atts[i].Value, replier.href) {
-					atts[i].Params.Set("PARTSTAT", partStat)
+				if strings.EqualFold(atts[i].Value, replier) {
+					atts[i].Params.Set("PARTSTAT", st.instances[id])
 					atts[i].Params.Set("SCHEDULE-STATUS", requestStatus)
 					atts[i].Params.Del("RSVP")
 				}
 			}
-			comp.Props["ATTENDEE"] = atts
+			target.Props["ATTENDEE"] = atts
 		}
 		return existing, nil
 	default:

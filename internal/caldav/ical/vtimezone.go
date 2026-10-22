@@ -2,50 +2,65 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	goical "github.com/emersion/go-ical"
 )
 
 // resolveNonIANATZIDs rewrites, in place, every date-time property in cal whose
-// TZID is not resolvable by time.LoadLocation but is defined by an embedded
-// VTIMEZONE, converting the value to a UTC (Z) date-time using the offsets in
-// that VTIMEZONE. go-ical's Prop.DateTime resolves TZIDs only through
-// time.LoadLocation, so Outlook-style non-IANA zone names (e.g. "W. Europe
-// Standard Time") otherwise hard-error even when the object carries their
-// VTIMEZONE. Rewriting to UTC lets the rest of the package treat them normally.
+// TZID time.LoadLocation cannot resolve. go-ical's Prop.DateTime resolves TZIDs
+// only through time.LoadLocation, so Outlook-style zone names (e.g. "W. Europe
+// Standard Time") otherwise hard-error.
+//
+// A TZID that names an IANA zone, by the Windows zone table or by an embedded
+// VTIMEZONE whose rules match one, is renamed to it. The value keeps its wall
+// clock, so a recurring event keeps its local time across DST changes. Any
+// other TZID with an embedded VTIMEZONE has its values converted to UTC with
+// that VTIMEZONE's offsets: right for each single instant, but a rule then
+// repeats in UTC.
 //
 // TZIDs that time.LoadLocation already understands, DATE-only values, and
-// already-UTC values are left untouched. TZIDs with no embedded VTIMEZONE are
-// left untouched too (there is nothing to resolve from).
+// already-UTC values are left untouched, as are unknown TZIDs with no embedded
+// VTIMEZONE (there is nothing to resolve from).
 func resolveNonIANATZIDs(cal *goical.Calendar) {
-	zones := map[string]*vtimezone{}
+	embedded := map[string]*goical.Component{}
 	for _, child := range cal.Children {
 		if child.Name != goical.CompTimezone {
 			continue
 		}
-		id := ""
-		if p := child.Props.Get(goical.PropTimezoneID); p != nil {
-			id = p.Value
-		}
-		if id == "" {
-			continue
-		}
-		if _, err := time.LoadLocation(id); err == nil {
-			continue // resolvable by go-ical already
-		}
-		if z := parseVTimezone(child); z != nil {
-			zones[id] = z
+		if p := child.Props.Get(goical.PropTimezoneID); p != nil && p.Value != "" {
+			embedded[p.Value] = child
 		}
 	}
-	if len(zones) == 0 {
-		return
+	type resolution struct {
+		iana string     // rename to this zone
+		vtz  *vtimezone // else flatten with this one (nil: leave as is)
+	}
+	resolved := map[string]resolution{}
+	resolve := func(tzid string) resolution {
+		if r, ok := resolved[tzid]; ok {
+			return r
+		}
+		var r resolution
+		if _, err := time.LoadLocation(tzid); err != nil {
+			comp := embedded[tzid]
+			var vtz *vtimezone
+			if comp != nil {
+				vtz = parseVTimezone(comp)
+			}
+			if r.iana = ianaZoneFor(tzid, vtz); r.iana == "" {
+				r.vtz = vtz
+			}
+		}
+		resolved[tzid] = r
+		return r
 	}
 	dateProps := []string{
-		goical.PropDateTimeStart, goical.PropDateTimeEnd,
+		goical.PropDateTimeStart, goical.PropDateTimeEnd, "DUE",
 		goical.PropRecurrenceID, goical.PropExceptionDates,
 		goical.PropRecurrenceDates,
 	}
@@ -56,26 +71,117 @@ func resolveNonIANATZIDs(cal *goical.Calendar) {
 		for _, name := range dateProps {
 			props := comp.Props[name]
 			for i := range props {
-				rewriteTZIDProp(&props[i], zones)
-			}
-			if props != nil {
-				comp.Props[name] = props
+				tzid := props[i].Params.Get(goical.PropTimezoneID)
+				if tzid == "" {
+					continue
+				}
+				switch r := resolve(tzid); {
+				case r.iana != "":
+					props[i].Params.Set(goical.PropTimezoneID, r.iana)
+				case r.vtz != nil:
+					flattenTZIDProp(&props[i], r.vtz)
+				}
 			}
 		}
 	}
 }
 
-// rewriteTZIDProp converts a single date-time property from a non-IANA TZID to
-// a UTC value, when its zone is one of the resolved VTIMEZONEs.
-func rewriteTZIDProp(prop *goical.Prop, zones map[string]*vtimezone) {
-	tzid := prop.Params.Get(goical.PropTimezoneID)
-	if tzid == "" {
-		return
+// ianaZoneFor names the IANA zone a TZID that time.LoadLocation cannot load
+// stands for: the Windows zone table's entry, else the zone whose transitions
+// match those of its embedded VTIMEZONE (vtz, nil when there is none). It
+// returns "" when neither applies.
+func ianaZoneFor(tzid string, vtz *vtimezone) string {
+	if name, ok := windowsZones[tzid]; ok {
+		if _, err := time.LoadLocation(name); err == nil {
+			return name
+		}
 	}
-	z := zones[tzid]
-	if z == nil {
-		return
+	if vtz == nil {
+		return ""
 	}
+	return matchIANAZone(vtz)
+}
+
+// matchWindow is the span over which an embedded VTIMEZONE must agree with an
+// IANA zone to be renamed to it. Outlook's definitions carry only the rule
+// current when they were written, so older history cannot be compared.
+var matchWindow = [2]time.Time{
+	time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC),
+	time.Date(2038, 1, 1, 0, 0, 0, 0, time.UTC),
+}
+
+// candidateZones are the IANA zones an embedded VTIMEZONE is compared with:
+// one per Windows zone, which covers every rule set in current use.
+var candidateZones = sync.OnceValue(func() []*time.Location {
+	names := map[string]bool{}
+	for _, name := range windowsZones {
+		names[name] = true
+	}
+	sorted := make([]string, 0, len(names))
+	for name := range names {
+		sorted = append(sorted, name)
+	}
+	slices.Sort(sorted)
+	var out []*time.Location
+	for _, name := range sorted {
+		if loc, err := time.LoadLocation(name); err == nil {
+			out = append(out, loc)
+		}
+	}
+	return out
+})
+
+// matchIANAZone returns the first candidate zone with the same offset as vtz
+// at the start of matchWindow and the same offset changes within it, or "".
+// A VTIMEZONE without changes in the window is not matched: flattening a
+// fixed offset to UTC is already exact, and a rename could pick up some
+// zone's DST outside the window.
+func matchIANAZone(vtz *vtimezone) string {
+	from, to := matchWindow[0], matchWindow[1]
+	type change struct {
+		at  int64
+		off int
+	}
+	var want []change
+	off := vtz.offsetAtInstant(from)
+	for _, tr := range vtz.transitions {
+		if !tr.at.After(from) || !tr.at.Before(to) || tr.offset == off {
+			continue
+		}
+		off = tr.offset
+		want = append(want, change{tr.at.Unix(), off})
+	}
+	if len(want) == 0 {
+		return ""
+	}
+	start := vtz.offsetAtInstant(from)
+next:
+	for _, loc := range candidateZones() {
+		if _, o := from.In(loc).Zone(); o != start {
+			continue
+		}
+		var got []change
+		for _, tr := range zoneTransitions(loc, from, to) {
+			if tr.from != tr.to {
+				got = append(got, change{tr.at.Unix(), tr.to})
+			}
+		}
+		if len(got) != len(want) {
+			continue
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				continue next
+			}
+		}
+		return loc.String()
+	}
+	return ""
+}
+
+// flattenTZIDProp converts a single date-time property from its TZID to a UTC
+// value, using the offsets of the zone's VTIMEZONE.
+func flattenTZIDProp(prop *goical.Prop, z *vtimezone) {
 	var converted []string
 	for _, v := range strings.Split(prop.Value, ",") {
 		wall, err := time.ParseInLocation("20060102T150405", v, time.UTC)
@@ -225,7 +331,7 @@ func parseVTimezone(comp *goical.Component) *vtimezone {
 	if !haveFirst {
 		return nil
 	}
-	sort.Slice(raw, func(i, j int) bool { return raw[i].at.Before(raw[j].at) })
+	slices.SortFunc(raw, func(a, b tzTransition) int { return a.at.Compare(b.at) })
 	return &vtimezone{transitions: raw, firstOffset: firstOffset}
 }
 

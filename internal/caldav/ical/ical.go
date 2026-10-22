@@ -6,9 +6,11 @@ package ical
 
 import (
 	"bytes"
-	"sort"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	goical "github.com/emersion/go-ical"
 	"github.com/teambition/rrule-go"
@@ -35,7 +37,7 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 		}
 	}
 	if !needsSplit {
-		return comp.RecurrenceSet(loc)
+		return componentSet(comp, loc)
 	}
 	shallow := &goical.Component{Name: comp.Name, Props: goical.Props{}, Children: comp.Children}
 	for name, props := range comp.Props {
@@ -53,7 +55,69 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 		}
 		shallow.Props[name] = split
 	}
-	return shallow.RecurrenceSet(loc)
+	return componentSet(shallow, loc)
+}
+
+// componentSet is go-ical's RecurrenceSet, plus the set of an RDATE-only
+// component, which go-ical treats as not recurring: DTSTART and the RDATEs,
+// minus the EXDATEs (RFC 5545 §3.8.5.2). It is nil for a component that does
+// not recur.
+func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error) {
+	if comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) == nil {
+		return comp.RecurrenceSet(loc)
+	}
+	dtstart, err := comp.Props.DateTime(goical.PropDateTimeStart, loc)
+	if err != nil {
+		return nil, fmt.Errorf("parsing DTSTART: %w", err)
+	}
+	set := &rrule.Set{}
+	set.RDate(dtstart)
+	for _, p := range comp.Props[goical.PropRecurrenceDates] {
+		t, err := p.DateTime(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parsing RDATE: %w", err)
+		}
+		set.RDate(t)
+	}
+	for _, p := range comp.Props[goical.PropExceptionDates] {
+		t, err := p.DateTime(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parsing EXDATE: %w", err)
+		}
+		set.ExDate(t)
+	}
+	return set, nil
+}
+
+// IsRecurring reports whether a component has a recurrence set: an RRULE or
+// an RDATE.
+func IsRecurring(comp *goical.Component) bool {
+	return comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) != nil
+}
+
+// overridesOf maps the RECURRENCE-ID instants (read in loc) of master's
+// overrides, the other components in cal of its type and UID, to them.
+// Overrides whose RECURRENCE-ID doesn't parse are left out.
+func overridesOf(cal *goical.Calendar, master *goical.Component, loc *time.Location) map[int64]*goical.Component {
+	uid := ""
+	if p := master.Props.Get(goical.PropUID); p != nil {
+		uid = p.Value
+	}
+	out := map[int64]*goical.Component{}
+	for _, child := range cal.Children {
+		if child == master || child.Name != master.Name {
+			continue
+		}
+		if p := child.Props.Get(goical.PropUID); p == nil || p.Value != uid {
+			continue
+		}
+		if rid := child.Props.Get(goical.PropRecurrenceID); rid != nil {
+			if t, err := rid.DateTime(loc); err == nil {
+				out[t.Unix()] = child
+			}
+		}
+	}
+	return out
 }
 
 // ComponentType returns the first non-VTIMEZONE component name (VEVENT, VTODO,
@@ -101,7 +165,7 @@ func encodeComponent(buf *bytes.Buffer, comp *goical.Component) {
 	for name := range comp.Props {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		for _, prop := range comp.Props[name] {
 			writeContentLine(buf, formatProp(&prop))
@@ -120,27 +184,47 @@ func formatProp(prop *goical.Prop) string {
 	for name := range prop.Params {
 		paramNames = append(paramNames, name)
 	}
-	sort.Strings(paramNames)
+	slices.Sort(paramNames)
 	for _, name := range paramNames {
-		for _, v := range prop.Params[name] {
-			b.WriteString(";" + name + "=")
-			if strings.ContainsAny(v, ";:,") {
-				b.WriteString(`"` + v + `"`)
-			} else {
-				b.WriteString(v)
+		b.WriteString(";" + name + "=")
+		for i, v := range prop.Params[name] {
+			if i > 0 {
+				b.WriteByte(',')
 			}
+			b.WriteString(paramValue(v))
 		}
 	}
 	b.WriteString(":" + prop.Value)
 	return b.String()
 }
 
-// writeContentLine folds at 75 octets per RFC 5545 §3.1.
+// paramEscaper applies RFC 6868 to the characters a parameter value cannot
+// hold as they are.
+var paramEscaper = strings.NewReplacer("\r\n", "^n", "\n", "^n", "\r", "^n", `"`, "^'")
+
+// paramValue renders one parameter value: a double quote or line break is
+// RFC 6868-encoded, and a value containing ; : or , is quoted. A ^ is left
+// alone: go-ical keeps values as written, without decoding RFC 6868, so one
+// is already part of an encoding.
+func paramValue(v string) string {
+	v = paramEscaper.Replace(v)
+	if strings.ContainsAny(v, ";:,") {
+		return `"` + v + `"`
+	}
+	return v
+}
+
+// writeContentLine folds at 75 octets per RFC 5545 §3.1, counting the
+// leading space of a continuation line, and never inside a UTF-8 sequence.
 func writeContentLine(buf *bytes.Buffer, line string) {
 	const limit = 75
-	for len(line) > limit {
-		buf.WriteString(line[:limit] + "\r\n ")
-		line = line[limit:]
+	for n := limit; len(line) > n; n = limit - 1 {
+		cut := n
+		for !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		buf.WriteString(line[:cut] + "\r\n ")
+		line = line[cut:]
 	}
 	buf.WriteString(line + "\r\n")
 }

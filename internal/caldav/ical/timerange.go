@@ -24,17 +24,16 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 	if dtstartProp == nil {
 		return false, errors.New("VEVENT is missing DTSTART")
 	}
-	roption, err := comp.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := comp.Props.RecurrenceRule(); err != nil {
 		return false, fmt.Errorf("parsing RRULE: %w", err)
 	}
 
-	if roption != nil {
+	if IsRecurring(comp) {
 		dtstart, err := dtstartProp.DateTime(loc)
 		if err != nil {
 			return false, err
 		}
-		dur, err := masterDurationIn(comp, dtstartProp, dtstart)
+		endOf, err := occurrenceEnd(comp, dtstartProp, dtstart)
 		if err != nil {
 			return false, err
 		}
@@ -55,7 +54,7 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 			if !ok || !occStart.Before(end) {
 				return false, nil
 			}
-			if occStart.Add(dur).After(start) {
+			if endOf(occStart).After(start) {
 				return true, nil
 			}
 		}
@@ -77,12 +76,16 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 // +1 day for all-day, else DTSTART.
 func eventEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time, loc *time.Location) (time.Time, error) {
 	if dtendProp := comp.Props.Get(goical.PropDateTimeEnd); dtendProp != nil {
-		return dtendProp.DateTime(loc)
+		dtend, err := dtendProp.DateTime(loc)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("parsing DTEND: %w", err)
+		}
+		return dtend, nil
 	}
 	if durProp := comp.Props.Get(goical.PropDuration); durProp != nil {
 		dur, err := durProp.Duration()
 		if err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("parsing DURATION: %w", err)
 		}
 		return dtstart.Add(dur), nil
 	}
@@ -92,14 +95,25 @@ func eventEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Tim
 	return dtstart, nil
 }
 
-// masterDurationIn is masterDuration with an explicit location (the UTC-only
-// variant lives in denormalize.go).
-func masterDurationIn(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time) (time.Duration, error) {
+// occurrenceEnd returns the function from an occurrence's start to its end,
+// following the master's DTEND/DURATION. An all-day (DATE) series spans whole
+// days: a fixed duration would end an occurrence on the far side of a DST
+// change in the start's location an hour early or late, which for a one-day
+// event is the wrong date.
+func occurrenceEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time) (func(time.Time) time.Time, error) {
 	end, err := eventEnd(comp, dtstartProp, dtstart, dtstart.Location())
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return end.Sub(dtstart), nil
+	if dtstartProp.ValueType() != goical.ValueDate {
+		dur := end.Sub(dtstart)
+		return func(t time.Time) time.Time { return t.Add(dur) }, nil
+	}
+	y1, m1, d1 := dtstart.Date()
+	y2, m2, d2 := end.Date()
+	days := int(time.Date(y2, m2, d2, 0, 0, 0, 0, time.UTC).Sub(time.Date(y1, m1, d1, 0, 0, 0, 0, time.UTC)) / (24 * time.Hour))
+	rest := end.Sub(dtstart.AddDate(0, 0, days))
+	return func(t time.Time) time.Time { return t.AddDate(0, 0, days).Add(rest) }, nil
 }
 
 // TodoInTimeRange ports vobject VTodo::isInTimeRange: DTSTART/DURATION/DUE
@@ -181,8 +195,7 @@ func JournalInTimeRange(comp *goical.Component, start, end time.Time, loc *time.
 }
 
 // EffectiveTriggerTime resolves a VALARM's trigger, relative to its parent
-// event. Port of vobject VAlarm::getEffectiveTriggerTime (VEVENT parents;
-// VTODO alarms come with the todo port).
+// VEVENT or VTODO. Port of vobject VAlarm::getEffectiveTriggerTime.
 func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (time.Time, error) {
 	trigger := alarm.Props.Get("TRIGGER")
 	if trigger == nil {
@@ -194,6 +207,13 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 	triggerDur, err := trigger.Duration()
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing TRIGGER duration: %w", err)
+	}
+	if parent.Name == goical.CompToDo {
+		anchor, err := todoAlarmAnchor(parent, strings.EqualFold(trigger.Params.Get("RELATED"), "END"), loc)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return anchor.Add(triggerDur), nil
 	}
 
 	dtstartProp := parent.Props.Get(goical.PropDateTimeStart)
@@ -215,6 +235,42 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 	return dtstart.Add(triggerDur), nil
 }
 
+// todoAlarmAnchor is the time a VTODO's relative trigger counts from: its
+// DTSTART, or for RELATED=END its DUE, else DTSTART+DURATION (RFC 5545
+// §3.8.6.3). A todo without DTSTART anchors a START-related trigger on DUE,
+// so the alarm of a todo with only a due date still fires.
+func todoAlarmAnchor(todo *goical.Component, relatedEnd bool, loc *time.Location) (time.Time, error) {
+	var start, due time.Time
+	var err error
+	sp, dp := todo.Props.Get(goical.PropDateTimeStart), todo.Props.Get("DUE")
+	if sp != nil {
+		if start, err = sp.DateTime(loc); err != nil {
+			return time.Time{}, err
+		}
+	}
+	if dp != nil {
+		if due, err = dp.DateTime(loc); err != nil {
+			return time.Time{}, err
+		}
+	}
+	switch {
+	case sp != nil && !relatedEnd:
+		return start, nil
+	case dp != nil:
+		return due, nil
+	case sp != nil:
+		if durProp := todo.Props.Get(goical.PropDuration); durProp != nil {
+			dur, err := durProp.Duration()
+			if err != nil {
+				return time.Time{}, err
+			}
+			return start.Add(dur), nil
+		}
+		return start, nil
+	}
+	return time.Time{}, errors.New("VALARM parent VTODO has neither DTSTART nor DUE")
+}
+
 // AlarmsInTimeRangeRecurring evaluates the VALARMs of a recurring VEVENT,
 // porting sabre's recurring branch of validateTimeRange (the Issue 220
 // behavior) exactly: instances are walked in order with overridden instances
@@ -222,24 +278,7 @@ func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (
 // search as a no-match; the walk also stops once the earliest relative
 // trigger of an instance passes the range end.
 func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
-	uid := ""
-	if p := master.Props.Get(goical.PropUID); p != nil {
-		uid = p.Value
-	}
-	overrides := map[int64]*goical.Component{}
-	for _, child := range cal.Children {
-		if child.Name != goical.CompEvent || child == master {
-			continue
-		}
-		if p := child.Props.Get(goical.PropUID); p == nil || p.Value != uid {
-			continue
-		}
-		if rid := child.Props.Get(goical.PropRecurrenceID); rid != nil {
-			if t, err := rid.DateTime(loc); err == nil {
-				overrides[t.Unix()] = child
-			}
-		}
-	}
+	overrides := overridesOf(cal, master, loc)
 
 	dtstartProp := master.Props.Get(goical.PropDateTimeStart)
 	if dtstartProp == nil {
@@ -249,7 +288,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	if err != nil {
 		return false, err
 	}
-	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
 	if err != nil {
 		return false, err
 	}
@@ -267,7 +306,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 			return false, nil
 		}
 		instance := master
-		instStart, instEnd := occStart, occStart.Add(dur)
+		instStart, instEnd := occStart, endOf(occStart)
 		if override, exists := overrides[occStart.Unix()]; exists {
 			instance = override
 			if sp := override.Props.Get(goical.PropDateTimeStart); sp != nil {
@@ -335,22 +374,40 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	return false, nil
 }
 
-// alarmRepeatsInRange checks a trigger (plus its REPEAT/DURATION
-// repetitions) against [start, end).
-func alarmRepeatsInRange(alarm *goical.Component, trigger, start, end time.Time) bool {
-	repeat := 0
-	var dur time.Duration
-	if durProp := alarm.Props.Get(goical.PropDuration); durProp != nil {
-		if d, err := durProp.Duration(); err == nil {
-			dur = d
-			repeat = 1
-			if repProp := alarm.Props.Get("REPEAT"); repProp != nil {
-				if n, err := repProp.Int(); err == nil {
-					repeat = n
-				}
-			}
+// alarmRepetition reads a VALARM's DURATION and REPEAT: how far apart its
+// repetitions are and how many follow the trigger. Without DURATION there are
+// none; with one, REPEAT defaults to 1 (sabre's DatePeriod with
+// recurrences=N yields the start plus N repetitions).
+func alarmRepetition(alarm *goical.Component) (time.Duration, int, error) {
+	durProp := alarm.Props.Get(goical.PropDuration)
+	if durProp == nil {
+		return 0, 0, nil
+	}
+	dur, err := durProp.Duration()
+	if err != nil {
+		return 0, 0, err
+	}
+	repeat := 1
+	if repProp := alarm.Props.Get("REPEAT"); repProp != nil {
+		if n, err := repProp.Int(); err == nil {
+			repeat = n
 		}
 	}
+	return dur, repeat, nil
+}
+
+// alarmRepeatsInRange checks a trigger (plus its REPEAT/DURATION
+// repetitions) against [start, end). A malformed DURATION counts as no
+// repetition.
+func alarmRepeatsInRange(alarm *goical.Component, trigger, start, end time.Time) bool {
+	dur, repeat, err := alarmRepetition(alarm)
+	if err != nil {
+		dur, repeat = 0, 0
+	}
+	return repetitionInRange(trigger, dur, repeat, start, end)
+}
+
+func repetitionInRange(trigger time.Time, dur time.Duration, repeat int, start, end time.Time) bool {
 	occ := trigger
 	for i := 0; i <= repeat; i++ {
 		if !start.After(occ) && end.After(occ) {
@@ -368,28 +425,9 @@ func AlarmInTimeRange(alarm, parent *goical.Component, start, end time.Time, loc
 	if err != nil {
 		return false, err
 	}
-	durProp := alarm.Props.Get(goical.PropDuration)
-	if durProp == nil {
-		return !start.After(trigger) && end.After(trigger), nil
-	}
-	dur, err := durProp.Duration()
+	dur, repeat, err := alarmRepetition(alarm)
 	if err != nil {
 		return false, err
 	}
-	repeat := 1
-	if repProp := alarm.Props.Get("REPEAT"); repProp != nil {
-		if n, err := repProp.Int(); err == nil {
-			repeat = n
-		}
-	}
-	// PHP's DatePeriod with recurrences=N yields N+1 values (the start
-	// plus N repetitions).
-	occ := trigger
-	for i := 0; i <= repeat; i++ {
-		if !start.After(occ) && end.After(occ) {
-			return true, nil
-		}
-		occ = occ.Add(dur)
-	}
-	return false, nil
+	return repetitionInRange(trigger, dur, repeat, start, end), nil
 }

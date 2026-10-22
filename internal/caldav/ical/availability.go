@@ -3,7 +3,7 @@ package ical
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -277,7 +277,8 @@ func unavailablePeriods(data []byte, start, end time.Time) ([]busyPeriod, error)
 		priorities = append(priorities, pr)
 	}
 	// Lowest priority first, so each higher layer overwrites what it covers.
-	sort.Sort(sort.Reverse(sort.IntSlice(priorities)))
+	slices.Sort(priorities)
+	slices.Reverse(priorities)
 	var unavailable []interval
 	for _, pr := range priorities {
 		l := layers[pr]
@@ -437,7 +438,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 	if err != nil {
 		return nil, invalidAvailability("AVAILABLE DTSTART: %v", err)
 	}
-	dur, err := masterDurationIn(ruleComp, ruleComp.Props.Get(goical.PropDateTimeStart), dtstart)
+	endOf, err := occurrenceEnd(ruleComp, ruleComp.Props.Get(goical.PropDateTimeStart), dtstart)
 	if err != nil {
 		return nil, invalidAvailability("AVAILABLE: %v", err)
 	}
@@ -467,7 +468,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 		if !more {
 			break
 		}
-		s, e := place(occ), place(occ.Add(dur))
+		s, e := place(occ), place(endOf(occ))
 		if !s.Before(end) {
 			break
 		}
@@ -481,7 +482,7 @@ func (z availabilityZoneSet) expand(comp *goical.Component, start, end time.Time
 
 // subtract returns cover minus the union of holes, in order.
 func subtract(cover interval, holes []interval) []interval {
-	sort.Slice(holes, func(i, j int) bool { return holes[i].start.Before(holes[j].start) })
+	slices.SortFunc(holes, func(a, b interval) int { return a.start.Compare(b.start) })
 	var out []interval
 	cur := cover.start
 	for _, h := range holes {
@@ -507,9 +508,9 @@ func subtract(cover interval, holes []interval) []interval {
 
 // availabilityZoneSet maps the TZIDs of embedded VTIMEZONEs that
 // time.LoadLocation cannot resolve (Outlook-style names) to their parsed
-// transitions. Unlike resolveNonIANATZIDs, which flattens such times to fixed
-// UTC values, availability keeps them as wall-clock times so a recurring rule
-// follows the zone's DST changes.
+// transitions. Availability keeps them as wall-clock times on the embedded
+// definition, so a recurring rule follows the zone's DST changes even when
+// resolveNonIANATZIDs would find no IANA zone for it.
 type availabilityZoneSet map[string]*vtimezone
 
 func availabilityZones(cal *goical.Calendar) availabilityZoneSet {

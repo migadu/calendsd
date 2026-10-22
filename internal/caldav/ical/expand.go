@@ -2,7 +2,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	goical "github.com/emersion/go-ical"
@@ -95,7 +95,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		for k := range overrides {
 			keys = append(keys, k)
 		}
-		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		slices.Sort(keys)
 		for _, k := range keys {
 			inst, ok, err := utcInstance(overrides[k], start, end, loc, true)
 			if err != nil {
@@ -108,11 +108,10 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		return out, nil
 	}
 
-	roption, err := master.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := master.Props.RecurrenceRule(); err != nil {
 		return nil, err
 	}
-	if roption == nil {
+	if !IsRecurring(master) {
 		inst, ok, err := utcInstance(master, start, end, loc, false)
 		if err != nil || !ok {
 			return nil, err
@@ -130,7 +129,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	if err != nil {
 		return nil, err
 	}
-	dur, err := masterDurationIn(master, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(master, dtstartProp, dtstart)
 	if err != nil {
 		return nil, err
 	}
@@ -145,12 +144,16 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 	// emitted afterward when their new DTSTART lands in [start, end).
 	consumed := make(map[int64]bool, len(overrides))
 	next := set.Iterator()
-	for i := 0; i < maxRecurrences; i++ {
+	// maxRecurrences caps the instances returned, not the ones stepped over
+	// to reach the window, which would leave a long-running series (a daily
+	// event from 2010) with no instances at all; the walk itself is bounded
+	// by end, with maxTimeRangeScan as the backstop (see EventInTimeRange).
+	for i := 0; i < maxTimeRangeScan && len(out) < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more || !occStart.Before(end) {
 			break
 		}
-		occEnd := occStart.Add(dur)
+		occEnd := endOf(occStart)
 		if !occEnd.After(start) {
 			continue
 		}
@@ -195,7 +198,7 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 			movedKeys = append(movedKeys, k)
 		}
 	}
-	sort.Slice(movedKeys, func(i, j int) bool { return movedKeys[i] < movedKeys[j] })
+	slices.Sort(movedKeys)
 	for _, k := range movedKeys {
 		inst, ok, err := utcInstance(overrides[k], start, end, loc, true)
 		if err != nil {
@@ -234,42 +237,34 @@ func utcInstance(comp *goical.Component, start, end time.Time, loc *time.Locatio
 	return inst, true, nil
 }
 
+// setUTCDateTime writes t as a UTC date-time into comp's first name property,
+// dropping its TZID and VALUE and keeping its other params.
 func setUTCDateTime(comp *goical.Component, name string, t time.Time) {
-	props := comp.Props.Values(name)
-	prop := goical.NewProp(name)
-	if len(props) > 0 {
-		// Preserve position/other params by editing the existing prop.
-		prop = &props[0]
-	}
-	prop.Params.Del(goical.PropTimezoneID)
-	prop.Params.Del("VALUE")
-	prop.Value = t.UTC().Format("20060102T150405Z")
-	if len(props) > 0 {
-		props[0] = *prop
-		comp.Props[name] = props
-	} else {
-		comp.Props.Set(prop)
-	}
+	setDateProp(comp, name, t.UTC().Format("20060102T150405Z"), "")
 }
 
 // setDateValue writes a DATE-valued property (all-day), keeping VALUE=DATE and
 // the calendar date in loc, dropping any TZID. t is the occurrence start in the
 // calendar's location, whose date is the wanted calendar day.
 func setDateValue(comp *goical.Component, name string, t time.Time) {
-	props := comp.Props.Values(name)
-	prop := goical.NewProp(name)
-	if len(props) > 0 {
-		prop = &props[0]
-	}
-	prop.Params.Del(goical.PropTimezoneID)
-	prop.Params.Set("VALUE", "DATE")
-	prop.Value = t.Format("20060102")
-	if len(props) > 0 {
-		props[0] = *prop
+	setDateProp(comp, name, t.Format("20060102"), "DATE")
+}
+
+// setDateProp sets the value of comp's first name property (adding one if
+// there is none) and its VALUE parameter (none for ""), dropping any TZID.
+func setDateProp(comp *goical.Component, name, value, valueType string) {
+	props := comp.Props[name]
+	if len(props) == 0 {
+		props = []goical.Prop{*goical.NewProp(name)}
 		comp.Props[name] = props
-	} else {
-		comp.Props.Set(prop)
 	}
+	props[0].Params.Del(goical.PropTimezoneID)
+	if valueType == "" {
+		props[0].Params.Del("VALUE")
+	} else {
+		props[0].Params.Set("VALUE", valueType)
+	}
+	props[0].Value = value
 }
 
 // cloneComponent deep-copies a component.
@@ -278,11 +273,7 @@ func cloneComponent(src *goical.Component) *goical.Component {
 	for name, props := range src.Props {
 		copied := make([]goical.Prop, len(props))
 		for i, p := range props {
-			cp := goical.Prop{Name: p.Name, Value: p.Value, Params: goical.Params{}}
-			for k, vs := range p.Params {
-				cp.Params[k] = append([]string(nil), vs...)
-			}
-			copied[i] = cp
+			copied[i] = cloneProp(p)
 		}
 		dst.Props[name] = copied
 	}

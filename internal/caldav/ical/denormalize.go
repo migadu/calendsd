@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	goical "github.com/emersion/go-ical"
@@ -67,28 +67,6 @@ func Denormalize(data []byte) (*Denormalized, error) {
 		return nil, ErrNoComponent
 	}
 
-	// Overridden instances (same component type + UID, carrying a
-	// RECURRENCE-ID) can extend the object's last occurrence beyond what the
-	// master's RRULE alone implies; collect them for the bounds computation.
-	var overrides []*goical.Component
-	if comp.Name == goical.CompEvent {
-		masterUID := ""
-		if p := comp.Props.Get(goical.PropUID); p != nil {
-			masterUID = p.Value
-		}
-		for _, child := range cal.Children {
-			if child == comp || child.Name != goical.CompEvent {
-				continue
-			}
-			if child.Props.Get("RECURRENCE-ID") == nil {
-				continue
-			}
-			if p := child.Props.Get(goical.PropUID); p != nil && p.Value == masterUID {
-				overrides = append(overrides, child)
-			}
-		}
-	}
-
 	sum := md5.Sum(data)
 	d := &Denormalized{
 		ETag:          hex.EncodeToString(sum[:]),
@@ -100,7 +78,9 @@ func Denormalize(data []byte) (*Denormalized, error) {
 	}
 
 	if comp.Name == goical.CompEvent {
-		first, last, err := eventOccurrenceBounds(comp, overrides)
+		// Overridden instances can extend the object's last occurrence
+		// beyond what the master's RRULE alone implies.
+		first, last, err := eventOccurrenceBounds(comp, overridesOf(cal, comp, time.UTC))
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +106,7 @@ func clampUnix(t time.Time) *int64 {
 //     for all-day events, else DTSTART
 //   - recurring: infinite rules cap at maxDate; finite rules expand until the
 //     first occurrence whose *end* reaches maxDate (or the final occurrence).
-func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component) (first, last time.Time, err error) {
+func eventOccurrenceBounds(comp *goical.Component, ovByRID map[int64]*goical.Component) (first, last time.Time, err error) {
 	dtstartProp := comp.Props.Get(goical.PropDateTimeStart)
 	if dtstartProp == nil {
 		return time.Time{}, time.Time{}, errors.New("VEVENT is missing DTSTART")
@@ -141,8 +121,8 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 		return time.Time{}, time.Time{}, fmt.Errorf("parsing RRULE: %w", err)
 	}
 
-	if roption == nil {
-		end, err := nonRecurringEnd(comp, dtstartProp, dtstart)
+	if !IsRecurring(comp) {
+		end, err := eventEnd(comp, dtstartProp, dtstart, time.UTC)
 		if err != nil {
 			return time.Time{}, time.Time{}, err
 		}
@@ -150,7 +130,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 	}
 
 	// Recurring event. Infinite rules (no UNTIL, no COUNT) cap at maxDate.
-	if roption.Until.IsZero() && roption.Count == 0 {
+	if roption != nil && roption.Until.IsZero() && roption.Count == 0 {
 		return dtstart, maxDate, nil
 	}
 
@@ -161,29 +141,23 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 	// A plain occurrence's end is its start plus the master duration; an
 	// overridden instance (RECURRENCE-ID) uses its own end, which can push
 	// the last occurrence later. Mirrors sabre's EventIterator::getDtEnd.
-	dur, err := masterDuration(comp, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(comp, dtstartProp, dtstart)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
-	}
-
-	ovByRID := make(map[int64]*goical.Component, len(overrides))
-	for _, ov := range overrides {
-		rid := ov.Props.Get("RECURRENCE-ID")
-		if rid == nil {
-			continue
-		}
-		if t, e := rid.DateTime(time.UTC); e == nil {
-			ovByRID[t.Unix()] = ov
-		}
 	}
 
 	type occurrence struct{ start, end time.Time }
 	var occs []occurrence
 	consumed := make(map[int64]bool, len(ovByRID))
 	next := set.Iterator()
-	for i := 0; i < maxRecurrences; i++ {
+	capped := false
+	for i := 0; ; i++ {
 		start, ok := next()
 		if !ok {
+			break
+		}
+		if i == maxRecurrences {
+			capped = true
 			break
 		}
 		if ov, has := ovByRID[start.Unix()]; has {
@@ -193,7 +167,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 				continue
 			}
 		}
-		occs = append(occs, occurrence{start, start.Add(dur)})
+		occs = append(occs, occurrence{start, endOf(start)})
 	}
 	// Overrides whose RECURRENCE-ID fell outside the iterated set (moved out
 	// of range, or an RDATE-only instance) still bound the object.
@@ -206,17 +180,31 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 		}
 	}
 	if len(occs) == 0 {
-		return dtstart, dtstart.Add(dur), nil
+		return dtstart, endOf(dtstart), nil
 	}
 
 	// Walk occurrences in start order, taking each end until one reaches
 	// maxDate — sabre's getDtEnd loop.
-	sort.Slice(occs, func(i, j int) bool { return occs[i].start.Before(occs[j].start) })
+	slices.SortFunc(occs, func(a, b occurrence) int { return a.start.Compare(b.start) })
 	last = occs[0].end
 	for _, o := range occs {
 		last = o.end
 		if !last.Before(maxDate) {
 			break
+		}
+	}
+	// The series goes on past the cap, so the walk above stopped short of
+	// its real end: bound it by UNTIL instead, or by maxDate for a COUNT,
+	// as for an infinite rule.
+	if capped {
+		bound := maxDate
+		if roption != nil && !roption.Until.IsZero() {
+			if u := endOf(roption.Until); u.Before(maxDate) {
+				bound = u
+			}
+		}
+		if bound.After(last) {
+			last = bound
 		}
 	}
 	return dtstart, last, nil
@@ -232,39 +220,6 @@ func overrideStartEnd(ov *goical.Component) (start, end time.Time, err error) {
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	end, err = nonRecurringEnd(ov, dsProp, start)
+	end, err = eventEnd(ov, dsProp, start, time.UTC)
 	return start, end, err
-}
-
-// nonRecurringEnd resolves the end of a single-instance VEVENT:
-// DTEND, else DTSTART+DURATION, else +1 day for all-day starts, else DTSTART.
-func nonRecurringEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time) (time.Time, error) {
-	if dtendProp := comp.Props.Get(goical.PropDateTimeEnd); dtendProp != nil {
-		dtend, err := dtendProp.DateTime(time.UTC)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("parsing DTEND: %w", err)
-		}
-		return dtend, nil
-	}
-	if durProp := comp.Props.Get(goical.PropDuration); durProp != nil {
-		dur, err := durProp.Duration()
-		if err != nil {
-			return time.Time{}, fmt.Errorf("parsing DURATION: %w", err)
-		}
-		return dtstart.Add(dur), nil
-	}
-	if dtstartProp.ValueType() == goical.ValueDate {
-		return dtstart.AddDate(0, 0, 1), nil
-	}
-	return dtstart, nil
-}
-
-// masterDuration is the length of one occurrence, derived from the master
-// component: DTEND-DTSTART, else DURATION, else 1 day for all-day, else 0.
-func masterDuration(comp *goical.Component, dtstartProp *goical.Prop, dtstart time.Time) (time.Duration, error) {
-	end, err := nonRecurringEnd(comp, dtstartProp, dtstart)
-	if err != nil {
-		return 0, err
-	}
-	return end.Sub(dtstart), nil
 }

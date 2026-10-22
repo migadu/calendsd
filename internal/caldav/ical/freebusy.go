@@ -2,7 +2,7 @@ package ical
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,7 +18,8 @@ type busyPeriod struct {
 // GenerateFreeBusy computes a VFREEBUSY response for the objects' VEVENTs
 // within [start, end). Subset of vobject's FreeBusyGenerator: transparent and
 // cancelled events are skipped, TENTATIVE maps to BUSY-TENTATIVE, recurring
-// events expand within the range, and overlapping same-type periods coalesce
+// events expand within the range with each override replacing its
+// occurrence, and overlapping same-type periods coalesce
 // (pinned against sabre's output in testdata/freebusy-golden.ics).
 //
 // extraProps are additional pre-formatted iCalendar property lines (unfolded,
@@ -55,10 +56,15 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 		if err != nil {
 			continue // unparseable objects contribute nothing, like sabre
 		}
+		resolveNonIANATZIDs(cal)
 		for _, comp := range cal.Children {
 			switch comp.Name {
 			case goical.CompEvent:
-				p, err := eventBusyPeriods(comp, start, end, loc)
+				var overrides map[int64]*goical.Component
+				if comp.Props.Get(goical.PropRecurrenceID) == nil {
+					overrides = overridesOf(cal, comp, loc)
+				}
+				p, err := eventBusyPeriods(comp, start, end, loc, overrides)
 				if err != nil {
 					return nil, err
 				}
@@ -113,7 +119,7 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 	}
 	var out []busyPeriod
 	for _, group := range byType {
-		sort.Slice(group, func(i, j int) bool { return group[i].start.Before(group[j].start) })
+		slices.SortFunc(group, func(a, b busyPeriod) int { return a.start.Compare(b.start) })
 		var merged []busyPeriod
 		for _, p := range group {
 			if n := len(merged); n > 0 && !p.start.After(merged[n-1].end) {
@@ -126,7 +132,7 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 		}
 		out = append(out, merged...)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].start.Before(out[j].start) })
+	slices.SortFunc(out, func(a, b busyPeriod) int { return a.start.Compare(b.start) })
 	return out
 }
 
@@ -190,7 +196,10 @@ func parseFreeBusyPeriodEnd(start time.Time, s string) (time.Time, error) {
 	return parseFreeBusyTime(s)
 }
 
-func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location) ([]busyPeriod, error) {
+// eventBusyPeriods lists a VEVENT's busy time in [start, end). A master
+// leaves out the occurrences in overridden: each override counts on its own,
+// at its own time and with its own TRANSP and STATUS.
+func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Location, overridden map[int64]*goical.Component) ([]busyPeriod, error) {
 	if transp := comp.Props.Get("TRANSP"); transp != nil && strings.EqualFold(transp.Value, "TRANSPARENT") {
 		return nil, nil
 	}
@@ -212,7 +221,7 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 	if err != nil {
 		return nil, err
 	}
-	dur, err := masterDurationIn(comp, dtstartProp, dtstart)
+	endOf, err := occurrenceEnd(comp, dtstartProp, dtstart)
 	if err != nil {
 		return nil, err
 	}
@@ -230,12 +239,14 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return &busyPeriod{start: s, end: e, fbType: fbType}
 	}
 
-	roption, err := comp.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := comp.Props.RecurrenceRule(); err != nil {
 		return nil, err
 	}
-	if roption == nil {
-		if p := clamp(dtstart, dtstart.Add(dur)); p != nil {
+	if !IsRecurring(comp) {
+		if overridden[dtstart.Unix()] != nil {
+			return nil, nil
+		}
+		if p := clamp(dtstart, endOf(dtstart)); p != nil {
 			return []busyPeriod{*p}, nil
 		}
 		return nil, nil
@@ -255,7 +266,10 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if !more || !occStart.Before(end) {
 			break
 		}
-		if p := clamp(occStart, occStart.Add(dur)); p != nil {
+		if overridden[occStart.Unix()] != nil {
+			continue
+		}
+		if p := clamp(occStart, endOf(occStart)); p != nil {
 			out = append(out, *p)
 		}
 	}
