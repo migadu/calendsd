@@ -2,12 +2,15 @@ package caldav
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/mail"
@@ -132,6 +135,8 @@ type IMipPlugin struct {
 	// settles (or a synchronous deferred send resolves inline). Wired from
 	// SchedulePlugin.patchScheduleStatus via UseScheduler; nil no-ops.
 	WriteBack func(path, method, recipient, status string)
+	// Now stamps the Date header; nil uses time.Now (tests pin it).
+	Now func() time.Time
 
 	server *dav.Server
 }
@@ -414,7 +419,7 @@ func (p *IMipPlugin) deliverAsUser(r *http.Request, msg *ical.Message, sender, r
 
 	// From is the user's own identity (== the envelope sender), so From and the
 	// in-body ORGANIZER stay one identity and no Reply-To split is needed.
-	email := framedEmail([]string{"From: " + formatAddress(msg.SenderName, sender)},
+	email := p.framedEmail([]string{"From: " + formatAddress(msg.SenderName, sender)},
 		msg, recipient, subject, body)
 
 	// Off the request path: enqueue the send durably with the password encrypted
@@ -464,7 +469,7 @@ func (p *IMipPlugin) deliverViaRelay(msg *ical.Message, sender, recipient, subje
 			"From: " + formatAddress(msg.SenderName, p.SenderEmail),
 		}
 	}
-	email := framedEmail(leading, msg, recipient, subject, body)
+	email := p.framedEmail(leading, msg, recipient, subject, body)
 
 	if p.Mailer == nil {
 		msg.ScheduleStatus = "5.2;No mailer configured"
@@ -633,25 +638,51 @@ func (p *IMipPlugin) mapSubmitError(msg *ical.Message, err error) bool {
 	return true
 }
 
-// framedEmail assembles the RFC822 message: leading holds the From/Reply-To
-// framing, then the To/Subject/MIME/Content-Type tail and body. stripHeaderChars
-// removes CR/LF from untrusted values so they can't inject headers.
-func framedEmail(leading []string, msg *ical.Message, recipient, subject string, body []byte) []byte {
+// framedEmail assembles the RFC 5322 message: leading holds the From/Reply-To
+// framing, then the To/Subject/Date/Message-ID/MIME tail and body. Addresses
+// and the subject go through net/mail and mime (RFC 2047) encoding, after
+// stripHeaderChars removes CR/LF from the untrusted values.
+func (p *IMipPlugin) framedEmail(leading []string, msg *ical.Message, recipient, subject string, body []byte) []byte {
+	now := time.Now
+	if p.Now != nil {
+		now = p.Now
+	}
 	headers := append(leading,
 		"To: "+formatAddress(msg.RecipientName, recipient),
-		"Subject: "+stripHeaderChars(subject),
+		"Subject: "+mime.QEncoding.Encode("utf-8", stripHeaderChars(subject)),
+		"Date: "+now().Format(time.RFC1123Z),
+		"Message-ID: "+newMessageID(p.SenderEmail),
 		"MIME-Version: 1.0",
 		"Content-Type: text/calendar; charset=UTF-8; method="+stripHeaderChars(msg.Method),
 	)
 	return []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + string(body))
 }
 
+// formatAddress renders a mailbox header value. A malformed address (a
+// mis-provisioned principal) is written bare: net/mail would turn it into a
+// meaningless "<local@>".
 func formatAddress(name, addr string) string {
 	name, addr = stripHeaderChars(name), stripHeaderChars(addr)
-	if name != "" && name != addr {
-		return fmt.Sprintf("%s <%s>", name, addr)
+	if _, err := mail.ParseAddress(addr); err != nil {
+		return addr
 	}
-	return addr
+	if name == addr {
+		name = ""
+	}
+	return (&mail.Address{Name: name, Address: addr}).String()
+}
+
+// newMessageID returns a unique Message-ID in the domain of the server's
+// sender address. A durable job keeps the framed bytes, so retries of one
+// send share an ID and receivers can drop the duplicates.
+func newMessageID(senderEmail string) string {
+	domain := "localhost"
+	if at := strings.LastIndex(senderEmail, "@"); at >= 0 && at < len(senderEmail)-1 {
+		domain = stripHeaderChars(senderEmail[at+1:])
+	}
+	var b [16]byte
+	rand.Read(b[:])
+	return "<" + hex.EncodeToString(b[:]) + "@" + domain + ">"
 }
 
 // stripHeaderChars removes CR and LF so untrusted values (event summaries,

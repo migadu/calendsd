@@ -1,9 +1,12 @@
 package caldav_test
 
 import (
+	"mime"
 	"net/http/httptest"
+	"net/mail"
 	"strings"
 	"testing"
+	"time"
 
 	goical "github.com/emersion/go-ical"
 
@@ -52,6 +55,59 @@ func TestIMipHeaderInjectionStripped(t *testing.T) {
 	// The subject should still carry the (sanitized, single-line) summary.
 	if !strings.Contains(headerBlock, "Subject: Invitation: Lunch") {
 		t.Errorf("sanitized subject missing:\n%s", headerBlock)
+	}
+}
+
+// TestIMipHeadersEncoded verifies that non-ASCII names and summaries are
+// RFC 2047-encoded, and that the message carries Date and Message-ID.
+func TestIMipHeadersEncoded(t *testing.T) {
+	ev := &goical.Component{Name: "VEVENT", Props: goical.Props{}}
+	ev.Props.SetText("SUMMARY", "Café \"Zürich\"")
+	cal := goical.NewCalendar()
+	cal.Children = append(cal.Children, ev)
+	msg := &ical.Message{
+		Method:            "REQUEST",
+		Sender:            "mailto:organizer@example.org",
+		SenderName:        "Jörg, Müller",
+		Recipient:         "mailto:guest@example.com",
+		RecipientName:     "Guest <x>",
+		SignificantChange: true,
+		Calendar:          cal,
+	}
+	spy := &spyMailer{}
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	plugin := &caldav.IMipPlugin{SenderEmail: "server@example.org", Mailer: spy, Now: func() time.Time { return now }}
+	if !plugin.DeliverExternal(httptest.NewRequest("POST", "/", nil), msg) {
+		t.Fatalf("DeliverExternal returned false; status=%q", msg.ScheduleStatus)
+	}
+
+	m, err := mail.ReadMessage(strings.NewReader(string(spy.msg)))
+	if err != nil {
+		t.Fatalf("message does not parse: %v\n%s", err, spy.msg)
+	}
+	for _, raw := range []string{m.Header.Get("Subject"), m.Header.Get("Reply-To")} {
+		for _, r := range raw {
+			if r > 0x7e {
+				t.Errorf("header carries raw non-ASCII: %q", raw)
+				break
+			}
+		}
+	}
+	dec := new(mime.WordDecoder)
+	if subject, _ := dec.DecodeHeader(m.Header.Get("Subject")); subject != "Invitation: Café \"Zürich\"" {
+		t.Errorf("Subject decodes to %q", subject)
+	}
+	if replyTo, err := mail.ParseAddress(m.Header.Get("Reply-To")); err != nil || replyTo.Name != "Jörg, Müller" || replyTo.Address != "organizer@example.org" {
+		t.Errorf("Reply-To = %q (%v)", m.Header.Get("Reply-To"), err)
+	}
+	if to, err := mail.ParseAddress(m.Header.Get("To")); err != nil || to.Name != "Guest <x>" || to.Address != "guest@example.com" {
+		t.Errorf("To = %q (%v)", m.Header.Get("To"), err)
+	}
+	if date, err := m.Header.Date(); err != nil || !date.Equal(now) {
+		t.Errorf("Date = %q (%v)", m.Header.Get("Date"), err)
+	}
+	if id := m.Header.Get("Message-ID"); !strings.HasPrefix(id, "<") || !strings.HasSuffix(id, "@example.org>") {
+		t.Errorf("Message-ID = %q", id)
 	}
 }
 
