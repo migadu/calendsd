@@ -76,3 +76,15 @@ func TestClarkRoundTrip(t *testing.T) {
 		t.Error("ParseClark should reject names without braces")
 	}
 }
+
+func TestParsePropfindRejectsTwoKinds(t *testing.T) {
+	for _, body := range []string{
+		`<D:propfind xmlns:D="DAV:"><D:allprop/><D:propname/></D:propfind>`,
+		`<D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop><D:propname/></D:propfind>`,
+		`<D:propfind xmlns:D="DAV:"><D:allprop/><D:prop><D:getetag/></D:prop></D:propfind>`,
+	} {
+		if _, err := ParsePropfind(strings.NewReader(body)); err == nil {
+			t.Errorf("ParsePropfind accepted %s", body)
+		}
+	}
+}

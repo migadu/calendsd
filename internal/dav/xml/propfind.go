@@ -66,6 +66,17 @@ func ParsePropfind(r io.Reader) (*Propfind, error) {
 		return out
 	}
 
+	// RFC 4918 §14.20: propfind is exactly one of propname, allprop (with an
+	// optional include) or prop.
+	chosen := 0
+	for _, set := range []bool{body.PropName != nil, body.AllProp != nil, body.Prop != nil} {
+		if set {
+			chosen++
+		}
+	}
+	if chosen > 1 {
+		return nil, errors.New("propfind body must contain only one of prop, allprop or propname")
+	}
 	switch {
 	case body.PropName != nil:
 		return &Propfind{Type: PropfindPropName}, nil
