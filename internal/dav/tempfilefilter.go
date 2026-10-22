@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 
 	davxml "calserver/internal/dav/xml"
 )
@@ -36,6 +39,28 @@ type TempFileFilterPlugin struct {
 	// Patterns is the set of basename patterns treated as temporary. Nil uses
 	// the sabre default set.
 	Patterns []*regexp.Regexp
+
+	mu    sync.Mutex
+	usage *tempUsage // nil until first counted; see reserve
+}
+
+// Limits on what the scratch directory may hold, so the filter cannot be used
+// to fill the disk: per file, in total, and by count.
+const (
+	maxTempFileSize  = 10 << 20
+	maxTempDirBytes  = 256 << 20
+	maxTempFileCount = 10000
+)
+
+type tempUsage struct {
+	bytes int64
+	files int
+}
+
+// privilegeChecker is the ACL plugin's enforcement surface (acl.Plugin), named
+// here structurally since dav cannot import acl.
+type privilegeChecker interface {
+	CheckPrivileges(ctx context.Context, path string, privileges ...string) error
 }
 
 // defaultTempFilePatterns mirrors sabre's temporaryFilePatterns. The literal
@@ -71,8 +96,15 @@ func (p *TempFileFilterPlugin) BeforeMethod(w http.ResponseWriter, r *http.Reque
 		// A malformed path is not ours to answer; let normal handling report it.
 		return true, nil
 	}
-	loc, ok := p.tempLocation(reqPath)
+	loc, ok := p.tempLocation(Principal(r.Context()), reqPath)
 	if !ok {
+		return true, nil
+	}
+	// The filter answers in place of the tree, so it must not answer anyone
+	// the tree would refuse: require the right to create a file in the parent
+	// collection. Otherwise fall through, and the ACL plugin and the core
+	// handlers answer as for any other path.
+	if !p.mayBind(r, reqPath) {
 		return true, nil
 	}
 	switch r.Method {
@@ -88,10 +120,23 @@ func (p *TempFileFilterPlugin) BeforeMethod(w http.ResponseWriter, r *http.Reque
 	return true, nil
 }
 
+// mayBind reports whether the requester holds {DAV:}bind on reqPath's parent.
+// A server without access control allows everything, so the filter does too.
+func (p *TempFileFilterPlugin) mayBind(r *http.Request, reqPath string) bool {
+	parent := path.Dir("/" + reqPath)[1:]
+	for _, plugin := range p.server.Plugins() {
+		if checker, ok := plugin.(privilegeChecker); ok {
+			return checker.CheckPrivileges(r.Context(), parent, "{DAV:}bind") == nil
+		}
+	}
+	return true
+}
+
 // tempLocation returns the on-disk path for a request path whose basename
-// matches a temporary-file pattern, keyed by md5 of the full path so the same
-// junk name in different collections does not collide (sabre's scheme).
-func (p *TempFileFilterPlugin) tempLocation(reqPath string) (string, bool) {
+// matches a temporary-file pattern, keyed by md5 of the principal and the full
+// path, so the same junk name in different collections or from different users
+// does not collide.
+func (p *TempFileFilterPlugin) tempLocation(principal, reqPath string) (string, bool) {
 	base := path.Base(reqPath)
 	if base == "." || base == "/" || base == "" {
 		return "", false
@@ -106,7 +151,7 @@ func (p *TempFileFilterPlugin) tempLocation(reqPath string) (string, bool) {
 	if !matched {
 		return "", false
 	}
-	sum := md5.Sum([]byte(reqPath))
+	sum := md5.Sum([]byte(principal + "\x00" + reqPath))
 	return filepath.Join(p.DataDir, "calserver_"+hex.EncodeToString(sum[:])+".tempfile"), true
 }
 
@@ -147,11 +192,25 @@ func (p *TempFileFilterPlugin) put(w http.ResponseWriter, r *http.Request, loc s
 				"The resource already exists, and an If-None-Match header was supplied")
 		}
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxTempFileSize+1))
 	if err != nil {
 		return false, err
 	}
+	if len(body) > maxTempFileSize {
+		return false, &Error{Status: http.StatusRequestEntityTooLarge,
+			Message: "Temporary files are limited to " + strconv.Itoa(maxTempFileSize) + " bytes"}
+	}
+	var oldSize int64
+	if !newFile {
+		if info, err := os.Stat(loc); err == nil {
+			oldSize = info.Size()
+		}
+	}
+	if err := p.reserve(int64(len(body))-oldSize, boolToInt(newFile)); err != nil {
+		return false, err
+	}
 	if err := os.WriteFile(loc, body, 0o600); err != nil {
+		p.release(int64(len(body))-oldSize, boolToInt(newFile))
 		return false, err
 	}
 	w.Header().Set("X-Sabre-Temp", "true")
@@ -167,9 +226,14 @@ func (p *TempFileFilterPlugin) delete(w http.ResponseWriter, loc string) (bool, 
 	if _, err := os.Stat(loc); os.IsNotExist(err) {
 		return true, nil // never written: fall through to a normal 404
 	}
+	info, err := os.Stat(loc)
+	if err != nil {
+		return false, err
+	}
 	if err := os.Remove(loc); err != nil {
 		return false, err
 	}
+	p.release(info.Size(), 1)
 	w.Header().Set("X-Sabre-Temp", "true")
 	w.WriteHeader(http.StatusNoContent)
 	return false, nil
@@ -209,4 +273,63 @@ func (p *TempFileFilterPlugin) propfind(w http.ResponseWriter, reqPath, loc stri
 	w.WriteHeader(http.StatusMultiStatus)
 	_, err = w.Write(body)
 	return false, err
+}
+
+// reserve accounts for a write of delta bytes and newFiles files, refusing it
+// with 507 when the directory would exceed its limits. Usage is counted once
+// from disk and tracked in memory after that; files an external sweep removes
+// are noticed by recounting before a write is refused.
+func (p *TempFileFilterPlugin) reserve(delta int64, newFiles int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fits := func() bool {
+		return p.usage.bytes+delta <= maxTempDirBytes && p.usage.files+newFiles <= maxTempFileCount
+	}
+	if p.usage == nil || !fits() {
+		usage, err := p.countUsage()
+		if err != nil {
+			return err
+		}
+		p.usage = usage
+	}
+	if !fits() {
+		return &Error{Status: http.StatusInsufficientStorage, Message: "The temporary file area is full"}
+	}
+	p.usage.bytes += delta
+	p.usage.files += newFiles
+	return nil
+}
+
+func (p *TempFileFilterPlugin) release(bytes int64, files int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.usage != nil {
+		p.usage.bytes -= bytes
+		p.usage.files -= files
+	}
+}
+
+func (p *TempFileFilterPlugin) countUsage() (*tempUsage, error) {
+	entries, err := os.ReadDir(p.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	usage := &tempUsage{}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "calserver_") || !strings.HasSuffix(e.Name(), ".tempfile") {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			usage.bytes += info.Size()
+			usage.files++
+		}
+	}
+	return usage, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

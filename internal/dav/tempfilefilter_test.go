@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,13 +127,68 @@ func TestTempFileMatch(t *testing.T) {
 	}
 	normal := []string{"event.ics", "contact.vcf", "calendars/admin/", "foo.swp", "DS_Store"}
 	for _, path := range temp {
-		if _, ok := p.tempLocation(path); !ok {
+		if _, ok := p.tempLocation("principals/a", path); !ok {
 			t.Errorf("tempLocation(%q) = not-temp, want temp", path)
 		}
 	}
 	for _, path := range normal {
-		if _, ok := p.tempLocation(path); ok {
+		if _, ok := p.tempLocation("principals/a", path); ok {
 			t.Errorf("tempLocation(%q) = temp, want not-temp", path)
 		}
+	}
+}
+
+// denyBind is a stand-in ACL plugin that refuses {DAV:}bind everywhere.
+type denyBind struct{}
+
+func (denyBind) PluginName() string { return "deny-bind" }
+func (denyBind) Init(*Server)       {}
+func (denyBind) CheckPrivileges(context.Context, string, ...string) error {
+	return ErrForbidden("no bind")
+}
+
+// Without bind on the parent the filter steps aside, so the request gets the
+// tree's normal answer instead of a scratch file.
+func TestTempFileFilterRequiresBind(t *testing.T) {
+	s := newTempFilterServer(t)
+	s.AddPlugin(denyBind{})
+	rec := do(t, s, "PUT", "/calendars/admin/._fork", "junk", nil)
+	if rec.Header().Get("X-Sabre-Temp") == "true" || rec.Code < 400 {
+		t.Errorf("PUT without bind = %d (temp=%q), want the tree's error", rec.Code, rec.Header().Get("X-Sabre-Temp"))
+	}
+}
+
+// Two principals writing the same junk path get separate files.
+func TestTempFilesArePerPrincipal(t *testing.T) {
+	p := &TempFileFilterPlugin{DataDir: t.TempDir()}
+	p.Init(NewServer("/", testRoot()))
+	a, _ := p.tempLocation("principals/a", "calendars/a/._x")
+	b, _ := p.tempLocation("principals/b", "calendars/a/._x")
+	if a == b {
+		t.Errorf("principals a and b share temp file %s", a)
+	}
+}
+
+func TestTempFileFilterLimits(t *testing.T) {
+	s := newTempFilterServer(t)
+	big := strings.Repeat("x", maxTempFileSize+1)
+	if rec := do(t, s, "PUT", "/calendars/admin/._big", big, nil); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized PUT = %d, want 413", rec.Code)
+	}
+	var p *TempFileFilterPlugin
+	for _, plugin := range s.Plugins() {
+		if tp, ok := plugin.(*TempFileFilterPlugin); ok {
+			p = tp
+		}
+	}
+	p.usage = &tempUsage{bytes: maxTempDirBytes} // as if full; a recount finds the dir empty
+	if rec := do(t, s, "PUT", "/calendars/admin/._a", "x", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("PUT after a stale-full count = %d, want 201 (recount)", rec.Code)
+	}
+	if err := p.reserve(maxTempDirBytes, 1); err == nil {
+		t.Error("reserve past the byte cap succeeded")
+	}
+	if err := p.reserve(0, maxTempFileCount); err == nil {
+		t.Error("reserve past the file cap succeeded")
 	}
 }
