@@ -484,19 +484,35 @@ func (r *importRun) record(res storage.ImportResult, failed bool) {
 	}
 }
 
+// importSummary is the --json run summary, a stable shape for cutover
+// scripts.
+type importSummary struct {
+	RunID            string            `json:"runId"`
+	DryRun           bool              `json:"dryRun"`
+	Principals       int               `json:"principals"`
+	Cards            int               `json:"cards"`
+	CardsWritten     int               `json:"cardsWritten"`
+	CardsSkipped     int               `json:"cardsSkipped"`
+	Orphans          int               `json:"orphans"`
+	Errors           int               `json:"errors"`
+	ElapsedSeconds   float64           `json:"elapsedSeconds"`
+	Actions          map[string]int    `json:"actions"`
+	UnreadableShards map[string]string `json:"unreadableShards"`
+}
+
 func (r *importRun) print() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.opts.jsonOutput {
-		out := map[string]any{
-			"runId": r.runID, "dryRun": r.opts.dryRun,
-			"principals": r.visited, "cards": r.cards,
-			"cardsWritten": r.written, "cardsSkipped": r.skipped,
-			"orphans": r.orphans, "errors": r.failed,
-			"elapsedSeconds":   time.Since(r.started).Seconds(),
-			"actions":          actionCounts(r.counts),
-			"unreadableShards": shardErrorStrings(r.shardErrors),
+		out := importSummary{
+			RunID: r.runID, DryRun: r.opts.dryRun,
+			Principals: r.visited, Cards: r.cards,
+			CardsWritten: r.written, CardsSkipped: r.skipped,
+			Orphans: r.orphans, Errors: r.failed,
+			ElapsedSeconds:   time.Since(r.started).Seconds(),
+			Actions:          actionCounts(r.counts),
+			UnreadableShards: shardErrorStrings(r.shardErrors),
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
