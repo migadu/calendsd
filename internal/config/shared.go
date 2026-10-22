@@ -225,6 +225,9 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 				Workers:       m.File.Scheduling.IMip.Queue.Workers,
 			},
 		}
+		if err := m.Server.Validate(); err != nil {
+			return nil, err
+		}
 		return m, nil
 	}
 }

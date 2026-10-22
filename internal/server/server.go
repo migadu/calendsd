@@ -183,6 +183,16 @@ func (c Config) Canonical() string {
 		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
 
+// Validate reports a configuration the server cannot run with. [push]
+// enabled without its keys must fail closed at startup, as a config error
+// rather than a crash.
+func (c Config) Validate() error {
+	if c.Push.Enabled && !c.pushConfig().Valid() {
+		return fmt.Errorf("[push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+	}
+	return nil
+}
+
 // pushConfig projects the server config onto the push package's config,
 // filling in the mount prefix the plugin needs for absolute Location URLs.
 func (c Config) pushConfig() push.Config {
@@ -465,8 +475,10 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	// first and a non-push body is passed on intact). Enabled-but-unconfigured
 	// fails closed at startup, mirroring the ACL assertion below.
 	if cfg.Push.Enabled {
-		if !cfg.pushConfig().Valid() {
-			panic("server: [push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+		if err := cfg.Validate(); err != nil {
+			// Config resolution (config.SharedServerFlags) already reports
+			// this to the operator; reaching here is a caller that skipped it.
+			panic("server: " + err.Error())
 		}
 		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), &push.Store{DB: db}))
 	}
