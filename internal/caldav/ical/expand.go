@@ -108,11 +108,10 @@ func expandGroup(master *goical.Component, overrides map[int64]*goical.Component
 		return out, nil
 	}
 
-	roption, err := master.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := master.Props.RecurrenceRule(); err != nil {
 		return nil, err
 	}
-	if roption == nil {
+	if !IsRecurring(master) {
 		inst, ok, err := utcInstance(master, start, end, loc, false)
 		if err != nil || !ok {
 			return nil, err

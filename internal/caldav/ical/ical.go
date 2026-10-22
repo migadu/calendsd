@@ -6,6 +6,7 @@ package ical
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 		}
 	}
 	if !needsSplit {
-		return comp.RecurrenceSet(loc)
+		return componentSet(comp, loc)
 	}
 	shallow := &goical.Component{Name: comp.Name, Props: goical.Props{}, Children: comp.Children}
 	for name, props := range comp.Props {
@@ -53,7 +54,44 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 		}
 		shallow.Props[name] = split
 	}
-	return shallow.RecurrenceSet(loc)
+	return componentSet(shallow, loc)
+}
+
+// componentSet is go-ical's RecurrenceSet, plus the set of an RDATE-only
+// component, which go-ical treats as not recurring: DTSTART and the RDATEs,
+// minus the EXDATEs (RFC 5545 §3.8.5.2). It is nil for a component that does
+// not recur.
+func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error) {
+	if comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) == nil {
+		return comp.RecurrenceSet(loc)
+	}
+	dtstart, err := comp.Props.DateTime(goical.PropDateTimeStart, loc)
+	if err != nil {
+		return nil, fmt.Errorf("parsing DTSTART: %w", err)
+	}
+	set := &rrule.Set{}
+	set.RDate(dtstart)
+	for _, p := range comp.Props[goical.PropRecurrenceDates] {
+		t, err := p.DateTime(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parsing RDATE: %w", err)
+		}
+		set.RDate(t)
+	}
+	for _, p := range comp.Props[goical.PropExceptionDates] {
+		t, err := p.DateTime(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parsing EXDATE: %w", err)
+		}
+		set.ExDate(t)
+	}
+	return set, nil
+}
+
+// IsRecurring reports whether a component has a recurrence set: an RRULE or
+// an RDATE.
+func IsRecurring(comp *goical.Component) bool {
+	return comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) != nil
 }
 
 // ComponentType returns the first non-VTIMEZONE component name (VEVENT, VTODO,

@@ -24,12 +24,11 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 	if dtstartProp == nil {
 		return false, errors.New("VEVENT is missing DTSTART")
 	}
-	roption, err := comp.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := comp.Props.RecurrenceRule(); err != nil {
 		return false, fmt.Errorf("parsing RRULE: %w", err)
 	}
 
-	if roption != nil {
+	if IsRecurring(comp) {
 		dtstart, err := dtstartProp.DateTime(loc)
 		if err != nil {
 			return false, err

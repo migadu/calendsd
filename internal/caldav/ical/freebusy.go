@@ -272,11 +272,10 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return &busyPeriod{start: s, end: e, fbType: fbType}
 	}
 
-	roption, err := comp.Props.RecurrenceRule()
-	if err != nil {
+	if _, err := comp.Props.RecurrenceRule(); err != nil {
 		return nil, err
 	}
-	if roption == nil {
+	if !IsRecurring(comp) {
 		if overridden[dtstart.Unix()] {
 			return nil, nil
 		}

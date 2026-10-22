@@ -141,7 +141,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 		return time.Time{}, time.Time{}, fmt.Errorf("parsing RRULE: %w", err)
 	}
 
-	if roption == nil {
+	if !IsRecurring(comp) {
 		end, err := nonRecurringEnd(comp, dtstartProp, dtstart)
 		if err != nil {
 			return time.Time{}, time.Time{}, err
@@ -150,7 +150,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 	}
 
 	// Recurring event. Infinite rules (no UNTIL, no COUNT) cap at maxDate.
-	if roption.Until.IsZero() && roption.Count == 0 {
+	if roption != nil && roption.Until.IsZero() && roption.Count == 0 {
 		return dtstart, maxDate, nil
 	}
 
@@ -229,7 +229,7 @@ func eventOccurrenceBounds(comp *goical.Component, overrides []*goical.Component
 	// as for an infinite rule.
 	if capped {
 		bound := maxDate
-		if !roption.Until.IsZero() {
+		if roption != nil && !roption.Until.IsZero() {
 			if u := roption.Until.Add(dur); u.Before(maxDate) {
 				bound = u
 			}
