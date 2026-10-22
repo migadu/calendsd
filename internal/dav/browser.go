@@ -1,9 +1,11 @@
 package dav
 
 import (
+	"fmt"
 	"html"
 	"net/http"
-	"sort"
+	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -29,27 +31,34 @@ func (b *BrowserPlugin) HandleGet(node Node, w http.ResponseWriter, r *http.Requ
 		return false, nil
 	}
 
-	children, err := coll.Children()
+	path, err := b.server.Path(r)
 	if err != nil {
 		return true, err
 	}
-	names := make([]string, 0, len(children))
+	children, err := b.server.VisibleChildren(r.Context(), strings.Trim(path, "/"), coll)
+	if err != nil {
+		return true, err
+	}
+	type entry struct{ name, href string }
+	entries := make([]entry, 0, len(children))
 	for _, child := range children {
-		name := child.Name()
+		name, href := child.Name(), url.PathEscape(child.Name())
 		if _, isChildColl := child.(Collection); isChildColl {
 			name += "/"
+			href += "/"
 		}
-		names = append(names, name)
+		entries = append(entries, entry{name, href})
 	}
-	sort.Strings(names)
+	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
 
-	base := strings.TrimSuffix(r.URL.Path, "/")
+	base := strings.TrimSuffix(r.URL.EscapedPath(), "/")
+	title := html.EscapeString(r.URL.Path)
 	var sb strings.Builder
-	sb.WriteString("<html>\n<head><title>Index of " + html.EscapeString(r.URL.Path) + "</title></head>\n<body>\n")
-	sb.WriteString("<h1>Index of " + html.EscapeString(r.URL.Path) + "</h1>\n<ul>\n")
-	for _, name := range names {
-		href := base + "/" + name
-		sb.WriteString("<li><a href=\"" + html.EscapeString(href) + "\">" + html.EscapeString(name) + "</a></li>\n")
+	fmt.Fprintf(&sb, "<html>\n<head><title>Index of %s</title></head>\n<body>\n", title)
+	fmt.Fprintf(&sb, "<h1>Index of %s</h1>\n<ul>\n", title)
+	for _, e := range entries {
+		fmt.Fprintf(&sb, "<li><a href=\"%s\">%s</a></li>\n",
+			html.EscapeString(base+"/"+e.href), html.EscapeString(e.name))
 	}
 	sb.WriteString("</ul>\n</body>\n</html>\n")
 

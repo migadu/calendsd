@@ -320,17 +320,9 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 	items := []reqItem{{pf, node}}
 	if depth == 1 {
 		if coll, isColl := node.(Collection); isColl {
-			children, err := coll.Children()
+			children, err := s.VisibleChildren(ctx, path, coll)
 			if err != nil {
 				return nil, err
-			}
-			// Let plugins hide children the requester may not enumerate (e.g.
-			// domain-scoped principal listings). Runs before hrefs are emitted,
-			// so a filtered child leaves no trace in the response.
-			for _, p := range s.plugins {
-				if hook, ok := p.(ChildFilterHook); ok {
-					children = hook.FilterChildren(ctx, path, children)
-				}
 			}
 			for _, child := range children {
 				childPath := child.Name()
@@ -466,6 +458,22 @@ func isCollectionNode(n Node) bool {
 
 // encodePath percent-encodes a path, segment-preserving, like sabre's
 // HTTP\encodePath.
+// VisibleChildren lists a collection's children minus those a plugin hides
+// from the requester (e.g. domain-scoped principal listings). Every listing
+// goes through here, so a filtered child leaves no trace in any response.
+func (s *Server) VisibleChildren(ctx context.Context, path string, coll Collection) ([]Node, error) {
+	children, err := coll.Children()
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range s.plugins {
+		if hook, ok := p.(ChildFilterHook); ok {
+			children = hook.FilterChildren(ctx, path, children)
+		}
+	}
+	return children, nil
+}
+
 func encodePath(p string) string {
 	segs := strings.Split(p, "/")
 	for i, seg := range segs {

@@ -105,3 +105,23 @@ func TestPrincipalSearchScopedToDomain(t *testing.T) {
 		t.Errorf("directory search leaked foreign-domain user3:\n%s", body)
 	}
 }
+
+// TestBrowserListingScopedToDomain: the HTML index goes through the same child
+// filter as PROPFIND, so it cannot be used to enumerate foreign-domain users.
+func TestBrowserListingScopedToDomain(t *testing.T) {
+	srv := enumServer("principals/user1")
+	srv.AddPlugin(&dav.BrowserPlugin{})
+	for _, path := range []string{"/principals/", "/calendars/"} {
+		w := request(t, srv, "GET", path, "")
+		if w.Code != 200 {
+			t.Fatalf("GET %s = %d: %s", path, w.Code, w.Body.String())
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, path+"user2") {
+			t.Errorf("GET %s missing same-domain user2:\n%s", path, body)
+		}
+		if strings.Contains(body, "user3") {
+			t.Errorf("GET %s leaked foreign-domain user3:\n%s", path, body)
+		}
+	}
+}

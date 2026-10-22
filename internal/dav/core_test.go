@@ -347,3 +347,16 @@ func TestPropfindGetcontentlengthUnknownSizeIs404(t *testing.T) {
 		t.Errorf("getcontentlength for an unknown-size file must be a 404 propstat (sabre parity):\n%s", out)
 	}
 }
+
+// Browser hrefs are path-encoded, so a child name holding "?" or "#" links to
+// the child instead of a query or fragment.
+func TestBrowserEncodesHrefs(t *testing.T) {
+	root := newMemColl("root", &memFile{name: "a?b#c.txt", contents: []byte("x")})
+	s := NewServer("/", root)
+	s.AddPlugin(&BrowserPlugin{})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if body := rec.Body.String(); !strings.Contains(body, `href="/a%3Fb%23c.txt"`) {
+		t.Errorf("browser href not path-encoded:\n%s", body)
+	}
+}
