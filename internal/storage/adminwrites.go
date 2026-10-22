@@ -216,7 +216,8 @@ func deleteUserCascadeRows(tx *sql.Tx, username string) error {
 
 // deletePrincipalRows removes the rows shared by both delete paths: the
 // principal's group-membership, scheduling-inbox, working-hours
-// (calendar_availability) and free-busy visibility rows, its principal
+// (calendar_availability), share-invite notification and free-busy
+// visibility rows, its principal
 // triple (the principal plus the two proxy sub-principals), and its users
 // row (absent for group principals, which is fine). It errors if no
 // principal row matched, so deleting an unknown account is reported.
@@ -236,6 +237,12 @@ DELETE FROM groupmembers
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM calendar_availability WHERE principal = $1`, principal); err != nil {
+		return err
+	}
+	// Their share-invite inbox: no foreign key, and a later account with the
+	// same name must not inherit the invites.
+	if _, err := tx.Exec(
+		`DELETE FROM notifications WHERE principaluri = $1`, principal); err != nil {
 		return err
 	}
 	// Their own free-busy setting, and their place on everyone else's

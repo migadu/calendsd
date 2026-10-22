@@ -6,7 +6,9 @@ package storage_test
 
 import (
 	"testing"
+	"time"
 
+	"calserver/internal/caldav"
 	"calserver/internal/storage"
 )
 
@@ -62,5 +64,37 @@ CREATE TRIGGER fail_purge BEFORE DELETE ON contact_frecency
 	}
 	if left != 0 {
 		t.Fatalf("%d principal/tombstone row(s) left after the purge", left)
+	}
+}
+
+// TestDeleteUserCascadeDropsNotifications covers the cascade leaving the
+// principal's share-invite notifications behind: nothing else removes them,
+// and a later account with the same name inherited the invites.
+func TestDeleteUserCascadeDropsNotifications(t *testing.T) {
+	db := openContactsScratchDB(t, "calserver_d_cascade_notif")
+	writes := &storage.AdminWrites{DB: db}
+	if err := writes.CreateUser("bob", storage.BlockedDigestA1(), "bob@example.org", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+	cal := &storage.CalDAV{DB: db}
+	if err := cal.AddNotification("principals/bob", caldav.InviteNotification{
+		ID: "invite-1", DTStamp: time.Now(), HostURL: "/calendars/alice/default/",
+		Organizer: "mailto:alice@example.org", Access: caldav.AccessRead, InviteStatus: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writes.DeleteUserCascade("bob"); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the account: it must start with an empty inbox.
+	if err := writes.CreateUser("bob", storage.BlockedDigestA1(), "bob@example.org", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cal.NotificationsForPrincipal("principals/bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("recreated principal inherited %d notification(s): %+v", len(got), got)
 	}
 }
