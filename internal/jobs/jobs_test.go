@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -395,5 +396,104 @@ func TestEnqueueCredentialWithoutKeyring(t *testing.T) {
 	}
 	if n := countJobs(t, db); n != 0 {
 		t.Errorf("job count = %d, want 0 (enqueue must not persist)", n)
+	}
+}
+
+// TestEmptyBackoffUsesDefault: an empty (non-nil) Backoff, e.g. from a config
+// list with no entries, falls back to the default instead of indexing an
+// empty slice on the first retry.
+func TestEmptyBackoffUsesDefault(t *testing.T) {
+	q := New(nil, Config{Backoff: []time.Duration{}})
+	if got := q.backoff(1); got != defaultBackoff[0] {
+		t.Errorf("backoff(1) = %v, want %v", got, defaultBackoff[0])
+	}
+}
+
+// TestWaitSettlesInFlightJob: after the queue's ctx is cancelled, Wait returns
+// only once a running handler has returned and its outcome is recorded, so a
+// shutdown does not leave the row 'executing' for the reclaim sweep.
+func TestWaitSettlesInFlightJob(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_jobs_wait")
+	q := newTestQueue(t, db)
+	started := make(chan struct{})
+	q.Register("imip_send", func(ctx context.Context, j Job) error {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(100 * time.Millisecond) // a send unwinding after cancel
+		return ctx.Err()
+	})
+	if err := q.Enqueue(context.Background(), "imip_send",
+		imipArgs("u8", "mailto:w@x.test", "REQUEST", "0", "20260101T000000Z")); err != nil {
+		t.Fatal(err)
+	}
+	id := lastJobID(t, db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	q.Start(ctx)
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		cancel()
+		t.Fatal("handler never started")
+	}
+	cancel()
+	q.Wait()
+	if r := getJob(t, db, id); r.state != "available" || r.attempt != 1 {
+		t.Errorf("after Wait: state=%q attempt=%d, want available/1 (rescheduled)", r.state, r.attempt)
+	}
+}
+
+// TestSettleIgnoresStaleClaim: a handler that outlives its claim — the job was
+// reclaimed and claimed again, or cancelled — must not settle the row the
+// newer claim (or the operator) now owns.
+func TestSettleIgnoresStaleClaim(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_jobs_stale_settle")
+	q := newTestQueue(t, db)
+	ctx := context.Background()
+	q.Register("imip_send", func(context.Context, Job) error { return nil })
+
+	if err := q.Enqueue(ctx, "imip_send",
+		imipArgs("u7", "mailto:h@x.test", "REQUEST", "0", "20260101T000000Z")); err != nil {
+		t.Fatal(err)
+	}
+	id := lastJobID(t, db)
+	first, err := q.store.claim(ctx, "default")
+	if err != nil || first == nil {
+		t.Fatalf("claim: %v, %v", first, err)
+	}
+	// Reclaim it and claim it again: attempt 2 now owns the row.
+	if _, err := db.Exec(`UPDATE jobs SET attempted_at = now() - interval '1 hour' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.store.reclaimOrphans(ctx, time.Now().Add(-defaultReclaimAfter)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := q.store.claim(ctx, "default")
+	if err != nil || second == nil || second.attempt != 2 {
+		t.Fatalf("second claim: %+v, %v", second, err)
+	}
+
+	// The first worker finishes, fails or gives up: none of it may touch
+	// attempt 2's row.
+	for name, write := range map[string]func() error{
+		"complete":   func() error { return q.store.complete(ctx, first) },
+		"reschedule": func() error { return q.store.reschedule(ctx, first, time.Now(), "late") },
+		"discard":    func() error { return q.store.discard(ctx, first, "late") },
+	} {
+		if err := write(); !errors.Is(err, errStaleClaim) {
+			t.Errorf("%s with a stale claim = %v, want errStaleClaim", name, err)
+		}
+		if r := getJob(t, db, id); r.state != "executing" || r.attempt != 2 {
+			t.Fatalf("after stale %s: state=%q attempt=%d, want executing/2", name, r.state, r.attempt)
+		}
+	}
+
+	// A job cancelled while executing stays cancelled when its handler ends.
+	if err := (&Ops{DB: db}).Cancel(id); err != nil {
+		t.Fatal(err)
+	}
+	q.process(ctx, second)
+	if r := getJob(t, db, id); r.state != "discarded" || r.lastErr.String != "cancelled via calctl" {
+		t.Errorf("after cancel + completion: state=%q err=%q, want discarded/cancelled", r.state, r.lastErr.String)
 	}
 }

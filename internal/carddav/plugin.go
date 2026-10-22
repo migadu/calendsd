@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -68,7 +69,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 				`<card:supported-collation>i;octet</card:supported-collation>` +
 				`<card:supported-collation>i;unicode-casemap</card:supported-collation>`)
 		})
-		pf.Handle(card("max-resource-size"), func() any { return 10000000 })
+		pf.Handle(card("max-resource-size"), func() any { return MaxCardSize })
 	}
 	if c, isCard := node.(*Card); isCard {
 		pf.Handle(nameAddressData, func() any {
@@ -78,10 +79,11 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	return nil
 }
 
-// InterceptWrite validates vCard bodies on PUT/create, mirroring sabre's
-// CardDAV\Plugin::validateVCard: a body that does not parse as a vCard is
-// rejected with 415 rather than stored raw. Only writes whose parent is an
-// address book are inspected; anything else is left to other handlers.
+// InterceptWrite validates vCard bodies on PUT/create with ValidateCard, the
+// check the contacts API applies too: a body that is not exactly one vCard
+// with a UID is rejected with 415 rather than stored raw, and one over
+// max-resource-size with 403. Only writes whose parent is an address book are
+// inspected; anything else is left to other handlers.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
 	parentPath, _ := pathutil.Split(path)
 	parent, err := p.server.Tree.NodeForPath(parentPath)
@@ -91,7 +93,13 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 	if _, isBook := parent.(*AddressBook); !isBook {
 		return data, nil
 	}
-	if _, err := decodeVCard(data); err != nil {
+	_, err = ValidateCard(data)
+	switch {
+	case errors.Is(err, ErrCardTooLarge):
+		e := dav.ErrForbidden("The vCard exceeds the maximum resource size of %d bytes", MaxCardSize)
+		e.Precondition = []xml.Name{{Space: NSCardDAV, Local: "max-resource-size"}}
+		return nil, e
+	case err != nil:
 		return nil, dav.ErrUnsupportedMediaType(
 			"This resource only supports valid vCard or jCard data. Parse error: %s", err)
 	}
@@ -184,11 +192,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 		}
 		for _, child := range cards {
 			c := child.(*Card)
-			ok, err := query.match(c.Data())
-			if err != nil {
-				return err
-			}
-			if ok {
+			if query.match(c.Data()) {
 				matches = append(matches, path+"/"+c.Name())
 				if query.limit > 0 && len(matches) >= query.limit {
 					break
@@ -196,11 +200,7 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 			}
 		}
 	case *Card:
-		ok, err := query.match(n.Data())
-		if err != nil {
-			return err
-		}
-		if ok {
+		if query.match(n.Data()) {
 			matches = append(matches, path)
 		}
 	}

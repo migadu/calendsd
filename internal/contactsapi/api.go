@@ -146,24 +146,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), h.opts.RequestTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	principal, ok, reason := h.auth.Check(r)
-	if !ok {
+	principal, err := h.auth.Check(r)
+	if err != nil {
 		switch {
 		case ctx.Err() != nil:
 			// The rcptd lookup or first-login provisioning ran out of time:
 			// a server-side stall, not bad credentials, so no challenge.
 			h.timedOut(w, r, "authentication")
 			return
-		case auth.Unavailable(reason):
+		case errors.Is(err, auth.ErrUnavailable):
 			// rcptd is down or faulting. A 401 here would have webmail ask
 			// the user for a password that is fine.
-			h.opts.Logger.Warn("contacts api: authentication unavailable", "reason", reason,
+			h.opts.Logger.Warn("contacts api: authentication unavailable", "reason", err,
 				"method", r.Method, "path", r.URL.Path)
-			writeError(w, http.StatusServiceUnavailable, reason)
+			writeError(w, http.StatusServiceUnavailable, auth.ClientMessage(err))
 			return
 		}
 		h.auth.Challenge(w.Header(), r)
-		writeError(w, http.StatusUnauthorized, reason)
+		writeError(w, http.StatusUnauthorized, auth.ClientMessage(err))
 		return
 	}
 	if h.tombstoned != nil && h.tombstoned(ctx, principal) {

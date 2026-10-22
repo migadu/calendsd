@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -121,6 +122,7 @@ type Queue struct {
 	registry map[string]Handler
 	log      *slog.Logger
 	wake     chan struct{}
+	running  sync.WaitGroup // Start's goroutines, for Wait
 }
 
 // New builds a queue over db. Register handlers before Start.
@@ -128,7 +130,7 @@ func New(db *sql.DB, cfg Config) *Queue {
 	if cfg.Workers <= 0 {
 		cfg.Workers = defaultWorkers
 	}
-	if cfg.Backoff == nil {
+	if len(cfg.Backoff) == 0 {
 		cfg.Backoff = defaultBackoff
 	}
 	if cfg.ReclaimAfter <= 0 {
@@ -200,13 +202,7 @@ func WithDelay(d time.Duration) Opt {
 // coalesces per (uid, recipient, method): a newer revision supersedes a pending
 // job, an older/equal re-issue is a no-op (D10).
 func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Opt) error {
-	o := enqueueOpts{queue: "default", maxAttempts: 6}
-	for _, fn := range opts {
-		fn(&o)
-	}
-	if o.scheduledAt.IsZero() {
-		o.scheduledAt = time.Now()
-	}
+	o := applyOpts(opts)
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("jobs: marshal args: %w", err)
@@ -222,12 +218,30 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 	if err := q.store.enqueue(ctx, o.queue, worker, raw, o.maxAttempts, o.scheduledAt, cred); err != nil {
 		return fmt.Errorf("jobs: enqueue: %w", err)
 	}
+	q.wakeAll(ctx)
+	return nil
+}
+
+// applyOpts resolves an Enqueue's options over the defaults.
+func applyOpts(opts []Opt) enqueueOpts {
+	o := enqueueOpts{queue: "default", maxAttempts: 6}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	if o.scheduledAt.IsZero() {
+		o.scheduledAt = time.Now()
+	}
+	return o
+}
+
+// wakeAll wakes this process's idle workers and, through NOTIFY, other
+// nodes'. The NOTIFY is best-effort; a failure just means peers rely on their
+// tick.
+func (q *Queue) wakeAll(ctx context.Context) {
 	q.signalWake()
-	// Best-effort cross-node wake; a failure just means peers rely on their tick.
 	if _, err := q.store.db.ExecContext(ctx, `SELECT pg_notify($1, '')`, notifyChannel); err != nil {
 		q.log.Debug("jobs: pg_notify failed", "err", err)
 	}
-	return nil
 }
 
 // EnqueueLatest persists a relay-identity job that coalesces latest-wins per
@@ -242,18 +256,12 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 // store.reschedule and store.reclaimOrphans) rather than violating the index.
 // WithCredential is refused — these jobs never carry a secret.
 func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generation int64, args any, opts ...Opt) error {
-	o := enqueueOpts{queue: "default", maxAttempts: 6}
-	for _, fn := range opts {
-		fn(&o)
-	}
+	o := applyOpts(opts)
 	if o.credential != nil {
 		return errors.New("jobs: EnqueueLatest does not take a credential")
 	}
 	if key == "" {
 		return errors.New("jobs: EnqueueLatest needs a coalesce key")
-	}
-	if o.scheduledAt.IsZero() {
-		o.scheduledAt = time.Now()
 	}
 	raw, err := json.Marshal(args)
 	if err != nil {
@@ -265,26 +273,37 @@ func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generatio
 	if err := q.store.enqueueLatest(ctx, o.queue, worker, key, generation, raw, o.maxAttempts, o.scheduledAt); err != nil {
 		return fmt.Errorf("jobs: enqueue: %w", err)
 	}
-	q.signalWake()
-	if _, err := q.store.db.ExecContext(ctx, `SELECT pg_notify($1, '')`, notifyChannel); err != nil {
-		q.log.Debug("jobs: pg_notify failed", "err", err)
-	}
+	q.wakeAll(ctx)
 	return nil
 }
 
 // Start runs the claim loops, the LISTEN wake, and the sweep tick until ctx is
-// cancelled. Safe to `go q.Start(ctx)`; it never returns an error the caller
-// must act on. Register all handlers first.
+// cancelled. It spawns its goroutines and returns; it never returns an error
+// the caller must act on. Register all handlers first, and call Wait after
+// cancelling ctx so in-flight jobs settle before the process exits.
 func (q *Queue) Start(ctx context.Context) {
 	for _, queue := range q.cfg.Queues {
 		for i := 0; i < q.cfg.Workers; i++ {
-			go q.workerLoop(ctx, queue)
+			q.goRun(func() { q.workerLoop(ctx, queue) })
 		}
 	}
-	go q.sweepLoop(ctx)
+	q.goRun(func() { q.sweepLoop(ctx) })
 	if q.cfg.DSN != "" {
-		go q.listenLoop(ctx)
+		q.goRun(func() { q.listenLoop(ctx) })
 	}
+}
+
+// Wait blocks until every goroutine Start spawned has returned: after ctx is
+// cancelled, once each running job's handler has returned and its outcome is
+// recorded.
+func (q *Queue) Wait() { q.running.Wait() }
+
+func (q *Queue) goRun(fn func()) {
+	q.running.Add(1)
+	go func() {
+		defer q.running.Done()
+		fn()
+	}()
 }
 
 // workerLoop claims and processes jobs for one queue until ctx is cancelled,
@@ -322,7 +341,7 @@ func (q *Queue) process(ctx context.Context, c *claimed) {
 	h := q.registry[c.worker]
 	if h == nil {
 		q.log.Error("jobs: no handler registered; discarding", "worker", c.worker, "id", c.id)
-		q.settleDiscard(c.id, "no handler for worker "+c.worker)
+		q.settleDiscard(c, "no handler for worker "+c.worker)
 		return
 	}
 
@@ -333,28 +352,28 @@ func (q *Queue) process(ctx context.Context, c *claimed) {
 			// Fail-safe (D12): a rotated-out or tampered credential is never
 			// worked around via an unmetered relay — discard and let D5b surface.
 			q.log.Warn("jobs: credential undecryptable; discarding", "id", c.id, "key_id", c.cred.keyID, "err", err)
-			q.settleDiscard(c.id, "credential undecryptable")
+			q.settleDiscard(c, "credential undecryptable")
 			return
 		}
 		j.Credential = pt
-		defer zero(pt)
+		defer clear(pt)
 	}
 
 	err := runHandler(ctx, h, j)
 
 	switch {
 	case err == nil:
-		q.settle(c.id, q.store.complete)
+		q.settle(c, q.store.complete)
 	case IsDiscard(err):
-		q.settleDiscard(c.id, err.Error())
+		q.settleDiscard(c, err.Error())
 	case c.attempt >= c.maxAttempts:
 		q.log.Warn("jobs: giving up (attempts exhausted)", "id", c.id, "worker", c.worker, "attempts", c.attempt, "err", err)
-		q.settleDiscard(c.id, err.Error())
+		q.settleDiscard(c, err.Error())
 	default:
 		delay := q.backoff(c.attempt)
 		q.log.Warn("jobs: rescheduling after transient failure", "id", c.id, "worker", c.worker, "attempt", c.attempt, "next_in", delay, "err", err)
-		q.settle(c.id, func(sctx context.Context, id int64) error {
-			return q.store.reschedule(sctx, id, time.Now().Add(delay), err.Error())
+		q.settle(c, func(sctx context.Context, c *claimed) error {
+			return q.store.reschedule(sctx, c, time.Now().Add(delay), err.Error())
 		})
 	}
 }
@@ -384,17 +403,22 @@ func (q *Queue) backoff(attempt int) time.Duration {
 
 // settle runs a terminal/reschedule write on a detached, time-bounded context
 // so a job that finished during shutdown still records its outcome (rather than
-// being left 'executing' for the reclaim sweep).
-func (q *Queue) settle(id int64, write func(context.Context, int64) error) {
+// being left 'executing' for the reclaim sweep). The write applies only while
+// the row is still this claim's: a job reclaimed (and perhaps claimed again),
+// cancelled or re-queued while its handler ran is left alone.
+func (q *Queue) settle(c *claimed, write func(context.Context, *claimed) error) {
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := write(sctx, id); err != nil {
-		q.log.Warn("jobs: settle failed (row stays executing; reclaim will recover)", "id", id, "err", err)
+	switch err := write(sctx, c); {
+	case errors.Is(err, errStaleClaim):
+		q.log.Warn("jobs: settle skipped; job changed while executing", "id", c.id, "attempt", c.attempt)
+	case err != nil:
+		q.log.Warn("jobs: settle failed (row stays executing; reclaim will recover)", "id", c.id, "err", err)
 	}
 }
 
-func (q *Queue) settleDiscard(id int64, lastErr string) {
-	q.settle(id, func(ctx context.Context, id int64) error { return q.store.discard(ctx, id, lastErr) })
+func (q *Queue) settleDiscard(c *claimed, lastErr string) {
+	q.settle(c, func(ctx context.Context, c *claimed) error { return q.store.discard(ctx, c, lastErr) })
 }
 
 // sweepLoop periodically reclaims orphaned jobs, purges aged credentials, prunes
@@ -490,11 +514,5 @@ func (q *Queue) sleep(ctx context.Context, d time.Duration) bool {
 		return false
 	case <-t.C:
 		return false
-	}
-}
-
-func zero(b []byte) {
-	for i := range b {
-		b[i] = 0
 	}
 }

@@ -21,6 +21,16 @@ func TestDigestA1SeedCompatibility(t *testing.T) {
 	}
 }
 
+// check runs b.Check and reports its outcome as (principal, ok, the message a
+// client would see).
+func check(b Backend, r *http.Request) (string, bool, string) {
+	principal, err := b.Check(r)
+	if err != nil {
+		return "", false, ClientMessage(err)
+	}
+	return principal, true, ""
+}
+
 func TestBasicBackend(t *testing.T) {
 	b := &BasicBackend{
 		Realm: "SabreDAV",
@@ -31,19 +41,19 @@ func TestBasicBackend(t *testing.T) {
 
 	r := httptest.NewRequest("PROPFIND", "/", nil)
 	r.SetBasicAuth("admin", "admin")
-	principal, ok, _ := b.Check(r)
+	principal, ok, _ := check(b, r)
 	if !ok || principal != "principals/admin" {
 		t.Errorf("Check = (%q, %v), want (principals/admin, true)", principal, ok)
 	}
 
 	r = httptest.NewRequest("PROPFIND", "/", nil)
 	r.SetBasicAuth("admin", "wrong")
-	if _, ok, reason := b.Check(r); ok || reason != "Username or password was incorrect" {
+	if _, ok, reason := check(b, r); ok || reason != "Username or password was incorrect" {
 		t.Errorf("bad password accepted or wrong reason: %v %q", ok, reason)
 	}
 
 	r = httptest.NewRequest("PROPFIND", "/", nil)
-	if _, ok, _ := b.Check(r); ok {
+	if _, ok, _ := check(b, r); ok {
 		t.Error("missing header accepted")
 	}
 }
@@ -90,16 +100,16 @@ func TestDigestBackend(t *testing.T) {
 	const uri = "/calendars/admin/"
 	nonce := issueNonce(t, b)
 
-	principal, ok, reason := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000001", "admin"))
+	principal, ok, reason := check(b, digestRequest("PROPFIND", uri, uri, nonce, "00000001", "admin"))
 	if !ok || principal != "principals/admin" {
 		t.Errorf("Check = (%q, %v, %q), want (principals/admin, true)", principal, ok, reason)
 	}
 	// The same nonce with a higher count is the normal client pattern.
-	if _, ok, reason := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000002", "admin")); !ok {
+	if _, ok, reason := check(b, digestRequest("PROPFIND", uri, uri, nonce, "00000002", "admin")); !ok {
 		t.Errorf("next nonce count rejected: %q", reason)
 	}
 	// A wrong password must fail.
-	if _, ok, _ := b.Check(digestRequest("PROPFIND", uri, uri, nonce, "00000003", "wrong")); ok {
+	if _, ok, _ := check(b, digestRequest("PROPFIND", uri, uri, nonce, "00000003", "wrong")); ok {
 		t.Error("wrong password accepted")
 	}
 }
@@ -112,23 +122,23 @@ func TestDigestReplayProtection(t *testing.T) {
 	const uri = "/calendars/admin/"
 	nonce := issueNonce(t, b)
 	captured := digestRequest("PROPFIND", uri, uri, nonce, "00000001", "admin")
-	if _, ok, reason := b.Check(captured); !ok {
+	if _, ok, reason := check(b, captured); !ok {
 		t.Fatalf("first use rejected: %q", reason)
 	}
-	if _, ok, _ := b.Check(captured); ok {
+	if _, ok, _ := check(b, captured); ok {
 		t.Error("replayed request accepted")
 	}
-	if _, ok, _ := b.Check(digestRequest("PROPFIND", "/calendars/other/", uri, nonce, "00000005", "admin")); ok {
+	if _, ok, _ := check(b, digestRequest("PROPFIND", "/calendars/other/", uri, nonce, "00000005", "admin")); ok {
 		t.Error("credentials for one uri accepted on another path")
 	}
-	if _, ok, _ := b.Check(digestRequest("PROPFIND", uri, uri, "abc123", "00000001", "admin")); ok {
+	if _, ok, _ := check(b, digestRequest("PROPFIND", uri, uri, "abc123", "00000001", "admin")); ok {
 		t.Error("unissued nonce accepted")
 	}
 
 	later := time.Now().Add(nonceTTL + time.Minute)
 	b.now = func() time.Time { return later }
 	expired := digestRequest("PROPFIND", uri, uri, nonce, "00000009", "admin")
-	if _, ok, _ := b.Check(expired); ok {
+	if _, ok, _ := check(b, expired); ok {
 		t.Error("expired nonce accepted")
 	}
 	h := http.Header{}
@@ -154,20 +164,20 @@ func TestDigestBackendRejections(t *testing.T) {
 
 	// No Authorization header at all.
 	r := httptest.NewRequest("PROPFIND", "/", nil)
-	if _, ok, reason := b.Check(r); ok || !strings.Contains(reason, "Digest") {
+	if _, ok, reason := check(b, r); ok || !strings.Contains(reason, "Digest") {
 		t.Errorf("missing header: ok=%v reason=%q", ok, reason)
 	}
 
 	// A Digest header that carries no username.
 	r.Header.Set("Authorization", `Digest realm="SabreDAV", nonce="abc"`)
-	if _, ok, _ := b.Check(r); ok {
+	if _, ok, _ := check(b, r); ok {
 		t.Error("username-less Digest header accepted")
 	}
 
 	// An unknown user gets the same generic message as a wrong password.
 	r.Header.Set("Authorization",
 		`Digest username="ghost", realm="SabreDAV", nonce="abc", uri="/", qop=auth, nc=00000001, cnonce="x", response="y"`)
-	if _, ok, reason := b.Check(r); ok || reason != "Username or password was incorrect" {
+	if _, ok, reason := check(b, r); ok || reason != "Username or password was incorrect" {
 		t.Errorf("unknown user: ok=%v reason=%q, want the generic message", ok, reason)
 	}
 
@@ -175,7 +185,7 @@ func TestDigestBackendRejections(t *testing.T) {
 	// a protocol error, not as wrong credentials.
 	r.Header.Set("Authorization",
 		`Digest username="admin", realm="SabreDAV", nonce="abc", uri="/", response="y"`)
-	if _, ok, reason := b.Check(r); ok || reason != "Unsupported digest qop value" {
+	if _, ok, reason := check(b, r); ok || reason != "Unsupported digest qop value" {
 		t.Errorf("qop-less form: ok=%v reason=%q, want the qop error", ok, reason)
 	}
 }
@@ -210,17 +220,17 @@ func TestParseDigestHeaderSkipsBareTokens(t *testing.T) {
 	}
 }
 
-// TestPrincipalPrefixOverride: every backend substitutes an explicit
+// TestPrincipalPrefixOverride: a backend substitutes an explicit
 // PrincipalPrefix for the "principals/" default.
 func TestPrincipalPrefixOverride(t *testing.T) {
-	if got := (&BasicBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("BasicBackend prefix = %q, want users/", got)
+	if got := principalPath("", "admin"); got != "principals/admin" {
+		t.Errorf("default principal = %q, want principals/admin", got)
 	}
-	if got := (&DigestBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("DigestBackend prefix = %q, want users/", got)
-	}
-	if got := (&RcptdBackend{PrincipalPrefix: "users/"}).prefix(); got != "users/" {
-		t.Errorf("RcptdBackend prefix = %q, want users/", got)
+	b := &BasicBackend{PrincipalPrefix: "users/", Validate: func(string, string) bool { return true }}
+	r := httptest.NewRequest("PROPFIND", "/", nil)
+	r.SetBasicAuth("admin", "admin")
+	if got, _, _ := check(b, r); got != "users/admin" {
+		t.Errorf("BasicBackend principal = %q, want users/admin", got)
 	}
 }
 

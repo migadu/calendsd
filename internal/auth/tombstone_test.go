@@ -19,11 +19,11 @@ type stubBackend struct {
 	ok        bool
 }
 
-func (s stubBackend) Check(*http.Request) (string, bool, string) {
+func (s stubBackend) Check(*http.Request) (string, error) {
 	if s.ok {
-		return s.principal, true, ""
+		return s.principal, nil
 	}
-	return "", false, "no"
+	return "", ErrBadCredentials
 }
 func (stubBackend) Challenge(http.Header, *http.Request) {}
 

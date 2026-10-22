@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +93,7 @@ func TestRcptdCheckSuccess(t *testing.T) {
 		return nil
 	}
 
-	principal, ok, reason := b.Check(basicReq(t, "User@Example.com", "s3cret"))
+	principal, ok, reason := check(b, basicReq(t, "User@Example.com", "s3cret"))
 	if !ok {
 		t.Fatalf("Check failed: %s", reason)
 	}
@@ -110,7 +111,7 @@ func TestRcptdCheckWrongPassword(t *testing.T) {
 	}}
 	b, _ := newBackend(t, f, 0)
 
-	_, ok, reason := b.Check(basicReq(t, "user@example.com", "wrong"))
+	_, ok, reason := check(b, basicReq(t, "user@example.com", "wrong"))
 	if ok {
 		t.Fatal("Check succeeded with wrong password")
 	}
@@ -123,7 +124,7 @@ func TestRcptdCheckUnknownUser(t *testing.T) {
 	f := &fakeRcptd{users: map[string][]string{}}
 	b, _ := newBackend(t, f, 0)
 
-	_, ok, reason := b.Check(basicReq(t, "ghost@example.com", "whatever"))
+	_, ok, reason := check(b, basicReq(t, "ghost@example.com", "whatever"))
 	if ok {
 		t.Fatal("Check succeeded for unknown user")
 	}
@@ -140,7 +141,7 @@ func TestRcptdCheckServiceUnavailable(t *testing.T) {
 	}
 	b, _ := newBackend(t, f, 0)
 
-	_, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret"))
+	_, ok, reason := check(b, basicReq(t, "user@example.com", "s3cret"))
 	if ok {
 		t.Fatal("Check succeeded despite a 503 from rcptd")
 	}
@@ -157,7 +158,7 @@ func TestRcptdCheckBadServerToken(t *testing.T) {
 	t.Cleanup(ts.Close)
 	b := NewRcptdBackend("Realm", ts.URL, "WRONG-token", 0) // misconfigured
 
-	_, ok, _ := b.Check(basicReq(t, "user@example.com", "s3cret"))
+	_, ok, _ := check(b, basicReq(t, "user@example.com", "s3cret"))
 	if ok {
 		t.Fatal("Check succeeded with a wrong bearer token")
 	}
@@ -166,7 +167,7 @@ func TestRcptdCheckBadServerToken(t *testing.T) {
 func TestRcptdNoBasicHeader(t *testing.T) {
 	f := &fakeRcptd{}
 	b, _ := newBackend(t, f, 0)
-	_, ok, _ := b.Check(basicReq(t, "", ""))
+	_, ok, _ := check(b, basicReq(t, "", ""))
 	if ok {
 		t.Fatal("Check succeeded without an Authorization header")
 	}
@@ -182,7 +183,7 @@ func TestRcptdPositiveCache(t *testing.T) {
 	b, _ := newBackend(t, f, time.Minute)
 
 	for i := 0; i < 3; i++ {
-		if _, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret")); !ok {
+		if _, ok, reason := check(b, basicReq(t, "user@example.com", "s3cret")); !ok {
 			t.Fatalf("Check %d failed: %s", i, reason)
 		}
 	}
@@ -191,7 +192,7 @@ func TestRcptdPositiveCache(t *testing.T) {
 	}
 
 	// A wrong password must not be served from the positive cache.
-	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "nope")); ok {
+	if _, ok, _ := check(b, basicReq(t, "user@example.com", "nope")); ok {
 		t.Fatal("wrong password accepted from cache")
 	}
 	if got := atomic.LoadInt32(&f.hits); got != 2 {
@@ -207,8 +208,23 @@ func TestRcptdProvisionErrorFailsClosed(t *testing.T) {
 	b.Provision = func(_ context.Context, principal, email string) error {
 		return errProvision
 	}
-	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "s3cret")); ok {
+	if _, ok, _ := check(b, basicReq(t, "user@example.com", "s3cret")); ok {
 		t.Fatal("Check succeeded despite provisioning failure; must fail closed")
+	}
+
+	// The database error is logged, but the 401 body never carries it.
+	var logs strings.Builder
+	p := NewPlugin(b)
+	p.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	_, err := p.BeforeMethod(httptest.NewRecorder(), basicReq(t, "user@example.com", "s3cret"))
+	if err == nil {
+		t.Fatal("plugin let the request through")
+	}
+	if msg := err.Error(); strings.Contains(msg, "boom") || !strings.Contains(msg, "provisioning failed") {
+		t.Errorf("401 message = %q, want the generic provisioning failure without the database error", msg)
+	}
+	if !strings.Contains(logs.String(), "boom") {
+		t.Errorf("log lacks the provisioning error:\n%s", logs.String())
 	}
 }
 
@@ -235,12 +251,15 @@ func TestRcptdUnreachable(t *testing.T) {
 	ts.Close() // dial now fails
 	b := NewRcptdBackend("Realm", ts.URL, "", 0)
 
-	_, ok, reason := b.Check(basicReq(t, "user@example.com", "pw"))
+	_, ok, reason := check(b, basicReq(t, "user@example.com", "pw"))
 	if ok {
 		t.Fatal("Check succeeded with rcptd unreachable")
 	}
 	if reason != "authentication service is unreachable" {
 		t.Errorf("reason = %q, want the unreachable message", reason)
+	}
+	if _, err := b.Check(basicReq(t, "user@example.com", "pw")); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("Check = %v, want ErrUnavailable", err)
 	}
 }
 
@@ -249,7 +268,7 @@ func TestRcptdUnreachable(t *testing.T) {
 // leaking a Go error to the client.
 func TestRcptdBadBaseURL(t *testing.T) {
 	b := NewRcptdBackend("Realm", "http://bad host", "", 0)
-	_, ok, reason := b.Check(basicReq(t, "user@example.com", "pw"))
+	_, ok, reason := check(b, basicReq(t, "user@example.com", "pw"))
 	if ok {
 		t.Fatal("Check succeeded with an unusable base URL")
 	}
@@ -270,7 +289,7 @@ func TestRcptdUnexpectedStatus(t *testing.T) {
 	set := metrics.New("test")
 	b.Metrics = set
 
-	_, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret"))
+	_, ok, reason := check(b, basicReq(t, "user@example.com", "s3cret"))
 	if ok {
 		t.Fatal("Check succeeded despite a 500 from rcptd")
 	}
@@ -300,7 +319,7 @@ func TestRcptdMalformedBody(t *testing.T) {
 	set := metrics.New("test")
 	b.Metrics = set
 
-	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "pw")); ok {
+	if _, ok, _ := check(b, basicReq(t, "user@example.com", "pw")); ok {
 		t.Fatal("Check succeeded on an undecodable /auth body")
 	}
 	want := `
@@ -323,7 +342,7 @@ func TestRcptdCustomHTTPClient(t *testing.T) {
 	b, _ := newBackend(t, f, 0)
 	b.HTTP = &http.Client{Timeout: time.Second}
 
-	if _, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret")); !ok {
+	if _, ok, reason := check(b, basicReq(t, "user@example.com", "s3cret")); !ok {
 		t.Fatalf("Check with injected client failed: %s", reason)
 	}
 }
@@ -339,7 +358,7 @@ func TestRcptdUnusableHashLogged(t *testing.T) {
 	cap := &captureHandler{}
 	b.Logger = slog.New(cap)
 
-	if _, ok, _ := b.Check(basicReq(t, "user@example.com", "whatever")); ok {
+	if _, ok, _ := check(b, basicReq(t, "user@example.com", "whatever")); ok {
 		t.Fatal("Check succeeded against an unusable hash")
 	}
 	rec, attrs := cap.only(t)
@@ -364,7 +383,7 @@ func TestRcptdCacheStorePurgesExpired(t *testing.T) {
 	b.cache["old@example.com"] = cacheEntry{expiry: time.Now().Add(-time.Second)}
 	b.mu.Unlock()
 
-	if _, ok, reason := b.Check(basicReq(t, "user@example.com", "s3cret")); !ok {
+	if _, ok, reason := check(b, basicReq(t, "user@example.com", "s3cret")); !ok {
 		t.Fatalf("Check failed: %s", reason)
 	}
 

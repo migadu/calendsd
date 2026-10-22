@@ -136,9 +136,11 @@ func parseAddressbookQuery(body []byte) (*addressbookQuery, error) {
 		}
 	}
 	if q.Filter != nil {
-		if q.Filter.Test != "" {
-			out.test = q.Filter.Test
+		test, err := parseTest(q.Filter.Test)
+		if err != nil {
+			return nil, err
 		}
+		out.test = test
 		for _, pf := range q.Filter.PropFilters {
 			pfilter, err := convertPropFilter(pf)
 			if err != nil {
@@ -153,11 +155,25 @@ func parseAddressbookQuery(body []byte) (*addressbookQuery, error) {
 	return out, nil
 }
 
-func convertPropFilter(in propFilterXML) (propFilter, error) {
-	out := propFilter{name: in.Name, isNotDefined: in.IsNotDefined != nil, test: in.Test}
-	if out.test == "" {
-		out.test = "anyof"
+// parseTest validates a filter's or prop-filter's test attribute (RFC 6352
+// §10.5, §10.5.1), defaulting to anyof. Anything else is a 400: matching
+// treated an unknown value as neither, so the filter silently never matched.
+func parseTest(test string) (string, error) {
+	switch test {
+	case "":
+		return "anyof", nil
+	case "anyof", "allof":
+		return test, nil
 	}
+	return "", fmt.Errorf("unknown test value: %s", test)
+}
+
+func convertPropFilter(in propFilterXML) (propFilter, error) {
+	test, err := parseTest(in.Test)
+	if err != nil {
+		return propFilter{}, err
+	}
+	out := propFilter{name: in.Name, isNotDefined: in.IsNotDefined != nil, test: test}
 	for _, tm := range in.TextMatches {
 		conv, err := convertTextMatch(tm)
 		if err != nil {
@@ -248,24 +264,24 @@ func parseAddressbookMultiget(body []byte) (*multigetQuery, error) {
 
 // match reports whether a vCard satisfies the query filters. Port of
 // Plugin::validateFilters.
-func (q *addressbookQuery) match(data []byte) (bool, error) {
+func (q *addressbookQuery) match(data []byte) bool {
 	if len(q.filters) == 0 {
-		return true, nil
+		return true
 	}
 	card, err := decodeVCard(data)
 	if err != nil {
-		return false, nil // unparseable cards never match, like sabre
+		return false // unparseable cards never match, like sabre
 	}
 	for _, filter := range q.filters {
 		success := q.matchFilter(card, filter)
 		if q.test == "anyof" && success {
-			return true, nil
+			return true
 		}
 		if q.test == "allof" && !success {
-			return false, nil
+			return false
 		}
 	}
-	return q.test == "allof", nil
+	return q.test == "allof"
 }
 
 func (q *addressbookQuery) matchFilter(card vcard.Card, filter propFilter) bool {

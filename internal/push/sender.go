@@ -47,7 +47,8 @@ func (s WebPushSender) Send(ctx context.Context, sub Subscription, topic string,
 	if err != nil {
 		return 0, err
 	}
-	// Drain and close so the underlying connection can be reused.
+	// Only the status matters. The body is closed unread, which costs the
+	// connection's reuse only when a push service sends one.
 	resp.Body.Close()
 	return resp.StatusCode, nil
 }

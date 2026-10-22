@@ -214,3 +214,25 @@ func TestOpsDelete(t *testing.T) {
 		t.Fatalf("Delete on missing = %v, want ErrNoJob", err)
 	}
 }
+
+// TestOpsRequeueRefusesExecuting: re-queueing a job a worker is running would
+// let a second worker send it again.
+func TestOpsRequeueRefusesExecuting(t *testing.T) {
+	db := openScratchDB(t, "calserver_f_ops_requeue_exec")
+	q := newTestQueue(t, db)
+	ops := &Ops{DB: db}
+
+	id := enqueuePerUser(t, q, "u1", "mailto:a@x.test", "pw")
+	if _, err := q.store.claim(context.Background(), "default"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.Retry(id); err != ErrJobExecuting {
+		t.Errorf("Retry on executing = %v, want ErrJobExecuting", err)
+	}
+	if err := ops.RelayOverride(id); err != ErrJobExecuting {
+		t.Errorf("RelayOverride on executing = %v, want ErrJobExecuting", err)
+	}
+	if r := getJob(t, db, id); r.state != "executing" || r.attempt != 1 || !r.credSet {
+		t.Errorf("job changed: state=%q attempt=%d credSet=%v, want executing/1/true", r.state, r.attempt, r.credSet)
+	}
+}

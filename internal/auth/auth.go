@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,10 +17,44 @@ import (
 // Auth\Backend\BackendInterface.
 type Backend interface {
 	// Check returns the authenticated principal path (e.g.
-	// "principals/admin") or ok=false with a human-readable reason.
-	Check(r *http.Request) (principal string, ok bool, reason string)
+	// "principals/admin"), or an error saying why not: ErrBadCredentials for
+	// wrong credentials, ErrUnavailable when they could not be verified at
+	// all, anything else for missing or malformed credentials or a server
+	// fault. ClientMessage gives the part of it a response may show.
+	Check(r *http.Request) (principal string, err error)
 	// Challenge adds WWW-Authenticate headers for a 401 response to r.
 	Challenge(h http.Header, r *http.Request)
+}
+
+var (
+	// ErrBadCredentials is a Check failure for an unknown user or a wrong
+	// password; one error for both, so a response can't enumerate accounts.
+	ErrBadCredentials = errors.New("Username or password was incorrect")
+	// ErrUnavailable is a Check failure for credentials that could not be
+	// verified at all (the credential service is down), as opposed to wrong
+	// ones. A caller that can say "try again" (the contacts API's 503) tells
+	// it apart with errors.Is.
+	ErrUnavailable = errors.New("authentication service is temporarily unavailable")
+)
+
+// serverError is a Check failure caused by the server, whose detail (a
+// database or network error) is for the log, not for the client.
+type serverError struct {
+	msg string // what the client sees
+	err error
+}
+
+func (e *serverError) Error() string { return e.msg + ": " + e.err.Error() }
+func (e *serverError) Unwrap() error { return e.err }
+
+// ClientMessage returns the text of a Check error that a response body may
+// carry: the error itself, minus any server-side detail.
+func ClientMessage(err error) string {
+	var se *serverError
+	if errors.As(err, &se) {
+		return se.msg
+	}
+	return err.Error()
 }
 
 // Plugin authenticates every request before dispatch, recording the
@@ -93,10 +128,10 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		dav.SetPrincipal(r.Context(), p.fixedPrincipal)
 		return true, nil
 	}
-	var reasons []string
+	var reasons, messages []string
 	for _, b := range p.backends {
-		principal, ok, reason := b.Check(r)
-		if ok {
+		principal, err := b.Check(r)
+		if err == nil {
 			if p.Tombstoned != nil && p.Tombstoned(principal) {
 				// Valid credentials, but the account is scheduled for deletion:
 				// reject with 403 (not a 401 re-challenge, which would loop) and
@@ -122,7 +157,8 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 				"path", r.URL.Path, "remote", remoteAddr(r))
 			return true, nil
 		}
-		reasons = append(reasons, reason)
+		reasons = append(reasons, err.Error())
+		messages = append(messages, ClientMessage(err))
 	}
 	if !p.AutoRequireLogin {
 		return true, nil
@@ -152,8 +188,8 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		b.Challenge(w.Header(), r)
 	}
 	msg := "No authentication backends were configured on this server."
-	if len(reasons) > 0 {
-		msg = strings.Join(reasons, ", ")
+	if len(messages) > 0 {
+		msg = strings.Join(messages, ", ")
 	}
 	return false, dav.ErrNotAuthenticated("%s", msg)
 }

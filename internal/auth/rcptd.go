@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -90,13 +91,6 @@ func NewRcptdBackend(realm, rcptdURL, token string, ttl time.Duration) *RcptdBac
 	}
 }
 
-func (b *RcptdBackend) prefix() string {
-	if b.PrincipalPrefix != "" {
-		return b.PrincipalPrefix
-	}
-	return "principals/"
-}
-
 func (b *RcptdBackend) client() *http.Client {
 	if b.HTTP != nil {
 		return b.HTTP
@@ -104,65 +98,46 @@ func (b *RcptdBackend) client() *http.Client {
 	return &http.Client{Timeout: 5 * time.Second}
 }
 
-func (b *RcptdBackend) Check(r *http.Request) (string, bool, string) {
+func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 	username, password, ok := r.BasicAuth()
 	if !ok {
-		return "", false, "No 'Authorization: Basic' header found. Either the client didn't send one, or the server is misconfigured"
+		return "", errNoBasic
 	}
 	username = strings.ToLower(username)
 	start := time.Now()
-	ok, outcome, reason := b.verify(r.Context(), username, password)
+	outcome, err := b.verify(r.Context(), username, password)
 	b.Metrics.ObserveAuthCheck("rcptd", time.Since(start).Seconds())
-	if !ok {
+	if err != nil {
 		b.Metrics.AuthAttempt("rcptd", outcome)
-		return "", false, reason
+		return "", err
 	}
-	principal := b.prefix() + username
+	principal := principalPath(b.PrincipalPrefix, username)
 	if b.Provision != nil {
 		if err := b.Provision(r.Context(), principal, username); err != nil {
 			// Fail closed: an authenticated user with no principal would hit
 			// confusing downstream errors, so surface it as an auth failure.
 			// Operationally nothing like bad_credentials: a first-login DB
-			// write failed, so it gets its own outcome.
+			// write failed, so it gets its own outcome. The database error is
+			// logged, never sent to the client.
 			b.Metrics.AuthAttempt("rcptd", "provision_error")
-			return "", false, "provisioning failed: " + err.Error()
+			return "", &serverError{msg: "provisioning failed", err: err}
 		}
 	}
 	b.Metrics.AuthAttempt("rcptd", "ok")
-	return principal, true, ""
+	return principal, nil
 }
 
-// The reasons Check returns when rcptd could not give an answer, as opposed
-// to answering no. DAV clients get them as a 401 like any failed login; a
-// caller that can say "try again" instead (the contacts API's 503) tells them
-// apart with Unavailable.
-const (
-	ReasonUnreachable = "authentication service is unreachable"
-	ReasonUnavailable = "authentication service is temporarily unavailable"
-)
+func (b *RcptdBackend) Challenge(h http.Header, _ *http.Request) { basicChallenge(h, b.Realm) }
 
-// Unavailable reports whether a Check failure reason means the credential
-// could not be verified at all, rather than that it was wrong.
-func Unavailable(reason string) bool {
-	return reason == ReasonUnreachable || reason == ReasonUnavailable
-}
-
-func (b *RcptdBackend) Challenge(h http.Header, _ *http.Request) {
-	h.Add("WWW-Authenticate", fmt.Sprintf("Basic realm=%q, charset=\"UTF-8\"", b.Realm))
-}
-
-// verify returns whether the credentials are valid, a typed outcome for the
-// attempts metric, and a client-facing reason on failure. "user unknown" and
-// "wrong password" deliberately share one message so the response can't be
-// used to enumerate accounts (the metric outcome merges them too — it is
-// aggregate, so nothing leaks, but per-user separation stays out on
-// principle).
-func (b *RcptdBackend) verify(ctx context.Context, username, password string) (ok bool, outcome, reason string) {
-	const bad = "Username or password was incorrect"
-
+// verify returns a typed outcome for the attempts metric and, when the
+// credentials are not valid, why. "user unknown" and "wrong password"
+// deliberately share ErrBadCredentials so the response can't be used to
+// enumerate accounts (the metric outcome merges them too — it is aggregate,
+// so nothing leaks, but per-user separation stays out on principle).
+func (b *RcptdBackend) verify(ctx context.Context, username, password string) (outcome string, err error) {
 	if b.cacheHit(username, password) {
 		b.Metrics.AuthCacheEvent("hit")
-		return true, "ok", ""
+		return "ok", nil
 	}
 	if b.ttl != 0 {
 		// Only a real consultation counts: with the cache disabled (ttl 0) a
@@ -172,21 +147,22 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 
 	hashes, status, err := b.lookup(ctx, username)
 	if err != nil {
-		return false, "unavailable", ReasonUnreachable
+		return "unavailable", &serverError{msg: "authentication service is unreachable",
+			err: errors.Join(ErrUnavailable, err)}
 	}
 	switch status {
 	case http.StatusOK:
 		// fall through to verification
 	case http.StatusNotFound:
-		return false, "bad_credentials", bad
+		return "bad_credentials", ErrBadCredentials
 	case http.StatusServiceUnavailable:
 		// Transient CDB fault on rcptd's side; retryable, not a definitive no.
-		return false, "unavailable", ReasonUnavailable
+		return "unavailable", ErrUnavailable
 	case http.StatusUnauthorized:
 		// Our own bearer token is wrong — an operator misconfiguration.
-		return false, "error", "authentication service rejected this server's credentials"
+		return "error", errors.New("authentication service rejected this server's credentials")
 	default:
-		return false, "error", fmt.Sprintf("authentication service returned status %d", status)
+		return "error", fmt.Errorf("authentication service returned status %d", status)
 	}
 
 	res := passwd.VerifyAny(hashes, password)
@@ -195,10 +171,10 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 			"user", username, "unsupported", res.Unsupported, "malformed", res.Malformed)
 	}
 	if !res.Matched {
-		return false, "bad_credentials", bad
+		return "bad_credentials", ErrBadCredentials
 	}
 	b.cacheStore(username, password)
-	return true, "ok", ""
+	return "ok", nil
 }
 
 // authResponse is the subset of rcptd's /auth JSON we consume. allowed_from

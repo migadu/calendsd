@@ -28,9 +28,9 @@ func TestBasicBackendMetrics(t *testing.T) {
 	bad.SetBasicAuth("hans", "bad")
 	none := httptest.NewRequest("GET", "/", nil)
 
-	b.Check(ok)
-	b.Check(bad)
-	b.Check(none) // no Basic header: must not count
+	check(b, ok)
+	check(b, bad)
+	check(b, none) // no Basic header: must not count
 
 	if err := testutil.GatherAndCompare(set.Registry(), strings.NewReader(attemptsWant(
 		`calserver_auth_attempts_total{backend="basic",outcome="bad_credentials"} 1`,
@@ -90,7 +90,7 @@ func TestRcptdBackendMetrics(t *testing.T) {
 	login := func(user, pass string) {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.SetBasicAuth(user, pass)
-		b.Check(r)
+		check(b, r)
 	}
 	login("hans@example.org", "good")
 	login("hans@example.org", "wrong")

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"calserver/internal/caldav"
@@ -37,7 +38,7 @@ type Plugin struct {
 	cfg     Config
 	store   *Store
 	server  *dav.Server
-	checker caldav.PrivilegeChecker
+	checker func() (caldav.PrivilegeChecker, error) // set by Init
 }
 
 // NewPlugin builds the push plugin over the shared database pool.
@@ -47,7 +48,12 @@ func NewPlugin(cfg Config, store *Store) *Plugin {
 
 func (p *Plugin) PluginName() string { return "webdav-push" }
 
-func (p *Plugin) Init(s *dav.Server) { p.server = s }
+func (p *Plugin) Init(s *dav.Server) {
+	p.server = s
+	p.checker = sync.OnceValues(func() (caldav.PrivilegeChecker, error) {
+		return caldav.RequirePrivilegeChecker(s)
+	})
+}
 
 // Features implements dav.FeatureProvider: the "webdav-push" token in the DAV
 // header (and OPTIONS) tells clients the server speaks WebDAV-Push.
@@ -79,14 +85,9 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	}
 	name := func(local string) xml.Name { return xml.Name{Space: NS, Local: local} }
 
-	// transports: the Web Push transport plus our VAPID public key. The inner
-	// fragment carries its own default xmlns so it is self-contained (the
-	// marshaller declares NS on the multistatus root for the property name but
-	// does not rewrite Raw content).
+	// transports: the Web Push transport plus our VAPID public key.
 	pf.Handle(name("transports"), func() any {
-		return davxml.Raw(`<web-push xmlns="` + NS + `">` +
-			`<vapid-public-key type="p256ecdsa">` + escapeText(p.cfg.VAPIDPublicKey) + `</vapid-public-key>` +
-			`</web-push>`)
+		return davxml.Raw(webPushTransport(p.cfg.VAPIDPublicKey))
 	})
 	pf.Handle(name("topic"), func() any { return p.cfg.Topic(kind, id) })
 	pf.Handle(name("supported-triggers"), func() any {
@@ -204,19 +205,11 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	return false, nil
 }
 
-// privilegeChecker resolves (and caches) the ACL enforcement surface, failing
-// closed when none is registered — the same fail-closed contract caldav's
-// self-enforcing paths use.
+// privilegeChecker resolves (once, on first use, when every plugin is
+// registered) the ACL enforcement surface, failing closed when none is
+// registered — the same fail-closed contract caldav's self-enforcing paths use.
 func (p *Plugin) privilegeChecker() (caldav.PrivilegeChecker, error) {
-	if p.checker != nil {
-		return p.checker, nil
-	}
-	checker, err := caldav.RequirePrivilegeChecker(p.server)
-	if err != nil {
-		return nil, err
-	}
-	p.checker = checker
-	return checker, nil
+	return p.checker()
 }
 
 // randomToken returns a URL-safe opaque id for a subscription resource.
