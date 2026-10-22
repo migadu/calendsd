@@ -199,6 +199,12 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		h.timedOut(w, r, "storage")
 		return
 	}
+	// The card went away between our read and the write (a concurrent
+	// delete): the same answer as if it had already been gone.
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such contact")
+		return
+	}
 	h.opts.Logger.Error("contacts api", "method", r.Method, "path", r.URL.Path,
 		"principal", principalOf(r), "err", err)
 	writeError(w, http.StatusInternalServerError, "internal error")
