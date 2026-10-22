@@ -14,3 +14,14 @@ func TestParseJobID(t *testing.T) {
 		}
 	}
 }
+
+func TestTruncateKeepsRunesWhole(t *testing.T) {
+	// A byte-based cut at 16 would split the two-byte "ü".
+	got := truncate("Zustellung an Müller fehlgeschlagen", 17)
+	if want := "Zustellung an Mü…"; got != want {
+		t.Errorf("truncate = %q, want %q", got, want)
+	}
+	if got := truncate("äöü\nß", 5); got != "äöü ß" {
+		t.Errorf("short string changed: %q", got)
+	}
+}

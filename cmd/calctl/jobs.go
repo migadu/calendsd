@@ -427,8 +427,10 @@ func humanDur(d time.Duration) string {
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > n {
-		return s[:n-1] + "…"
+	// Count runes, not bytes: a byte cut can split a multi-byte character
+	// and print invalid UTF-8 into the table.
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
 	}
 	return s
 }
