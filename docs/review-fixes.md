@@ -153,6 +153,25 @@ Cross-workstream touch points (keep edits minimal and local):
 - `auth.Check` callers outside F's packages are updated by F.
 - `Server.Path` callers in B's and F's packages are updated by A, last.
 
+**Status: workstreams A–F merged** into `review-fixes`. Left over from them
+(fold into phase 2):
+- A: drop the `Bare` multistatus quirk (needs the three `PrincipalMatch*`
+  corpus cases out of `internal/corpus/runner_test.go`); move
+  `davxml.CanonicalizeFunc` to a test helper (corpus runner imports it); drop
+  `PropPatch.String` (a storage test prints it); `principalHrefs`, `proxyFor`
+  and `current-user-principal` should build hrefs with `Server.Href`.
+- A → B/F: serve `CalendarObject`, `SchedulingObject`, `Card` bodies with
+  `dav.BytesBody`, then delete `parseRange`/`ignoreRange`; use
+  `Server.WriteMultiStatus` for their hand-written 207s.
+- B: MKCALENDAR re-encodes into a propertyupdate; an exported per-property
+  parser in davxml would simplify it.
+- C: the time-range Validator still does not resolve non-IANA (Outlook)
+  TZIDs; export `ical.resolveNonIANATZIDs` and call it there. Timed events
+  with `DURATION:P1D` still use 24h.
+- E: `server.New` stays until `internal/storage/parity_test.go` calls `Build`.
+- F: the iMIP-specific `ON CONFLICT` in `jobs.enqueue` needs `IMipPlugin` to
+  opt in first.
+
 ## Phase 2 — cross-cutting refactors (sequential, after phase 1 is green)
 
 1. **`context.Context` through storage.** `ctx` is the first parameter of every
