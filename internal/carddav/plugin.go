@@ -277,16 +277,8 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 			ms.Responses = append(ms.Responses, resp)
 		}
 	}
-	h := w.Header()
-	h.Set("Content-Type", "application/xml; charset=utf-8")
-	h.Set("Vary", "Brief,Prefer")
-	out, err := ms.Marshal()
-	if err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(out)
-	return err
+	w.Header().Set("Vary", "Brief,Prefer")
+	return p.server.WriteMultiStatus(w, ms)
 }
 
 // decodeVCard parses vCard bytes.

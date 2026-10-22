@@ -316,16 +316,8 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 		}
 	}
 
-	h := w.Header()
-	h.Set("Content-Type", "application/xml; charset=utf-8")
-	h.Set("Vary", "Brief,Prefer")
-	out, err := ms.Marshal()
-	if err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusMultiStatus)
-	_, err = w.Write(out)
-	return err
+	w.Header().Set("Vary", "Brief,Prefer")
+	return p.server.WriteMultiStatus(w, ms)
 }
 
 // jsonResponseData rewrites the calendar-data property of a response as
