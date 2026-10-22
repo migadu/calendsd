@@ -214,12 +214,6 @@ func (c Config) pushConfig() push.Config {
 	}
 }
 
-// New builds the storage-backed server with no background services, for
-// in-process use (tests).
-func New(db *sql.DB, cfg Config) http.Handler {
-	return Build(db, cfg, "").Handler
-}
-
 // Built is everything Build assembles: the DAV handler to serve, the
 // background services to run, and the two pieces the webmail contacts API
 // (internal/contactsapi) must share with the DAV server rather than

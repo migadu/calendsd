@@ -93,7 +93,7 @@ func TestParity(t *testing.T) {
 		t.Fatalf("opening db: %v", err)
 	}
 	defer db.Close()
-	goSrv := httptest.NewServer(server.New(db, server.Config{BaseURI: "/"}))
+	goSrv := httptest.NewServer(server.Build(db, server.Config{BaseURI: "/"}, "").Handler)
 	defer goSrv.Close()
 
 	sabreClient := &digestClient{base: "http://" + sabreAddr, username: "admin", password: "admin"}
