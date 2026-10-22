@@ -150,6 +150,8 @@ type SharingPlugin struct {
 	// Notifier, when non-nil, is told about every sharee a {cs}share request
 	// newly granted a usable local share, so it can email them.
 	Notifier ShareNotifier
+	// Now stamps invite notifications; nil uses time.Now (tests pin it).
+	Now func() time.Time
 
 	server *dav.Server
 }
@@ -250,7 +252,7 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 			}
 			err := notif.AddNotification(c.Principal, InviteNotification{
 				ID:           notificationID(calPath, c.Href),
-				DTStamp:      requestTime(r),
+				DTStamp:      p.now(),
 				HostURL:      calPath,
 				Organizer:    calNode.Owner(),
 				Access:       c.Access,
@@ -335,13 +337,9 @@ func sameSharee(cur, s Sharee) bool {
 // must apply the same normalization inside their own transaction.
 func FinalSharees(sharees []Sharee, owner string) []Sharee { return finalSharees(sharees, owner) }
 
-// requestTime returns a deterministic timestamp when available (parity/tests
-// pin it), else now.
-func requestTime(r *http.Request) time.Time {
-	if v := r.Header.Get("X-Test-Now"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			return t
-		}
+func (p *SharingPlugin) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
 	}
 	return time.Now()
 }

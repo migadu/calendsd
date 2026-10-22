@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"calserver/internal/acl"
 	"calserver/internal/auth"
@@ -143,6 +144,42 @@ func TestShareNotificationsFollowCommittedResult(t *testing.T) {
 	n := backend.Notifications["principals/user2"]
 	if len(n) != 1 || n[0].Access != caldav.AccessReadWrite {
 		t.Fatalf("notifications = %+v, want one read-write invite", n)
+	}
+}
+
+// TestShareNotificationClock: the invite's DTSTAMP comes from the plugin's
+// clock; a client cannot choose it with a request header.
+func TestShareNotificationClock(t *testing.T) {
+	email := xmlNM{Space: "http://sabredav.org/ns", Local: "email-address"}
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1", Props: map[xmlNM]any{email: "user1@example.org"}},
+		{URI: "principals/user2", Props: map[xmlNM]any{email: "user2@example.org"}},
+	}}
+	backend := &caldav.MockSharingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "cal1", PrincipalURI: "principals/user1",
+	}}
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+	now := time.Date(2026, 5, 4, 3, 2, 1, 0, time.UTC)
+	srv.AddPlugin(&caldav.SharingPlugin{Now: func() time.Time { return now }})
+
+	share := `<?xml version="1.0"?><cs:share xmlns:cs="http://calendarserver.org/ns/" xmlns:d="DAV:">
+	  <cs:set><d:href>mailto:user2@example.org</d:href></cs:set>
+	</cs:share>`
+	w := req(t, srv, "POST", "/calendars/user1/cal1", share,
+		"Content-Type", "text/xml", "X-Test-Now", "2001-01-01T00:00:00Z")
+	if w.Code != 200 {
+		t.Fatalf("share POST = %d: %s", w.Code, w.Body.String())
+	}
+	n := backend.Notifications["principals/user2"]
+	if len(n) != 1 || !n[0].DTStamp.Equal(now) {
+		t.Fatalf("notifications = %+v, want one stamped %v", n, now)
 	}
 }
 
