@@ -1,6 +1,7 @@
 package caldav_test
 
 import (
+	"encoding/xml"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -203,5 +204,44 @@ func TestBugStrangerCanPublishCalendar(t *testing.T) {
 	if len(backend.publishCalls) != 0 {
 		t.Fatalf("stranger publish-calendar mutated publish state: %+v; want no SetPublishStatus call",
 			backend.publishCalls)
+	}
+}
+
+// A read-only sharee must not reach UpdateInvites through their own view of a
+// shared calendar: {DAV:}share is granted only on the owner's view, keyed off
+// ShareAccess (S3/S10 in docs/review-fixes.md).
+func TestReadOnlyShareeCannotReshare(t *testing.T) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{
+		{URI: "principals/user1"}, {URI: "principals/user2"},
+	}}
+	backend := &caldav.MockSharingBackend{}
+	backend.Calendars = []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1", Instance: "2"}, URI: "shared", PrincipalURI: "principals/user2",
+		ShareAccess: caldav.AccessRead,
+		Props:       map[xml.Name]any{{Space: "http://sabredav.org/ns", Local: "read-only"}: "1"},
+	}}
+	backend.Objects = map[caldav.CalendarID]map[string]*caldav.ObjectInfo{}
+
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user2"))
+	srv.AddPlugin(&acl.Plugin{})
+	srv.AddPlugin(&caldav.Plugin{})
+	srv.AddPlugin(&caldav.SharingPlugin{})
+
+	share := `<?xml version="1.0"?><cs:share xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">` +
+		`<cs:set><d:href>principals/user2</d:href><cs:read-write/></cs:set></cs:share>`
+	post := httptest.NewRequest("POST", "/calendars/user2/shared", strings.NewReader(share))
+	post.Header.Set("Content-Type", "text/xml")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, post)
+
+	if w.Code != 403 {
+		t.Fatalf("read-only sharee cs:share POST = %d, want 403:\n%s", w.Code, w.Body.String())
+	}
+	if len(backend.Shares) != 0 {
+		t.Fatalf("read-only sharee changed the invites: %+v", backend.Shares)
 	}
 }

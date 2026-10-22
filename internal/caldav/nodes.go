@@ -518,7 +518,7 @@ func (c *Calendar) ACL() []acl.ACE {
 	}
 	// {DAV:}share is granted only on the owner's own view (not-shared or
 	// shared-owner), so a sharee cannot re-share, like sabre.
-	if c.Info.ShareAccess == 0 || c.Info.ShareAccess == 1 {
+	if c.Info.ShareAccess == AccessNotShared || c.Info.ShareAccess == AccessSharedOwner {
 		aces = append(aces, acl.ACE{Privilege: "{DAV:}share", Principal: owner, Protected: true})
 	}
 	return aces
@@ -559,8 +559,7 @@ func (o *CalendarObject) Get() (io.ReadCloser, error) {
 // owner's proxies, and read-write sharees (who can edit, so must see the real
 // object to round-trip it) get the full payload. The read-only view is
 // identified by sabre's read-only marker — the same signal the object ACL keys
-// off, and the one the storage backend actually populates (ACCESS_READ sets it;
-// the ShareAccess field is left zero). The result is memoized because Get,
+// off (storage sets it for ACCESS_READ). The result is memoized because Get,
 // Data, and Size each ask for it within one request.
 func (o *CalendarObject) viewData() []byte {
 	if !(&Calendar{Info: o.calendar}).readOnly() {

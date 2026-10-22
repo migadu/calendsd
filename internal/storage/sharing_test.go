@@ -468,3 +468,29 @@ func findInvite(t *testing.T, invites []caldav.Sharee, href string) caldav.Share
 	t.Fatalf("no invite with href %q in %+v", href, invites)
 	return caldav.Sharee{}
 }
+
+// TestShareeViewCarriesShareAccess guards the {DAV:}share grant: the calendar
+// ACL grants it only on the owner's view, keyed off ShareAccess, so storage
+// must fill it or every sharee could re-share (and raise their own access).
+func TestShareeViewCarriesShareAccess(t *testing.T) {
+	backend := sharingDB(t, "calserver_sharing_access")
+	if _, err := backend.UpdateInvites(ownerCalID(t, backend), []caldav.Sharee{
+		{Href: bobHref, Principal: "principals/bob", Access: caldav.AccessRead},
+		{Href: carolHref, Principal: "principals/carol", Access: caldav.AccessReadWrite},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for principal, want := range map[string]int{
+		"principals/alice": caldav.AccessSharedOwner,
+		"principals/bob":   caldav.AccessRead,
+		"principals/carol": caldav.AccessReadWrite,
+	} {
+		cals, err := backend.CalendarsForUser(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cals) != 1 || cals[0].ShareAccess != want {
+			t.Errorf("%s: calendars = %+v, want one with ShareAccess %d", principal, cals, want)
+		}
+	}
+}

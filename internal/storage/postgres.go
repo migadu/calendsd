@@ -138,6 +138,7 @@ SELECT calendarinstances.id as id, displayname, description, timezone,
 			URI:          uri,
 			PrincipalURI: principal,
 			Props:        map[xml.Name]any{},
+			ShareAccess:  int(access),
 		}
 		// An orphaned instance (no calendars row) degrades to token "0",
 		// like sabre's ?: '0' fallback.
@@ -149,7 +150,7 @@ SELECT calendarinstances.id as id, displayname, description, timezone,
 		info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "sync-token"}] = token
 		// Sharee views carry sabre's read-only marker; the calendar ACLs
 		// drop write privileges from it.
-		if access == 2 { // Sharing\Plugin::ACCESS_READ
+		if access == caldav.AccessRead {
 			info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "read-only"}] = "1"
 		}
 		info.Props[xml.Name{Space: davxml.NSCalDAV, Local: "supported-calendar-component-set"}] = componentSetValue(components.String)
