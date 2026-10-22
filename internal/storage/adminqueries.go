@@ -532,11 +532,14 @@ SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
 
 	// In-data search: stream payloads with a scan cap. After the limit
 	// fills, keep scanning until one more MATCH proves truncation — a
-	// further non-matching row is not truncation.
-	rows, err := q.DB.Query(`
+	// further non-matching row is not truncation. The SQL stops one row
+	// past the cap, so the database never ships payloads the loop would
+	// discard.
+	args = append(args, adminScanCap+1)
+	rows, err := q.DB.Query(fmt.Sprintf(`
 SELECT uri, coalesce(uid, ''), coalesce(componenttype, ''), coalesce(etag, ''),
        size, lastmodified, firstoccurence, lastoccurence, calendardata
-  FROM calendarobjects WHERE `+where+` ORDER BY id DESC`, args...)
+  FROM calendarobjects WHERE %s ORDER BY id DESC LIMIT $%d`, where, len(args)), args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -669,7 +672,7 @@ SELECT uri, coalesce(etag, ''), size, lastmodified
 
 	rows, err := q.DB.Query(`
 SELECT uri, coalesce(etag, ''), size, lastmodified, carddata
-  FROM cards WHERE addressbookid = $1 ORDER BY id DESC`, bookID)
+  FROM cards WHERE addressbookid = $1 ORDER BY id DESC LIMIT $2`, bookID, adminScanCap+1)
 	if err != nil {
 		return nil, false, err
 	}

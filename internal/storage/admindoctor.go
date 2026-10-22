@@ -323,12 +323,14 @@ func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
 
 // doctorObjects re-derives every calendarobjects row's denormalized columns
 // with the production ical.Denormalize and reports parse failures and stale
-// columns (§3.4 as a sweep).
+// columns (§3.4 as a sweep). The query stops one row past the cap, which is
+// enough to report truncation: closing a cursor mid-way still drains the rest
+// of the table over the wire.
 func (q *AdminQueries) doctorObjects(report *AdminDoctorReport, scanCap int) error {
 	rows, err := q.DB.Query(`
 SELECT o.id, o.calendarid, o.uri, coalesce(o.uid, ''), coalesce(o.componenttype, ''),
        coalesce(o.etag, ''), o.size, o.firstoccurence, o.lastoccurence, o.calendardata
-  FROM calendarobjects o ORDER BY o.id`)
+  FROM calendarobjects o ORDER BY o.id LIMIT $1`, scanCap+1)
 	if err != nil {
 		return err
 	}
@@ -442,10 +444,11 @@ func (q *AdminQueries) flagStaleIMipPending(report *AdminDoctorReport, pending [
 }
 
 // doctorCards checks every cards row: parseable vCard, correct etag/size.
+// Capped in SQL like doctorObjects.
 func (q *AdminQueries) doctorCards(report *AdminDoctorReport, scanCap int) error {
 	rows, err := q.DB.Query(`
 SELECT c.id, c.addressbookid, c.uri, coalesce(c.etag, ''), c.size, c.carddata
-  FROM cards c ORDER BY c.id`)
+  FROM cards c ORDER BY c.id LIMIT $1`, scanCap+1)
 	if err != nil {
 		return err
 	}
