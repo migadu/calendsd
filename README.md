@@ -56,7 +56,8 @@ on loopback/LAN or behind TLS. Write actions are off by default, need the
 
 `calctl` is the management CLI (same shape as `mqctl`/`rcptctl` in the
 sibling services). It reads the server's `config.toml` (falling back to
-`/etc/calserver/config.toml`, `/usr/local/etc/calserver/config.toml`, then
+`/etc/calendsd/config.toml`, `/usr/local/etc/calendsd/config.toml`, the
+pre-rename `/etc/calserver` and `/usr/local/etc/calserver` paths, then
 `./config.toml`) and exposes the admin panel's read paths from the command
 line:
 

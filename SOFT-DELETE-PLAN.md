@@ -276,7 +276,7 @@ FreeBSD + ansible deployment. Add to the ansible role a daily job:
 
 ```cron
 # /usr/local/etc/cron.d/calendsd-purge  (or a periodic(8) script)
-17 3 * * *  calendsd  /usr/local/bin/calctl principal purge-expired >> /var/log/calserver/purge.log 2>&1
+17 3 * * *  calendsd  /usr/local/bin/calctl principal purge-expired >> /var/log/calendsd/purge.log 2>&1
 ```
 
 - Idempotent and safe to run often; only tombstones past `purge_after` act.

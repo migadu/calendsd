@@ -117,8 +117,10 @@ Usage:
 
 Global Options:
   --config PATH    Path to calendsd config file (default: first of
-                   /etc/calserver/config.toml,
-                   /usr/local/etc/calserver/config.toml, ./config.toml;
+                   /etc/calendsd/config.toml,
+                   /usr/local/etc/calendsd/config.toml, the pre-rename
+                   /etc/calserver and /usr/local/etc/calserver paths,
+                   ./config.toml;
                    built-in defaults when none exists)
 
 Commands:

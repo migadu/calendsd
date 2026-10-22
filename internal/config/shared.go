@@ -13,8 +13,12 @@ import (
 
 // DefaultConfigPaths are the locations searched, in order, for a config file
 // when -config is not given explicitly. Every binary that reads calendsd's
-// config (calendsd, calctl) discovers it through FindDefaultConfig.
+// config (calendsd, calctl) discovers it through FindDefaultConfig. The
+// calserver paths are the pre-rename locations, still found on hosts the
+// ansible role has not yet migrated.
 var DefaultConfigPaths = []string{
+	"/etc/calendsd/config.toml",
+	"/usr/local/etc/calendsd/config.toml",
 	"/etc/calserver/config.toml",
 	"/usr/local/etc/calserver/config.toml",
 	"config.toml",
@@ -92,7 +96,7 @@ func (m *Merged) Bool(name string, flagVal, fileVal bool) bool {
 // server.Config — the property the Canonical() config echo depends on
 // (ADMIN-PLAN.md §2). The returned resolver must run after flag.Parse.
 func SharedServerFlags(dbUsage string) func() (*Merged, error) {
-	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calserver/config.toml, /usr/local/etc/calserver/config.toml, ./config.toml is used")
+	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calendsd/config.toml, /usr/local/etc/calendsd/config.toml, the pre-rename /etc/calserver and /usr/local/etc/calserver paths, ./config.toml is used")
 	dsn := flag.String("db", "", dbUsage)
 	baseURI := flag.String("base-uri", "/", "URI prefix the server is mounted at")
 	realm := flag.String("realm", server.DefaultRealm, "auth realm; must match the realm baked into users.digesta1")
