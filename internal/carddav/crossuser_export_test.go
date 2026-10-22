@@ -75,3 +75,29 @@ func TestOwnerAddressbookExportAllowed(t *testing.T) {
 		t.Fatalf("owner addressbook ?export missing own card:\n%s", w.Body.String())
 	}
 }
+
+// TestStrangerCannotReadOrWriteCard: a card carries its owner's ACL, not the
+// ACL plugin's default, so another user can neither read nor overwrite it.
+func TestStrangerCannotReadOrWriteCard(t *testing.T) {
+	srv := twoUserServer("principals/user2")
+
+	get := httptest.NewRecorder()
+	srv.ServeHTTP(get, httptest.NewRequest("GET", "/addressbooks/user1/book1/secret.vcf", nil))
+	if get.Code != 403 || strings.Contains(get.Body.String(), "Secret Contact") {
+		t.Fatalf("stranger GET card = %d, want 403 without card data:\n%s", get.Code, get.Body.String())
+	}
+
+	put := httptest.NewRecorder()
+	srv.ServeHTTP(put, httptest.NewRequest("PUT", "/addressbooks/user1/book1/secret.vcf",
+		strings.NewReader("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:secret\r\nFN:Overwritten\r\nEND:VCARD\r\n")))
+	if put.Code != 403 {
+		t.Fatalf("stranger PUT card = %d, want 403:\n%s", put.Code, put.Body.String())
+	}
+
+	owner := httptest.NewRecorder()
+	twoUserServer("principals/user1").ServeHTTP(owner,
+		httptest.NewRequest("GET", "/addressbooks/user1/book1/secret.vcf", nil))
+	if owner.Code != 200 || !strings.Contains(owner.Body.String(), "Secret Contact") {
+		t.Fatalf("owner GET card = %d, want 200 with the card:\n%s", owner.Code, owner.Body.String())
+	}
+}

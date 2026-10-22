@@ -312,3 +312,11 @@ func (c *Card) Size() int64         { return int64(len(c.info.CardData)) }
 func (c *Card) ETag() string        { return c.info.QuotedETag() }
 func (c *Card) Data() []byte        { return c.info.CardData }
 func (c *Card) Owner() string       { return c.addressBook.PrincipalURI }
+
+// ACL grants the address book's owner full access, like sabre's
+// Card::getACL. Without it the card fell back to the ACL plugin's default.
+func (c *Card) ACL() []acl.ACE {
+	return []acl.ACE{
+		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
+	}
+}

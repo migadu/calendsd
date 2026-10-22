@@ -149,3 +149,25 @@ func TestCopyMoveMissingSourceIs404(t *testing.T) {
 		}
 	}
 }
+
+// The collections above the homes carry no ACL of their own; the default lets
+// an authenticated user read them but not write them, so nobody can PROPPATCH
+// dead properties every other user would then see.
+func TestSharedCollectionsAreReadOnly(t *testing.T) {
+	srv := buildServer("principals/user2")
+	patch := `<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>` +
+		`<d:displayname>defaced</d:displayname></d:prop></d:set></d:propertyupdate>`
+	for _, path := range []string{"/", "/calendars/", "/principals/"} {
+		w := request(t, srv, "PROPPATCH", path, patch)
+		if w.Code != 403 {
+			t.Errorf("PROPPATCH %s = %d, want 403: %s", path, w.Code, w.Body.String())
+		}
+		w = request(t, srv, "PROPFIND", path, "")
+		if w.Code != 207 || !strings.Contains(w.Body.String(), "HTTP/1.1 200 OK") {
+			t.Errorf("PROPFIND %s = %d, want readable 207: %s", path, w.Code, w.Body.String())
+		}
+	}
+	if w := request(t, srv, "PUT", "/junk.txt", "x"); w.Code != 403 {
+		t.Errorf("PUT /junk.txt = %d, want 403", w.Code)
+	}
+}

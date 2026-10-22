@@ -75,9 +75,12 @@ func flatPrivileges(root Privilege) map[string][]string {
 	return flat
 }
 
-// defaultACL applies to nodes without their own ACL: anything goes as long
-// as the user is authenticated, like sabre's $defaultAcl.
-var defaultACL = []ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}authenticated", Protected: true}}
+// defaultACL applies to nodes without their own ACL: the fixed collections
+// above the homes (root, principals, calendars, addressbooks), which any
+// authenticated user may read but nobody may write. Sabre's $defaultAcl grants
+// {DAV:}all here, which made those shared nodes writable (dead properties) and
+// any node that forgot its ACL writable by everyone.
+var defaultACL = []ACE{{Privilege: "{DAV:}read", Principal: "{DAV:}authenticated", Protected: true}}
 
 // nodeACL returns the effective ACL: node ACL (or the default) plus admin
 // ACEs. Port of sabre's Plugin::getAcl.

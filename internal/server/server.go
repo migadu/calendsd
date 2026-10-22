@@ -23,7 +23,6 @@ import (
 	"calserver/internal/carddav"
 	"calserver/internal/contactsapi"
 	"calserver/internal/dav"
-	"calserver/internal/dav/mock"
 	"calserver/internal/jobs"
 	"calserver/internal/metrics"
 	"calserver/internal/push"
@@ -383,17 +382,14 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 
 	addressbooks := &storage.CardDAV{DB: db, Metrics: cfg.Metrics}
 
-	root := mock.NewCollection("root")
 	principalCollection := acl.NewPrincipalCollection(principals, "principals")
 	principalCollection.Proxies = true // expose calendar-proxy delegation principals
-	root.Attach(principalCollection)
 	calendarRoot := caldav.NewCalendarRoot(principals, calendars, "calendars")
 	calendarRoot.AutoProvision = cfg.AutoProvision
 	calendarRoot.PerUserProps = cfg.PerUserProps
-	root.Attach(calendarRoot)
 	addressBookRoot := carddav.NewAddressBookRoot(principals, addressbooks, "addressbooks")
 	addressBookRoot.AutoProvision = cfg.AutoProvision
-	root.Attach(addressBookRoot)
+	root := dav.NewRoot(principalCollection, calendarRoot, addressBookRoot)
 
 	srv := dav.NewServer(cfg.BaseURI, root)
 	srv.Metrics = cfg.Metrics
