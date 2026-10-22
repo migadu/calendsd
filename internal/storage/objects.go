@@ -43,13 +43,16 @@ func (b *CalDAV) CalendarQuery(id caldav.CalendarID, componentType string, start
 		args = append(args, componentType)
 		q += fmt.Sprintf(" AND componenttype = $%d", len(args))
 	}
+	// The occurrence columns are int4 but a client's time-range can lie past
+	// 2038; binding the bounds as bigint compares them instead of failing the
+	// query with an int4 overflow.
 	if !end.IsZero() {
-		args = append(args, int(end.Unix()))
-		q += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d)", len(args))
+		args = append(args, end.Unix())
+		q += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d::bigint)", len(args))
 	}
 	if !start.IsZero() {
-		args = append(args, int(start.Unix()))
-		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d)", len(args))
+		args = append(args, start.Unix())
+		q += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d::bigint)", len(args))
 	}
 	rows, err := b.DB.Query(q, args...)
 	if err != nil {

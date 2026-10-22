@@ -483,13 +483,15 @@ func (q *AdminQueries) Objects(query AdminObjectQuery) (objects []AdminObjectRow
 	}
 	where := "calendarid = $1"
 	args := []any{query.CalendarID}
+	// bigint, not the columns' int4: a bound past 2038 must compare, not
+	// overflow (see CalDAV.CalendarQuery).
 	if query.Start != nil {
 		args = append(args, *query.Start)
-		where += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d)", len(args))
+		where += fmt.Sprintf(" AND (lastoccurence IS NULL OR lastoccurence > $%d::bigint)", len(args))
 	}
 	if query.End != nil {
 		args = append(args, *query.End)
-		where += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d)", len(args))
+		where += fmt.Sprintf(" AND (firstoccurence IS NULL OR firstoccurence < $%d::bigint)", len(args))
 	}
 
 	deep := query.InData && query.Match != ""
