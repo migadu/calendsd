@@ -346,7 +346,7 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 		}
 		// WebDAV recommends (and iCal demands, for principals) a
 		// trailing slash on collection and principal hrefs.
-		href := s.BaseURI + encodePath(item.pf.Path())
+		href := s.Href(item.pf.Path())
 		types := s.ResourceTypesForNode(item.node)
 		slash := slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "collection"}) ||
 			slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "principal"})

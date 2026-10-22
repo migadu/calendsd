@@ -294,7 +294,7 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 			var davErr *dav.Error
 			if errors.As(err, &davErr) && davErr.Status == http.StatusNotFound {
 				ms.Responses = append(ms.Responses, davxml.Response{
-					Href:   p.server.BaseURI + objPath,
+					Href:   p.server.Href(objPath),
 					Status: http.StatusNotFound,
 				})
 				continue

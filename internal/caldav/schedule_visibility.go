@@ -55,7 +55,7 @@ func (p *SchedulePlugin) renderVisibility(v acl.FreeBusyVisibility) davxml.Raw {
 	for _, entry := range v.Allowed {
 		href := entry
 		if !strings.HasPrefix(entry, "mailto:") {
-			href = p.server.BaseURI + entry + "/"
+			href = p.server.Href(entry) + "/"
 		}
 		b.WriteString(`<href xmlns="DAV:">`)
 		_ = xml.EscapeText(&b, []byte(href))

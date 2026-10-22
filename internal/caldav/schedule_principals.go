@@ -49,7 +49,7 @@ func (p *SchedulePlugin) addressesForPrincipal(ctx context.Context, principalURI
 	if !ok {
 		return nil
 	}
-	return append(ph.AlternateURISet(), p.server.BaseURI+ph.PrincipalURL()+"/")
+	return append(ph.AlternateURISet(), p.server.Href(ph.PrincipalURL())+"/")
 }
 
 // principalEmail returns a principal node's email address, if any.
@@ -178,7 +178,7 @@ func (p *SchedulePlugin) groupMembers(ctx context.Context, address string) (memb
 			}
 		}
 		if addr == "" {
-			addr = p.server.BaseURI + memberURI + "/"
+			addr = p.server.Href(memberURI) + "/"
 		}
 		members = append(members, groupMemberInfo{
 			address: addr, name: principalName(ctx, mnode), email: principalEmail(ctx, mnode),

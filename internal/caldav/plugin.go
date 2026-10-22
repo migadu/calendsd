@@ -69,7 +69,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	if ph, isPrincipal := node.(acl.PrincipalHolder); isPrincipal {
 		pf.Handle(cal("calendar-home-set"), func() any {
 			_, name := pathutil.Split(ph.PrincipalURL())
-			return davxml.Href{p.server.BaseURI + "calendars/" + name + "/"}
+			return davxml.Href{p.server.Href("calendars/"+name) + "/"}
 		})
 	}
 
@@ -77,7 +77,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		// RFC 5995 Add-Member: POSTing a resource here lets the server
 		// assign its name. The URL is the collection plus ";add-member".
 		pf.Handle(xml.Name{Space: davxml.NSDav, Local: "add-member"}, func() any {
-			return davxml.Href{p.server.BaseURI + pf.Path() + "/" + addMemberSegment}
+			return davxml.Href{p.server.Href(pf.Path()) + "/" + addMemberSegment}
 		})
 		// Constant per-calendar properties sabre emits on every calendar
 		// (max-resource-size is advertised, not enforced, matching sabre).

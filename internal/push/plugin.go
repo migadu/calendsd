@@ -174,7 +174,7 @@ func (p *Plugin) register(w http.ResponseWriter, r *http.Request, body []byte) e
 	}
 
 	h := w.Header()
-	h.Set("Location", p.server.BaseURI+subscriptionsPrefix+stored)
+	h.Set("Location", p.server.Href(subscriptionsPrefix+stored))
 	h.Set("Expires", expires.UTC().Format(http.TimeFormat))
 	h.Set("Content-Length", "0")
 	w.WriteHeader(http.StatusCreated)

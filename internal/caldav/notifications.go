@@ -235,7 +235,7 @@ func (p *NotificationsPlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	if ph, ok := node.(acl.PrincipalHolder); ok {
 		pf.Handle(xml.Name{Space: davxml.NSCalendarServer, Local: "notification-URL"}, func() any {
 			_, name := pathutil.Split(ph.PrincipalURL())
-			return davxml.Href{p.server.BaseURI + "calendars/" + name + "/notifications/"}
+			return davxml.Href{p.server.Href("calendars/" + name + "/notifications/")}
 		})
 	}
 	return nil

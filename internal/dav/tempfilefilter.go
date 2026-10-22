@@ -250,7 +250,7 @@ func (p *TempFileFilterPlugin) propfind(w http.ResponseWriter, reqPath, loc stri
 	}
 	dav := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
 	resp := davxml.Response{
-		Href: p.server.BaseURI + encodePath(reqPath),
+		Href: p.server.Href(reqPath),
 		Propstats: []davxml.Propstat{{
 			Status: http.StatusOK,
 			Props: []davxml.Property{

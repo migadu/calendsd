@@ -163,7 +163,7 @@ func (p *Plugin) handleAddMember(w http.ResponseWriter, r *http.Request) (bool, 
 	}
 
 	h := w.Header()
-	h.Set("Location", p.server.BaseURI+targetPath)
+	h.Set("Location", p.server.Href(targetPath))
 	if etag != "" {
 		h.Set("ETag", etag)
 	}

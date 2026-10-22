@@ -114,7 +114,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 			return davxml.Href(ph.AlternateURISet())
 		})
 		pf.Handle(davName("principal-URL"), func() any {
-			return davxml.Href{p.server.BaseURI + ph.PrincipalURL() + "/"}
+			return davxml.Href{p.server.Href(ph.PrincipalURL()) + "/"}
 		})
 		pf.Handle(davName("group-member-set"), func() any {
 			return p.principalHrefs(pf.Context(), ph.GroupMemberSet)
@@ -137,13 +137,13 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 
 	pf.Handle(davName("current-user-principal"), func() any {
 		if current := dav.Principal(pf.Context()); current != "" {
-			return davxml.Href{p.server.BaseURI + current + "/"}
+			return davxml.Href{p.server.Href(current) + "/"}
 		}
 		return davxml.Raw(`<d:unauthenticated/>`)
 	})
 	pf.Handle(davName("owner"), func() any {
 		if owned, ok := node.(interface{ Owner() string }); ok {
-			return davxml.Href{p.server.BaseURI + owned.Owner() + "/"}
+			return davxml.Href{p.server.Href(owned.Owner()) + "/"}
 		}
 		return nil
 	})
@@ -475,7 +475,7 @@ func (p *Plugin) proxyFor(ctx context.Context, ph PrincipalHolder, proxySuffix s
 	hrefs := davxml.Href{}
 	for _, g := range groups {
 		if parent, base := pathutil.Split(g); base == proxySuffix {
-			hrefs = append(hrefs, p.server.BaseURI+parent+"/")
+			hrefs = append(hrefs, p.server.Href(parent)+"/")
 		}
 	}
 	return hrefs
@@ -488,7 +488,7 @@ func (p *Plugin) principalHrefs(ctx context.Context, fn func(context.Context) ([
 	}
 	hrefs := make(davxml.Href, len(paths))
 	for i, path := range paths {
-		hrefs[i] = p.server.BaseURI + path + "/"
+		hrefs[i] = p.server.Href(path) + "/"
 	}
 	return hrefs
 }

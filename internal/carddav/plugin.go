@@ -55,7 +55,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	if ph, isPrincipal := node.(acl.PrincipalHolder); isPrincipal {
 		pf.Handle(card("addressbook-home-set"), func() any {
 			_, name := pathutil.Split(ph.PrincipalURL())
-			return davxml.Href{p.server.BaseURI + "addressbooks/" + name + "/"}
+			return davxml.Href{p.server.Href("addressbooks/"+name) + "/"}
 		})
 		pf.Handle(card("principal-address"), func() any { return nil })
 	}
@@ -261,7 +261,7 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 		if err != nil {
 			if dav.AsError(err).Status == http.StatusNotFound {
 				ms.Responses = append(ms.Responses, davxml.Response{
-					Href:   p.server.BaseURI + cardPath,
+					Href:   p.server.Href(cardPath),
 					Status: http.StatusNotFound,
 				})
 				continue

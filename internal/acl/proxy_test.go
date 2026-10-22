@@ -196,3 +196,17 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// Principal hrefs are percent-encoded: a name with a space must not produce
+// a broken href in current-user-principal or principal-URL.
+func TestPrincipalHrefsAreEncoded(t *testing.T) {
+	backend := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/user 1"}}}
+	srv := proxyServer(t, backend, "principals/user 1")
+	rec := do(t, srv, "PROPFIND", "/principals/user%201/",
+		`<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>`+
+			`<d:current-user-principal/><d:principal-URL/></d:prop></d:propfind>`)
+	body := rec.Body.String()
+	if strings.Contains(body, "user 1") || strings.Count(body, "<d:href>/principals/user%201/</d:href>") < 2 {
+		t.Errorf("principal hrefs not encoded:\n%s", body)
+	}
+}

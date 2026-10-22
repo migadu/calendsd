@@ -152,7 +152,7 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		return nil
 	}
 	_, principalName := pathutil.Split(ph.PrincipalURL())
-	homePath := p.server.BaseURI + "calendars/" + principalName + "/"
+	homePath := p.server.Href("calendars/"+principalName) + "/"
 
 	pf.Handle(cal("schedule-inbox-URL"), func() any {
 		return davxml.Href{homePath + "inbox/"}
@@ -162,7 +162,7 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	})
 	pf.Handle(cal("calendar-user-address-set"), func() any {
 		hrefs := davxml.Href(ph.AlternateURISet())
-		hrefs = append(hrefs, p.server.BaseURI+ph.PrincipalURL()+"/")
+		hrefs = append(hrefs, p.server.Href(ph.PrincipalURL())+"/")
 		return hrefs
 	})
 	// sabre's Schedule\Plugin reports every principal as an INDIVIDUAL; we
@@ -185,7 +185,7 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	})
 	pf.Handle(cal("schedule-default-calendar-URL"), func() any {
 		if path := p.defaultCalendarPath(ctx, ph.PrincipalURL()); path != "" {
-			return davxml.Href{p.server.BaseURI + path + "/"}
+			return davxml.Href{p.server.Href(path) + "/"}
 		}
 		return nil
 	})

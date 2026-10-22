@@ -204,7 +204,7 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 	}
 	for _, item := range changes.Deleted {
 		ms.Responses = append(ms.Responses, davxml.Response{
-			Href:   p.server.BaseURI + encodePath(joinPath(item)),
+			Href:   p.server.Href(joinPath(item)),
 			Status: http.StatusNotFound,
 		})
 	}
