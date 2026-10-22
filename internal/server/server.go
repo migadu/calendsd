@@ -168,7 +168,7 @@ type PushConfig struct {
 // applies them (base-URI slashes, realm default), so equivalent configs
 // always render the same line. No secrets: DSN and SMTP host stay out.
 func (c Config) Canonical() string {
-	base := normalizeBase(c.BaseURI)
+	base := dav.NormalizeBaseURI(c.BaseURI)
 	realm := c.Realm
 	if realm == "" {
 		realm = DefaultRealm
@@ -189,22 +189,10 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// normalizeBase gives a base URI the leading and trailing slash the DAV
-// server mounts it with ("" is "/"), matching dav.NewServer.
-func normalizeBase(base string) string {
-	if !strings.HasPrefix(base, "/") {
-		base = "/" + base
-	}
-	if !strings.HasSuffix(base, "/") {
-		base += "/"
-	}
-	return base
-}
-
 // pushConfig projects the server config onto the push package's config,
 // filling in the mount prefix the plugin needs for absolute Location URLs.
 func (c Config) pushConfig() push.Config {
-	base := normalizeBase(c.BaseURI)
+	base := dav.NormalizeBaseURI(c.BaseURI)
 	return push.Config{
 		VAPIDSubject:    c.Push.VAPIDSubject,
 		VAPIDPublicKey:  c.Push.VAPIDPublicKey,

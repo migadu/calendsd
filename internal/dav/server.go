@@ -72,7 +72,7 @@ func (s *Server) ResourceTypesForNode(node Node) []xml.Name {
 // WebDAV plugin registered.
 func NewServer(baseURI string, root Collection) *Server {
 	s := &Server{
-		BaseURI:             normalizeBaseURI(baseURI),
+		BaseURI:             NormalizeBaseURI(baseURI),
 		Tree:                NewTree(root),
 		ProtectedProperties: defaultProtectedProperties(),
 	}
@@ -100,7 +100,9 @@ func defaultProtectedProperties() []xml.Name {
 	}
 }
 
-func normalizeBaseURI(uri string) string {
+// NormalizeBaseURI gives a base URI the leading and trailing slash the
+// server mounts it with ("" is "/").
+func NormalizeBaseURI(uri string) string {
 	if uri == "" {
 		return "/"
 	}
