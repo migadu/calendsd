@@ -721,17 +721,9 @@ func (c *CorePlugin) copy(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if info.destinationExists {
-		for _, p := range c.server.Plugins() {
-			if hook, ok := p.(BeforeUnbindHook); ok {
-				if err := hook.BeforeUnbind(r, info.destination); err != nil {
-					return err
-				}
-			}
-		}
-		if err := c.server.Tree.Delete(info.destination); err != nil {
+		if err := c.deleteDestination(r, info.destination); err != nil {
 			return err
 		}
-		c.server.fireAfterUnbind(info.destination)
 	}
 	if err := c.server.Tree.Copy(path, info.destination, info.depth); err != nil {
 		return err
@@ -754,10 +746,9 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 		return ErrBadRequest(`The HTTP Depth header must only contain "infinity" for MOVE`)
 	}
 	if info.destinationExists {
-		if err := c.server.Tree.Delete(info.destination); err != nil {
+		if err := c.deleteDestination(r, info.destination); err != nil {
 			return err
 		}
-		c.server.fireAfterUnbind(info.destination)
 	}
 	if err := c.server.Tree.Move(path, info.destination); err != nil {
 		return err
@@ -768,6 +759,23 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 	c.server.fireAfterUnbind(path)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(statusForOverwrite(info.destinationExists))
+	return nil
+}
+
+// deleteDestination removes the node a COPY or MOVE overwrites, running the
+// same unbind hooks as a DELETE of it would.
+func (c *CorePlugin) deleteDestination(r *http.Request, destination string) error {
+	for _, p := range c.server.Plugins() {
+		if hook, ok := p.(BeforeUnbindHook); ok {
+			if err := hook.BeforeUnbind(r, destination); err != nil {
+				return err
+			}
+		}
+	}
+	if err := c.server.Tree.Delete(destination); err != nil {
+		return err
+	}
+	c.server.fireAfterUnbind(destination)
 	return nil
 }
 
@@ -786,6 +794,11 @@ type copyMoveInfo struct {
 
 // copyMoveInfo ports sabre's Server::getCopyAndMoveInfo validation chain.
 func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMoveInfo, error) {
+	// Resolve the source first, so a missing source is a 404 before
+	// anything at the destination is touched.
+	if _, err := c.server.Tree.NodeForPath(sourcePath); err != nil {
+		return nil, err
+	}
 	destHeader := r.Header.Get("Destination")
 	if destHeader == "" {
 		return nil, ErrBadRequest("The destination header was not supplied")

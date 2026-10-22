@@ -115,3 +115,37 @@ func TestStrangerQueryReportForbidden(t *testing.T) {
 		t.Errorf("stranger calendar-query = %d, want 403: %s", w.Code, w.Body.String())
 	}
 }
+
+// A COPY/MOVE whose source does not exist must still be authorized against the
+// destination, and must 404 without touching it.
+func TestCopyMoveMissingSourceCannotClobberForeignDestination(t *testing.T) {
+	for _, method := range []string{"COPY", "MOVE"} {
+		srv := buildServer("principals/user2")
+		req := httptest.NewRequest(method, "/calendars/user2/nope.ics", nil)
+		req.Header.Set("Destination", "/calendars/user1/cal/event.ics")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != 403 {
+			t.Errorf("%s missing source onto foreign object = %d, want 403: %s", method, w.Code, w.Body.String())
+		}
+		if !srv.Tree.NodeExists("calendars/user1/cal/event.ics") {
+			t.Errorf("%s deleted the foreign destination", method)
+		}
+	}
+}
+
+func TestCopyMoveMissingSourceIs404(t *testing.T) {
+	for _, method := range []string{"COPY", "MOVE"} {
+		srv := buildServer("principals/user1")
+		req := httptest.NewRequest(method, "/calendars/user1/cal/nope.ics", nil)
+		req.Header.Set("Destination", "/calendars/user1/cal/event.ics")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != 404 {
+			t.Errorf("%s missing source = %d, want 404: %s", method, w.Code, w.Body.String())
+		}
+		if !srv.Tree.NodeExists("calendars/user1/cal/event.ics") {
+			t.Errorf("%s with a missing source deleted the destination", method)
+		}
+	}
+}

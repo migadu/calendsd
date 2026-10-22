@@ -412,14 +412,17 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 			return check(parent(), "{DAV:}unbind")
 		}
 	case "COPY", "MOVE":
-		if !exists {
-			return true, nil
-		}
+		// The destination checks do not depend on the source existing: the
+		// handler would otherwise reach an unauthorized destination before
+		// it notices the source is missing.
+		//
 		// Sabre passes R_RECURSIVE here, but its checkPrivileges ignores
 		// the recursion argument entirely — the effective behavior (and
 		// ours) checks the top node only.
-		if ok, err := check(path, "{DAV:}read"); !ok {
-			return ok, err
+		if exists {
+			if ok, err := check(path, "{DAV:}read"); !ok {
+				return ok, err
+			}
 		}
 		dest, destErr := p.server.ResolveHref(r.Header.Get("Destination"))
 		if destErr != nil {
@@ -434,7 +437,7 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		if ok, err := check(destParent, "{DAV:}bind"); !ok {
 			return ok, err
 		}
-		if r.Method == "MOVE" {
+		if r.Method == "MOVE" && exists {
 			return check(parent(), "{DAV:}unbind")
 		}
 	}
