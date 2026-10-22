@@ -16,7 +16,7 @@ import (
 	"calserver/internal/caldav"
 )
 
-func openLockDB(t *testing.T) *sql.DB {
+func openLockDB(t *testing.T, dbName string) *sql.DB {
 	t.Helper()
 	host := os.Getenv("PGHOST")
 	if host == "" {
@@ -25,7 +25,6 @@ func openLockDB(t *testing.T) *sql.DB {
 	if err := exec.Command("pg_isready", "-h", host).Run(); err != nil {
 		t.Skipf("skipping: dev Postgres not reachable: %v", err)
 	}
-	const dbName = "calserver_advlock"
 	_ = exec.Command("dropdb", "--if-exists", dbName).Run()
 	if out, err := exec.Command("createdb", dbName).CombinedOutput(); err != nil {
 		t.Fatalf("createdb: %v\n%s", err, out)
@@ -44,7 +43,7 @@ func openLockDB(t *testing.T) *sql.DB {
 }
 
 func TestAdvisoryLockerSerializesAcrossInstances(t *testing.T) {
-	db := openLockDB(t)
+	db := openLockDB(t, "calserver_advlock")
 	nodeA := &caldav.AdvisoryLocker{DB: db}
 	nodeB := &caldav.AdvisoryLocker{DB: db} // a "second node" — independent in-process locks
 
@@ -82,4 +81,42 @@ func TestAdvisoryLockerSerializesAcrossInstances(t *testing.T) {
 		t.Fatal("unrelated paths should not serialize")
 	}
 	other()
+}
+
+// A waiter gives up on the advisory lock after Wait and proceeds under its
+// node's own lock, and its abandoned wait leaves no lock behind on a pooled
+// connection.
+func TestAdvisoryLockerWaitIsBounded(t *testing.T) {
+	db := openLockDB(t, "calserver_b_advlock_wait")
+	nodeA := &caldav.AdvisoryLocker{DB: db}
+	nodeB := &caldav.AdvisoryLocker{DB: db, Wait: 200 * time.Millisecond}
+
+	const path = "calendars/alice/home/e1.ics"
+	unlockA := nodeA.Lock(path)
+	acquired := make(chan func())
+	go func() { acquired <- nodeB.Lock(path) }()
+	select {
+	case unlockB := <-acquired:
+		unlockB()
+	case <-time.After(5 * time.Second):
+		t.Fatal("node B waited unboundedly for the advisory lock")
+	}
+	unlockA()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var held int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND granted
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		if held == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d advisory locks still held after both nodes unlocked", held)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
