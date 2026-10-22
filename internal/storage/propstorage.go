@@ -109,47 +109,14 @@ func (p *PropertyStorage) Delete(path string) error {
 	return err
 }
 
+// Move renames the exact path and all children, like sabre's PDO backend, in
+// one statement, so a failure cannot leave the property subtree half-renamed.
 func (p *PropertyStorage) Move(source, destination string) error {
-	// Sabre's PDO backend renames the exact path and all children. Do the
-	// select and every rename in one transaction so a failure mid-way cannot
-	// leave the property subtree half-renamed.
-	return withTx(p.DB, func(tx *sql.Tx) error {
-		return p.moveInTx(tx, source, destination)
-	})
-}
-
-func (p *PropertyStorage) moveInTx(tx *sql.Tx, source, destination string) error {
-	rows, err := tx.Query(
-		`SELECT id, path FROM propertystorage WHERE path = $1 OR path LIKE $2 ESCAPE '\'`,
-		source, escapeLike(source)+"/%")
-	if err != nil {
-		return err
-	}
-	type rename struct {
-		id      int64
-		newPath string
-	}
-	var renames []rename
-	for rows.Next() {
-		var id int64
-		var path string
-		if err := rows.Scan(&id, &path); err != nil {
-			rows.Close()
-			return err
-		}
-		renames = append(renames, rename{id, destination + strings.TrimPrefix(path, source)})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, r := range renames {
-		if _, err := tx.Exec(
-			`UPDATE propertystorage SET path = $1 WHERE id = $2`, r.newPath, r.id); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := p.DB.Exec(`
+UPDATE propertystorage SET path = $2 || substr(path, length($1) + 1)
+ WHERE path = $1 OR path LIKE $3 ESCAPE '\'`,
+		source, destination, escapeLike(source)+"/%")
+	return err
 }
 
 func escapeLike(s string) string {

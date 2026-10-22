@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"reflect"
+	"sort"
 	"testing"
 
 	"calserver/internal/acl"
@@ -63,6 +64,47 @@ func TestArrayColumnsRoundTrip(t *testing.T) {
 		if users != want {
 			t.Errorf("%s: source_users = %q, want %q", principal, users, want)
 		}
+	}
+}
+
+// TestPropertyMoveRenamesSubtree pins PropertyStorage.Move, now one UPDATE
+// rather than a select and a rename per row: the path and its children move
+// (multi-byte characters and LIKE metacharacters included), siblings that
+// merely share a prefix do not.
+func TestPropertyMoveRenamesSubtree(t *testing.T) {
+	db := openCardDAVScratchDB(t, "calserver_d_propmove")
+	if _, err := db.Exec(`INSERT INTO propertystorage (path, name, valuetype, value) VALUES
+		('calendars/ä_1/cal', '{DAV:}a', 1, 'x'),
+		('calendars/ä_1/cal/child.ics', '{DAV:}a', 1, 'x'),
+		(E'calendars/ä_1/cal/\nprincipals/bob', '{DAV:}a', 1, 'x'),
+		('calendars/ä_1/calendar', '{DAV:}a', 1, 'x'),
+		('calendars/äx1/cal', '{DAV:}a', 1, 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&storage.PropertyStorage{DB: db}).Move("calendars/ä_1/cal", "calendars/bö/new"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT path FROM propertystorage ORDER BY path`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, p)
+	}
+	want := []string{
+		"calendars/bö/new", "calendars/bö/new/\nprincipals/bob", "calendars/bö/new/child.ics",
+		"calendars/äx1/cal", "calendars/ä_1/calendar",
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("paths after Move = %q, want %q", got, want)
 	}
 }
 

@@ -214,9 +214,12 @@ type orphanedPropRow struct {
 // left alone rather than guessed at. Shared by the doctor (reporting) and
 // AdminWrites.DeleteOrphans (deleting) so they always agree. Four fixed
 // queries total: the rows plus three reference sets loaded once, so the
-// check stays flat no matter how many property rows exist.
-func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
-	rows, err := q.DB.Query(`SELECT id, path FROM propertystorage ORDER BY id`)
+// check stays flat no matter how many property rows exist. q is the pool for
+// the doctor and the deleting transaction for DeleteOrphans.
+func orphanedPropertyRows(q interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}) ([]orphanedPropRow, error) {
+	rows, err := q.Query(`SELECT id, path FROM propertystorage ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +240,7 @@ func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
 	}
 
 	loadSet := func(query string) (map[string]bool, error) {
-		rows, err := q.DB.Query(query)
+		rows, err := q.Query(query)
 		if err != nil {
 			return nil, err
 		}
@@ -310,7 +313,7 @@ func (q *AdminQueries) orphanedPropertyRows() ([]orphanedPropRow, error) {
 }
 
 func (q *AdminQueries) doctorPropertyPaths(report *AdminDoctorReport) error {
-	orphans, err := q.orphanedPropertyRows()
+	orphans, err := orphanedPropertyRows(q.DB)
 	if err != nil {
 		return err
 	}

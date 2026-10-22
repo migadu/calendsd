@@ -492,19 +492,28 @@ func DeletableOrphanChecks() []string {
 // right after reports the check clean.
 func (w *AdminWrites) DeleteOrphans(check string) (int64, error) {
 	if check == "orphaned-property" {
-		// Classified in Go (same walk the doctor uses), deleted by id.
-		orphans, err := (&AdminQueries{DB: w.DB}).orphanedPropertyRows()
+		// Classified in Go (same walk the doctor uses), deleted by id in one
+		// statement, inside the transaction the classification read in, so
+		// the delete is all or nothing.
+		var total int64
+		err := withTx(w.DB, func(tx *sql.Tx) error {
+			orphans, err := orphanedPropertyRows(tx)
+			if err != nil || len(orphans) == 0 {
+				return err
+			}
+			ids := make([]int64, len(orphans))
+			for i, o := range orphans {
+				ids[i] = o.id
+			}
+			res, err := tx.Exec(`DELETE FROM propertystorage WHERE id = ANY($1::bigint[])`, ids)
+			if err != nil {
+				return err
+			}
+			total, err = res.RowsAffected()
+			return err
+		})
 		if err != nil {
 			return 0, err
-		}
-		var total int64
-		for _, o := range orphans {
-			res, err := w.DB.Exec(`DELETE FROM propertystorage WHERE id = $1`, o.id)
-			if err != nil {
-				return total, err
-			}
-			n, _ := res.RowsAffected()
-			total += n
 		}
 		return total, nil
 	}
