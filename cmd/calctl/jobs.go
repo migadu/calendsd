@@ -291,7 +291,7 @@ func imipResend(args []string) {
 			"Job %d is a per-user send whose credential is gone (purged, or the key rotated).\n"+
 				"It can't be re-sent AS the user from here without bypassing metering. Either have %s\n"+
 				"re-issue the invitation from their calendar client, or override with\n"+
-				"`calctl imip resend %d --relay` to send it UNMETERED via the server.\n", id, orDash(j.Recipient), id)
+				"`calctl imip resend %d --relay` to send it UNMETERED via the server.\n", id, j.Username, id)
 		os.Exit(1)
 	}
 	if err := ops.Retry(id); err != nil {
