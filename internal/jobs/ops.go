@@ -138,14 +138,20 @@ var ErrJobCompleted = fmt.Errorf("job already completed")
 // ErrNoJob is returned when the id does not exist.
 var ErrNoJob = fmt.Errorf("no such job")
 
+// ErrJobExecuting is returned by re-queues of a job a worker is running now:
+// a second copy would send twice. Wait for it to settle (or for the reclaim
+// sweep, if its worker died).
+var ErrJobExecuting = fmt.Errorf("job is executing; wait for it to settle")
+
 // Retry resets a job to run immediately: state='available', due now, attempt
-// count cleared. It refuses a completed job (ErrJobCompleted). For a per-user
+// count cleared. It refuses a completed job (ErrJobCompleted) and a running one
+// (ErrJobExecuting). For a per-user
 // job whose credential was purged, the worker will fail-safe discard on the next
 // run — callers that know the semantics (calctl imip resend) check HasCred first.
 func (o *Ops) Retry(id int64) error {
 	return o.requeue(id, `
 UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL
- WHERE id=$1 AND state <> 'completed'`)
+ WHERE id=$1`)
 }
 
 // ErrNewerPending is returned when re-queueing a latest-wins job (one enqueued
@@ -154,8 +160,10 @@ UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=N
 // pending (jobs_latest_ix).
 var ErrNewerPending = fmt.Errorf("a newer job for the same key is already pending and supersedes this one")
 
-// requeue runs a guarded re-queue UPDATE ($1 = id) in a transaction that
-// first reconciles a latest-wins job with its key's pending sibling, the way
+// requeue runs a re-queue UPDATE ($1 = id) in a transaction that first locks
+// the row, refuses a completed or executing job (ErrJobCompleted /
+// ErrJobExecuting), and reconciles a latest-wins job with its key's pending
+// sibling, the way
 // the queue's own retry does: a sibling of the same or a newer generation
 // wins (ErrNewerPending); an older one is retired as superseded.
 func (o *Ops) requeue(id int64, update string) error {
@@ -164,17 +172,23 @@ func (o *Ops) requeue(id int64, update string) error {
 		return err
 	}
 	defer tx.Rollback()
-	var worker string
+	var worker, state string
 	var key sql.NullString
 	var gen sql.NullInt64
 	err = tx.QueryRow(`
-SELECT worker, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
-		id).Scan(&worker, &key, &gen)
+SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
+		id).Scan(&worker, &state, &key, &gen)
 	if err == sql.ErrNoRows {
 		return ErrNoJob
 	}
 	if err != nil {
 		return err
+	}
+	switch state {
+	case "completed":
+		return ErrJobCompleted
+	case "executing":
+		return ErrJobExecuting
 	}
 	if key.Valid {
 		var otherID, otherGen int64
@@ -197,12 +211,8 @@ WHERE id = $1`, otherID); err != nil {
 			}
 		}
 	}
-	res, err := tx.Exec(update, id)
-	if err != nil {
+	if _, err := tx.Exec(update, id); err != nil {
 		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrJobCompleted
 	}
 	return tx.Commit()
 }
@@ -210,13 +220,13 @@ WHERE id = $1`, otherID); err != nil {
 // RelayOverride drops the encrypted credential and re-queues the job so the
 // worker delivers it via the **relay** (server) identity — the deliberate,
 // unmetered `calctl imip resend --relay` fallback for a per-user send whose
-// credential is gone. Refuses a completed job. It never decrypts anything; it
+// credential is gone. Refuses a completed or executing job. It never decrypts anything; it
 // only clears the credential columns and resets state.
 func (o *Ops) RelayOverride(id int64) error {
 	return o.requeue(id, `
 UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL,
        enc_credential=NULL, enc_nonce=NULL, key_id=NULL
- WHERE id=$1 AND state <> 'completed'`)
+ WHERE id=$1`)
 }
 
 // Cancel stops delivery: marks the job discarded and NULLs any retained

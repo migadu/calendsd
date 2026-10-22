@@ -138,14 +138,33 @@ RETURNING id, queue, worker, args, attempt, max_attempts, enc_credential, enc_no
 	return &c, nil
 }
 
+// errStaleClaim reports a settle that found the row no longer executing the
+// claimed attempt — reclaimed (and perhaps claimed again), cancelled or
+// re-queued while the handler ran. Nothing was written.
+var errStaleClaim = errors.New("jobs: claim is stale")
+
+// settled maps a guarded settle UPDATE that matched no row to errStaleClaim.
+func settled(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errStaleClaim
+	}
+	return nil
+}
+
 // complete marks a successful job terminal and NULLs its credential — a
 // delivered send never needs it again (D12 lifecycle).
-func (s *store) complete(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `
+func (s *store) complete(ctx context.Context, c *claimed) error {
+	return settled(s.db.ExecContext(ctx, `
 UPDATE jobs SET state = 'completed', completed_at = now(), last_error = NULL,
     enc_credential = NULL, enc_nonce = NULL, key_id = NULL
-WHERE id = $1`, id)
-	return err
+WHERE id = $1 AND state = 'executing' AND attempt = $2`, c.id, c.attempt))
 }
 
 // reschedule returns a transiently-failed job to the queue, due after backoff,
@@ -157,29 +176,35 @@ WHERE id = $1`, id)
 // enqueue — and the other is discarded as superseded. A sibling inserted
 // between the check and the update surfaces as a unique violation; the whole
 // decision is simply retried.
-func (s *store) reschedule(ctx context.Context, id int64, runAt time.Time, lastErr string) error {
+func (s *store) reschedule(ctx context.Context, c *claimed, runAt time.Time, lastErr string) error {
 	var err error
 	for try := 0; try < 3; try++ {
-		if err = s.rescheduleOnce(ctx, id, runAt, lastErr); !isUniqueViolation(err) {
+		if err = s.rescheduleOnce(ctx, c, runAt, lastErr); !isUniqueViolation(err) {
 			return err
 		}
 	}
 	return err
 }
 
-func (s *store) rescheduleOnce(ctx context.Context, id int64, runAt time.Time, lastErr string) error {
+func (s *store) rescheduleOnce(ctx context.Context, c *claimed, runAt time.Time, lastErr string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	id := c.id
 	var worker string
 	var key sql.NullString
 	var gen sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
-SELECT worker, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
-		id).Scan(&worker, &key, &gen); err != nil {
+	err = tx.QueryRowContext(ctx, `
+SELECT worker, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs
+ WHERE id = $1 AND state = 'executing' AND attempt = $2 FOR UPDATE`,
+		id, c.attempt).Scan(&worker, &key, &gen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errStaleClaim
+	}
+	if err != nil {
 		return err
 	}
 	if key.Valid {
@@ -220,11 +245,10 @@ WHERE id = $1`, id, runAt, lastErr); err != nil {
 // per-user send can still be resent manually via calctl until the TTL sweep
 // clears the credential (D5b/D12). completed_at doubles as the settled-at time
 // for pruning.
-func (s *store) discard(ctx context.Context, id int64, lastErr string) error {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = $2
-WHERE id = $1`, id, lastErr)
-	return err
+func (s *store) discard(ctx context.Context, c *claimed, lastErr string) error {
+	return settled(s.db.ExecContext(ctx, `
+UPDATE jobs SET state = 'discarded', completed_at = now(), last_error = $3
+WHERE id = $1 AND state = 'executing' AND attempt = $2`, c.id, c.attempt, lastErr))
 }
 
 // reclaimOrphans resets 'executing' rows whose claim is older than the cutoff —
