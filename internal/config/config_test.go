@@ -180,6 +180,11 @@ func TestParseValues(t *testing.T) {
 		{`[]`, []string{}},
 		{`["a", "b"]`, []string{"a", "b"}},
 		{`"has # hash"`, "has # hash"},
+		// Escapes are decoded, not kept verbatim.
+		{`"pa\"ss\\word"`, `pa"ss\word`},
+		{`"a\tb\nc"`, "a\tb\nc"},
+		{`"café \U0001F600"`, "café 😀"},
+		{`["a,b", "c\"d"]`, []string{"a,b", `c"d`}},
 	} {
 		got, err := parseValue(tc.in)
 		if err != nil {
@@ -189,5 +194,22 @@ func TestParseValues(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("parseValue(%q) = %#v, want %#v", tc.in, got, tc.want)
 		}
+	}
+	for _, bad := range []string{`"a\q"`, `"\u12"`, `"\uD800"`, `"open\"`, `"a" "b"`, `["a" "b"]`} {
+		if v, err := parseValue(bad); err == nil {
+			t.Errorf("parseValue(%q) = %#v, want an error", bad, v)
+		}
+	}
+}
+
+// An escaped quote must not end the string for comment stripping, or the
+// rest of the value would be read as a comment.
+func TestParseEscapedQuoteBeforeHash(t *testing.T) {
+	flat, err := parse("[server.rcptd]\ntoken = \"a\\\"#b\" # comment\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flat["server.rcptd.token"]; got != `a"#b` {
+		t.Fatalf("token = %#v, want %q", got, `a"#b`)
 	}
 }
