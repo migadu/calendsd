@@ -89,7 +89,7 @@ func (m *SubmissionMailer) SendAs(username, password, from string, to []string, 
 	if _, ok := client.TLSConnectionState(); !ok {
 		return errors.New("submission: refusing to authenticate on a non-TLS connection")
 	}
-	if err := client.Auth(plainAuth{username: username, password: password}); err != nil {
+	if err := client.Auth(smtp.PlainAuth("", username, password, host)); err != nil {
 		return fmt.Errorf("submission auth: %w", err)
 	}
 	return transact(client, from, to, msg)
@@ -163,24 +163,4 @@ func (m *SubmissionMailer) dial(host string, tlsConf *tls.Config) (*smtp.Client,
 		return nil, fmt.Errorf("submission STARTTLS: %w", err)
 	}
 	return client, nil
-}
-
-// plainAuth is AUTH PLAIN (RFC 4616) for a connection the caller has already
-// established over TLS. net/smtp.PlainAuth refuses when it can't see TLS on the
-// Client (c.tls stays false after a manual tls.Dial for implicit TLS), so we
-// supply our own mechanism and rely on SendAs's explicit TLSConnectionState
-// check to enforce the encrypted-transport requirement instead.
-type plainAuth struct {
-	identity, username, password string
-}
-
-func (a plainAuth) Start(*smtp.ServerInfo) (string, []byte, error) {
-	return "PLAIN", []byte(a.identity + "\x00" + a.username + "\x00" + a.password), nil
-}
-
-func (a plainAuth) Next(fromServer []byte, more bool) ([]byte, error) {
-	if more {
-		return nil, errors.New("submission: unexpected additional server challenge")
-	}
-	return nil, nil
 }
