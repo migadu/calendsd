@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/xml"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	gopath "path"
 	"slices"
+	"strconv"
 	"strings"
 
 	davxml "calendsd/internal/dav/xml"
@@ -261,6 +263,9 @@ func (s *Server) WriteError(w http.ResponseWriter, err error) {
 		// Mirrors sabre's MethodNotAllowed::getHTTPHeaders. The methods of
 		// the in-memory root need no storage, so no request context.
 		h.Set("Allow", strings.Join(s.AllowedMethods(context.Background(), ""), ", "))
+	}
+	if de.RetryAfter > 0 {
+		h.Set("Retry-After", strconv.Itoa(int(math.Ceil(de.RetryAfter.Seconds()))))
 	}
 	w.WriteHeader(de.Status)
 	body := errorBody{Exception: de.Exception, Message: de.Message}

@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +68,73 @@ type RcptdBackend struct {
 	key   []byte
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+
+	// verifySem bounds concurrent lookup+verify work to the CPU count, so a
+	// burst of distinct wrong passwords queues instead of pinning every
+	// core with bcrypt and starving the rest of the server (audit 5.8).
+	// Acquired under the request context: a caller that gives up waiting
+	// is told the service is busy, never that its password was wrong.
+	semOnce   sync.Once
+	verifySem chan struct{}
+	// dummies holds one bcrypt hash per cost seen in real answers, so an
+	// unknown user's attempt pays the same verification as a wrong password
+	// instead of returning straight from rcptd's 404.
+	dummies  map[int]string
+	lastCost int
+}
+
+// defaultDummyCost is the bcrypt cost used for the unknown-user dummy until
+// a real hash has shown the deployment's cost.
+const defaultDummyCost = 10
+
+func (b *RcptdBackend) sem() chan struct{} {
+	b.semOnce.Do(func() {
+		n := runtime.NumCPU()
+		if n < 1 {
+			n = 1
+		}
+		b.verifySem = make(chan struct{}, n)
+	})
+	return b.verifySem
+}
+
+// noteCost records the bcrypt cost of a real hash so the dummy matches it.
+func (b *RcptdBackend) noteCost(hashes []string) {
+	for _, h := range hashes {
+		raw := h
+		if i := strings.Index(raw, "}"); strings.HasPrefix(raw, "{") && i > 0 {
+			raw = raw[i+1:]
+		}
+		if cost, err := bcrypt.Cost([]byte(raw)); err == nil {
+			b.mu.Lock()
+			b.lastCost = cost
+			b.mu.Unlock()
+			return
+		}
+	}
+}
+
+// dummyHash returns a bcrypt hash at the last seen cost, generated once per
+// cost.
+func (b *RcptdBackend) dummyHash() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cost := b.lastCost
+	if cost == 0 {
+		cost = defaultDummyCost
+	}
+	if h, ok := b.dummies[cost]; ok {
+		return h
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte("calserver-unknown-user-dummy"), cost)
+	if err != nil {
+		return ""
+	}
+	if b.dummies == nil {
+		b.dummies = map[int]string{}
+	}
+	b.dummies[cost] = string(h)
+	return string(h)
 }
 
 type cacheEntry struct {
@@ -150,10 +219,25 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 		return "unavailable", &serverError{msg: "authentication service is unreachable",
 			err: errors.Join(ErrUnavailable, err)}
 	}
+	// The semaphore bounds only the CPU work (bcrypt), never the rcptd
+	// round trip above: holding it across a slow rcptd would turn a slow
+	// lookup service into an auth outage for everyone.
+	select {
+	case b.sem() <- struct{}{}:
+		defer func() { <-b.verifySem }()
+	case <-ctx.Done():
+		return "unavailable", ErrUnavailable
+	}
 	switch status {
 	case http.StatusOK:
+		b.noteCost(hashes)
 		// fall through to verification
 	case http.StatusNotFound:
+		// Pay the same bcrypt work as a wrong password, so the time to a
+		// rejection does not say whether the user exists.
+		if dummy := b.dummyHash(); dummy != "" {
+			_ = bcrypt.CompareHashAndPassword([]byte(dummy), []byte(password))
+		}
 		return "bad_credentials", ErrBadCredentials
 	case http.StatusServiceUnavailable:
 		// Transient CDB fault on rcptd's side; retryable, not a definitive no.

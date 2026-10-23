@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,6 +166,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.opts.Logger.Warn("contacts api: authentication unavailable", "reason", err,
 				"method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusServiceUnavailable, auth.ClientMessage(err))
+			return
+		}
+		if retryAfter, throttled := auth.Throttled(err); throttled {
+			// The limiter keys this listener's callers by username only (they
+			// all arrive as loopback), so this is one account's guesses.
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+			writeError(w, http.StatusTooManyRequests, auth.ClientMessage(err))
 			return
 		}
 		h.auth.Challenge(w.Header(), r)

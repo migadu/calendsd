@@ -417,11 +417,14 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		rb.Provision = prov.ensure
 		rb.Logger = slog.Default()
 		rb.Metrics = cfg.Metrics
-		ap := auth.NewPlugin(rb)
+		// The limiter wraps the backend, not the plugin, so the contacts API
+		// (which calls the backend directly) is throttled too (audit 5.8).
+		limited := auth.NewLimiter(rb)
+		ap := auth.NewPlugin(limited)
 		ap.Metrics = cfg.Metrics
 		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
-		backend = rb
+		backend = limited
 	default:
 		basic := &auth.BasicBackend{Realm: cfg.Realm, Metrics: cfg.Metrics, Validate: func(ctx context.Context, username, password string) bool {
 			// Basic verifies against the same digesta1 hash, compared in
@@ -434,14 +437,15 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 			return hash != "" && subtle.ConstantTimeCompare(
 				[]byte(auth.DigestA1(username, cfg.Realm, password)), []byte(hash)) == 1
 		}}
-		ap := auth.NewPlugin(
+		limited := auth.NewLimiter(
 			&auth.DigestBackend{Realm: cfg.Realm, HashA1: users.HashA1, Metrics: cfg.Metrics},
 			basic,
 		)
+		ap := auth.NewPlugin(limited)
 		ap.Metrics = cfg.Metrics
 		ap.Tombstoned = tombstoned
 		srv.AddPlugin(ap)
-		backend = basic
+		backend = limited
 	}
 	if cfg.TempFileFilter {
 		// After auth (temp requests stay authenticated), before ACL and the

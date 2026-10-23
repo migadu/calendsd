@@ -2,12 +2,13 @@ package admin
 
 import (
 	"bufio"
+	"calendsd/internal/auth"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
-	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -49,17 +50,27 @@ func LoadHTPasswd(path string) (map[string]string, error) {
 	return creds, nil
 }
 
-// dummyHash is compared against when the username is unknown, so a request
-// for a missing user costs the same bcrypt work as a wrong password. It is
-// made on first use, so calctl commands other than the panel do not pay a
-// bcrypt hash at startup just for importing this package.
-var dummyHash = sync.OnceValue(func() string {
-	h, err := bcrypt.GenerateFromPassword([]byte("calendsd-admin-dummy"), bcrypt.DefaultCost)
-	if err != nil {
-		panic(err)
+// decoyHash picks a real stored hash to compare against when the username is
+// unknown, so a request for a missing user costs exactly the bcrypt work of a
+// wrong password for an existing one. A generated dummy at bcrypt's default
+// cost (10) was a 32x timing tell against htpasswd -B's default cost 5
+// (audit 5.8). Deterministic (lowest username) so the cost does not vary
+// between requests either.
+func decoyHash(creds map[string]string) string {
+	best := ""
+	for user := range creds {
+		if best == "" || user < best {
+			best = user
+		}
 	}
-	return string(h)
-})
+	return creds[best]
+}
+
+// adminThrottle is the panel's failure budget: the same shape as the DAV
+// limiter, keyed by client address and by attempted username.
+func adminThrottle() (byAddress, byUser *auth.Throttle) {
+	return &auth.Throttle{Rate: 10.0 / 60, Burst: 20}, &auth.Throttle{Rate: 20.0 / 300, Burst: 20}
+}
 
 // actorContextKey carries the authenticated admin username so write
 // endpoints can attribute their audit log lines.
@@ -76,16 +87,45 @@ func actor(r *http.Request) string {
 
 // BasicAuth guards every admin route with HTTP Basic against the htpasswd
 // credentials. Basic resends the password each request, hence the
-// loopback/TLS-only deployment note in the plan.
+// loopback/TLS-only deployment note in the plan. Failed attempts are
+// throttled per client address and per username (audit 5.8).
 func BasicAuth(creds map[string]string, next http.Handler) http.Handler {
+	byAddress, byUser := adminThrottle()
+	return basicAuthWith(creds, byAddress, byUser, next)
+}
+
+// basicAuthWith is BasicAuth with the failure budgets supplied (tests pin
+// their clocks).
+func basicAuthWith(creds map[string]string, byAddress, byUser *auth.Throttle, next http.Handler) http.Handler {
+	decoy := decoyHash(creds)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
+		// Same keying as the DAV limiter: a loopback caller without
+		// X-Forwarded-For has no address key, so operators on the loopback
+		// panel are throttled per username, not all together.
+		addrKey, _ := auth.ClientAddress(r)
+		userKey := strings.ToLower(user)
+		if ok {
+			wait := byAddress.RetryAfter(addrKey)
+			if w := byUser.RetryAfter(userKey); w > wait {
+				wait = w
+			}
+			if wait > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+				http.Error(w, "too many failed login attempts", http.StatusTooManyRequests)
+				return
+			}
+		}
 		hash, known := creds[user]
 		if !known {
-			hash = dummyHash()
+			hash = decoy
 		}
 		err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass))
 		if !ok || !known || err != nil {
+			if ok {
+				byAddress.Fail(addrKey)
+				byUser.Fail(userKey)
+			}
 			w.Header().Set("WWW-Authenticate", `Basic realm="calendsd-admin", charset="UTF-8"`)
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return

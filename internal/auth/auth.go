@@ -160,6 +160,15 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		}
 		reasons = append(reasons, err.Error())
 		messages = append(messages, ClientMessage(err))
+		if retryAfter, ok := Throttled(err); ok {
+			// A throttled client gets a 429 with Retry-After and no
+			// challenge, not a 401 it would answer with another guess at
+			// once (audit 5.8).
+			p.Metrics.AuthAttempt("limiter", "throttled")
+			p.logger().Warn("auth throttled", "user", func() string { u, _ := attemptedLogin(r); return u }(),
+				"method", r.Method, "path", r.URL.Path, "remote", remoteAddr(r), "retry_after", retryAfter)
+			return false, dav.ErrTooManyRequests(retryAfter, "%s", ClientMessage(err))
+		}
 	}
 	if !p.AutoRequireLogin {
 		return true, nil

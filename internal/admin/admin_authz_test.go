@@ -76,11 +76,14 @@ func TestBasicAuthGuardsEveryEndpoint(t *testing.T) {
 		if code := status(r.method, r.path, "", "", false); code != http.StatusUnauthorized {
 			t.Errorf("%s %s without credentials = %d, want 401", r.method, r.path, code)
 		}
-		if code := status(r.method, r.path, "root", "wrong", true); code != http.StatusUnauthorized {
-			t.Errorf("%s %s with wrong password = %d, want 401", r.method, r.path, code)
+		// Past the failure budget (audit 5.8) the wrapper answers 429 instead
+		// of 401; either proves the request never reached a handler.
+		rejected := func(code int) bool { return code == http.StatusUnauthorized || code == http.StatusTooManyRequests }
+		if code := status(r.method, r.path, "root", "wrong", true); !rejected(code) {
+			t.Errorf("%s %s with wrong password = %d, want 401 or 429", r.method, r.path, code)
 		}
-		if code := status(r.method, r.path, "nobody", "s3cret", true); code != http.StatusUnauthorized {
-			t.Errorf("%s %s as unknown user = %d, want 401", r.method, r.path, code)
+		if code := status(r.method, r.path, "nobody", "s3cret", true); !rejected(code) {
+			t.Errorf("%s %s as unknown user = %d, want 401 or 429", r.method, r.path, code)
 		}
 	}
 

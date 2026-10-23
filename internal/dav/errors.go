@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Error is a protocol error carrying the HTTP status and the sabre exception
@@ -21,6 +22,16 @@ type Error struct {
 	// (e.g. {urn:ietf:params:xml:ns:caldav}valid-calendar-data) that sabre
 	// serializes as children of {DAV:}error alongside the exception.
 	Precondition []xml.Name
+	// RetryAfter, when set, is emitted as a Retry-After header (429s).
+	RetryAfter time.Duration
+}
+
+// ErrTooManyRequests is a 429 carrying a Retry-After; the auth plugin returns
+// it for a throttled login (audit 5.8). No sabre counterpart.
+func ErrTooManyRequests(retryAfter time.Duration, format string, args ...any) *Error {
+	e := davError(http.StatusTooManyRequests, "TooManyRequests", format, args...)
+	e.RetryAfter = retryAfter
+	return e
 }
 
 func (e *Error) Error() string {
