@@ -771,12 +771,15 @@ func TestWriteCarveOutErrors(t *testing.T) {
 		form       url.Values
 		want       int
 	}{
+		// A generic storage failure is a 500 with a generic body (audit
+		// 6.17); only a missing principal (404) or an operator guard (409)
+		// keeps a specific status, see TestWriteErrorMapping.
 		{"CreateUser", "/api/create-user",
-			url.Values{"username": {"x"}, "password": {"y"}}, http.StatusConflict},
+			url.Values{"username": {"x"}, "password": {"y"}}, http.StatusInternalServerError},
 		{"SetPassword", "/api/set-password",
-			url.Values{"username": {"x"}, "password": {"y"}}, http.StatusNotFound},
+			url.Values{"username": {"x"}, "password": {"y"}}, http.StatusInternalServerError},
 		{"DeleteUser", "/api/delete-user",
-			url.Values{"username": {"x"}}, http.StatusConflict},
+			url.Values{"username": {"x"}}, http.StatusInternalServerError},
 		{"ScheduleDelete", "/api/schedule-delete",
 			url.Values{"username": {"x"}}, http.StatusConflict},
 		{"CancelDelete", "/api/restore-user",

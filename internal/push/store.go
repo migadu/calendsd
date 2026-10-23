@@ -17,6 +17,12 @@ const DefaultMaxSubscriptionsPerPrincipal = 50
 // exceed the principal's cap. The plugin maps it to 403.
 var ErrTooManySubscriptions = errors.New("too many push subscriptions for this principal")
 
+// ErrEndpointOwnedByOther is returned by Upsert when the (collection,
+// endpoint) row belongs to a different principal: a co-reader who learned
+// the endpoint URL must not be able to take over the subscription and its
+// keys (audit 6.13). The plugin maps it to 409.
+var ErrEndpointOwnedByOther = errors.New("this push endpoint is registered to another principal")
+
 // Store is the push_subscriptions persistence layer. It talks to the same
 // Postgres the DAV backends use, over the shared database/sql pool.
 type Store struct {
@@ -78,14 +84,19 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (collection_kind, collection_id, push_resource)
 DO UPDATE SET
   collection_path = EXCLUDED.collection_path,
-  principal_uri   = EXCLUDED.principal_uri,
   p256dh          = EXCLUDED.p256dh,
   auth_secret     = EXCLUDED.auth_secret,
   expires         = EXCLUDED.expires
+WHERE push_subscriptions.principal_uri = EXCLUDED.principal_uri
 RETURNING token`,
 		sub.Token, sub.Kind, sub.CollectionID, sub.CollectionPath, sub.PrincipalURI,
 		sub.PushResource, sub.P256dh, sub.AuthSecret, seedToken, expires,
 	).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The conflict row belongs to someone else: the WHERE skipped the
+		// update, so nothing was returned (audit 6.13).
+		return "", ErrEndpointOwnedByOther
+	}
 	if err != nil {
 		return "", err
 	}

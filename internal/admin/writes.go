@@ -9,6 +9,7 @@ package admin
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -42,9 +43,11 @@ var _ Writes = (*storage.AdminWrites)(nil)
 // mutating endpoint.
 func (a *App) mutationGate(w http.ResponseWriter, r *http.Request) bool {
 	if !requireMutationHeader(w, r) {
+		refused(r, http.StatusForbidden, "missing X-Admin-Request header")
 		return false
 	}
 	if a.ReadOnly {
+		refused(r, http.StatusForbidden, "read-only mode")
 		http.Error(w, "read-only mode: restart `calctl panel` with -readonly=false to enable write actions", http.StatusForbidden)
 		return false
 	}
@@ -59,6 +62,7 @@ func (a *App) writeGate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if a.Writes == nil {
+		refused(r, http.StatusForbidden, "write actions not wired")
 		http.Error(w, "write actions not wired in this deployment", http.StatusForbidden)
 		return false
 	}
@@ -68,6 +72,44 @@ func (a *App) writeGate(w http.ResponseWriter, r *http.Request) bool {
 // audit is the structured audit line every §3.8 write emits.
 func audit(r *http.Request, action string, kv ...any) {
 	slog.Info("admin write", append([]any{"actor", actor(r), "action", action}, kv...)...)
+}
+
+// refused is the audit line for a write that was not applied, so a refused
+// or failed attempt is as visible as a successful one (audit 6.15).
+func refused(r *http.Request, status int, reason string) {
+	slog.Warn("admin write refused", "actor", actor(r), "path", r.URL.Path, "status", status, "reason", reason)
+}
+
+// writeFailed answers a storage error from a write endpoint. A missing
+// principal is a 404; a guard the operator must act on (collections still
+// held, a duplicate user) keeps its text as a 409; anything else is an
+// internal error whose driver text stays in the log, not the response
+// (audit 6.17).
+func writeFailed(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, storage.ErrNoPrincipal):
+		refused(r, http.StatusNotFound, err.Error())
+		http.Error(w, "no such user", http.StatusNotFound)
+	case isOperatorGuard(err):
+		refused(r, http.StatusConflict, err.Error())
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		refused(r, http.StatusInternalServerError, err.Error())
+		http.Error(w, "the write failed; see the server log", http.StatusInternalServerError)
+	}
+}
+
+// isOperatorGuard recognises the refusals storage phrases for the operator:
+// an account that still holds collections, a duplicate on create, an invalid
+// username. These are the 409s whose text the panel must show.
+func isOperatorGuard(err error) bool {
+	msg := err.Error()
+	for _, marker := range []string{"still holds", "already exist", "invalid username", "not scheduled for deletion", "nothing to update"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 type writeResult struct {
@@ -89,7 +131,7 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 	err := a.Writes.CreateUser(r.Context(), username, digest,
 		r.PostFormValue("email"), r.PostFormValue("displayname"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		writeFailed(w, r, err)
 		return
 	}
 	audit(r, "create-user", "username", username, "realm", a.Config.Realm)
@@ -108,7 +150,7 @@ func (a *App) setPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.Writes.SetPassword(r.Context(), username, auth.DigestA1(username, a.Config.Realm, password)); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		writeFailed(w, r, err)
 		return
 	}
 	audit(r, "set-password", "username", username, "realm", a.Config.Realm)
@@ -134,7 +176,7 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 		err = a.Writes.DeleteUser(r.Context(), username)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		writeFailed(w, r, err)
 		return
 	}
 	audit(r, "delete-user", "username", username, "cascade", cascade)
@@ -341,7 +383,7 @@ func (a *App) deleteOrphans(w http.ResponseWriter, r *http.Request) {
 // davRequest runs one in-process DAV request against h, as the simulator
 // and the DAV-backed write actions do.
 func davRequest(h http.Handler, method, path, body, depth string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req := syntheticRequest(method, path, body)
 	req.Header.Set("Depth", depth)
 	req.Header.Set("Content-Type", "application/xml")
 	w := httptest.NewRecorder()

@@ -95,7 +95,7 @@ func writeHeaders(b *strings.Builder, h http.Header) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if strings.EqualFold(name, "Authorization") {
+		if strings.EqualFold(name, "Authorization") || strings.EqualFold(name, "Proxy-Authorization") {
 			fmt.Fprintf(b, "%s: [redacted]\n", name)
 			continue
 		}

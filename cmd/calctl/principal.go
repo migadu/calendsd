@@ -335,5 +335,10 @@ func resolvePassword(flagValue string, fromStdin bool) string {
 		}
 		return strings.TrimRight(line, "\r\n")
 	}
+	if flagValue != "" {
+		// Kept for compatibility, but an argv password is visible to every
+		// process on the host (ps) and lands in the shell history (audit 6.11).
+		fmt.Fprintln(os.Stderr, "Warning: --password exposes the password to other processes and the shell history; prefer --password-stdin.")
+	}
 	return flagValue
 }

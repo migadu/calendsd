@@ -36,12 +36,34 @@ func stalledPrincipals(t *testing.T) *storage.Principals {
 	return &storage.Principals{DB: db}
 }
 
+// The memo expires (audit 6.7): calctl deletes accounts from another process,
+// so a principal confirmed long ago is re-checked against the database. A
+// stale entry must hit the (here stalled) lookup instead of answering from
+// memory; a fresh one answers at once.
+func TestProvisionMemoExpires(t *testing.T) {
+	p := &provisioner{
+		principals: stalledPrincipals(t),
+		seen: map[string]time.Time{
+			"principals/fresh@example.org": time.Now(),
+			"principals/stale@example.org": time.Now().Add(-seenTTL - time.Minute),
+		},
+	}
+	if err := p.ensure(context.Background(), "principals/fresh@example.org", "fresh@example.org"); err != nil {
+		t.Fatalf("fresh memo: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := p.ensure(ctx, "principals/stale@example.org", "stale@example.org"); err == nil {
+		t.Fatal("stale memo answered without consulting the database")
+	}
+}
+
 // One user's stalled first login must not hold up anyone else's: before, a
 // single mutex was held across the lookup, so every login queued behind it.
 func TestProvisionStallDoesNotBlockOthers(t *testing.T) {
 	p := &provisioner{
 		principals: stalledPrincipals(t),
-		seen:       map[string]bool{"principals/bob@example.org": true},
+		seen:       map[string]time.Time{"principals/bob@example.org": time.Now()},
 	}
 	stalled := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -72,7 +94,7 @@ func TestProvisionStallDoesNotBlockOthers(t *testing.T) {
 	if err := <-stalled; err == nil {
 		t.Error("stalled alice: ensure succeeded against a dead database")
 	}
-	if p.seen["principals/alice@example.org"] {
+	if _, memoized := p.seen["principals/alice@example.org"]; memoized {
 		t.Error("a failed provisioning was memoized as seen")
 	}
 }

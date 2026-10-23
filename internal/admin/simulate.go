@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	"calendsd/internal/acl"
@@ -101,6 +102,18 @@ func (a *App) simulateData(r *http.Request) (any, error) {
 			Principal: ace.Principal, Privilege: ace.Privilege, Protected: ace.Protected})
 	}
 	return d, nil
+}
+
+// syntheticRequest builds the in-process request the simulator and the write
+// helpers feed to a DAV server. httptest.NewRequest parses its target as a
+// request line and panics on one it cannot parse (a path with a space, from
+// an operator typo), so the path is set on the URL directly (audit 6.12).
+func syntheticRequest(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, "/", strings.NewReader(body))
+	req.URL.Path = path
+	req.URL.RawPath = ""
+	req.RequestURI = req.URL.RequestURI()
+	return req
 }
 
 // Multistatus subset for the privilege PROPFIND. Privileges arrive as

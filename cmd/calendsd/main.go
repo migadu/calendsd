@@ -167,10 +167,14 @@ func main() {
 		Addr:              addrV,
 		Handler:           srv,
 		ReadHeaderTimeout: 15 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MiB of request headers
+		// 300 s rather than 60: a whole-calendar export or a large import
+		// PUT over a slow link was cut off mid-body. The per-request
+		// deadline the server installs (server.RequestDeadline) is what
+		// bounds the work behind a connection; these only bound the bytes.
+		ReadTimeout:    server.RequestDeadline,
+		WriteTimeout:   server.RequestDeadline,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MiB of request headers
 	}
 
 	tls := tlsCertV != "" || tlsKeyV != ""

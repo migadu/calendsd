@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"calendsd/internal/storage"
 )
@@ -27,9 +28,15 @@ type provisioner struct {
 	realm      string
 
 	mu       sync.Mutex
-	seen     map[string]bool
+	seen     map[string]time.Time // principal → when it was last confirmed to exist
 	inflight map[string]chan struct{}
 }
+
+// seenTTL bounds the memo: a principal deleted by calctl (a separate process,
+// so no in-process invalidation is possible) is re-checked against the
+// database within this long, the same window as the rcptd credential cache
+// (audit 6.7).
+const seenTTL = 5 * time.Minute
 
 // ensure makes sure principal exists, creating it (and its users row) when this
 // is the login's first sighting. email seeds the principal's address and
@@ -38,7 +45,7 @@ type provisioner struct {
 func (p *provisioner) ensure(ctx context.Context, principal, email string) error {
 	for {
 		p.mu.Lock()
-		if p.seen[principal] {
+		if at, ok := p.seen[principal]; ok && time.Since(at) < seenTTL {
 			p.mu.Unlock()
 			return nil
 		}
@@ -63,7 +70,10 @@ func (p *provisioner) ensure(ctx context.Context, principal, email string) error
 		p.mu.Lock()
 		delete(p.inflight, principal)
 		if err == nil {
-			p.seen[principal] = true
+			if p.seen == nil {
+				p.seen = map[string]time.Time{}
+			}
+			p.seen[principal] = time.Now()
 		}
 		p.mu.Unlock()
 		close(done)

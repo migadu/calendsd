@@ -102,11 +102,14 @@ func TestFindDefaultConfig(t *testing.T) {
 		t.Fatalf("expected no config in empty dir, got %q", got)
 	}
 
+	// A config.toml in the working directory is deliberately NOT discovered
+	// (audit 6.10): calctl runs privileged actions and must not be steered
+	// by a file planted where it happens to be run.
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[database]\ndsn = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := FindDefaultConfig(); got != "config.toml" {
-		t.Fatalf("expected config.toml to be discovered, got %q", got)
+	if got := FindDefaultConfig(); got != "" {
+		t.Fatalf("config.toml in the working directory was discovered as %q; want it ignored", got)
 	}
 }
 

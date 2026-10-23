@@ -277,6 +277,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	// Health sits outside both logs, so a monitor polling every few seconds
 	// does not flood them, but inside metrics, so probes are still counted.
 	h = WrapHealth(h, db.PingContext)
+	h = WrapRequestDeadline(h, RequestDeadline)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
 	return &Built{
@@ -411,7 +412,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 			principals: principals,
 			writes:     &storage.AdminWrites{DB: db},
 			realm:      cfg.Realm,
-			seen:       map[string]bool{},
+			seen:       map[string]time.Time{},
 		}
 		rb := auth.NewRcptdBackend(cfg.Realm, cfg.RcptdURL, cfg.RcptdToken, 5*time.Minute)
 		rb.Provision = prov.ensure

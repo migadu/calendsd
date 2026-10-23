@@ -15,13 +15,15 @@ import (
 // when -config is not given explicitly. Every binary that reads calendsd's
 // config (calendsd, calctl) discovers it through FindDefaultConfig. The
 // calserver paths are the pre-rename locations, still found on hosts the
-// ansible role has not yet migrated.
+// ansible role has not yet migrated. The working directory is deliberately
+// not searched: calctl runs privileged actions, and a config.toml planted in
+// whatever directory an operator happens to run it from would redirect them
+// (audit 6.10). Pass -config for a file elsewhere.
 var DefaultConfigPaths = []string{
 	"/etc/calendsd/config.toml",
 	"/usr/local/etc/calendsd/config.toml",
 	"/etc/calserver/config.toml",
 	"/usr/local/etc/calserver/config.toml",
-	"config.toml",
 }
 
 // FindDefaultConfig returns the first existing DefaultConfigPaths entry, or ""
