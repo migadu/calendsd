@@ -32,6 +32,12 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 	if !isCal {
 		return data, nil
 	}
+	// Checked on the body as sent, before any parsing.
+	if len(data) > MaxResourceSize {
+		e := dav.ErrForbidden("The calendar object exceeds the maximum resource size of %d bytes", MaxResourceSize)
+		e.Precondition = []xml.Name{{Space: davxml.NSCalDAV, Local: "max-resource-size"}}
+		return nil, e
+	}
 
 	// jCal → iCalendar. Malformed jCal is rejected rather than stored raw.
 	if ical.IsJCal(data) {
@@ -100,6 +106,12 @@ func invalidComponentType(msg string) error {
 		Message:   msg,
 	}
 }
+
+// MaxResourceSize is the largest calendar object a client may store, in
+// bytes; calendars advertise it as {CALDAV:}max-resource-size (RFC 4791
+// §5.2.5), and a larger PUT or Add-Member POST is refused with that
+// precondition.
+const MaxResourceSize = 10000000
 
 // addMemberSegment is the trailing path segment RFC 5995 Add-Member POSTs
 // target (Calendar Server's convention).

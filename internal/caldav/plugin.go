@@ -79,9 +79,8 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		pf.Handle(xml.Name{Space: davxml.NSDav, Local: "add-member"}, func() any {
 			return davxml.Href{p.server.Href(pf.Path()) + "/" + addMemberSegment}
 		})
-		// Constant per-calendar properties sabre emits on every calendar
-		// (max-resource-size is advertised, not enforced, matching sabre).
-		pf.Handle(cal("max-resource-size"), func() any { return "10000000" })
+		// Constant per-calendar properties sabre emits on every calendar.
+		pf.Handle(cal("max-resource-size"), func() any { return MaxResourceSize })
 		pf.Handle(cal("supported-calendar-data"), func() any {
 			return davxml.Raw(`<cal:calendar-data content-type="text/calendar" version="2.0"/>` +
 				`<cal:calendar-data content-type="application/calendar+json"/>`)

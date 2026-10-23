@@ -96,3 +96,46 @@ func TestMalformedCalendarDataRejectedCleanly(t *testing.T) {
 		t.Errorf("400 body missing valid-calendar-data precondition:\n%s", w.Body.String())
 	}
 }
+
+// A calendar object over max-resource-size is refused with 403 and the
+// {CALDAV:}max-resource-size precondition, by PUT and by Add-Member POST; one
+// at the limit is stored.
+func TestMaxResourceSizeEnforced(t *testing.T) {
+	principals := &acl.MemoryBackend{Principals: []acl.Principal{{URI: "principals/user1"}}}
+	backend := &caldav.MockBackend{Calendars: []caldav.CalendarInfo{{
+		ID: caldav.CalendarID{Calendar: "1"}, URI: "calendar", PrincipalURI: "principals/user1",
+	}}}
+
+	root := mock.NewCollection("root")
+	root.Attach(acl.NewPrincipalCollection(principals, "principals"))
+	root.Attach(caldav.NewCalendarRoot(principals, backend, "calendars"))
+	srv := dav.NewServer("/", root)
+	srv.AddPlugin(auth.NewLoggedInPlugin("principals/user1"))
+	srv.AddPlugin(&acl.Plugin{AdminPrincipals: []string{"principals/admin"}})
+	srv.AddPlugin(&caldav.Plugin{})
+
+	// An event padded with a DESCRIPTION to exactly size bytes.
+	event := func(uid string, size int) string {
+		head := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:" + uid +
+			"\r\nDTSTART:20260101T120000Z\r\nDTEND:20260101T130000Z\r\nDESCRIPTION:"
+		tail := "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+		return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+	}
+	send := func(method, uri, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/calendars/user1/calendar/"+uri, strings.NewReader(body))
+		req.Header.Set("Content-Type", "text/calendar")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := send("PUT", "max.ics", event("max", caldav.MaxResourceSize)); w.Code != 201 {
+		t.Errorf("PUT at the limit = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	for _, c := range []struct{ method, uri string }{{"PUT", "over.ics"}, {"POST", ";add-member"}} {
+		w := send(c.method, c.uri, event("over", caldav.MaxResourceSize+1))
+		if w.Code != 403 || !strings.Contains(w.Body.String(), "max-resource-size") {
+			t.Errorf("%s over the limit = %d, want 403 with max-resource-size:\n%s", c.method, w.Code, w.Body.String())
+		}
+	}
+}
