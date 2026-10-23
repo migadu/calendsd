@@ -74,16 +74,8 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 // not recur.
 func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error) {
 	if comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) == nil {
-		if opt, err := comp.Props.RecurrenceRule(); err == nil && opt != nil {
-			if err := checkRRule(opt); err != nil {
-				return nil, err
-			}
-			// rrule-go builds its day masks when the year changes from the
-			// one it last saw, which starts as 0: a rule starting in year 0
-			// never gets them and indexes empty slices.
-			if start, err := comp.Props.DateTime(goical.PropDateTimeStart, loc); err == nil && start.Year() < 1 {
-				return nil, fmt.Errorf("recurring DTSTART %v is before year 1", start)
-			}
+		if err := checkRecurrence(comp, loc); err != nil {
+			return nil, err
 		}
 		return comp.RecurrenceSet(loc)
 	}
@@ -108,6 +100,26 @@ func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error
 		set.ExDate(t)
 	}
 	return set, nil
+}
+
+// checkRecurrence rejects an RRULE that rrule-go would panic on (see
+// checkRRule), and one starting before year 1: rrule-go builds its day masks
+// when the year changes from the one it last saw, which starts as 0, so a
+// rule starting in year 0 never gets them and indexes empty slices.
+// Denormalize runs it on every PUT, so such a rule is refused up front
+// rather than stored to fail every later expansion.
+func checkRecurrence(comp *goical.Component, loc *time.Location) error {
+	opt, err := comp.Props.RecurrenceRule()
+	if err != nil || opt == nil {
+		return nil // no rule, or one RecurrenceSet reports itself
+	}
+	if err := checkRRule(opt); err != nil {
+		return err
+	}
+	if start, err := comp.Props.DateTime(goical.PropDateTimeStart, loc); err == nil && start.Year() < 1 {
+		return fmt.Errorf("recurring DTSTART %v is before year 1", start)
+	}
+	return nil
 }
 
 // checkRRule rejects BYDAY ordinals that rrule-go cannot iterate: it

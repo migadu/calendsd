@@ -66,6 +66,14 @@ func Denormalize(data []byte) (*Denormalized, error) {
 	if comp == nil {
 		return nil, ErrNoComponent
 	}
+	// Every recurring component, not only the VEVENT whose bounds are
+	// computed below (which skips the recurrence set for an infinite rule):
+	// a rule expansion would panic on must not be stored.
+	for _, child := range cal.Children {
+		if err := checkRecurrence(child, time.UTC); err != nil {
+			return nil, err
+		}
+	}
 
 	sum := md5.Sum(data)
 	d := &Denormalized{

@@ -221,3 +221,25 @@ func TestDenormalizeOverrideWithinRange(t *testing.T) {
 	)
 	checkBounds(t, data, ts(t, 2026, 1, 1, 12, 0), ts(t, 2026, 1, 15, 13, 0))
 }
+
+// A rule that expansion cannot handle is refused when the object is stored,
+// including an infinite one, whose occurrence bounds need no expansion.
+func TestDenormalizeRejectsUnexpandableRules(t *testing.T) {
+	for _, c := range []struct{ start, rule string }{
+		{"DTSTART:20260326T090000Z", "FREQ=MONTHLY;BYDAY=8FR"},
+		{"DTSTART:20260326T090000Z", "FREQ=YEARLY;BYMONTH=3;BYDAY=-6MO;COUNT=3"},
+		{"DTSTART:20260326T090000Z", "FREQ=YEARLY;BYDAY=54MO"},
+		{"DTSTART:00000101T000000Z", "FREQ=WEEKLY"},
+	} {
+		data := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r\r\n" + c.start +
+			"\r\nRRULE:" + c.rule + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+		if _, err := Denormalize([]byte(data)); err == nil {
+			t.Errorf("Denormalize accepted %s with %s", c.rule, c.start)
+		}
+	}
+	ok := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r\r\nDTSTART:20260326T090000Z\r\n" +
+		"RRULE:FREQ=MONTHLY;BYDAY=-1FR\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if _, err := Denormalize([]byte(ok)); err != nil {
+		t.Errorf("Denormalize refused the last Friday of each month: %v", err)
+	}
+}
