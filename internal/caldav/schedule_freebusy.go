@@ -106,6 +106,19 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return dav.ErrBadRequest("Invalid DTEND")
 	}
+	// A window wider than the server will expand answers every recipient
+	// with a terminal 5.3 rather than a truncated schedule (audit 3.1, D1).
+	// The envelope is still a 200 schedule-response, like any per-recipient
+	// failure, so a client sees which recipients it must re-ask.
+	var spanStatus string
+	if _, _, err := freeBusyWindow(start, end); err != nil {
+		var de *dav.Error
+		if errors.As(err, &de) {
+			spanStatus = "5.3;" + de.Message
+		} else {
+			spanStatus = "5.3;" + err.Error()
+		}
+	}
 
 	// Identity properties echoed into each recipient's VFREEBUSY, matching
 	// sabre's generateFreeBusyResponse (UID + ORGANIZER from the request,
@@ -129,7 +142,9 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		status := "2.0;Success"
 		var fbData string
 		principal := principalForAddress(r.Context(), p.server, att.Value)
-		if principal == "" {
+		if spanStatus != "" {
+			status = spanStatus
+		} else if principal == "" {
 			status = "3.7;Could not find principal"
 		} else {
 			extra := appendPropLine(append([]string{}, idProps...), &goical.Prop{Name: "ATTENDEE", Value: att.Value})

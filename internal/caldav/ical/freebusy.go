@@ -1,6 +1,7 @@
 package ical
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -257,21 +258,24 @@ func eventBusyPeriods(comp *goical.Component, start, end time.Time, loc *time.Lo
 		return nil, err
 	}
 	var out []busyPeriod
-	next := set.Iterator()
-	// Bounded by the finite window end (see EventInTimeRange); maxTimeRangeScan
-	// is only a pathological-rule backstop, not an occurrence cap that would
-	// truncate a long-running series before its instances in the window.
-	for i := 0; i < maxTimeRangeScan; i++ {
-		occStart, more := next()
-		if !more || !occStart.Before(end) {
-			break
+	last, err := scanWindow(set.Iterator(), endOf, start, end, func(occ time.Time) bool {
+		if overridden[occ.Unix()] != nil {
+			return false
 		}
-		if overridden[occStart.Unix()] != nil {
-			continue
-		}
-		if p := clamp(occStart, endOf(occStart)); p != nil {
+		if p := clamp(occ, endOf(occ)); p != nil {
 			out = append(out, *p)
 		}
+		return false
+	})
+	if errors.Is(err, ErrTooManyInstances) {
+		// Too dense to enumerate: report the rest of the window as busy from
+		// the last instance seen. Over-reporting busy time is the safe side
+		// for scheduling; a silently truncated answer would invite double
+		// bookings (audit 3.1).
+		if p := clamp(last, end); p != nil {
+			out = append(out, *p)
+		}
+		return out, nil
 	}
-	return out, nil
+	return out, err
 }

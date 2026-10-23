@@ -9,12 +9,68 @@ import (
 	goical "github.com/emersion/go-ical"
 )
 
-// maxTimeRangeScan backstops recurrence iteration that is already bounded by a
-// finite window end. It is far higher than the shared maxRecurrences guard so
-// that matching a long-running rule against a window past its 3500th instance
-// (e.g. a decade-old daily event) is not a false negative, while a pathological
-// sub-daily infinite rule still cannot spin forever.
-const maxTimeRangeScan = 1_000_000
+// ErrTooManyInstances is returned when a recurrence rule produces more
+// instances than a scan is willing to materialise. It is the Go counterpart of
+// sabre vobject's MaxInstancesExceededException; callers decide what the
+// conservative answer is (time-range: match; free-busy: busy; PUT: refuse).
+var ErrTooManyInstances = errors.New("recurrence rule produces too many instances")
+
+// maxPreWindowScan bounds the instances a window scan may skip *before* the
+// window starts. The skip is cheap (no allocation, one iterator step), so the
+// budget is generous enough that a decade-old daily series or a years-old
+// hourly one still reaches its window; it exists only so a sub-daily infinite
+// rule cannot spin for minutes. Instances inside the window count against the
+// shared maxRecurrences cap instead (audit item 3.1, D7).
+//
+// Sabre's EventIterator throws MaxInstancesExceededException after
+// Settings::$maxRecurrences (3500) instances *counted from DTSTART*, including
+// inside VEvent::isInTimeRange, because its fastForward iterates rather than
+// jumps. Counting only in-window instances is deliberately more lenient to
+// long-running series; counting pre-window ones at all is what sabre lacks.
+const maxPreWindowScan = 100_000
+
+// maxTimeRangeScan bounds the skip-ahead loops that look for one target
+// instant (expand's walk to the window, iTIP's search for an occurrence):
+// the same budget as the pre-window skip, for the same reason.
+const maxTimeRangeScan = maxPreWindowScan
+
+// maxAlarmRepeat caps a VALARM's REPEAT. The value is also what sabre's
+// iterator would tolerate for a recurrence; a client-supplied
+// REPEAT:9223372036854775807 otherwise pins a core (audit item 3.2).
+const maxAlarmRepeat = 3500
+
+// scanWindow walks a recurrence iterator over [start, end), calling visit for
+// each instance that overlaps the window (an instance starting at occ and
+// ending at endOf(occ) overlaps when occ < end and endOf(occ) > start). It stops when visit
+// returns true, when the series ends, or when the next instance starts at or
+// after end. Two budgets bound the walk: maxPreWindowScan for instances that
+// end before start, and maxRecurrences for instances handed to visit. When a
+// budget runs out the error is ErrTooManyInstances and last is the start of
+// the last instance seen, so the caller can answer conservatively from there.
+func scanWindow(next func() (time.Time, bool), endOf func(time.Time) time.Time, start, end time.Time, visit func(occ time.Time) (stop bool)) (last time.Time, err error) {
+	pre, in := 0, 0
+	for {
+		occ, ok := next()
+		if !ok || !occ.Before(end) {
+			return last, nil
+		}
+		last = occ
+		if !endOf(occ).After(start) {
+			pre++
+			if pre > maxPreWindowScan {
+				return last, ErrTooManyInstances
+			}
+			continue
+		}
+		in++
+		if in > maxRecurrences {
+			return last, ErrTooManyInstances
+		}
+		if visit(occ) {
+			return last, nil
+		}
+	}
+}
 
 // EventInTimeRange reports whether a VEVENT overlaps [start, end).
 // Port of vobject VEvent::isInTimeRange: recurring events match if any
@@ -41,24 +97,18 @@ func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Lo
 		if err != nil {
 			return false, err
 		}
-		next := set.Iterator()
-		// Iterate until an occurrence overlaps the window or the series passes
-		// its end. Termination is guaranteed by `end` (always finite via
-		// TimeRange.bounds), so — unlike the shared maxRecurrences guard —
-		// there is no artificial occurrence cap that would falsely report "no
-		// match" for a long-running rule whose window lies past the 3500th
-		// instance (sabre's iterator has no such cap either). maxTimeRangeScan
-		// is only a backstop against a pathological sub-daily infinite rule.
-		for i := 0; i < maxTimeRangeScan; i++ {
-			occStart, ok := next()
-			if !ok || !occStart.Before(end) {
-				return false, nil
-			}
-			if endOf(occStart).After(start) {
-				return true, nil
-			}
+		// The first instance overlapping the window is a match. A series too
+		// dense to scan is reported as matching: the client gets an object it
+		// may not have needed rather than silently losing one (audit 3.1).
+		matched := false
+		_, err = scanWindow(set.Iterator(), endOf, start, end, func(time.Time) bool {
+			matched = true
+			return true
+		})
+		if errors.Is(err, ErrTooManyInstances) {
+			return true, nil
 		}
-		return false, nil
+		return matched, err
 	}
 
 	effStart, err := dtstartProp.DateTime(loc)
@@ -372,7 +422,9 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 // alarmRepetition reads a VALARM's DURATION and REPEAT: how far apart its
 // repetitions are and how many follow the trigger. Without DURATION there are
 // none; with one, REPEAT defaults to 1 (sabre's DatePeriod with
-// recurrences=N yields the start plus N repetitions).
+// recurrences=N yields the start plus N repetitions, and PHP reads a missing,
+// unparseable or zero REPEAT as 1). REPEAT is capped at maxAlarmRepeat so a
+// client-supplied REPEAT:9223372036854775807 cannot pin a core (audit 3.2).
 func alarmRepetition(alarm *goical.Component) (time.Duration, int, error) {
 	durProp := alarm.Props.Get(goical.PropDuration)
 	if durProp == nil {
@@ -384,9 +436,12 @@ func alarmRepetition(alarm *goical.Component) (time.Duration, int, error) {
 	}
 	repeat := 1
 	if repProp := alarm.Props.Get("REPEAT"); repProp != nil {
-		if n, err := repProp.Int(); err == nil {
+		if n, err := repProp.Int(); err == nil && n > 0 {
 			repeat = n
 		}
+	}
+	if repeat > maxAlarmRepeat {
+		repeat = maxAlarmRepeat
 	}
 	return dur, repeat, nil
 }
@@ -402,10 +457,20 @@ func alarmRepeatsInRange(alarm *goical.Component, trigger, start, end time.Time)
 	return repetitionInRange(trigger, dur, repeat, start, end)
 }
 
+// repetitionInRange walks the trigger and its repetitions. The walk stops as
+// soon as an occurrence reaches end, since the sequence is monotonic for a
+// positive DURATION; a zero or negative DURATION (invalid per RFC 5545) is
+// treated as a single occurrence so the loop cannot stand still (audit 3.2).
 func repetitionInRange(trigger time.Time, dur time.Duration, repeat int, start, end time.Time) bool {
+	if dur <= 0 {
+		repeat = 0
+	}
 	occ := trigger
 	for i := 0; i <= repeat; i++ {
-		if !start.After(occ) && end.After(occ) {
+		if !occ.Before(end) {
+			return false
+		}
+		if !start.After(occ) {
 			return true
 		}
 		occ = occ.Add(dur)

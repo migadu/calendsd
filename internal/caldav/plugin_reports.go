@@ -44,6 +44,34 @@ func RequirePrivilegeChecker(server *dav.Server) (PrivilegeChecker, error) {
 	return nil, dav.ErrForbidden("access control is not configured on this server")
 }
 
+// maxFreeBusySpan bounds the window of a free-busy-query REPORT and of an
+// outbox VFREEBUSY request. Free-busy expands every recurring event of every
+// readable calendar across the window, and the window is client-chosen (sabre
+// defaults an open end to the year 3000), so without a bound one request
+// over a few dense rules is an allocation storm. 366 days covers every client
+// default (Apple asks for about a month, Thunderbird for six weeks) with room
+// for a leap year. A wider window is refused, never silently truncated: a
+// truncated answer looks complete and invites double bookings (audit 3.1,
+// D1). Expressed in days so the message and the check agree.
+const maxFreeBusySpanDays = 366
+
+// freeBusyWindow validates a free-busy window against maxFreeBusySpanDays. An
+// open-ended window is refused for the same reason as a wide one.
+func freeBusyWindow(start, end time.Time) (time.Time, time.Time, error) {
+	if start.IsZero() || end.IsZero() {
+		return time.Time{}, time.Time{}, dav.ErrForbidden(
+			"The free-busy time-range must specify both a start and an end, at most %d days apart", maxFreeBusySpanDays)
+	}
+	if !end.After(start) {
+		return time.Time{}, time.Time{}, dav.ErrBadRequest("The free-busy time-range end must be after its start")
+	}
+	if end.Sub(start) > maxFreeBusySpanDays*24*time.Hour {
+		return time.Time{}, time.Time{}, dav.ErrForbidden(
+			"The free-busy time-range may span at most %d days", maxFreeBusySpanDays)
+	}
+	return start, end, nil
+}
+
 // freeBusyQueryReport implements the free-busy-query REPORT (RFC 4791
 // §7.10), answering 200 with a text/calendar VFREEBUSY body like sabre.
 func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
@@ -58,7 +86,10 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 	if err != nil {
 		return err
 	}
-	start, end := tr.bounds()
+	start, end, err := freeBusyWindow(tr.Start, tr.End)
+	if err != nil {
+		return err
+	}
 
 	// Free-busy is gated by its own privilege ({DAV:}authenticated holds
 	// it via the calendar ACL).
