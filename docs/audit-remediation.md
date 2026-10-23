@@ -279,6 +279,33 @@ older than both windows ends `available` with its credential intact.
 
 ## 4. Phase 2 — medium severity, user-visible data integrity
 
+**Status (2026-10-23): implemented and committed, all six items, suite
+green.** Deviations from the text below:
+
+- 4.1: the DELETE-as-delegate vector is covered at the `dav` layer (any
+  encoded slash in a request path is a 403 before ACL runs), so no
+  caldav-level proxy test was needed. Test: `dav/encodedslash_test.go`.
+- 4.2: the UID lookup is an optional backend interface (`caldav.UIDLookup`)
+  that storage implements over the `uid` column and the mock implements by
+  scanning. Tests: `caldav/schedule_delivery_security_test.go`,
+  `storage/uidlookup_test.go`.
+- 4.3: `dav.ConditionalPutter` / `caldav.ConditionalUpdater`; the core PUT
+  uses it whenever `If-Match` carries a tag. Tests: `dav/conditional_test.go`,
+  `storage/conditional_test.go`, `caldav/writeback_test.go`.
+- 4.4: default is `DefaultMaxAttendees = maxExpandedAttendees` (250) so the
+  two caps cannot drift. Tests: `caldav/attendee_cap_test.go`,
+  `caldav/schedule_attendees_test.go`.
+- 4.5: the doctor reports a sabre-written over-cap object under
+  `recurrence-exceeds-max-instances`, not as unparseable. Tests:
+  `ical/maxinstances_test.go`, `caldav/maxinstances_test.go`.
+- 4.6: horizon policy as landed: anchored at the booking's first instance,
+  or at *now* for a series already under way; one year long; instances
+  beyond it are **accepted unchecked** (the text below's "decline a booking
+  outside the horizon" cannot occur with this anchoring, and declining every
+  open-ended booking is not what a room should do). The room's calendars
+  are read through the backend's occurrence prefilter. Test:
+  `caldav/autoschedule_horizon_test.go`.
+
 ### 4.1 Trailing `%2F` turns MOVE into a delete of the source
 
 **Defect.** `dav/server.go:205` trims slashes *before* `unescapePath`
