@@ -606,8 +606,36 @@ func (o *CalendarObject) Put(ctx context.Context, data io.Reader) (string, error
 	if err != nil {
 		return "", err
 	}
-	o.obj.CalendarData = raw
+	o.stored(raw, etag)
 	return etag, nil
+}
+
+// PutIfMatch replaces the object only if its stored ETag still equals
+// expectedETag (dav.ConditionalPutter). With a ConditionalUpdater backend the
+// check is inside the UPDATE; otherwise it is a best-effort compare against
+// the node's own view, which is what every caller had before.
+func (o *CalendarObject) PutIfMatch(ctx context.Context, raw []byte, expectedETag string) (string, error) {
+	var etag string
+	var err error
+	if cu, ok := o.backend.(ConditionalUpdater); ok {
+		etag, err = cu.UpdateCalendarObjectIfMatch(ctx, o.calendar.ID, o.obj.URI, raw, expectedETag)
+	} else if o.ETag() != expectedETag {
+		err = ErrETagMismatch
+	} else {
+		etag, err = o.backend.UpdateCalendarObject(ctx, o.calendar.ID, o.obj.URI, raw)
+	}
+	if err != nil {
+		return "", err
+	}
+	o.stored(raw, etag)
+	return etag, nil
+}
+
+// stored refreshes the node's view after a successful write.
+func (o *CalendarObject) stored(raw []byte, etag string) {
+	o.obj.CalendarData = raw
+	o.obj.ETag = etag
+	o.view = nil
 }
 
 // ContentType includes the component hint, like sabre's CalendarObject.

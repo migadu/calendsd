@@ -152,6 +152,17 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 // item of an If-Match / If-None-Match header) identifies the node's current
 // ETag. Both sides are normalized first (see normalizeETag). An empty node
 // ETag never matches.
+// anyETagMatches reports whether any tag in a comma-separated If-Match list
+// matches nodeETag.
+func anyETagMatches(list, nodeETag string) bool {
+	for _, item := range strings.Split(list, ",") {
+		if etagMatches(item, nodeETag) {
+			return true
+		}
+	}
+	return false
+}
+
 func etagMatches(clientTag, nodeETag string) bool {
 	if nodeETag == "" {
 		return false

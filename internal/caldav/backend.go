@@ -173,6 +173,31 @@ func (m *MockBackend) CalendarObjects(ctx context.Context, calendarID CalendarID
 	return out, nil
 }
 
+// ErrETagMismatch is dav.ErrETagMismatch, re-exported for backends.
+var ErrETagMismatch = dav.ErrETagMismatch
+
+// ConditionalUpdater is implemented by backends whose update can be made
+// conditional on the stored ETag (storage does it with a WHERE on the etag
+// column, so the check and the write are one statement). expectedETag is the
+// quoted form as served; a mismatch, or a vanished object, returns
+// ErrETagMismatch and changes nothing.
+type ConditionalUpdater interface {
+	UpdateCalendarObjectIfMatch(ctx context.Context, calendarID CalendarID, objectURI string, data []byte, expectedETag string) (string, error)
+}
+
+// UpdateCalendarObjectIfMatch compares against the current ETag under the
+// mock's lock, which is the same guarantee storage gives.
+func (m *MockBackend) UpdateCalendarObjectIfMatch(ctx context.Context, calendarID CalendarID, objectURI string, data []byte, expectedETag string) (string, error) {
+	m.mu.Lock()
+	cur, ok := m.Objects[calendarID][objectURI]
+	if !ok || cur.QuotedETag() != expectedETag {
+		m.mu.Unlock()
+		return "", ErrETagMismatch
+	}
+	m.mu.Unlock()
+	return m.CreateCalendarObject(ctx, calendarID, objectURI, data)
+}
+
 // CalendarQuery returns every object URI (a valid superset); the mock leaves
 // all filtering to the caller's validator.
 func (m *MockBackend) CalendarQuery(ctx context.Context, calendarID CalendarID, componentType string, start, end time.Time) ([]string, error) {

@@ -3,6 +3,7 @@ package caldav
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"hash/fnv"
 	"log/slog"
 	"net/http"
@@ -368,34 +369,77 @@ func (p *SchedulePlugin) writeBackLocker() WriteBackLocker {
 	return &p.writeBackLocks
 }
 
+// writeBackAttempts bounds the read/patch/conditional-update loop in
+// patchScheduleStatus.
+const writeBackAttempts = 3
+
 // patchScheduleStatus re-opens the stored object at path and writes status onto
 // the ATTENDEE (or ORGANIZER, for a REPLY) matching recipient, persisting it
 // through the backend — which, unlike an HTTP PUT, does not re-run the iTIP
 // broker, so this cannot trigger another send. It runs on a queue worker after
 // the object was persisted, and is best-effort: if the object has since been
 // deleted, moved, or no longer names the recipient, it does nothing. The
-// per-object lock (writeBackLocker) serializes the read-modify-write so
-// concurrent per-attendee write-backs don't clobber one another: across nodes
-// when WriteBackLocker is an AdvisoryLocker, otherwise only within this process
-// (writeBackLocks), which suffices for a single instance.
+// per-object lock (writeBackLocker) serializes write-backs among themselves:
+// across nodes when WriteBackLocker is an AdvisoryLocker, otherwise only within
+// this process (writeBackLocks). A user PUT does not take that lock, so the
+// write is conditional on the ETag read here; a mismatch means the user saved
+// in between, and the loop re-reads their revision and applies only this
+// attendee's parameter to it (audit 4.3).
 func (p *SchedulePlugin) patchScheduleStatus(ctx context.Context, path, method, recipient, status string) {
 	unlock := p.writeBackLocker().Lock(ctx, path)
 	defer unlock()
-	node, err := p.server.Tree.NodeForPath(ctx, path)
-	if err != nil {
-		return
+	msg := &ical.Message{Method: method, Recipient: recipient, ScheduleStatus: status}
+	for attempt := 1; attempt <= writeBackAttempts; attempt++ {
+		node, err := p.server.Tree.NodeForPath(ctx, path)
+		if err != nil {
+			return // object deleted; nothing to annotate
+		}
+		obj, ok := node.(*CalendarObject)
+		if !ok {
+			return
+		}
+		expected := obj.ETag()
+		cal, err := ical.Decode(obj.Data())
+		if err != nil {
+			return
+		}
+		if !hasScheduleTarget(cal, msg) {
+			slog.Default().Info("imip schedule-status write-back dropped: participant no longer on the object",
+				"path", path, "recipient", recipient, "status", status)
+			return
+		}
+		applyScheduleStatus(cal, []*ical.Message{msg})
+		_, err = obj.PutIfMatch(ctx, ical.EncodeLenient(cal), expected)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, ErrETagMismatch) {
+			slog.Default().Warn("imip schedule-status write-back failed",
+				"path", path, "recipient", recipient, "status", status, "err", err)
+			return
+		}
 	}
-	obj, ok := node.(*CalendarObject)
-	if !ok {
-		return
+	slog.Default().Warn("imip schedule-status write-back gave up: object kept changing",
+		"path", path, "recipient", recipient, "status", status, "attempts", writeBackAttempts)
+}
+
+// hasScheduleTarget reports whether the message's recipient still appears on
+// the object as the property the status would annotate (ATTENDEE, or
+// ORGANIZER for a REPLY).
+func hasScheduleTarget(cal *goical.Calendar, msg *ical.Message) bool {
+	target := "ATTENDEE"
+	if msg.Method == "REPLY" {
+		target = "ORGANIZER"
 	}
-	cal, err := ical.Decode(obj.Data())
-	if err != nil {
-		return
+	for _, comp := range cal.Children {
+		if comp.Name != goical.CompEvent {
+			continue
+		}
+		for _, p := range comp.Props.Values(target) {
+			if strings.EqualFold(p.Value, msg.Recipient) {
+				return true
+			}
+		}
 	}
-	applyScheduleStatus(cal, []*ical.Message{{Method: method, Recipient: recipient, ScheduleStatus: status}})
-	if _, err := obj.Put(ctx, strings.NewReader(string(ical.EncodeLenient(cal)))); err != nil {
-		slog.Default().Warn("imip schedule-status write-back failed",
-			"path", path, "recipient", recipient, "status", status, "err", err)
-	}
+	return false
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -426,7 +427,23 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		if !isFile {
 			return ErrConflict("PUT is not allowed on non-files.")
 		}
-		etag, err := file.Put(r.Context(), body)
+		var etag string
+		ifMatch := r.Header.Get("If-Match")
+		if cp, ok := node.(ConditionalPutter); ok && ifMatch != "" && ifMatch != "*" {
+			// checkPreconditions already matched If-Match against the node,
+			// but a writer can land between that check and this write. Make
+			// the write itself conditional on the tag that matched.
+			current := file.ETag()
+			if !anyETagMatches(ifMatch, current) {
+				return ErrPreconditionFailed("An If-Match header was specified, but none of the specified ETags matched.")
+			}
+			etag, err = cp.PutIfMatch(r.Context(), raw, current)
+			if errors.Is(err, ErrETagMismatch) {
+				return ErrPreconditionFailed("The resource was modified by another request while this PUT was in progress; refresh and retry.")
+			}
+		} else {
+			etag, err = file.Put(r.Context(), body)
+		}
 		if err != nil {
 			return err
 		}

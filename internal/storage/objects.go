@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"calendsd/internal/caldav"
@@ -154,6 +155,40 @@ UPDATE calendarobjects
 			data, d.ETag, d.Size, d.ComponentType, d.FirstOccurrence, d.LastOccurrence,
 			d.UID, id.Calendar, objectURI)); err != nil {
 			return err
+		}
+		return recordChange(ctx, tx, calendarLog, id.Calendar, objectURI, 2)
+	})
+	if err != nil {
+		return "", err
+	}
+	return `"` + d.ETag + `"`, nil
+}
+
+// UpdateCalendarObjectIfMatch is UpdateCalendarObject with the ETag check
+// folded into the UPDATE's predicate (caldav.ConditionalUpdater), so a
+// concurrent writer between the caller's read and this write is detected
+// instead of overwritten. expectedETag is the quoted form as served.
+func (b *CalDAV) UpdateCalendarObjectIfMatch(ctx context.Context, id caldav.CalendarID, objectURI string, data []byte, expectedETag string) (string, error) {
+	defer b.Metrics.DBOpTimer("update_object")()
+	d, err := ical.Denormalize(data)
+	if err != nil {
+		return "", err
+	}
+	expected := strings.Trim(expectedETag, `"`)
+	err = withTx(ctx, b.DB, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+UPDATE calendarobjects
+   SET calendardata = $1, lastmodified = extract(epoch from now())::int,
+       etag = $2, size = $3, componenttype = $4,
+       firstoccurence = $5, lastoccurence = $6, uid = $7
+ WHERE calendarid = $8 AND uri = $9 AND etag = $10`,
+			data, d.ETag, d.Size, d.ComponentType, d.FirstOccurrence, d.LastOccurrence,
+			d.UID, id.Calendar, objectURI, expected)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return caldav.ErrETagMismatch
 		}
 		return recordChange(ctx, tx, calendarLog, id.Calendar, objectURI, 2)
 	})
