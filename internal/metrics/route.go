@@ -27,7 +27,7 @@ func NormalizeMethod(m string) string {
 // path-segment count under the known roots, never by matching user data, so
 // the return value is always one of a dozen constants:
 //
-//	root, well-known, principal,
+//	root, well-known, health, principal,
 //	calendar-home, calendar, calendar-object,
 //	addressbook-home, addressbook, addressbook-object,
 //	other
@@ -42,6 +42,10 @@ func RoutePattern(path, baseURI string) string {
 	// /.well-known lives at the root regardless of the base URI.
 	if path == "/.well-known" || strings.HasPrefix(path, "/.well-known/") {
 		return "well-known"
+	}
+	// So does the monitoring endpoint (server.HealthPath).
+	if path == "/health" {
+		return "health"
 	}
 	if baseURI == "" {
 		baseURI = "/"

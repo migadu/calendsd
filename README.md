@@ -96,6 +96,19 @@ any finding, so both slot straight into monitoring. The `principal` writes go th
 `storage.AdminWrites` carve-out as the admin panel (digesta1 computed under
 the configured realm; override with `--realm`).
 
+## /health
+
+The DAV listener answers an unauthenticated `GET`/`HEAD /health` (at the
+root, whatever the base URI) for load balancers and uptime monitors:
+`200 {"status":"ok","database":"ok"}` while the database answers a ping
+within 2s, `503 {"status":"unavailable","database":"unreachable"}` otherwise.
+The database error is logged, never returned. Probes are counted in metrics
+(`route="health"`) but kept out of the access and request logs.
+
+```sh
+curl -fsS http://127.0.0.1:8080/health
+```
+
 ## Metrics
 
 Set `-metrics-addr` (or `[server].metrics_addr`) to serve Prometheus metrics

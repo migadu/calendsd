@@ -264,6 +264,9 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	// Access log wraps outside the per-request file dump so its status and byte
 	// count reflect the final response, including well-known redirects.
 	h = WrapAccessLog(h, cfg.AccessLog)
+	// Health sits outside both logs, so a monitor polling every few seconds
+	// does not flood them, but inside metrics, so probes are still counted.
+	h = WrapHealth(h, db.PingContext)
 	// Metrics wrap outermost too, so the well-known row counts redirects;
 	// order relative to the request log (a debug aid) is immaterial.
 	return &Built{
