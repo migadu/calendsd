@@ -47,6 +47,9 @@ func TestParity(t *testing.T) {
 	if os.Getenv("PARITY") == "" {
 		t.Skip("skipping live parity test: set PARITY=1 to run it")
 	}
+	if reason := parityPrereqsMissing(root); reason != "" {
+		t.Fatalf("PARITY=1, but the live parity test cannot run: %s", reason)
+	}
 
 	// Fresh database from sabre's schema files.
 	run(t, root, "dropdb", "--if-exists", parityDB)
