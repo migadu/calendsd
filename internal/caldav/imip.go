@@ -16,6 +16,7 @@ import (
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"time"
 
@@ -555,7 +556,7 @@ func (p *IMipPlugin) enqueueDurable(msg *ical.Message, envelopeFrom, username, r
 		Method:       msg.Method,
 		UID:          msg.UID,
 		Sequence:     eventSequence(msg),
-		DTStamp:      eventProp(msg, "DTSTAMP"),
+		DTStamp:      eventDTStamp(msg),
 		Outcome:      outcome,
 		ObjectPath:   objectPath,
 		MessageB64:   base64.StdEncoding.EncodeToString(email),
@@ -771,9 +772,42 @@ func eventProp(msg *ical.Message, name string) string {
 
 // eventSequence returns the first VEVENT's SEQUENCE, defaulting to "0" (the iCal
 // default) so the coalesce ordering always has a value to compare.
+// eventSequence returns the event's SEQUENCE as canonical decimal digits.
+// The queue casts it in SQL inside the coalesce predicate, so a client value
+// that is not a non-negative integer (SEQUENCE:1.0, a negative, a 20-digit
+// number) must never reach the row: it would error the enqueue, the caller
+// would fall back to a synchronous send, and the stale job would deliver
+// later (audit 5.6). Anything unusable reads as 0.
 func eventSequence(msg *ical.Message) string {
-	if s := eventProp(msg, "SEQUENCE"); s != "" {
-		return s
+	s := strings.TrimSpace(eventProp(msg, "SEQUENCE"))
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return "0"
 	}
-	return "0"
+	return strconv.FormatInt(n, 10)
+}
+
+// eventDTStamp returns the event's DTSTAMP canonicalised to UTC
+// (yyyymmddThhmmssZ), the form the coalesce predicate compares as text. A
+// DTSTAMP written with a TZID or without seconds would otherwise never
+// collate against a canonical one.
+func eventDTStamp(msg *ical.Message) string {
+	if msg.Calendar == nil {
+		return ""
+	}
+	for _, comp := range msg.Calendar.Children {
+		if comp.Name != "VEVENT" {
+			continue
+		}
+		pr := comp.Props.Get("DTSTAMP")
+		if pr == nil {
+			return ""
+		}
+		t, err := pr.DateTime(time.UTC)
+		if err != nil {
+			return strings.TrimSpace(pr.Value)
+		}
+		return t.UTC().Format("20060102T150405Z")
+	}
+	return ""
 }

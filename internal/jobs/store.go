@@ -54,8 +54,8 @@ DO UPDATE SET
     -- so its purge window runs from now, not from the original insert.
     inserted_at    = now(),
     last_error     = NULL
-WHERE (COALESCE((EXCLUDED.args->>'sequence')::int, 0), COALESCE(EXCLUDED.args->>'dtstamp', ''))
-    > (COALESCE((jobs.args->>'sequence')::int, 0), COALESCE(jobs.args->>'dtstamp', ''))`,
+WHERE (COALESCE((EXCLUDED.args->>'sequence')::bigint, 0), COALESCE(EXCLUDED.args->>'dtstamp', ''))
+    > (COALESCE((jobs.args->>'sequence')::bigint, 0), COALESCE(jobs.args->>'dtstamp', ''))`,
 		queue, worker, []byte(args), maxAttempts, scheduledAt, ct, nonce, keyID)
 	return err
 }
