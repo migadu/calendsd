@@ -1,9 +1,10 @@
 # calendsd
 
-A Go CalDAV server ported from [sabre/dav](https://sabre.io/), designed to run
-**alongside a live sabre-dav instance against the same Postgres database**.
-See [PLAN.md](PLAN.md) for the full porting plan; `dav/` is the reference
-sabre/dav checkout the port is derived from.
+A Go CalDAV server ported from [sabre/dav](https://sabre.io/). It still stores
+its data in sabre's tables, but sabre is no longer a rollback target: the
+schema is calendsd's own now (`scripts/schema/migrations/`, applied by
+`calctl schema apply`). See [PLAN.md](PLAN.md) for the porting plan; `dav/` is
+the reference sabre/dav checkout the port is derived from.
 
 ## Dev environment
 
@@ -11,20 +12,20 @@ Everything is provided by the Nix flake; with [direnv](https://direnv.net/)
 installed, `direnv allow` once and the toolchain (Go, PHP+pdo_pgsql, composer,
 Postgres 16, sqlc) is on PATH.
 
-## Co-existence harness
+## Local server
 
 ```sh
 scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), schema migrated, dev accounts seeded
-php -S 127.0.0.1:8081 scripts/sabre-server.php   # reference sabre instance
-go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # Go server (default :8080)
+go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # default :8080
 ```
 
 Credentials: `admin` / `admin` (Basic or Digest, realm `SabreDAV` — the realm
 is baked into `users.digesta1`, see PLAN.md §5).
 
-The **live parity test** (the §5 acceptance gate) spins up a fresh database,
-a real sabre instance, and the Go server, then cross-reads/writes through
-both:
+The **live parity test** (the §5 acceptance gate during the migration) spins
+up a fresh database, a real sabre instance, and the Go server, then
+cross-reads/writes through both. It is opt-in and no longer runs in CI; it
+goes away with `scripts/sabre-server.php` after one release:
 
 ```sh
 PARITY=1 go test ./internal/storage/ -run TestParity -v

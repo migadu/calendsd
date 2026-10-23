@@ -12,17 +12,10 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v16
       - uses: DeterminateSystems/magic-nix-cache-action@v8
 
+      # The dev Postgres runs first so the storage and migration tests run
+      # instead of skipping.
       - name: Unit tests + corpus
-        run: nix develop -c sh -c 'go vet ./... && go test ./...'
-
-      - name: Live parity test (Go + sabre on one Postgres)
-        run: |
-          nix develop -c sh -c '
-            set -e
-            scripts/dev-db.sh start
-            (cd dav && composer install --no-interaction --no-progress)
-            PARITY=1 go test ./internal/storage/ -run TestParity -v
-          '
+        run: nix develop -c sh -c 'scripts/dev-db.sh start && go vet ./... && go test ./...'
 
       # litmus is packaged for Linux only; results are informational until
       # the WebDAV class coverage is reviewed and pinned.

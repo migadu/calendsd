@@ -1,5 +1,9 @@
 # Strangler-fig migration: routing traffic from sabre to calendsd
 
+> **Historical.** The migration is complete and sabre is no longer a rollback
+> target: calendsd may add tables and columns sabre does not know about
+> (`scripts/schema/migrations/`). Kept as a record of how the cutover was run.
+
 Both servers run against the same Postgres database (PLAN.md §5), so the Go
 server can take over incrementally: front both with a reverse proxy and move
 routes over as confidence grows. The live parity test

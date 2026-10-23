@@ -41,14 +41,11 @@ const (
 
 func TestParity(t *testing.T) {
 	root := repoRoot(t)
-	// The co-existence contract this test guards must run whenever the
-	// environment allows, not only on opt-in: it is the sole automatic
-	// check of Go↔sabre database compatibility. PARITY=1 forces it (and
-	// turns missing prerequisites into failures).
+	// Opt-in only: sabre is no longer a rollback target, so co-existence
+	// with it is not a contract any more. Kept for one release, then
+	// removed with scripts/sabre-server.php.
 	if os.Getenv("PARITY") == "" {
-		if reason := parityPrereqsMissing(root); reason != "" {
-			t.Skipf("skipping live parity test: %s (set PARITY=1 to force)", reason)
-		}
+		t.Skip("skipping live parity test: set PARITY=1 to run it")
 	}
 
 	// Fresh database from sabre's schema files.
