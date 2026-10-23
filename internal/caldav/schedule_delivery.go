@@ -3,7 +3,6 @@
 package caldav
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -308,16 +307,48 @@ func (p *SchedulePlugin) queueReply(r *http.Request, reply *ical.Message) {
 	w.replies = append(w.replies, reply)
 }
 
-// hasConflict reports whether the object's occurrence window overlaps any
-// busy period on the principal's calendars, ignoring copies of the same UID.
+// conflictHorizon is how far ahead of a booking's anchor its instances are
+// conflict-checked: the same span free-busy answers (audit 4.6). Instances
+// of a standing booking beyond it are accepted unchecked; the alternative,
+// declining every open-ended booking, is not what a room should do.
+const conflictHorizon = maxFreeBusySpanDays * 24 * time.Hour
+
+// hasConflict reports whether any instance of the incoming booking overlaps
+// busy time on the principal's calendars, ignoring copies of the same UID.
+//
+// The check is per instance within a horizon, the way Calendar Server does
+// it. The first draft compared the booking's whole occurrence hull — for a
+// weekly booking DTSTART→2038 — against the room's free-busy over that hull,
+// so a standing booking was declined if the room had anything at all, and it
+// expanded every room event across the hull on every booking.
+//
+// The horizon is anchored at the booking's first instance; for a series that
+// has already started it is anchored at now, so a years-old standing booking
+// being re-sent is checked for the coming year, not its past.
 func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, data []byte) bool {
 	d, err := ical.Denormalize(data)
 	if err != nil || d.FirstOccurrence == nil || d.LastOccurrence == nil {
 		return false
 	}
-	start := time.Unix(*d.FirstOccurrence, 0).UTC()
-	end := time.Unix(*d.LastOccurrence, 0).UTC()
-	if !end.After(start) {
+	first := time.Unix(*d.FirstOccurrence, 0).UTC()
+	last := time.Unix(*d.LastOccurrence, 0).UTC()
+	if !last.After(first) {
+		return false
+	}
+	cal, err := ical.Decode(data)
+	if err != nil {
+		return false
+	}
+	anchor := first
+	if now := time.Now().UTC(); now.After(first) && last.After(now) {
+		anchor = now
+	}
+	horizonEnd := anchor.Add(conflictHorizon)
+	if last.Before(horizonEnd) {
+		horizonEnd = last
+	}
+	instances, err := ical.InstancePeriods(cal, anchor, horizonEnd, time.UTC)
+	if err != nil || len(instances) == 0 {
 		return false
 	}
 
@@ -337,10 +368,12 @@ func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, d
 	var payloads [][]byte
 	for _, child := range children {
 		calNode, isCal := child.(*Calendar)
-		if !isCal {
+		if !isCal || calNode.transparent() {
 			continue
 		}
-		objs, err := calNode.QueryObjects(ctx, "", start, end)
+		// The backend prefilter (occurrence bounds) keeps a room with years
+		// of past bookings from being loaded and expanded on every request.
+		objs, err := calNode.QueryObjects(ctx, "VEVENT", anchor, horizonEnd)
 		if err != nil {
 			continue
 		}
@@ -354,11 +387,19 @@ func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, d
 	if len(payloads) == 0 {
 		return false
 	}
-	fb, err := ical.GenerateFreeBusy(payloads, start, end, time.UTC, time.Now())
+	// The room's busy time once over the horizon, then intersect.
+	busy, err := ical.BusyPeriods(payloads, anchor, horizonEnd, time.UTC)
 	if err != nil {
 		return false
 	}
-	return bytes.Contains(fb, []byte("\r\nFREEBUSY"))
+	for _, inst := range instances {
+		for _, b := range busy {
+			if b.Start.Before(inst.End) && b.End.After(inst.Start) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // setAttendeePartStat sets PARTSTAT (and clears RSVP) on every ATTENDEE

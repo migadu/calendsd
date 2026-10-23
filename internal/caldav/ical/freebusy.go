@@ -51,37 +51,11 @@ func GenerateFreeBusyWithAvailability(objects [][]byte, availability []byte, sta
 // FBTYPE coalesce separately, so an event outside working hours is still
 // listed as BUSY alongside the BUSY-UNAVAILABLE span, like CalendarServer.
 func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
-	periods := append([]busyPeriod(nil), extra...)
-	for _, data := range objects {
-		cal, err := Decode(data)
-		if err != nil {
-			continue // unparseable objects contribute nothing, like sabre
-		}
-		ResolveNonIANATZIDs(cal)
-		for _, comp := range cal.Children {
-			switch comp.Name {
-			case goical.CompEvent:
-				var overrides map[int64]*goical.Component
-				if comp.Props.Get(goical.PropRecurrenceID) == nil {
-					overrides = overridesOf(cal, comp, loc)
-				}
-				p, err := eventBusyPeriods(comp, start, end, loc, overrides)
-				if err != nil {
-					return nil, err
-				}
-				periods = append(periods, p...)
-			case "VFREEBUSY":
-				// A stored VFREEBUSY object contributes its own FREEBUSY
-				// periods, like vobject's FreeBusyGenerator::calculateBusy.
-				p, err := freeBusyComponentPeriods(comp, start, end)
-				if err != nil {
-					return nil, err
-				}
-				periods = append(periods, p...)
-			}
-		}
+	collected, err := collectBusy(objects, start, end, loc)
+	if err != nil {
+		return nil, err
 	}
-	periods = coalesce(periods)
+	periods := coalesce(append(append([]busyPeriod(nil), extra...), collected...))
 
 	const stamp = "20060102T150405Z"
 	var b strings.Builder
@@ -108,6 +82,91 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 	writeLine("END:VFREEBUSY")
 	writeLine("END:VCALENDAR")
 	return []byte(b.String()), nil
+}
+
+// collectBusy gathers the busy periods of every object within [start, end):
+// VEVENT instances (expanded, bounded; see eventBusyPeriods) and stored
+// VFREEBUSY periods. Unparseable objects contribute nothing, like sabre.
+func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]busyPeriod, error) {
+	var periods []busyPeriod
+	for _, data := range objects {
+		cal, err := Decode(data)
+		if err != nil {
+			continue
+		}
+		ResolveNonIANATZIDs(cal)
+		for _, comp := range cal.Children {
+			switch comp.Name {
+			case goical.CompEvent:
+				var overrides map[int64]*goical.Component
+				if comp.Props.Get(goical.PropRecurrenceID) == nil {
+					overrides = overridesOf(cal, comp, loc)
+				}
+				p, err := eventBusyPeriods(comp, start, end, loc, overrides)
+				if err != nil {
+					return nil, err
+				}
+				periods = append(periods, p...)
+			case "VFREEBUSY":
+				// A stored VFREEBUSY object contributes its own FREEBUSY
+				// periods, like vobject's FreeBusyGenerator::calculateBusy.
+				p, err := freeBusyComponentPeriods(comp, start, end)
+				if err != nil {
+					return nil, err
+				}
+				periods = append(periods, p...)
+			}
+		}
+	}
+	return periods, nil
+}
+
+// Period is a half-open busy interval [Start, End).
+type Period struct{ Start, End time.Time }
+
+// BusyPeriods returns the coalesced busy time of the objects within
+// [start, end): the same intervals a VFREEBUSY for that window would list,
+// every FBTYPE merged together. The auto-schedule conflict check uses it to
+// compute a resource's busy time once per booking (audit 4.6).
+func BusyPeriods(objects [][]byte, start, end time.Time, loc *time.Location) ([]Period, error) {
+	collected, err := collectBusy(objects, start, end, loc)
+	if err != nil {
+		return nil, err
+	}
+	for i := range collected {
+		collected[i].fbType = "BUSY"
+	}
+	var out []Period
+	for _, p := range coalesce(collected) {
+		out = append(out, Period{p.start, p.end})
+	}
+	return out, nil
+}
+
+// InstancePeriods returns the busy instances of every VEVENT in cal that
+// fall within [start, end), uncoalesced, overrides counted at their own
+// time. A series too dense to enumerate contributes one period covering the
+// rest of the window (see eventBusyPeriods).
+func InstancePeriods(cal *goical.Calendar, start, end time.Time, loc *time.Location) ([]Period, error) {
+	ResolveNonIANATZIDs(cal)
+	var out []Period
+	for _, comp := range cal.Children {
+		if comp.Name != goical.CompEvent {
+			continue
+		}
+		var overrides map[int64]*goical.Component
+		if comp.Props.Get(goical.PropRecurrenceID) == nil {
+			overrides = overridesOf(cal, comp, loc)
+		}
+		ps, err := eventBusyPeriods(comp, start, end, loc, overrides)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range ps {
+			out = append(out, Period{p.start, p.end})
+		}
+	}
+	return out, nil
 }
 
 // coalesce merges overlapping or touching periods of the same FBTYPE and
