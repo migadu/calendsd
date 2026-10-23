@@ -9,9 +9,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"calendsd/internal/caldav"
+	"calendsd/internal/dav"
 )
+
+func pinClock(srv *dav.Server, at time.Time) {
+	for _, p := range srv.Plugins() {
+		if sp, ok := p.(*caldav.SchedulePlugin); ok {
+			sp.Now = func() time.Time { return at }
+		}
+	}
+}
 
 func weeklyBookingICS(uid, start, end string) string {
 	return strings.Replace(bookingICS(uid, start, end),
@@ -44,6 +54,9 @@ func TestAutoScheduleStandingBookingCheckedPerInstance(t *testing.T) {
 		{"event two years out", "20281105T100000Z", "20281105T110000Z", "PARTSTAT=ACCEPTED"},
 	} {
 		srv, backend := newAutoScheduleServer()
+		// The horizon anchors on the clock once a series is under way; pin
+		// it so the expectations below hold whenever the test runs.
+		pinClock(srv, time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC))
 		backend.Objects[caldav.CalendarID{Calendar: "2"}] = map[string]*caldav.ObjectInfo{
 			"existing.ics": {URI: "existing.ics", CalendarData: []byte(bookingICS("existing", tc.roomStart, tc.room))},
 		}

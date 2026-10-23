@@ -770,8 +770,6 @@ func eventProp(msg *ical.Message, name string) string {
 	return ""
 }
 
-// eventSequence returns the first VEVENT's SEQUENCE, defaulting to "0" (the iCal
-// default) so the coalesce ordering always has a value to compare.
 // eventSequence returns the event's SEQUENCE as canonical decimal digits.
 // The queue casts it in SQL inside the coalesce predicate, so a client value
 // that is not a non-negative integer (SEQUENCE:1.0, a negative, a 20-digit

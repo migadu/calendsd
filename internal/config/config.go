@@ -96,7 +96,11 @@ type Config struct {
 		AccessLog bool
 	}
 	Scheduling struct {
-		IMip struct {
+		// MaxAttendees caps the distinct ATTENDEEs one calendar object may
+		// schedule (default 250): each is an iTIP message and possibly an
+		// email. The one deployment-specific scheduling knob.
+		MaxAttendees int
+		IMip         struct {
 			SMTP            string
 			Sender          string
 			SendAsOrganizer bool
@@ -310,6 +314,7 @@ func Load(path string) (*Config, error) {
 	cfg.Logging.Level = str("logging.level")
 	cfg.Logging.RequestDir = str("logging.request_dir")
 	cfg.Logging.AccessLog = boolean("logging.access_log")
+	cfg.Scheduling.MaxAttendees = integer("scheduling.max_attendees")
 	cfg.Scheduling.IMip.SMTP = str("scheduling.imip.smtp")
 	cfg.Scheduling.IMip.Sender = str("scheduling.imip.sender")
 	cfg.Scheduling.IMip.SendAsOrganizer = boolean("scheduling.imip.send_as_organizer")

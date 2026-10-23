@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -340,7 +341,7 @@ func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, d
 		return false
 	}
 	anchor := first
-	if now := time.Now().UTC(); now.After(first) && last.After(now) {
+	if now := p.now().UTC(); now.After(first) && last.After(now) {
 		anchor = now
 	}
 	horizonEnd := anchor.Add(conflictHorizon)
@@ -348,6 +349,9 @@ func (p *SchedulePlugin) hasConflict(ctx context.Context, principalURI string, d
 		horizonEnd = last
 	}
 	instances, err := ical.InstancePeriods(cal, anchor, horizonEnd, time.UTC)
+	if errors.Is(err, ical.ErrTooManyInstances) {
+		return true // too dense to check is a conflict, not a free pass
+	}
 	if err != nil || len(instances) == 0 {
 		return false
 	}

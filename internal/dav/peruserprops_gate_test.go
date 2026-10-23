@@ -53,5 +53,13 @@ func TestReadOnlyDelegateCannotWriteSharedProps(t *testing.T) {
 		if _, shared := store.props[path][displayname]; shared {
 			t.Errorf("%s: displayname landed in shared storage", tc.name)
 		}
+		// All-or-nothing: the per-user colour must not persist either, and
+		// it reports 424, not 200.
+		if _, persisted := store.props[path+"/\nprincipals/user2"][color]; persisted {
+			t.Errorf("%s: per-user colour persisted inside a failed PROPPATCH", tc.name)
+		}
+		if result[color] != http.StatusFailedDependency {
+			t.Errorf("%s: colour status = %d, want 424", tc.name, result[color])
+		}
 	}
 }

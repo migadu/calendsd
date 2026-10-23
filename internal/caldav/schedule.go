@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	goical "github.com/emersion/go-ical"
 
@@ -30,6 +31,13 @@ type SchedulePlugin struct {
 	// CUTYPE=X-SERVER-GROUP placeholder plus one real ATTENDEE per member
 	// (Calendar Server's group-attendee expansion); off by default.
 	ExpandGroups bool
+	// MaxAttendees caps the distinct attendees scheduled per object; zero
+	// means DefaultMaxAttendees. Attendees past the cap get SCHEDULE-STATUS
+	// 5.3 and no message (audit 4.4).
+	MaxAttendees int
+	// Now is the clock the auto-schedule conflict horizon is anchored on;
+	// nil means time.Now. Tests pin it.
+	Now func() time.Time
 
 	// AutoSchedule marks principals that auto-process scheduling messages
 	// (Calendar-Server resource/location semantics): REQUESTs are accepted
@@ -223,12 +231,34 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		}
 	}
 
+	addresses := p.addressesForPrincipal(r.Context(), calNode.Owner())
+	// The attendee cap applies to the ORGANIZER's copy only: that is the
+	// object whose attendees are messaged. An attendee saving their own copy
+	// of a large meeting (delivered to them, not written by them) sends one
+	// REPLY, not a fan-out, and must not be refused (audit 4.4).
+	limit := effectiveMaxAttendees(p.MaxAttendees)
+	organizes := isOrganizerOf(newCal, addresses)
+	if organizes {
+		if err := checkAttendeeCap(newCal, limit); err != nil {
+			return nil, err
+		}
+	}
 	expanded := false
 	if p.ExpandGroups {
 		expanded = p.expandGroupAttendees(r.Context(), newCal)
 	}
-
-	addresses := p.addressesForPrincipal(r.Context(), calNode.Owner())
+	// Backstop behind the PUT-time refusal: group expansion runs after it,
+	// and objects written by sabre or before the cap existed may carry more.
+	// Attendees past the cap are marked 5.3, not messaged.
+	var over map[string]bool
+	if organizes {
+		over = attendeesOverCap(newCal, limit, true)
+		if len(over) > 0 {
+			expanded = true
+			slog.Default().Warn("scheduling: attendee cap exceeded; excess attendees not scheduled",
+				"path", path, "excess", len(over), "limit", limit)
+		}
+	}
 	messages, err := ical.ParseEvent(newCal, addresses, oldCal)
 	if err != nil || len(messages) == 0 {
 		// Re-encode only when group expansion rewrote the object; a plain
@@ -283,6 +313,11 @@ func (p *SchedulePlugin) BeforeUnbind(r *http.Request, path string) error {
 	messages, err := ical.ParseEvent(nil, addresses, oldCal)
 	if err != nil {
 		return nil
+	}
+	// The same cap as on write: a stored object with more attendees than the
+	// server schedules must not fan out more CANCELs than it sent invites.
+	if isOrganizerOf(oldCal, addresses) {
+		messages = withoutRecipients(messages, attendeesOverCap(oldCal, effectiveMaxAttendees(p.MaxAttendees), false))
 	}
 	for _, msg := range messages {
 		// Async, no write-back: a delete can fan out one CANCEL per attendee, each
@@ -442,4 +477,12 @@ func hasScheduleTarget(cal *goical.Calendar, msg *ical.Message) bool {
 		}
 	}
 	return false
+}
+
+// now is the plugin's clock.
+func (p *SchedulePlugin) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
 }

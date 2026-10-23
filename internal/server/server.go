@@ -78,6 +78,9 @@ type Config struct {
 	// ExpandGroups expands group ATTENDEEs into per-member invitations
 	// (Calendar-Server behavior); off by default.
 	ExpandGroups bool
+	// MaxAttendees caps the distinct ATTENDEEs one object may schedule;
+	// zero means caldav.DefaultMaxAttendees.
+	MaxAttendees int
 	// PrincipalsReadable grants authenticated users read on principal
 	// resources (Calendar-Server behavior); off by default (sabre parity).
 	PrincipalsReadable bool
@@ -406,7 +409,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		srv.AddPlugin(authOverride)
 	case cfg.RcptdURL != "":
 		// Authenticate against rcptd's /auth (Dovecot hashes verified locally
-		// via shared/passwd). Basic-only: rcptd serves no digesta1, so Digest
+		// via internal/passwd). Basic-only: rcptd serves no digesta1, so Digest
 		// can't work. First-time logins get a principal from the provisioner.
 		prov := &provisioner{
 			principals: principals,
@@ -466,7 +469,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	})
 	// AddVTimezones departs from sabre deliberately: bare IANA TZIDs (calweb
 	// writes them) get the VTIMEZONE RFC 5545 requires.
-	srv.AddPlugin(&caldav.Plugin{AddVTimezones: true})
+	srv.AddPlugin(&caldav.Plugin{AddVTimezones: true, MaxAttendees: cfg.MaxAttendees})
 	// WebDAV-Push (PUSH-PLAN.md). Registered here on purpose: after the ACL
 	// plugin (so its PropFind values honor the read-deny latch) and after
 	// caldav.Plugin, but before SharingPlugin (so a collection POST reaches it
@@ -482,6 +485,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 	}
 	schedule := &caldav.SchedulePlugin{
 		ExpandGroups: cfg.ExpandGroups,
+		MaxAttendees: cfg.MaxAttendees,
 		// Serialize SCHEDULE-STATUS write-backs cluster-wide (a Postgres advisory
 		// lock), so durable iMIP workers on additional nodes can't clobber one
 		// another's per-attendee patches.

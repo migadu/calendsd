@@ -210,6 +210,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			AutoProvision:             m.Bool("auto-provision", *autoProvision, m.File.CalendarServer.AutoProvision),
 			PerUserProps:              m.Bool("per-user-props", *perUserProps, m.File.CalendarServer.PerUserProps),
 			ExpandGroups:              m.Bool("expand-groups", *expandGroups, m.File.CalendarServer.ExpandGroups),
+			MaxAttendees:              m.File.Scheduling.MaxAttendees,
 			RcptdURL:                  m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
 			RcptdToken:                rcptdTok,
 			RequestLogDir:             m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),

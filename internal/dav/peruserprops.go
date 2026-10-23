@@ -91,6 +91,27 @@ func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node
 	if perUser == "" {
 		return nil
 	}
+	if p.MayWriteShared == nil || !p.MayWriteShared(ctx, path) {
+		// Refuse the non-per-user properties, and register that refusal
+		// FIRST: Commit runs handlers in registration order and stops at
+		// the first failure, so the per-user write below never runs and
+		// the PROPPATCH stays all-or-nothing (its per-user props report 424).
+		var others []xml.Name
+		for _, n := range pp.Remaining() {
+			if !slices.Contains(p.Names, n) {
+				others = append(others, n)
+			}
+		}
+		if len(others) > 0 {
+			pp.Handle(others, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+				result := make(map[xml.Name]int, len(values))
+				for n := range values {
+					result[n] = http.StatusForbidden
+				}
+				return result, false
+			})
+		}
+	}
 	pp.Handle(p.Names, func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		// Delegate to the storage backend through a single-shot PropPatch
 		// carrying only the claimed values.
@@ -101,14 +122,6 @@ func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node
 		result, ok := inner.Commit()
 		return result, ok
 	})
-	if p.MayWriteShared == nil || !p.MayWriteShared(ctx, path) {
-		pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
-			result := make(map[xml.Name]int, len(values))
-			for n := range values {
-				result[n] = http.StatusForbidden
-			}
-			return result, false
-		})
-	}
+
 	return nil
 }

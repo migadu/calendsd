@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"calendsd/internal/acl"
@@ -28,6 +29,10 @@ type Plugin struct {
 	// §5). Off by default, matching sabre, which stores such bodies as sent;
 	// the calendsd composition turns it on.
 	AddVTimezones bool
+	// MaxAttendees caps the distinct ATTENDEEs an object may carry on PUT
+	// (403 max-attendees-per-instance); zero means DefaultMaxAttendees. The
+	// scheduling plugin applies the same cap as a backstop (audit 4.4).
+	MaxAttendees int
 
 	server *dav.Server
 }
@@ -81,6 +86,9 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		})
 		// Constant per-calendar properties sabre emits on every calendar.
 		pf.Handle(cal("max-resource-size"), func() any { return MaxResourceSize })
+		pf.Handle(cal("max-attendees-per-instance"), func() any {
+			return strconv.Itoa(effectiveMaxAttendees(p.MaxAttendees))
+		})
 		pf.Handle(cal("supported-calendar-data"), func() any {
 			return davxml.Raw(`<cal:calendar-data content-type="text/calendar" version="2.0"/>` +
 				`<cal:calendar-data content-type="application/calendar+json"/>`)

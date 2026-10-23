@@ -118,23 +118,34 @@ func (b *RcptdBackend) noteCost(hashes []string) {
 // cost.
 func (b *RcptdBackend) dummyHash() string {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	cost := b.lastCost
 	if cost == 0 {
 		cost = defaultDummyCost
 	}
-	if h, ok := b.dummies[cost]; ok {
+	h, ok := b.dummies[cost]
+	b.mu.Unlock()
+	if ok {
 		return h
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte("calserver-unknown-user-dummy"), cost)
+	// Generated outside the lock (shared with the credential cache): at a
+	// high cost this takes seconds, and other logins must not wait on it.
+	// Two racing first callers both generate; the second write wins, which
+	// is harmless. The cost is capped so an absurd stored cost cannot be
+	// used to wedge every unknown-user attempt.
+	if cost > bcrypt.MaxCost-10 {
+		cost = bcrypt.MaxCost - 10
+	}
+	gen, err := bcrypt.GenerateFromPassword([]byte("calserver-unknown-user-dummy"), cost)
 	if err != nil {
 		return ""
 	}
+	b.mu.Lock()
 	if b.dummies == nil {
 		b.dummies = map[int]string{}
 	}
-	b.dummies[cost] = string(h)
-	return string(h)
+	b.dummies[cost] = string(gen)
+	b.mu.Unlock()
+	return string(gen)
 }
 
 type cacheEntry struct {
