@@ -119,14 +119,16 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 		return
 	}
 
-	// Locate an existing copy by UID across the recipient's calendars.
+	// Locate an existing copy by UID across the calendars the recipient
+	// OWNS. Shared instances are skipped: a message addressed to the sharee
+	// must never write into the sharer's calendar through them (audit 4.2).
 	var existingObj *CalendarObject
 	home, _ := p.server.Tree.NodeForPath(r.Context(), homePath)
 	if coll, ok := home.(dav.Collection); ok {
 		children, _ := coll.Children(r.Context())
 		for _, child := range children {
 			calNode, isCal := child.(*Calendar)
-			if !isCal {
+			if !isCal || !calNode.ownedInstance() {
 				continue
 			}
 			if obj, err := calNode.ObjectByUID(r.Context(), msg.UID); err == nil && obj != nil {
@@ -139,6 +141,22 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 	var existingCal *goical.Calendar
 	if existingObj != nil {
 		existingCal, _ = ical.Decode(existingObj.Data())
+	}
+
+	// A REQUEST or CANCEL may only replace or cancel a stored copy that the
+	// same organizer owns. Anyone who knows a UID can otherwise overwrite the
+	// recipient's own event, or cancel it, by sending a message for that
+	// UID. On a mismatch the message still reaches the inbox so the user
+	// sees it; only the automatic write is withheld (audit 4.2, D3).
+	if existingCal != nil && (msg.Method == "REQUEST" || msg.Method == "CANCEL") &&
+		!sameOrganizer(existingCal, msg.Calendar) {
+		fileName := "calserver-" + randomToken() + ".ics"
+		if _, err := inbox.CreateFile(r.Context(), fileName, strings.NewReader(string(ical.EncodeLenient(msg.Calendar)))); err != nil {
+			msg.ScheduleStatus = "5.2;Could not deliver to local inbox"
+			return
+		}
+		msg.ScheduleStatus = statusOrganizerMismatch
+		return
 	}
 	newObject, err := ical.ProcessMessage(msg, existingCal)
 	if err != nil || (newObject == nil && msg.Method != "CANCEL") {
@@ -180,6 +198,41 @@ func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Messag
 		}
 	}
 	msg.ScheduleStatus = "1.2;Message delivered locally"
+}
+
+// statusOrganizerMismatch is the delivery status for a REQUEST or CANCEL whose
+// ORGANIZER differs from the one on the recipient's stored copy of that UID.
+// 3.x is the "recipient-side, permanent" class alongside 3.7 (unknown
+// principal); the message was delivered to the inbox only.
+const statusOrganizerMismatch = "3.8;Organizer does not match the stored event; delivered to the inbox only"
+
+// ownedInstance reports whether this calendar view belongs to its principal
+// (not a shared instance of someone else's calendar).
+func (c *Calendar) ownedInstance() bool {
+	return c.Info.ShareAccess == AccessNotShared || c.Info.ShareAccess == AccessSharedOwner
+}
+
+// organizerAddress returns the normalized ORGANIZER calendar-user address of
+// the first component carrying one: lower-cased, parameters ignored. "" when
+// there is none.
+func organizerAddress(cal *goical.Calendar) string {
+	if cal == nil {
+		return ""
+	}
+	for _, c := range cal.Children {
+		if p := c.Props.Get("ORGANIZER"); p != nil {
+			return strings.ToLower(strings.TrimSpace(p.Value))
+		}
+	}
+	return ""
+}
+
+// sameOrganizer reports whether the incoming message's ORGANIZER is the one
+// on the stored copy. A stored copy with no ORGANIZER (the recipient's own,
+// unscheduled event) never matches.
+func sameOrganizer(stored, incoming *goical.Calendar) bool {
+	have := organizerAddress(stored)
+	return have != "" && have == organizerAddress(incoming)
 }
 
 // autoProcess handles a scheduling message for an auto-schedule principal
