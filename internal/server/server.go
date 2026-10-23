@@ -159,6 +159,9 @@ type PushConfig struct {
 	VAPIDPublicKey  string
 	VAPIDPrivateKey string
 	TopicSecret     string
+	// MaxSubscriptions caps live push subscriptions per principal; zero
+	// means push.DefaultMaxSubscriptionsPerPrincipal.
+	MaxSubscriptions int
 }
 
 // Canonical renders the effective configuration as one deterministic line.
@@ -200,7 +203,15 @@ func (c Config) pushConfig() push.Config {
 		VAPIDPrivateKey: c.Push.VAPIDPrivateKey,
 		TopicSecret:     c.Push.TopicSecret,
 		BaseURI:         base,
+
+		MaxSubscriptionsPerPrincipal: c.Push.MaxSubscriptions,
 	}
+}
+
+// pushStore builds the subscription store with the configured per-principal
+// cap.
+func (c Config) pushStore(db *sql.DB) *push.Store {
+	return &push.Store{DB: db, MaxPerPrincipal: c.Push.MaxSubscriptions}
 }
 
 // Built is everything Build assembles: the DAV handler to serve, the
@@ -249,7 +260,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	users := &storage.Users{DB: db}
 	var worker *push.Worker
 	if cfg.Push.Enabled && dsn != "" {
-		store := &push.Store{DB: db}
+		store := cfg.pushStore(db)
 		worker = push.NewWorker(cfg.pushConfig(), store,
 			push.NewWebPushSender(cfg.pushConfig()), srv, dsn, slog.Default())
 	}
@@ -463,7 +474,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 			// this to the operator; reaching here is a caller that skipped it.
 			panic("server: " + err.Error())
 		}
-		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), &push.Store{DB: db}))
+		srv.AddPlugin(push.NewPlugin(cfg.pushConfig(), cfg.pushStore(db)))
 	}
 	schedule := &caldav.SchedulePlugin{
 		ExpandGroups: cfg.ExpandGroups,

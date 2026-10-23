@@ -183,6 +183,10 @@ type Config struct {
 		// topic. A secret; changing it re-topics every collection (clients
 		// re-register on their next discovery).
 		TopicSecret string
+		// MaxSubscriptions caps live push subscriptions per principal
+		// (default 50). The one deployment-specific knob in the push
+		// hardening: a site with many devices per user may raise it.
+		MaxSubscriptions int
 	}
 }
 
@@ -331,6 +335,7 @@ func Load(path string) (*Config, error) {
 	cfg.Push.VAPIDPublicKey = str("push.vapid_public_key")
 	cfg.Push.VAPIDPrivateKey = str("push.vapid_private_key")
 	cfg.Push.TopicSecret = str("push.topic_secret")
+	cfg.Push.MaxSubscriptions = integer("push.max_subscriptions")
 
 	for key := range flat {
 		if !consumed[key] {

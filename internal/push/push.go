@@ -32,6 +32,9 @@ type Config struct {
 	// BaseURI is the server mount prefix (begins and ends with "/"), used to
 	// build absolute subscription Location URLs.
 	BaseURI string
+	// MaxSubscriptionsPerPrincipal caps live subscriptions per principal
+	// ([push] max_subscriptions); zero means DefaultMaxSubscriptionsPerPrincipal.
+	MaxSubscriptionsPerPrincipal int
 }
 
 // Valid reports whether the secrets required to run push are all present.

@@ -220,6 +220,8 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 				VAPIDPublicKey:  m.File.Push.VAPIDPublicKey,
 				VAPIDPrivateKey: m.File.Push.VAPIDPrivateKey,
 				TopicSecret:     m.File.Push.TopicSecret,
+
+				MaxSubscriptions: m.File.Push.MaxSubscriptions,
 			},
 			IMipQueue: server.IMipQueueConfig{
 				CredentialKey: imipKey,

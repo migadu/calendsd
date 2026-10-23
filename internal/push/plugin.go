@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -169,6 +170,10 @@ func (p *Plugin) register(w http.ResponseWriter, r *http.Request, body []byte) e
 		P256dh:         req.p256dh,
 		AuthSecret:     req.authSecret,
 	}, current, expires)
+	if errors.Is(err, ErrTooManySubscriptions) {
+		return dav.ErrForbidden("This principal already holds the maximum of %d push subscriptions; unsubscribe one first",
+			p.store.maxPerPrincipal())
+	}
 	if err != nil {
 		return err
 	}

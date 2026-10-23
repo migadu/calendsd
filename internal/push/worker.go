@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,26 @@ const housekeepingInterval = time.Hour
 // after it drops (Postgres failover, network blip).
 const reconnectBackoff = 5 * time.Second
 
+// Delivery bounds (audit 3.3). Sends used to run one after another on the
+// listen goroutine with the worker's lifetime context, so a single endpoint
+// that never answered stalled every collection's notifications until restart.
+const (
+	// sendConcurrency caps in-flight pushes across all collections.
+	sendConcurrency = 8
+	// defaultSendTimeout bounds one push, including the ACL re-check.
+	defaultSendTimeout = 15 * time.Second
+	// slowSendWarn is the latency above which a send is logged, so a
+	// degrading push service is visible before it is a stall.
+	slowSendWarn = 5 * time.Second
+)
+
+// dispatchResult is what an asynchronous dispatch hands back to the listen
+// loop, which owns the retry set.
+type dispatchResult struct {
+	key   string
+	retry bool
+}
+
 // Worker delivers Web Push notifications. It holds a dedicated Postgres
 // connection LISTENing on the dav_push channel (a pinned connection
 // database/sql can't provide), coalesces per collection, re-checks ACL, and
@@ -39,6 +60,33 @@ type Worker struct {
 	dsn     string
 	log     *slog.Logger
 	checker caldav.PrivilegeChecker
+
+	sendTimeout time.Duration // zero → defaultSendTimeout
+	initOnce    sync.Once
+	sem         chan struct{}       // bounds concurrent sends across collections
+	results     chan dispatchResult // outcomes for the listen loop's retry set
+
+	// Per-collection dispatch bookkeeping: one dispatch runs per key at a
+	// time (two concurrent ones would both read the same last_synctoken and
+	// double-deliver); a flush that arrives while one is running marks the
+	// key to be dispatched once more when it finishes.
+	mu       sync.Mutex
+	inflight map[string]bool
+	redo     map[string]bool
+}
+
+// init lazily prepares the concurrency state so a Worker built as a struct
+// literal (tests) behaves like one from NewWorker.
+func (w *Worker) init() {
+	w.initOnce.Do(func() {
+		if w.sendTimeout <= 0 {
+			w.sendTimeout = defaultSendTimeout
+		}
+		w.sem = make(chan struct{}, sendConcurrency)
+		w.results = make(chan dispatchResult, 1024)
+		w.inflight = map[string]bool{}
+		w.redo = map[string]bool{}
+	})
 }
 
 // NewWorker builds the dispatch worker. dsn is used to open the dedicated
@@ -150,6 +198,11 @@ func (w *Worker) listen(ctx context.Context, housekeeping *time.Ticker) error {
 				w.deliver(ctx, key, retry)
 			}
 			retry.arm(time.Now())
+		case r := <-w.results:
+			// A dispatch finished off the loop; the retry set is this
+			// goroutine's, so the outcome is recorded here.
+			retry.record(r.key, r.retry, time.Now())
+			retry.arm(time.Now())
 		case <-housekeeping.C:
 			if err := w.store.PruneExpired(); err != nil {
 				w.log.Warn("webdav-push: pruning expired subscriptions", "err", err)
@@ -183,9 +236,46 @@ func (w *Worker) reconcile(ctx context.Context, retry *retrySet) {
 	retry.arm(time.Now())
 }
 
-// deliver dispatches key and records in retry whether to try it again.
-func (w *Worker) deliver(ctx context.Context, key string, retry *retrySet) {
-	retry.record(key, w.dispatch(ctx, key), time.Now())
+// deliver dispatches key off the listen loop; the outcome reaches retry
+// through w.results, so a collection whose subscribers are slow never delays
+// another collection's notification, and the retry set stays on this
+// goroutine. A key already being dispatched is re-dispatched once that run
+// finishes.
+func (w *Worker) deliver(ctx context.Context, key string, _ *retrySet) {
+	w.dispatchAsync(ctx, key)
+}
+
+// dispatchAsync runs dispatch for key on its own goroutine, at most one run
+// per key at a time, and reports each run's outcome on w.results.
+func (w *Worker) dispatchAsync(ctx context.Context, key string) {
+	w.init()
+	w.mu.Lock()
+	if w.inflight[key] {
+		w.redo[key] = true
+		w.mu.Unlock()
+		return
+	}
+	w.inflight[key] = true
+	w.mu.Unlock()
+	go func() {
+		for {
+			retry := w.dispatch(ctx, key)
+			select {
+			case w.results <- dispatchResult{key: key, retry: retry}:
+			case <-ctx.Done():
+			}
+			w.mu.Lock()
+			if w.redo[key] && ctx.Err() == nil {
+				delete(w.redo, key)
+				w.mu.Unlock()
+				continue
+			}
+			delete(w.redo, key)
+			delete(w.inflight, key)
+			w.mu.Unlock()
+			return
+		}
+	}()
 }
 
 // retryDelays are the pauses before re-dispatching a collection whose push
@@ -252,6 +342,7 @@ func (r *retrySet) arm(now time.Time) {
 // service answered with a temporary failure (429 or 5xx), so the delivery
 // should be retried.
 func (w *Worker) dispatch(ctx context.Context, key string) (retry bool) {
+	w.init()
 	kind, id, ok := splitKey(key)
 	if !ok {
 		return false
@@ -275,39 +366,74 @@ func (w *Worker) dispatch(ctx context.Context, key string) (retry bool) {
 	topic := w.cfg.Topic(kind, id)
 	payload := buildPushMessage(topic, syncTokenPrefix+strconv.FormatInt(token, 10))
 
+	// Sends run concurrently, bounded by sendConcurrency across the worker
+	// and by sendTimeout each; the call returns once every send for this
+	// collection has settled.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+sends:
 	for _, s := range subs {
 		if s.LastSyncToken >= token {
 			continue // already delivered
 		}
-		// Re-check that the subscriber can still read the collection; a
-		// principal that lost access must not keep being told it changed.
-		pctx := dav.ContextWithPrincipal(ctx, s.PrincipalURI)
-		if err := w.checker.CheckPrivileges(pctx, s.CollectionPath, "{DAV:}read"); err != nil {
-			continue
+		select {
+		case w.sem <- struct{}{}:
+		case <-ctx.Done():
+			break sends
 		}
-		status, err := w.sender.Send(ctx, s, topic, payload)
-		if err != nil {
-			w.log.Warn("webdav-push: send failed", "endpoint", s.PushResource, "err", err)
-			continue
-		}
-		switch {
-		case status == http.StatusNotFound || status == http.StatusGone:
-			// The push service says this endpoint is gone; drop it.
-			if err := w.store.DeleteByID(s.ID); err != nil {
-				w.log.Warn("webdav-push: pruning dead subscription", "err", err)
+		wg.Add(1)
+		go func(s Subscription) {
+			defer wg.Done()
+			defer func() { <-w.sem }()
+			if w.send(ctx, s, topic, token, payload) {
+				mu.Lock()
+				retry = true
+				mu.Unlock()
 			}
-		case status >= 200 && status < 300:
-			if err := w.store.SetLastToken(s.ID, token); err != nil {
-				w.log.Warn("webdav-push: recording delivery", "err", err)
-			}
-		case status == http.StatusTooManyRequests || status >= 500:
-			w.log.Warn("webdav-push: push service unavailable; will retry", "status", status, "endpoint", s.PushResource)
-			retry = true
-		default:
-			w.log.Warn("webdav-push: unexpected push status", "status", status, "endpoint", s.PushResource)
-		}
+		}(s)
 	}
+	wg.Wait()
 	return retry
+}
+
+// send delivers one notification under its own deadline and settles the
+// subscription's state from the push service's answer. It reports whether
+// the push service answered with a temporary failure (429 or 5xx).
+func (w *Worker) send(ctx context.Context, s Subscription, topic string, token int64, payload []byte) (retry bool) {
+	ctx, cancel := context.WithTimeout(ctx, w.sendTimeout)
+	defer cancel()
+	// Re-check that the subscriber can still read the collection; a
+	// principal that lost access must not keep being told it changed.
+	pctx := dav.ContextWithPrincipal(ctx, s.PrincipalURI)
+	if err := w.checker.CheckPrivileges(pctx, s.CollectionPath, "{DAV:}read"); err != nil {
+		return false
+	}
+	started := time.Now()
+	status, err := w.sender.Send(ctx, s, topic, payload)
+	if took := time.Since(started); took > slowSendWarn {
+		w.log.Warn("webdav-push: slow push service", "endpoint", s.PushResource, "took", took)
+	}
+	if err != nil {
+		w.log.Warn("webdav-push: send failed", "endpoint", s.PushResource, "err", err)
+		return false
+	}
+	switch {
+	case status == http.StatusNotFound || status == http.StatusGone:
+		// The push service says this endpoint is gone; drop it.
+		if err := w.store.DeleteByID(s.ID); err != nil {
+			w.log.Warn("webdav-push: pruning dead subscription", "err", err)
+		}
+	case status >= 200 && status < 300:
+		if err := w.store.SetLastToken(s.ID, token); err != nil {
+			w.log.Warn("webdav-push: recording delivery", "err", err)
+		}
+	case status == http.StatusTooManyRequests || status >= 500:
+		w.log.Warn("webdav-push: push service unavailable; will retry", "status", status, "endpoint", s.PushResource)
+		return true
+	default:
+		w.log.Warn("webdav-push: unexpected push status", "status", status, "endpoint", s.PushResource)
+	}
+	return false
 }
 
 // splitKey parses a "kind:id" notification payload.
