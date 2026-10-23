@@ -532,6 +532,40 @@ overlapping the third instance → DECLINED; existing conflict test unchanged.
 
 ## 5. Phase 3 — medium severity, resource and privilege
 
+**Status (2026-10-23): implemented and committed, all nine items, suite
+green (640 tests).** Deviations from the text below:
+
+- 5.1: no visited set (see the item); a missing href yields nothing for
+  that href. Test: `acl/expand_depth_test.go`.
+- 5.2: `PerUserPropsPlugin.MayWriteShared`, wired by the server to the ACL
+  plugin's `{DAV:}write-content` check; nil fails closed. The existing unit
+  test now models a write delegate and a new one a read-only delegate.
+  Tests: `dav/peruserprops_gate_test.go`.
+- 5.3: the index runs the `ChildFilterHook` loop; no per-child read check
+  (the filter is what PROPFIND exposes). Test: `dav/browser_filter_test.go`.
+- 5.4: pruning runs from the write path at most hourly instead of a
+  goroutine, so the plugin keeps having no lifecycle. The "PUT under another
+  user's calendar → 403" case is the ACL ordering in `server.go`, not unit
+  tested. Tests: `dav/tempfilefilter_bounds_test.go`.
+- 5.5: one transaction per account; the cascade body moved to
+  `deleteUserCascadeTx`. Tested by breaking the cascade (renaming a table)
+  inside `storage/adminqueries_test.go`.
+- 5.6: no schema change; `dtstamp` is canonicalised too. Tests:
+  `caldav/imip_sequence_test.go`, `jobs/sequence_test.go`.
+- 5.7: as described. Test: `admin/security_headers_test.go`.
+- 5.8: `auth.Throttle` (failure-only token bucket) and `auth.Limiter` (a
+  composite `Backend` wrapping the real ones), so the DAV plugin and the
+  contacts API share one limiter. `dav.ErrTooManyRequests` carries
+  `Retry-After`. The admin panel uses the same `Throttle` and a real stored
+  hash as its decoy; the rcptd backend bounds verification to `NumCPU` and
+  pays a bcrypt at the last seen cost for an unknown user. No timing test:
+  it would be flaky on a loaded runner; the work done on both paths is now
+  the same by construction. The endpoint-guard test in
+  `admin/admin_authz_test.go` accepts 429 as a rejection. Tests:
+  `auth/throttle_test.go`, `admin/throttle_test.go`,
+  `contactsapi/throttle_test.go`.
+- 5.9: as described. Test: `contactsapi/defaults_test.go`.
+
 ### 5.1 `expand-property` recursion is unbounded
 
 **Defect.** `acl/plugin.go:411` recurses per nested `<property>` with no
