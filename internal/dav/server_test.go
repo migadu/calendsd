@@ -137,7 +137,9 @@ func TestPath(t *testing.T) {
 		{"/dav/", "/dav", "", false},            // request for the base itself, no trailing slash
 		{"/dav/", "/other/calendars", "", true}, // outside base uri
 		{"/", "/a%20b/c", "a b/c", false},
-		{"/", "/a%20b/c%2Fd", "", true}, // an encoded slash would split a segment after Clean
+		{"/", "/a%20b/c%2Fd", "", true},    // an encoded slash would split a segment after Clean (audit 4.1, D6)
+		{"/", "/%2Fcalendars/x", "", true}, // leading %2F
+		{"/", "/calendars/x%2F", "", true}, // trailing %2F
 	} {
 		s := NewServer(tc.base, testRoot())
 		req := httptest.NewRequest("GET", tc.uri, nil)
