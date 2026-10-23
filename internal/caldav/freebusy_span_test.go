@@ -2,9 +2,16 @@ package caldav_test
 
 import (
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// statusCount counts recipients answered with the given status code prefix,
+// whatever namespace prefix the serializer uses.
+func statusCount(body, code string) int {
+	return len(regexp.MustCompile(`<(?:[a-z]+:)?request-status[^>]*>`+regexp.QuoteMeta(code)+`;`).FindAllString(body, -1))
+}
 
 // The free-busy window is client-chosen and drives a full recurrence
 // expansion, so it is capped at 366 days and never silently truncated
@@ -61,7 +68,7 @@ func TestFreeBusyOutboxSpanCap(t *testing.T) {
 		t.Fatalf("ten-year outbox request = %d, want 200 schedule-response:\n%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if n := strings.Count(body, "<cal:request-status>5.3;"); n != 2 {
+	if n := statusCount(body, "5.3"); n != 2 {
 		t.Errorf("want both recipients at 5.3, got %d:\n%s", n, body)
 	}
 	if strings.Contains(body, "calendar-data") {
@@ -69,12 +76,12 @@ func TestFreeBusyOutboxSpanCap(t *testing.T) {
 	}
 
 	w = post("20260801T000000Z", "20261001T000000Z")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "<cal:request-status>2.0;") {
+	if w.Code != 200 || statusCount(w.Body.String(), "2.0") != 1 {
 		t.Errorf("two-month request should still succeed: %d\n%s", w.Code, w.Body.String())
 	}
 
 	w = post("20261001T000000Z", "20260801T000000Z")
-	if w.Code != 200 || strings.Count(w.Body.String(), "<cal:request-status>5.3;") != 2 || strings.Contains(w.Body.String(), "calendar-data") {
+	if w.Code != 200 || statusCount(w.Body.String(), "5.3") != 2 || strings.Contains(w.Body.String(), "calendar-data") {
 		t.Errorf("inverted window should answer every recipient 5.3 with no data: %d\n%s", w.Code, w.Body.String())
 	}
 }
