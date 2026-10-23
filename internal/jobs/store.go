@@ -352,17 +352,34 @@ UPDATE jobs
 // resets scheduled_at to now on the reclaim, so a reclaimed job is never
 // immediately purge-eligible). Touches only the secret columns, leaving the row
 // for ops visibility.
-func (s *store) purgeCredentials(ctx context.Context, grace time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+//
+// The two counts are reported separately: a purge of an 'available' row means
+// a per-user send will now be discarded by its handler instead of delivered
+// (audit 3.5), i.e. the queue is not keeping up, which an operator must see.
+func (s *store) purgeCredentials(ctx context.Context, grace time.Time) (discarded, available int64, err error) {
+	rows, err := s.db.QueryContext(ctx, `
 UPDATE jobs SET enc_credential = NULL, enc_nonce = NULL, key_id = NULL
 WHERE enc_credential IS NOT NULL AND (
     (state = 'discarded' AND completed_at < $1) OR
     (state = 'available' AND scheduled_at < $1)
-)`, grace)
+)
+RETURNING state`, grace)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return res.RowsAffected()
+	defer rows.Close()
+	for rows.Next() {
+		var state string
+		if err := rows.Scan(&state); err != nil {
+			return discarded, available, err
+		}
+		if state == "available" {
+			available++
+		} else {
+			discarded++
+		}
+	}
+	return discarded, available, rows.Err()
 }
 
 // pruneTerminal deletes settled rows past the retention window (multi-KB bodies

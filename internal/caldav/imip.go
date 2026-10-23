@@ -171,6 +171,31 @@ type imipJob struct {
 	Outcome      string `json:"outcome"`               // success metric label (sent / sent_as_user / resource_relay)
 	ObjectPath   string `json:"object_path,omitempty"` // stored object to write SCHEDULE-STATUS back onto; "" = none
 	MessageB64   string `json:"message_b64"`           // fully-framed RFC822, base64 (D4)
+	// Identity says which sender the job was enqueued for: identityUser (SendAs
+	// with the stored credential, metered) or identityRelay (the server's own
+	// mailer). The handler trusts this, not the presence of a credential: the
+	// credential purge NULLs the secret on an overdue job, and a per-user send
+	// must then be discarded, never silently rerouted through the unmetered
+	// relay (audit 3.5, D4). Empty on rows enqueued before the field existed;
+	// those are classified by Username, which only a per-user job carries.
+	Identity string `json:"identity,omitempty"`
+}
+
+const (
+	identityUser  = "user"
+	identityRelay = "relay"
+)
+
+// identity resolves the job's sender identity, including legacy rows.
+func (a imipJob) identity() string {
+	switch {
+	case a.Identity != "":
+		return a.Identity
+	case a.Username != "":
+		return identityUser
+	default:
+		return identityRelay
+	}
 }
 
 // Terminal SCHEDULE-STATUS values (RFC 6638 §3.2.9). statusQueued is the
@@ -178,11 +203,17 @@ type imipJob struct {
 // PUT/DELETE write-back replaces it with statusSent or statusFailed once the
 // background send settles.
 const (
-	statusQueued      = "1.0;Scheduling message is queued for delivery"
-	statusSent        = "1.1;Scheduling message is sent via iMip"
-	statusFailed      = "5.1;Could not deliver invite by email"
-	statusAuthFailed  = "5.3;Submission authentication failed"
-	statusRateLimited = "5.3;Temporarily rejected by the submission server (sending limit or transient policy); message not sent"
+	statusQueued = "1.0;Scheduling message is queued for delivery"
+	statusSent   = "1.1;Scheduling message is sent via iMip"
+	statusFailed = "5.1;Could not deliver invite by email"
+	// statusCredentialPurged: a per-user send sat in the queue past the
+	// credential TTL (an outage or a stalled worker pool) and the secret was
+	// purged before delivery. Terminal, so the user sees it on the object and
+	// can re-save to retrigger; the alternative, relaying unmetered, defeats
+	// the per-user path's attribution (audit 3.5, D4).
+	statusCredentialPurged = "5.1;Credential expired before delivery; save the event again to resend"
+	statusAuthFailed       = "5.3;Submission authentication failed"
+	statusRateLimited      = "5.3;Temporarily rejected by the submission server (sending limit or transient policy); message not sent"
 )
 
 // classifySendError maps a terminal submission failure to the SCHEDULE-STATUS
@@ -512,7 +543,12 @@ func (p *IMipPlugin) enqueueDurable(msg *ical.Message, envelopeFrom, username, r
 	if p.Durable == nil {
 		return false
 	}
+	identity := identityRelay
+	if cred != nil {
+		identity = identityUser
+	}
 	args := imipJob{
+		Identity:     identity,
 		EnvelopeFrom: envelopeFrom,
 		Username:     username,
 		Recipient:    recipient,
@@ -560,9 +596,30 @@ func (p *IMipPlugin) DurableHandler(ctx context.Context, j jobs.Job) error {
 		return jobs.Discard(fmt.Errorf("imip: bad message_b64: %w", err))
 	}
 
+	recipient := "mailto:" + a.Recipient
+	attrs := []any{"outcome", a.Outcome, "method", a.Method, "recipient", recipient, "attempt", j.Attempt}
+
+	// The job's declared identity decides the path. A per-user job whose
+	// credential is gone (purged after sitting past the TTL) is discarded with
+	// a terminal status rather than relayed unmetered; a relay job carrying a
+	// secret is equally wrong and also discarded (audit 3.5, D4).
+	identity := a.identity()
+	switch {
+	case identity == identityUser && j.Credential == nil:
+		p.Metrics.IMipDelivery("credential_purged")
+		p.logger().Warn("imip durable discarded: per-user credential purged before delivery", attrs...)
+		p.writeBackStatus(ctx, a, statusCredentialPurged)
+		return jobs.Discard(errors.New("imip: per-user job's credential was purged before delivery"))
+	case identity == identityRelay && j.Credential != nil:
+		p.Metrics.IMipDelivery("identity_mismatch")
+		p.logger().Warn("imip durable discarded: relay job carries a credential", attrs...)
+		p.writeBackStatus(ctx, a, statusFailed)
+		return jobs.Discard(errors.New("imip: relay job must not carry a credential"))
+	}
+
 	start := time.Now()
 	var sendErr error
-	if j.Credential != nil {
+	if identity == identityUser {
 		if p.Submission == nil {
 			return jobs.Discard(errors.New("imip: per-user job but no submission mailer"))
 		}
@@ -573,14 +630,13 @@ func (p *IMipPlugin) DurableHandler(ctx context.Context, j jobs.Job) error {
 		}
 		// A relay always uses the server's own envelope (bounces + SPF align on the
 		// server). For a genuine relay job that equals the stored envelope_from; for
-		// a `calctl imip resend --relay` override of a per-user job (credential
-		// dropped), it correctly overrides the stored user address.
+		// a `calctl imip resend --relay` override of a per-user job (identity
+		// rewritten to relay, credential dropped), it correctly overrides the
+		// stored user address.
 		sendErr = p.Mailer.Send(p.SenderEmail, []string{a.Recipient}, body)
 	}
 	p.Metrics.ObserveIMipSend(time.Since(start).Seconds())
 
-	recipient := "mailto:" + a.Recipient
-	attrs := []any{"outcome", a.Outcome, "method", a.Method, "recipient", recipient, "attempt", j.Attempt}
 	if sendErr == nil {
 		p.Metrics.IMipDelivery(a.Outcome)
 		p.logger().Info("imip delivered (durable)", attrs...)

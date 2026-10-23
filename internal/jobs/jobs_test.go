@@ -241,6 +241,40 @@ func TestReclaimOrphan(t *testing.T) {
 	}
 }
 
+// TestSweepReclaimsBeforePurge: the startup/periodic sweep reclaims orphaned
+// executing jobs *before* it purges credentials, so a job that was executing
+// at a crash and is older than both windows comes back available with its
+// credential intact instead of being purged and then discarded by its handler
+// (audit 3.5).
+func TestSweepReclaimsBeforePurge(t *testing.T) {
+	db := openScratchDB(t, "calserver_jobs_sweeporder")
+	q := newTestQueue(t, db)
+	ctx := context.Background()
+	if err := q.Enqueue(ctx, "imip_send",
+		imipArgs("u5", "mailto:e@x.test", "REQUEST", "0", "20260101T000000Z"),
+		WithCredential([]byte("pw"))); err != nil {
+		t.Fatal(err)
+	}
+	id := lastJobID(t, db)
+	if _, err := q.store.claim(ctx, "default"); err != nil {
+		t.Fatal(err)
+	}
+	// Crashed mid-execution, long enough ago for both the reclaim window and
+	// the credential TTL to have elapsed.
+	if _, err := db.Exec(`UPDATE jobs SET attempted_at = now() - interval '3 hours',
+	                                      scheduled_at = now() - interval '3 hours' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	q.sweep(ctx)
+	r := getJob(t, db, id)
+	if r.state != "available" {
+		t.Errorf("state = %q, want available after sweep", r.state)
+	}
+	if !r.credSet {
+		t.Error("a reclaimed job must keep its credential (reclaim resets scheduled_at before the purge looks)")
+	}
+}
+
 // TestPurgeCredentialsTracksSchedule: a credential is dropped only once the job
 // stops needing it — kept while a retry is still scheduled (a future
 // scheduled_at, even if the row was inserted long ago), dropped after give-up
@@ -275,12 +309,12 @@ func TestPurgeCredentialsTracksSchedule(t *testing.T) {
 	exec(`UPDATE jobs SET scheduled_at = now() - interval '2 hours'   WHERE id=$1`, overdue)
 	exec(`UPDATE jobs SET state='discarded', completed_at = now() - interval '2 hours' WHERE id=$1`, gaveUp)
 
-	n, err := q.store.purgeCredentials(ctx, time.Now().Add(-time.Hour)) // grace = 1h
+	discarded, available, err := q.store.purgeCredentials(ctx, time.Now().Add(-time.Hour)) // grace = 1h
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Fatalf("purged %d credentials, want 2 (overdue + gave-up)", n)
+	if discarded != 1 || available != 1 {
+		t.Fatalf("purged discarded=%d available=%d credentials, want 1 + 1 (gave-up + overdue)", discarded, available)
 	}
 	if !getJob(t, db, retrying).credSet {
 		t.Error("a job with a future retry must keep its credential")

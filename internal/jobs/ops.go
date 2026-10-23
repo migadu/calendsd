@@ -214,9 +214,14 @@ SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM 
 // credential is gone. Refuses a completed or executing job. It never decrypts anything; it
 // only clears the credential columns and resets state.
 func (o *Ops) RelayOverride(id int64) error {
+	// The identity is rewritten explicitly: the worker refuses a per-user job
+	// without a credential (it means the credential was purged, not that a
+	// relay was intended), so dropping the secret alone would have the job
+	// discarded instead of relayed.
 	return o.requeue(id, `
 UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL,
-       enc_credential=NULL, enc_nonce=NULL, key_id=NULL
+       enc_credential=NULL, enc_nonce=NULL, key_id=NULL,
+       args = args || '{"identity":"relay"}'::jsonb
  WHERE id=$1`)
 }
 

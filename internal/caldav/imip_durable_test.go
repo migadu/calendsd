@@ -245,6 +245,9 @@ func TestDeliverAsUserEnqueuesDurable(t *testing.T) {
 		t.Error("per-user job must carry a credential")
 	}
 	m := j.argMap(t)
+	if m["identity"] != "user" {
+		t.Errorf("identity = %v, want user (audit 3.5)", m["identity"])
+	}
 	if m["username"] != "alice" {
 		t.Errorf("username = %v, want alice", m["username"])
 	}
@@ -280,7 +283,11 @@ func TestDeliverViaRelayEnqueuesDurable(t *testing.T) {
 	if relay.msg != nil {
 		t.Error("relay Mailer was called inline; the durable worker should send")
 	}
-	if m := j.argMap(t); m["envelope_from"] != "server@example.org" {
+	m := j.argMap(t)
+	if m["envelope_from"] != "server@example.org" {
 		t.Errorf("envelope_from = %v, want server@example.org", m["envelope_from"])
+	}
+	if m["identity"] != "relay" {
+		t.Errorf("identity = %v, want relay (audit 3.5)", m["identity"])
 	}
 }

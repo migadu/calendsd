@@ -444,10 +444,15 @@ func (q *Queue) sweep(ctx context.Context) {
 	} else if n > 0 {
 		q.log.Info("jobs: reclaimed orphaned jobs", "count", n)
 	}
-	if n, err := q.store.purgeCredentials(ctx, now.Add(-q.cfg.CredentialTTL)); err != nil {
+	// Order matters: reclaimOrphans runs first so a job that was executing at
+	// a crash is reset with scheduled_at = now and is not purge-eligible.
+	if discarded, available, err := q.store.purgeCredentials(ctx, now.Add(-q.cfg.CredentialTTL)); err != nil {
 		q.log.Warn("jobs: credential purge failed", "err", err)
-	} else if n > 0 {
-		q.log.Info("jobs: purged aged credentials", "count", n)
+	} else if available > 0 {
+		q.log.Warn("jobs: purged credentials from overdue available jobs; their per-user sends will be discarded (queue not keeping up)",
+			"available", available, "discarded", discarded)
+	} else if discarded > 0 {
+		q.log.Info("jobs: purged aged credentials", "discarded", discarded)
 	}
 	if _, err := q.store.pruneTerminal(ctx, now.Add(-q.cfg.Retention)); err != nil {
 		q.log.Warn("jobs: prune failed", "err", err)

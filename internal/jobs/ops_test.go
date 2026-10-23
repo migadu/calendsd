@@ -151,6 +151,13 @@ func TestOpsRelayOverride(t *testing.T) {
 	if r.credSet {
 		t.Error("RelayOverride must drop the credential (the worker then relays, unmetered)")
 	}
+	var args map[string]any
+	if err := json.Unmarshal(r.args, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["identity"] != "relay" {
+		t.Errorf("RelayOverride must rewrite the job identity to relay, args = %s", r.args)
+	}
 }
 
 func TestOpsCancelDropsCredential(t *testing.T) {
