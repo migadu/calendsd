@@ -17,7 +17,17 @@ import (
 )
 
 // Decode parses raw iCalendar bytes into a calendar object.
-func Decode(data []byte) (*goical.Calendar, error) {
+//
+// go-ical's line decoder indexes past the end of some malformed lines (a
+// parameter with an empty value at the end of the line, "X;P=") instead of
+// returning an error. Every PUT body goes through here, so that panic is
+// turned into the parse error it should have been.
+func Decode(data []byte) (cal *goical.Calendar, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cal, err = nil, fmt.Errorf("malformed iCalendar: %v", r)
+		}
+	}()
 	return goical.NewDecoder(bytes.NewReader(data)).Decode()
 }
 
@@ -64,6 +74,17 @@ func recurrenceSet(comp *goical.Component, loc *time.Location) (*rrule.Set, erro
 // not recur.
 func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error) {
 	if comp.Props.Get(goical.PropRecurrenceRule) != nil || comp.Props.Get(goical.PropRecurrenceDates) == nil {
+		if opt, err := comp.Props.RecurrenceRule(); err == nil && opt != nil {
+			if err := checkRRule(opt); err != nil {
+				return nil, err
+			}
+			// rrule-go builds its day masks when the year changes from the
+			// one it last saw, which starts as 0: a rule starting in year 0
+			// never gets them and indexes empty slices.
+			if start, err := comp.Props.DateTime(goical.PropDateTimeStart, loc); err == nil && start.Year() < 1 {
+				return nil, fmt.Errorf("recurring DTSTART %v is before year 1", start)
+			}
+		}
 		return comp.RecurrenceSet(loc)
 	}
 	dtstart, err := comp.Props.DateTime(goical.PropDateTimeStart, loc)
@@ -87,6 +108,24 @@ func componentSet(comp *goical.Component, loc *time.Location) (*rrule.Set, error
 		set.ExDate(t)
 	}
 	return set, nil
+}
+
+// checkRRule rejects BYDAY ordinals that rrule-go cannot iterate: it
+// indexes its day masks with the nth weekday before checking the result is
+// in range, so an ordinal past the period (FREQ=MONTHLY;BYDAY=8FR) panics
+// instead of matching nothing. RFC 5545 §3.3.10 allows at most ±53; a month
+// holds at most five of a weekday.
+func checkRRule(opt *rrule.ROption) error {
+	limit := 53
+	if opt.Freq == rrule.MONTHLY || (opt.Freq == rrule.YEARLY && len(opt.Bymonth) > 0) {
+		limit = 5
+	}
+	for _, wd := range opt.Byweekday {
+		if n := wd.N(); n > limit || n < -limit {
+			return fmt.Errorf("RRULE BYDAY ordinal %d is outside ±%d", n, limit)
+		}
+	}
+	return nil
 }
 
 // IsRecurring reports whether a component has a recurrence set: an RRULE or
