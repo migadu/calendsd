@@ -242,3 +242,19 @@ func TestCheckRcptdProbeAddressIsWellFormed(t *testing.T) {
 		t.Errorf("probe against a validating rcptd: %+v", r)
 	}
 }
+
+func TestVersionResult(t *testing.T) {
+	for _, c := range []struct {
+		have, want int
+		status     string
+	}{
+		{3, 3, Healthy},
+		{2, 3, Unhealthy},
+		{0, 3, Unhealthy},
+		{4, 3, Degraded},
+	} {
+		if r := versionResult(startTimer(), c.have, c.want); r.Status != c.status {
+			t.Errorf("versionResult(%d, %d) = %s (%s), want %s", c.have, c.want, r.Status, r.Message, c.status)
+		}
+	}
+}

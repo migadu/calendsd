@@ -59,8 +59,8 @@ func TestParity(t *testing.T) {
 	// The calendsd extension tables are additive; loading them into the
 	// parity database (which a live sabre also runs against) proves sabre is
 	// unaffected by their presence.
-	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
-	for _, f := range append(sqlFiles, extFiles...) {
+	extFile := filepath.Join(root, "scripts/schema/migrations/0002_extension.sql")
+	for _, f := range append(sqlFiles, extFile) {
 		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-f", f)
 	}
 	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-c",

@@ -1,4 +1,4 @@
--- Read-only audit of everything scripts/schema/pgsql.calserver.sql is
+-- Read-only audit of everything scripts/schema/migrations/0002_extension.sql is
 -- responsible for: the tables and indexes it creates, the index it drops, the
 -- sabre columns it widens, and the columns of the tables it owns.
 --
@@ -6,7 +6,7 @@
 -- to answer "has this file been applied, and is what is there still what the
 -- code expects":
 --
---     psql -d sabredav -f scripts/schema/check.pgsql.calserver.sql
+--     psql -d sabredav -f scripts/schema/check.sql
 --
 -- Every row should say ok. Anything else is listed again in the summary at the
 -- end, with a count — so a clean database prints "0 problems".
@@ -113,7 +113,7 @@ SELECT kind, object, expected, found,
 SELECT count(*) FILTER (WHERE NOT ok) AS problems,
        CASE WHEN count(*) FILTER (WHERE NOT ok) = 0
             THEN 'schema is up to date'
-            ELSE 'apply scripts/schema/pgsql.calserver.sql (see the rows marked FIX above)'
+            ELSE 'run calctl schema apply (see the rows marked FIX above)'
        END AS verdict
   FROM (
     SELECT to_regclass(v.name) IS NOT NULL AS ok FROM (VALUES

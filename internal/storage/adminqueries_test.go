@@ -8,39 +8,22 @@ package storage_test
 
 import (
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"calendsd/internal/auth"
 	"calendsd/internal/caldav"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 func TestAdminQueries(t *testing.T) {
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping admin queries test: %s", reason)
-	}
-
 	const dbName = "calserver_adminqueries"
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
-	if len(sqlFiles) == 0 || len(extFiles) == 0 {
-		t.Fatalf("schema files missing (sabre=%d, ext=%d)", len(sqlFiles), len(extFiles))
-	}
-	for _, f := range append(sqlFiles, extFiles...) {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	// The pgsql.principals.sql seed ships principals/admin (+ proxy
-	// sub-principals) and a users row for admin. Add alice (a shared
-	// calendar owner with an overlay), bob (shared instance, no users
-	// row), and an orphaned users row.
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", `
+	db := storagetest.NewDB(t, dbName)
+	// NewDB seeds principals/admin (+ proxy sub-principals) and a users row
+	// for admin. Add alice (a shared calendar owner with an overlay), bob
+	// (shared instance, no users row), and an orphaned users row.
+	mustExec(t, db, `
 		INSERT INTO principals (uri, email, displayname) VALUES
 			('principals/alice', 'alice@example.org', 'Alice'),
 			('principals/bob', 'bob@example.org', 'Bob');
@@ -59,12 +42,6 @@ func TestAdminQueries(t *testing.T) {
 		INSERT INTO addressbooks (principaluri, displayname, uri, synctoken)
 			VALUES ('principals/alice', 'Contacts', 'contacts', 1);
 	`)
-
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 
 	// Write one object through the production backend so the change log
 	// and denormalized columns are populated the real way.
@@ -223,7 +200,7 @@ func TestAdminQueries(t *testing.T) {
 
 	// Phase B: seed every broken invariant the doctor must catch, plus a
 	// pending share invite.
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", `
+	mustExec(t, db, `
 		UPDATE calendarinstances SET share_invitestatus = 1 WHERE principaluri = 'principals/bob';
 		INSERT INTO calendarinstances (calendarid, principaluri, access, uri)
 			VALUES (9999, 'principals/alice', 1, 'ghost-cal');

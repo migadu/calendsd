@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,6 +28,7 @@ import (
 	"calendsd/internal/auth"
 	"calendsd/internal/contactsapi"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 func repoRoot() string {
@@ -38,38 +37,7 @@ func repoRoot() string {
 }
 
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
-	t.Helper()
-	if os.Getenv("PGHOST") == "" {
-		t.Skip("skipping: PGHOST not set (dev Postgres not running)")
-	}
-	if err := exec.Command("pg_isready", "-h", os.Getenv("PGHOST")).Run(); err != nil {
-		t.Skipf("skipping: dev Postgres not reachable: %v", err)
-	}
-	root := repoRoot()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", args, err, out)
-		}
-	}
-	run("dropdb", "--if-exists", dbName)
-	run("createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no sabre schema files found")
-	}
-	sqlFiles = append(sqlFiles, filepath.Join(root, "scripts/schema/pgsql.calserver.sql"))
-	for _, f := range sqlFiles {
-		run("psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return storagetest.NewDB(t, dbName)
 }
 
 // fakeAuth accepts any user with the one password and maps them to

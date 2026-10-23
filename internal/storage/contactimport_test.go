@@ -17,13 +17,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 // openContactsScratchDB creates a fresh database from sabre's schema files plus
@@ -31,25 +30,7 @@ import (
 // contact_frecency live) and opens it.
 func openContactsScratchDB(t *testing.T, dbName string) *sql.DB {
 	t.Helper()
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping postgres test: %s", reason)
-	}
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no schema files found")
-	}
-	sqlFiles = append(sqlFiles, filepath.Join(root, "scripts/schema/pgsql.calserver.sql"))
-	for _, f := range sqlFiles {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := storagetest.NewDB(t, dbName)
 	return db
 }
 

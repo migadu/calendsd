@@ -1,7 +1,7 @@
 package storage
 
 // Per-recipient-domain notification policy (the domain_scheduling_policy
-// table, scripts/schema/pgsql.calserver.sql). A domain operator opts its users
+// table, scripts/schema/migrations/0002_extension.sql). A domain operator opts its users
 // in to calendsd emails that are not part of CalDAV itself; an absent row
 // means every setting is at its default ("off"). share_notify drives the
 // calendar-share notice (docs/share-invite-email.md); local_notify is reserved

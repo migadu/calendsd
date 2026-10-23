@@ -11,44 +11,26 @@ package storage_test
 // Skips automatically when the dev Postgres isn't reachable.
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 
 	"calendsd/internal/caldav"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 func TestSyncTokenConcurrency(t *testing.T) {
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping sync-token concurrency test: %s", reason)
-	}
-
 	const dbName = "calserver_concurrency"
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no schema files found")
-	}
-	for _, f := range sqlFiles {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c",
+	db := storagetest.NewDB(t, dbName)
+	mustExec(t, db,
 		`INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT');
 		 INSERT INTO calendarinstances (calendarid, principaluri, access, uri)
 		 VALUES (currval('calendars_id_seq'), 'principals/admin', 1, 'default')`)
-
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 
 	var calID int64
 	if err := db.QueryRow(`SELECT id FROM calendars LIMIT 1`).Scan(&calID); err != nil {
@@ -115,6 +97,14 @@ func TestSyncTokenConcurrency(t *testing.T) {
 
 // pgOnlyPrereqsMissing reports why the Postgres-only test can't run: it needs
 // the psql tooling and the dev Postgres, but not php/sabre.
+// mustExec runs SQL (several statements are fine) against a test database.
+func mustExec(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("%v\n%s", err, query)
+	}
+}
+
 func pgOnlyPrereqsMissing() string {
 	for _, bin := range []string{"psql", "createdb", "dropdb"} {
 		if _, err := exec.LookPath(bin); err != nil {

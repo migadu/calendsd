@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -23,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 func testDSN(dbName string) string {
@@ -34,43 +34,9 @@ func repoRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-// openScratchDB builds a fresh database from the sabre schema plus the
-// calendsd extension schema (which defines push_subscriptions).
+// openScratchDB builds a fresh database with every migration applied.
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
-	t.Helper()
-	if os.Getenv("PGHOST") == "" {
-		t.Skip("skipping: PGHOST not set (dev Postgres not running)")
-	}
-	if err := exec.Command("pg_isready", "-h", os.Getenv("PGHOST")).Run(); err != nil {
-		t.Skipf("skipping: dev Postgres not reachable: %v", err)
-	}
-	root := repoRoot()
-	psql := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", args, err, out)
-		}
-	}
-	psql("dropdb", "--if-exists", dbName)
-	psql("createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no sabre schema files found")
-	}
-	for _, f := range sqlFiles {
-		psql("psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	psql("psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f",
-		filepath.Join(root, "scripts/schema/pgsql.calserver.sql"))
-
-	db, err := storage.Open(testDSN(dbName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return storagetest.NewDB(t, dbName)
 }
 
 // TestChangeFiresNotify verifies a committed calendar-object write emits the

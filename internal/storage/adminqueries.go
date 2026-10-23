@@ -57,17 +57,13 @@ func (q *AdminQueries) Counts(ctx context.Context) (*AdminCounts, error) {
 	return &c, nil
 }
 
-// SchemaPresent verifies every sabre table the admin surface reads exists, and
-// every table pgsql.calserver.sql creates, via a LIMIT 0 probe per table.
+// SchemaPresent verifies every table the migrations create exists, via a
+// LIMIT 0 probe per table.
 // Unlike Counts it stays O(1) on large databases, so it is safe in a health
 // check that runs on a monitoring interval. A missing extension table fails it
 // too: the server starts without one and only fails the requests that need it.
 func (q *AdminQueries) SchemaPresent(ctx context.Context) error {
-	for _, table := range append([]string{
-		"principals", "users", "calendars", "calendarinstances",
-		"calendarobjects", "addressbooks", "cards", "schedulingobjects",
-		"propertystorage", "groupmembers", "calendarchanges", "addressbookchanges",
-	}, schema.Tables()...) {
+	for _, table := range schema.Tables() {
 		rows, err := q.DB.QueryContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
 		if err != nil {
 			return fmt.Errorf("table %s: %w", table, err)

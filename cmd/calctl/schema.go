@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"calendsd/internal/storage"
 	"calendsd/scripts/schema"
 )
 
-// handleSchema applies the calendsd extension schema embedded in this
-// binary (scripts/schema/pgsql.calserver.sql). The deploy runs it before
-// restarting the server, so a release that adds a table never starts against
-// a database without it.
+// handleSchema runs the schema migrations embedded in this binary
+// (scripts/schema/migrations) that the database has not had yet. The deploy
+// runs it before restarting the server, so a release that changes the schema
+// never starts against a database without the change.
 func handleSchema(ctx context.Context, args []string) {
 	if len(args) == 0 || args[0] != "apply" {
 		fatalf("Usage: calctl schema apply [--db DSN] [--timeout DUR] [--lock-timeout DUR]")
@@ -27,11 +26,15 @@ func handleSchema(ctx context.Context, args []string) {
 	q := openAdminQueries(ctx, *dsnOverride)
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
-	if err := storage.ApplySchema(ctx, q.DB, *lockTimeout); err != nil {
-		fatalf("Applying the calendsd schema failed, nothing was changed: %v", err)
+	applied, err := schema.Apply(ctx, q.DB, *lockTimeout)
+	for _, m := range applied {
+		fmt.Printf("applied %04d_%s\n", m.Version, m.Name)
+	}
+	if err != nil {
+		fatalf("Applying the schema failed, the failed migration changed nothing: %v", err)
 	}
 	if err := q.SchemaPresent(ctx); err != nil {
 		fatalf("Schema applied, but a table is still missing: %v", err)
 	}
-	fmt.Printf("calendsd schema is up to date (%d extension tables).\n", len(schema.Tables()))
+	fmt.Printf("calendsd schema is up to date (version %d).\n", schema.Latest())
 }

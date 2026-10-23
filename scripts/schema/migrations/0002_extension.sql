@@ -5,28 +5,18 @@
 -- publishing unimplemented, so its schema has no home for them. calendsd
 -- fills those gaps here.
 --
--- Every object below is a NEW table: a live sabre instance running against the
--- same database never references them, so loading this alongside the sabre
--- schema cannot affect it. No sabre-owned table is altered except to widen a
--- varchar (see the end of the file). Load this AFTER the
--- dav/examples/sql/pgsql.*.sql files.
+-- This is the extension schema as it stood before the migration runner. It
+-- was re-run on every deploy, so every statement in it is conditional, and it
+-- runs as a no-op on a database that already has it: the runner records it as
+-- applied there the first time. It is frozen now. A schema change is a new
+-- numbered file next to this one, applied once (see scripts/schema/schema.go).
 --
--- THIS FILE IS SAFE TO RE-RUN. Every statement is conditional, so applying it
--- to a database that already has some or all of it is a no-op that takes no
--- exclusive lock. Run it with ON_ERROR_STOP so a real failure stops the run:
+-- No sabre-owned table is altered here except to widen a varchar and drop one
+-- index (see below).
 --
---     psql -v ON_ERROR_STOP=1 -d sabredav -f scripts/schema/pgsql.calserver.sql
---
--- calctl carries this file (scripts/schema/schema.go embeds it), and
--- `calctl schema apply` runs it as one transaction with the config's DSN; the
--- Ansible role does that on every deploy.
---
--- What re-runnable does NOT mean: this is not a migration runner. CREATE TABLE
--- IF NOT EXISTS matches on the name, so a table that already exists with an
--- OUTDATED definition is skipped silently, not brought up to date. The guard at
--- the end of the file turns that specific failure into a loud one for the
--- tables here; changing an existing column is still a deliberate ALTER you
--- write yourself.
+-- The guard below is from the re-run era: CREATE TABLE IF NOT EXISTS matches on
+-- the name, so a table that already existed with an OUTDATED definition would
+-- be skipped silently. It still protects the first run on an old database.
 
 -- PRECONDITION. Guard against the one hazard CREATE TABLE IF NOT EXISTS
 -- introduces, and do it before anything is applied.

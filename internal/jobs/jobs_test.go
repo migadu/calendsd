@@ -9,12 +9,12 @@ package jobs
 
 import (
 	"bytes"
+	"calendsd/internal/storage/storagetest"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -33,40 +33,7 @@ func repoRoot() string {
 }
 
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
-	t.Helper()
-	if os.Getenv("PGHOST") == "" {
-		t.Skip("skipping: PGHOST not set (dev Postgres not running)")
-	}
-	if err := exec.Command("pg_isready", "-h", os.Getenv("PGHOST")).Run(); err != nil {
-		t.Skipf("skipping: dev Postgres not reachable: %v", err)
-	}
-	root := repoRoot()
-	psql := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %v\n%s", args, err, out)
-		}
-	}
-	psql("dropdb", "--if-exists", dbName)
-	psql("createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	if len(sqlFiles) == 0 {
-		t.Fatal("no sabre schema files found")
-	}
-	for _, f := range sqlFiles {
-		psql("psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	psql("psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f",
-		filepath.Join(root, "scripts/schema/pgsql.calserver.sql"))
-
-	db, err := sql.Open("pgx", testDSN(dbName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return storagetest.NewDB(t, dbName)
 }
 
 func testKeyring(t *testing.T) *Keyring {

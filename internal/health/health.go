@@ -33,6 +33,7 @@ import (
 	"calendsd/internal/config"
 	"calendsd/internal/pgdial"
 	"calendsd/internal/storage"
+	"calendsd/scripts/schema"
 )
 
 // DefaultTimeout bounds each check.
@@ -415,10 +416,31 @@ func checkDatabase(ctx context.Context, o Options) []Result {
 	if err := (&storage.AdminQueries{DB: db}).SchemaPresent(pctx); err != nil {
 		return []Result{t.result("database", Unhealthy, "", "schema check failed: "+err.Error())}
 	}
-	return []Result{
-		t.result("database", Healthy, "", "connected, sabre and calendsd schema present"),
-		checkJobs(ctx, o, db),
+	return []Result{schemaResult(pctx, t, db), checkJobs(ctx, o, db)}
+}
+
+// schemaResult compares the database's migration version with this
+// binary's. Behind is unhealthy: the deploy did not run `calctl schema
+// apply`. Ahead is only a warning: a binary rolled back after a migration
+// usually still works, since migrations add rather than remove.
+func schemaResult(ctx context.Context, t timer, db *sql.DB) Result {
+	have, err := schema.Version(ctx, db)
+	if err != nil {
+		return t.result("database", Unhealthy, "", "schema version: "+err.Error())
 	}
+	return versionResult(t, have, schema.Latest())
+}
+
+func versionResult(t timer, have, want int) Result {
+	switch {
+	case have < want:
+		return t.result("database", Unhealthy, "",
+			fmt.Sprintf("schema at version %d, this binary needs %d: run calctl schema apply", have, want))
+	case have > want:
+		return t.result("database", Degraded, "",
+			fmt.Sprintf("schema at version %d, newer than this binary's %d (rolled back?)", have, want))
+	}
+	return t.result("database", Healthy, "", fmt.Sprintf("connected, schema at version %d", have))
 }
 
 // node is one host of a (possibly multi-host) DSN.

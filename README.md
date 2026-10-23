@@ -14,7 +14,7 @@ Postgres 16, sqlc) is on PATH.
 ## Co-existence harness
 
 ```sh
-scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), sabre schema loaded
+scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), schema migrated, dev accounts seeded
 php -S 127.0.0.1:8081 scripts/sabre-server.php   # reference sabre instance
 go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # Go server (default :8080)
 ```
@@ -81,7 +81,7 @@ calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
 |---|---|---|
 | `calendsd` | unauthenticated `OPTIONS` on the DAV listener | no HTTP answer |
 | `contacts-api` | unauthenticated `GET /api/v1/health` on `api_addr` (401 is healthy) | no answer, or no auth backend |
-| `database` | a pool opened the way calendsd opens it, plus the schema check | unreachable or schema missing; degraded when no DSN |
+| `database` | a pool opened the way calendsd opens it, plus the schema check | unreachable, schema missing or behind the binary; degraded when no DSN or the schema is newer |
 | `database[host:port]` | each host of a multi-host DSN on its own (only when there are several) | degraded when some nodes fail, unhealthy when all do |
 | `db-pool` | the running daemon's `go_sql_*` gauges from `metrics_addr` | degraded when in-use reaches the cap |
 | `jobs` | due, stuck-executing and discarded rows in the job queue | degraded when due work is >10m old or a claim is >15m old |

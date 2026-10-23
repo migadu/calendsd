@@ -16,9 +16,6 @@ package storage_test
 
 import (
 	"encoding/xml"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +23,7 @@ import (
 	"calendsd/internal/caldav"
 	davxml "calendsd/internal/dav/xml"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 // sharingDB builds a scratch database (sabre schema + calendsd extensions)
@@ -33,23 +31,10 @@ import (
 // sharees, and returns the backend over it.
 func sharingDB(t *testing.T, dbName string) *storage.CalDAV {
 	t.Helper()
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping %s: %s", t.Name(), reason)
-	}
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
-	if len(sqlFiles) == 0 || len(extFiles) == 0 {
-		t.Fatalf("schema files missing (sabre=%d, ext=%d)", len(sqlFiles), len(extFiles))
-	}
-	for _, f := range append(sqlFiles, extFiles...) {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
+	db := storagetest.NewDB(t, dbName)
 	// Alice owns one calendar (access=1). Bob and Carol are candidate sharees
 	// with principals; Dan is deliberately absent so his invite can't resolve.
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", `
+	mustExec(t, db, `
 		INSERT INTO principals (uri, email, displayname) VALUES
 			('principals/alice', 'alice@example.org', 'Alice'),
 			('principals/bob',   'bob@example.org',   'Bob'),
@@ -59,11 +44,6 @@ func sharingDB(t *testing.T, dbName string) *storage.CalDAV {
 			VALUES (currval('calendars_id_seq'), 'principals/alice', 1, 'default', 'Alice cal', '#ff0000');
 	`)
 
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
 	return &storage.CalDAV{DB: db}
 }
 

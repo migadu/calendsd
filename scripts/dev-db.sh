@@ -14,18 +14,20 @@ cd "$(dirname "$0")/.."
 export PGDATA PGHOST PGDATABASE
 
 load_schema() {
-    for f in dav/examples/sql/pgsql.*.sql; do
-        psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$f"
-    done
-    # calendsd extension tables (notifications, publications) — additive,
-    # new tables only, so a live sabre on the same DB is unaffected.
-    for f in scripts/schema/pgsql.*.sql; do
-        psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$f"
-    done
-    # examples/sql seeds principals/users with an 'admin' account
-    # (digesta1 for realm "SabreDAV", password "admin"), but no calendar;
-    # give admin an empty default calendar the same way sabre's PDO
-    # backend would.
+    # Every migration embedded in calctl (scripts/schema/migrations), the way
+    # the deploy applies them.
+    go run ./cmd/calctl schema apply --db "postgres:///$PGDATABASE?host=$PGHOST"
+    # The 'admin' account sabre's example schema seeded (digesta1 for realm
+    # "SabreDAV", password "admin"); the migrations leave it out.
+    psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" <<'SQL'
+INSERT INTO principals (uri, email, displayname) VALUES
+('principals/admin', 'admin@example.org', 'Administrator'),
+('principals/admin/calendar-proxy-read', NULL, NULL),
+('principals/admin/calendar-proxy-write', NULL, NULL);
+INSERT INTO users (username, digesta1) VALUES ('admin', '87fd274b7b6c01e48d7c2f965da8ddf7');
+SQL
+    # Give admin an empty default calendar the same way sabre's PDO backend
+    # would.
     psql -q -v ON_ERROR_STOP=1 -d "$PGDATABASE" <<'SQL'
 INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
 INSERT INTO calendarinstances (calendarid, principaluri, access, displayname, uri, description, calendarorder, calendarcolor, timezone, transparent)

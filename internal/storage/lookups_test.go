@@ -6,41 +6,20 @@ package storage_test
 
 import (
 	"database/sql"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 // lookupsDB builds a scratch database with the full schema, runs seed, and
 // opens it. The database is dropped when the test ends.
 func lookupsDB(t *testing.T, dbName, seed string) *sql.DB {
 	t.Helper()
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping %s: %s", t.Name(), reason)
-	}
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	t.Cleanup(func() { run(t, root, "dropdb", "--if-exists", dbName) })
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	extFiles, _ := filepath.Glob(filepath.Join(root, "scripts/schema/pgsql.*.sql"))
-	if len(sqlFiles) == 0 || len(extFiles) == 0 {
-		t.Fatalf("schema files missing (sabre=%d, ext=%d)", len(sqlFiles), len(extFiles))
-	}
-	for _, f := range append(sqlFiles, extFiles...) {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", seed)
+	db := storagetest.NewDB(t, dbName)
+	mustExec(t, db, seed)
 
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
 	return db
 }
 

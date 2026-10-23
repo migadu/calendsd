@@ -1,40 +1,30 @@
 package storage_test
 
 // calendar_availability against a scratch Postgres: the one-time move of
-// inbox dead properties when pgsql.calserver.sql is applied, the backend
+// inbox dead properties when the extension migration is applied, the backend
 // round-trip, the user-delete cleanup and the doctor's orphan check
 // (VAVAILABILITY-PLAN.md §3). Skips when the dev Postgres isn't reachable.
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"calendsd/internal/acl"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
+	"calendsd/scripts/schema"
 )
 
 func TestCalendarAvailability(t *testing.T) {
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping availability test: %s", reason)
-	}
-
 	const dbName = "calserver_availability"
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	sqlFiles, _ := filepath.Glob(filepath.Join(root, "dav/examples/sql/pgsql.*.sql"))
-	extFile := filepath.Join(root, "scripts/schema/pgsql.calserver.sql")
-	for _, f := range sqlFiles {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
+	// The sabre tables only, as before the extension schema existed.
+	db := storagetest.CreateDB(t, dbName)
+	mustExec(t, db, schema.Migrations()[0].SQL)
 	// Dead properties as a client wrote them before the table existed:
 	// alice under both names (the CalendarServer one must win), bob under
 	// the RFC name only, a deleted user's row, and an unrelated inbox
 	// property that must stay.
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", `
+	mustExec(t, db, `
 		INSERT INTO principals (uri, email, displayname) VALUES
 			('principals/alice', 'alice@example.org', 'Alice'),
 			('principals/bob', 'bob@example.org', 'Bob'),
@@ -49,13 +39,9 @@ func TestCalendarAvailability(t *testing.T) {
 			('calendars/dave/inbox', '{http://calendarserver.org/ns/}calendar-availability', 1, NULL),
 			('calendars/alice/inbox', '{DAV:}note', 1, 'keep me');
 	`)
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", extFile)
-
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
+	if _, err := schema.Apply(t.Context(), db, 0); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
 	backend := &storage.CalDAV{DB: db}
 
 	get := func(principal string) string {
@@ -94,11 +80,12 @@ func TestCalendarAvailability(t *testing.T) {
 		}
 	}
 
-	// Re-applying the schema moves nothing and keeps newer values.
+	// Running the extension migration again (as the runner does once on a
+	// database from before it) moves nothing and keeps newer values.
 	if err := backend.SetAvailability(t.Context(), "principals/alice", []byte("newer")); err != nil {
 		t.Fatal(err)
 	}
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", extFile)
+	mustExec(t, db, schema.Migrations()[1].SQL)
 	if got := get("principals/alice"); got != "newer" {
 		t.Errorf("re-run replaced alice's value with %q", got)
 	}

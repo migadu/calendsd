@@ -4,8 +4,6 @@ package storage_test
 // bounds, NULL-safe) against real Postgres. Skips when the dev DB is absent.
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -13,30 +11,16 @@ import (
 
 	"calendsd/internal/caldav"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
 )
 
 func TestCalendarQueryPrefilter(t *testing.T) {
-	root := repoRoot(t)
-	if reason := pgOnlyPrereqsMissing(); reason != "" {
-		t.Skipf("skipping calendar-query prefilter test: %s", reason)
-	}
-
 	const dbName = "calserver_prefilter"
-	run(t, root, "dropdb", "--if-exists", dbName)
-	run(t, root, "createdb", dbName)
-	for _, f := range mustGlob(t, filepath.Join(root, "dav/examples/sql/pgsql.*.sql")) {
-		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", f)
-	}
-	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c",
+	db := storagetest.NewDB(t, dbName)
+	mustExec(t, db,
 		`INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');
 		 INSERT INTO calendarinstances (calendarid, principaluri, access, uri)
 		 VALUES (currval('calendars_id_seq'), 'principals/admin', 1, 'default')`)
-
-	db, err := storage.Open(fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 
 	var calID int64
 	if err := db.QueryRow(`SELECT id FROM calendars LIMIT 1`).Scan(&calID); err != nil {
