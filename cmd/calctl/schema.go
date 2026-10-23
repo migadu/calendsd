@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"calendsd/scripts/schema"
+	"calendsd/internal/schema"
 )
 
 // handleSchema runs the schema migrations embedded in this binary
-// (scripts/schema/migrations) that the database has not had yet. The deploy
+// (internal/schema/migrations) that the database has not had yet. The deploy
 // runs it before restarting the server, so a release that changes the schema
 // never starts against a database without the change.
 func handleSchema(ctx context.Context, args []string) {

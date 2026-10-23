@@ -32,8 +32,8 @@ import (
 
 	"calendsd/internal/config"
 	"calendsd/internal/pgdial"
+	"calendsd/internal/schema"
 	"calendsd/internal/storage"
-	"calendsd/scripts/schema"
 )
 
 // DefaultTimeout bounds each check.

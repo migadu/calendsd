@@ -9,7 +9,7 @@
 -- was re-run on every deploy, so every statement in it is conditional, and it
 -- runs as a no-op on a database that already has it: the runner records it as
 -- applied there the first time. It is frozen now. A schema change is a new
--- numbered file next to this one, applied once (see scripts/schema/schema.go).
+-- numbered file next to this one, applied once (see internal/schema/schema.go).
 --
 -- No sabre-owned table is altered here except to widen a varchar and drop one
 -- index (see below).

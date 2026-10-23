@@ -22,7 +22,7 @@ import (
 // {cs}share / invite-reply / publish POSTs mutate real state, and the
 // notification inbox is served from Postgres. SharingSupport lives on the
 // sabre calendarinstances table; the notification inbox and publish state use
-// the additive calendsd extension tables (scripts/schema/migrations/0002_extension.sql)
+// the additive calendsd extension tables (internal/schema/migrations/0002_extension.sql)
 // that a live sabre on the same database never touches.
 var (
 	_ caldav.SharingSupport       = (*CalDAV)(nil)

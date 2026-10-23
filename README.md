@@ -2,7 +2,7 @@
 
 A Go CalDAV server ported from [sabre/dav](https://sabre.io/). It still stores
 its data in sabre's tables, but sabre is no longer a rollback target: the
-schema is calendsd's own now (`scripts/schema/migrations/`, applied by
+schema is calendsd's own now (`internal/schema/migrations/`, applied by
 `calctl schema apply`). See [PLAN.md](PLAN.md) for the porting plan; `dav/` is
 the reference sabre/dav checkout the port is derived from.
 

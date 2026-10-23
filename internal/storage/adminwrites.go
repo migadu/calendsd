@@ -200,7 +200,7 @@ func deleteUserCascadeRows(ctx context.Context, tx *sql.Tx, username string) err
 	// the rows hold correspondents' names and addresses, which must not
 	// outlive the deleted account. The contact_import ledger is deliberately
 	// NOT purged here — it is evidence about a migration run and is meant to
-	// survive the principal (see scripts/schema/migrations/0002_extension.sql).
+	// survive the principal (see internal/schema/migrations/0002_extension.sql).
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM contact_frecency WHERE principal = $1`, principal); err != nil {
 		return err

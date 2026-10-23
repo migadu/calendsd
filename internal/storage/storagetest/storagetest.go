@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"calendsd/internal/pgdial"
-	"calendsd/scripts/schema"
+	"calendsd/internal/schema"
 )
 
 // AdminSeed is the account sabre's example schema seeded and many tests

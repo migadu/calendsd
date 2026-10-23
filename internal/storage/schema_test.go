@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"calendsd/internal/schema"
 	"calendsd/internal/storage"
 	"calendsd/internal/storage/storagetest"
-	"calendsd/scripts/schema"
 )
 
 func TestApplyFresh(t *testing.T) {

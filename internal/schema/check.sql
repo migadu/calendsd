@@ -1,4 +1,4 @@
--- Read-only audit of everything scripts/schema/migrations/0002_extension.sql is
+-- Read-only audit of everything internal/schema/migrations/0002_extension.sql is
 -- responsible for: the tables and indexes it creates, the index it drops, the
 -- sabre columns it widens, and the columns of the tables it owns.
 --
@@ -6,7 +6,7 @@
 -- to answer "has this file been applied, and is what is there still what the
 -- code expects":
 --
---     psql -d sabredav -f scripts/schema/check.sql
+--     psql -d sabredav -f internal/schema/check.sql
 --
 -- Every row should say ok. Anything else is listed again in the summary at the
 -- end, with a count — so a clean database prints "0 problems".

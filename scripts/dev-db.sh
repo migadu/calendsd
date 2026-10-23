@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 export PGDATA PGHOST PGDATABASE
 
 load_schema() {
-    # Every migration embedded in calctl (scripts/schema/migrations), the way
+    # Every migration embedded in calctl (internal/schema/migrations), the way
     # the deploy applies them.
     go run ./cmd/calctl schema apply --db "postgres:///$PGDATABASE?host=$PGHOST"
     # The 'admin' account sabre's example schema seeded (digesta1 for realm

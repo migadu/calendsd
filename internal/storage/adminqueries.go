@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"calendsd/scripts/schema"
+	"calendsd/internal/schema"
 )
 
 // AdminQueries bundles the read-only SQL the admin panel needs beyond the

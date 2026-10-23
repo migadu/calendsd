@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"calendsd/internal/acl"
+	"calendsd/internal/schema"
 	"calendsd/internal/storage"
 	"calendsd/internal/storage/storagetest"
-	"calendsd/scripts/schema"
 )
 
 func TestCalendarAvailability(t *testing.T) {

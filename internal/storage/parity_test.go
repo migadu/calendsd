@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"calendsd/internal/auth"
+	"calendsd/internal/schema"
 	"calendsd/internal/server"
 	"calendsd/internal/storage"
 	"calendsd/internal/storage/storagetest"
-	"calendsd/scripts/schema"
 )
 
 const (
