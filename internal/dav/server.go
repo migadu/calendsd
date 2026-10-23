@@ -266,7 +266,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	de := AsError(err)
 	if de.Status >= 500 {
 		attrs := []any{"status", de.Status, "err", err}
-		if de.cause != nil {
+		if de.cause != nil && de.cause != err {
 			attrs = append(attrs, "cause", de.cause)
 		}
 		if r != nil {

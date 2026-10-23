@@ -205,9 +205,6 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 // run through the iTIP broker; SCHEDULE-STATUS updates are written back into
 // the stored object (sabre's calendarObjectChange + $modified).
 func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
-	if strings.EqualFold(r.Header.Get("Schedule-Reply"), "F") {
-		return data, nil
-	}
 	parentPath, _ := pathutil.Split(path)
 	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
@@ -242,6 +239,12 @@ func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byt
 		if err := checkAttendeeCap(newCal, limit); err != nil {
 			return nil, err
 		}
+	}
+	// Schedule-Reply: F stores without scheduling (RFC 6638 §8.1); it is
+	// checked after the cap so the advertised limit holds for every stored
+	// organizer copy, not only the ones that send.
+	if strings.EqualFold(r.Header.Get("Schedule-Reply"), "F") {
+		return data, nil
 	}
 	expanded := false
 	if p.ExpandGroups {

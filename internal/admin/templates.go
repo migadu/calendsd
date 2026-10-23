@@ -3,6 +3,7 @@ package admin
 import (
 	"embed"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -58,6 +59,7 @@ func renderPage(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, name, data); err != nil {
 		// Headers are gone; at least surface the failure in the body.
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("admin template failed", "template", name, "err", err)
+		http.Error(w, "internal error rendering "+name+"; see the server log", http.StatusInternalServerError)
 	}
 }

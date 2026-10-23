@@ -87,6 +87,9 @@ type RcptdBackend struct {
 // a real hash has shown the deployment's cost.
 const defaultDummyCost = 10
 
+// maxDummyCost bounds the dummy's cost (bcrypt cost 14 is about a second).
+const maxDummyCost = 14
+
 func (b *RcptdBackend) sem() chan struct{} {
 	b.semOnce.Do(func() {
 		n := runtime.NumCPU()
@@ -130,10 +133,11 @@ func (b *RcptdBackend) dummyHash() string {
 	// Generated outside the lock (shared with the credential cache): at a
 	// high cost this takes seconds, and other logins must not wait on it.
 	// Two racing first callers both generate; the second write wins, which
-	// is harmless. The cost is capped so an absurd stored cost cannot be
-	// used to wedge every unknown-user attempt.
-	if cost > bcrypt.MaxCost-10 {
-		cost = bcrypt.MaxCost - 10
+	// is harmless. The cost is capped at maxDummyCost so an absurd stored
+	// cost cannot be used to wedge every unknown-user attempt; a real hash
+	// above that is already an operational problem for known users.
+	if cost > maxDummyCost {
+		cost = maxDummyCost
 	}
 	gen, err := bcrypt.GenerateFromPassword([]byte("calserver-unknown-user-dummy"), cost)
 	if err != nil {

@@ -287,7 +287,7 @@ func (a *App) checkCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := a.Store.UserForPrincipal(r.Context(), "principals/"+username)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, CheckCredentials(user, username, password, a.Config.Realm))

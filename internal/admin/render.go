@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"log/slog"
 	"net/http"
 )
 
@@ -27,7 +28,8 @@ func (a *App) respond(w http.ResponseWriter, r *http.Request, template string, d
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("admin page failed", "path", r.URL.Path, "err", err)
+		http.Error(w, "internal error; see the server log", http.StatusInternalServerError)
 		return
 	}
 	if template == "" {

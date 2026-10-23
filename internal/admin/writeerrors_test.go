@@ -31,9 +31,13 @@ func TestWriteErrorMapping(t *testing.T) {
 		body string
 	}{
 		{fmt.Errorf("no users row for %q: %w", "x", storage.ErrNoPrincipal), http.StatusNotFound, "no such user"},
-		{errors.New("x still holds 2 calendar instance(s)"), http.StatusConflict, "still holds"},
-		{errors.New("creating users row (already exists?): dup"), http.StatusConflict, "already exist"},
+		{fmt.Errorf("x still holds 2 calendar instance(s): %w", storage.ErrHoldsCollections), http.StatusConflict, "still holds"},
+		{fmt.Errorf("user %q: %w", "x", storage.ErrAlreadyExists), http.StatusConflict, "already exists"},
+		{fmt.Errorf("invalid username %q: %w", "a/b", storage.ErrInvalidUsername), http.StatusConflict, "invalid username"},
 		{errors.New("pq: connection refused"), http.StatusInternalServerError, "see the server log"},
+		// A failed INSERT that is not a duplicate is an internal error even
+		// though it comes from the same code path as the duplicate case.
+		{errors.New("creating users row: pq: connection refused (host=db.internal)"), http.StatusInternalServerError, "see the server log"},
 	} {
 		for _, path := range []string{"/api/set-password", "/api/delete-user", "/api/create-user"} {
 			a := testAppB()

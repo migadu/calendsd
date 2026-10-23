@@ -81,35 +81,27 @@ func refused(r *http.Request, status int, reason string) {
 }
 
 // writeFailed answers a storage error from a write endpoint. A missing
-// principal is a 404; a guard the operator must act on (collections still
-// held, a duplicate user) keeps its text as a 409; anything else is an
-// internal error whose driver text stays in the log, not the response
-// (audit 6.17).
+// principal is a 404; a typed operator refusal (collections still held, a
+// duplicate user, an invalid name, not scheduled) keeps its text as a 409;
+// anything else is an internal error whose driver text stays in the log,
+// not the response (audit 6.17).
 func writeFailed(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, storage.ErrNoPrincipal):
 		refused(r, http.StatusNotFound, err.Error())
 		http.Error(w, "no such user", http.StatusNotFound)
-	case isOperatorGuard(err):
+	case storage.IsOperatorRefusal(err):
 		refused(r, http.StatusConflict, err.Error())
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
-		refused(r, http.StatusInternalServerError, err.Error())
-		http.Error(w, "the write failed; see the server log", http.StatusInternalServerError)
+		internalError(w, r, err)
 	}
 }
 
-// isOperatorGuard recognises the refusals storage phrases for the operator:
-// an account that still holds collections, a duplicate on create, an invalid
-// username. These are the 409s whose text the panel must show.
-func isOperatorGuard(err error) bool {
-	msg := err.Error()
-	for _, marker := range []string{"still holds", "already exist", "invalid username", "not scheduled for deletion", "nothing to update"} {
-		if strings.Contains(msg, marker) {
-			return true
-		}
-	}
-	return false
+// internalError logs err with the request and answers a generic 500.
+func internalError(w http.ResponseWriter, r *http.Request, err error) {
+	refused(r, http.StatusInternalServerError, err.Error())
+	http.Error(w, "internal error; see the server log", http.StatusInternalServerError)
 }
 
 type writeResult struct {
@@ -208,7 +200,7 @@ func (a *App) scheduleDelete(w http.ResponseWriter, r *http.Request) {
 		days = n
 	}
 	if err := a.Writes.ScheduleDelete(r.Context(), username, days, r.PostFormValue("reason")); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		writeFailed(w, r, err)
 		return
 	}
 	audit(r, "schedule-delete", "username", username, "days", days)
@@ -226,7 +218,7 @@ func (a *App) restoreUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.Writes.CancelDelete(r.Context(), username); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		writeFailed(w, r, err)
 		return
 	}
 	audit(r, "restore-user", "username", username)
@@ -248,7 +240,7 @@ func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
 	for _, m := range members {
 		p, err := a.Principals.PrincipalByPath(r.Context(), m)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			internalError(w, r, err)
 			return
 		}
 		if p == nil {
@@ -258,7 +250,7 @@ func (a *App) setDelegation(w http.ResponseWriter, r *http.Request) {
 	}
 	group := principal + "/calendar-proxy-" + kind
 	if err := a.Principals.SetGroupMemberSet(r.Context(), group, members); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, r, err)
 		return
 	}
 	audit(r, "set-delegation", "group", group, "members", strings.Join(members, ","))

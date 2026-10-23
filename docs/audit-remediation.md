@@ -808,6 +808,18 @@ findings on Phases 2–3, all fixed:
   lock with its cost capped; the admin panel keys loopback callers per
   username like the DAV limiter; a 429 carries no WWW-Authenticate and is
   counted as `limiter/throttled`.
+- Third review pass (Phase 4 and the corrections above): storage now
+  returns typed operator refusals (`ErrAlreadyExists` on a unique
+  violation, `ErrHoldsCollections`, `ErrInvalidUsername`, `ErrNotScheduled`)
+  and the panel maps only those to a 409 with text, so a failed INSERT
+  that is not a duplicate is a generic 500 instead of a 409 carrying the
+  driver message; every remaining `err.Error()` the panel sent is now
+  generic with the cause logged. `Schedule-Reply: F` no longer bypasses the
+  attendee cap. The rcptd dummy's cost is capped at 14, not 21. Principal
+  hrefs are cut only at a `principals/` path segment. COPY/MOVE with the
+  root as destination is refused by the ancestor guard. The three throttle
+  tests pin their clocks so a slow run cannot refill a token between the
+  20th and 21st attempt.
 - Noted, not changed: MOVE-overwrite's `BeforeUnbind` is ignored by the
   scheduling plugin (pre-existing, same as its MOVE-source guard); a
   SHA512-CRYPT-only deployment gets a bcrypt dummy for unknown users, which

@@ -22,6 +22,22 @@ import (
 // via errors.Is, rather than string-matching the message.
 var ErrNoPrincipal = errors.New("no principal")
 
+// Operator-facing refusals. The admin panel shows these verbatim as a 409;
+// any other error is an internal failure whose text stays in the log
+// (audit 6.17).
+var (
+	ErrAlreadyExists    = errors.New("already exists")
+	ErrHoldsCollections = errors.New("account still holds collections")
+	ErrInvalidUsername  = errors.New("invalid username")
+	ErrNotScheduled     = errors.New("not scheduled for deletion")
+)
+
+// IsOperatorRefusal reports whether err is one of the refusals above.
+func IsOperatorRefusal(err error) bool {
+	return errors.Is(err, ErrAlreadyExists) || errors.Is(err, ErrHoldsCollections) ||
+		errors.Is(err, ErrInvalidUsername) || errors.Is(err, ErrNotScheduled)
+}
+
 // AdminWrites holds the §1 carve-out mutations. Keep this type small and
 // this file the only place the admin app mutates tables directly.
 type AdminWrites struct {
@@ -34,7 +50,7 @@ type AdminWrites struct {
 // md5(user:realm:pass); the caller owns the realm.
 func (w *AdminWrites) CreateUser(ctx context.Context, username, digestA1, email, displayName string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
-		return fmt.Errorf("invalid username %q", username)
+		return fmt.Errorf("invalid username %q: %w", username, ErrInvalidUsername)
 	}
 	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
 		return createUserRows(ctx, tx, username, digestA1, email, displayName)
@@ -53,7 +69,10 @@ func createUserRows(ctx context.Context, tx *sql.Tx, username, digestA1, email, 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO users (username, digesta1) VALUES ($1, $2)`,
 		username, digestA1); err != nil {
-		return fmt.Errorf("creating users row (already exists?): %w", err)
+		if IsUniqueViolation(err) {
+			return fmt.Errorf("user %q: %w", username, ErrAlreadyExists)
+		}
+		return fmt.Errorf("creating users row: %w", err)
 	}
 	principal := "principals/" + username
 	if _, err := tx.ExecContext(ctx, `
@@ -62,7 +81,10 @@ INSERT INTO principals (uri, email, displayname) VALUES
 	($1 || '/calendar-proxy-read', NULL, NULL),
 	($1 || '/calendar-proxy-write', NULL, NULL)`,
 		principal, email, displayName); err != nil {
-		return fmt.Errorf("creating principal rows (already exist?): %w", err)
+		if IsUniqueViolation(err) {
+			return fmt.Errorf("principal %q: %w", principal, ErrAlreadyExists)
+		}
+		return fmt.Errorf("creating principal rows: %w", err)
 	}
 	return nil
 }
@@ -125,7 +147,7 @@ func (w *AdminWrites) UpdatePrincipal(ctx context.Context, uri string, email, di
 // as dangling/orphaned.
 func (w *AdminWrites) DeleteUser(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
-		return fmt.Errorf("invalid username %q", username)
+		return fmt.Errorf("invalid username %q: %w", username, ErrInvalidUsername)
 	}
 	principal := "principals/" + username
 	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
@@ -137,8 +159,8 @@ func (w *AdminWrites) DeleteUser(ctx context.Context, username string) error {
 			return err
 		}
 		if calendars > 0 || books > 0 {
-			return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade",
-				principal, calendars, books)
+			return fmt.Errorf("%s still holds %d calendar instance(s) and %d address book(s); delete or unshare them through DAV first, or use DeleteUserCascade: %w",
+				principal, calendars, books, ErrHoldsCollections)
 		}
 		return deletePrincipalRows(ctx, tx, principal, username)
 	})
@@ -155,7 +177,7 @@ func (w *AdminWrites) DeleteUser(ctx context.Context, username string) error {
 // orphaned-property sweep, same as DeleteUser.
 func (w *AdminWrites) DeleteUserCascade(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
-		return fmt.Errorf("invalid username %q", username)
+		return fmt.Errorf("invalid username %q: %w", username, ErrInvalidUsername)
 	}
 	return withTx(ctx, w.DB, func(tx *sql.Tx) error {
 		return deleteUserCascadeRows(ctx, tx, username)
@@ -301,7 +323,7 @@ type DeletedPrincipal struct {
 // once the window elapses. retainDays must be positive.
 func (w *AdminWrites) ScheduleDelete(ctx context.Context, username string, retainDays int, reason string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
-		return fmt.Errorf("invalid username %q", username)
+		return fmt.Errorf("invalid username %q: %w", username, ErrInvalidUsername)
 	}
 	if retainDays <= 0 {
 		return fmt.Errorf("retention days must be positive, got %d", retainDays)
@@ -331,7 +353,7 @@ ON CONFLICT (principal) DO UPDATE
 // account was not scheduled for deletion.
 func (w *AdminWrites) CancelDelete(ctx context.Context, username string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {
-		return fmt.Errorf("invalid username %q", username)
+		return fmt.Errorf("invalid username %q: %w", username, ErrInvalidUsername)
 	}
 	res, err := w.DB.ExecContext(ctx,
 		`DELETE FROM deleted_principals WHERE principal = $1`, "principals/"+username)
@@ -343,7 +365,7 @@ func (w *AdminWrites) CancelDelete(ctx context.Context, username string) error {
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("%q is not scheduled for deletion", username)
+		return fmt.Errorf("%q: %w", username, ErrNotScheduled)
 	}
 	return nil
 }

@@ -781,9 +781,9 @@ func TestWriteCarveOutErrors(t *testing.T) {
 		{"DeleteUser", "/api/delete-user",
 			url.Values{"username": {"x"}}, http.StatusInternalServerError},
 		{"ScheduleDelete", "/api/schedule-delete",
-			url.Values{"username": {"x"}}, http.StatusConflict},
+			url.Values{"username": {"x"}}, http.StatusInternalServerError},
 		{"CancelDelete", "/api/restore-user",
-			url.Values{"username": {"x"}}, http.StatusConflict},
+			url.Values{"username": {"x"}}, http.StatusInternalServerError},
 		{"DeleteOrphans", "/api/delete-orphans",
 			url.Values{"check": {"orphaned-instance"}}, http.StatusBadRequest},
 	}
