@@ -33,10 +33,15 @@ import (
 )
 
 // Options tune the API. Zero values take the documented defaults.
+// DefaultMaxBodyBytes caps a contacts API request body. The vcard field of a
+// single contact cannot legitimately approach 2 MiB (a photo-laden card is
+// tens of KB); bulk import is a CLI migration, not an HTTP route. The DAV
+// listener's 100 MiB cap was previously passed here (audit 5.9).
+const DefaultMaxBodyBytes = 2 << 20
+
 type Options struct {
-	// MaxBodyBytes caps a request body. The DAV server applies
-	// dav.DefaultMaxRequestBodySize (100 MiB) to its own listener; this
-	// listener has its own mux and inherits nothing, so it is set here.
+	// MaxBodyBytes caps a request body; zero means DefaultMaxBodyBytes. This
+	// listener has its own mux and inherits nothing from the DAV server.
 	MaxBodyBytes int64
 	// DefaultBookURI is where a create lands when the principal has such a
 	// book, and what is created for a principal with no book at all. "webmail"
@@ -60,7 +65,7 @@ type Options struct {
 
 func (o Options) withDefaults() Options {
 	if o.MaxBodyBytes <= 0 {
-		o.MaxBodyBytes = 100 << 20
+		o.MaxBodyBytes = DefaultMaxBodyBytes
 	}
 	if o.DefaultBookURI == "" {
 		o.DefaultBookURI = "webmail"

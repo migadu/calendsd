@@ -246,8 +246,7 @@ type Built struct {
 // own loopback listener ([server] api_addr); never mount it on the DAV one.
 func (b *Built) ContactsAPI(db *sql.DB) http.Handler {
 	return WrapAccessLogPathOnly(contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
-		MaxBodyBytes: dav.DefaultMaxRequestBodySize,
-		Logger:       slog.Default(),
+		Logger: slog.Default(),
 	}), b.accessLog)
 }
 
