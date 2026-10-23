@@ -547,6 +547,37 @@ func TestAdminQueries(t *testing.T) {
 		t.Fatalf("grace tombstone=%d userrow=%d, want 1/1 (future purge must not fire)", graceTombstone, graceRows)
 	}
 
+	// Audit 5.5: a cascade failure must not consume the tombstone. Expire
+	// grace, break the cascade (a table it deletes from is renamed away), and
+	// check the account is still scheduled afterwards; once the cascade works
+	// again the next run purges it.
+	if _, err := db.Exec(`UPDATE deleted_principals SET purge_after = now() - interval '1 hour' WHERE username = 'grace'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE groupmembers RENAME TO groupmembers_broken`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writes.PurgeExpired(t.Context()); err == nil {
+		t.Fatal("PurgeExpired succeeded with a broken cascade; want an error")
+	}
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM deleted_principals WHERE username = 'grace'),
+		(SELECT count(*) FROM users WHERE username = 'grace')`).Scan(&graceTombstone, &graceRows); err != nil {
+		t.Fatal(err)
+	}
+	if graceTombstone != 1 || graceRows != 1 {
+		t.Fatalf("after a failed cascade: tombstone=%d userrow=%d, want 1/1 (claim must roll back)", graceTombstone, graceRows)
+	}
+	if del, _ := users.IsDeleted(t.Context(), "principals/grace"); !del {
+		t.Fatal("grace can log in again after a failed purge")
+	}
+	if _, err := db.Exec(`ALTER TABLE groupmembers_broken RENAME TO groupmembers`); err != nil {
+		t.Fatal(err)
+	}
+	if purged, err := writes.PurgeExpired(t.Context()); err != nil || len(purged) != 1 || purged[0].Username != "grace" {
+		t.Fatalf("retry after repair: purged=%v err=%v, want grace", purged, err)
+	}
+
 	// DeleteUserCascade: alice owns a calendar (shared to bob) and an address
 	// book with objects, so plain DeleteUser must still refuse. Cascade drops
 	// the owned collections and their data — including bob's sharee instance
