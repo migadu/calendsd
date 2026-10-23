@@ -31,6 +31,9 @@ type AdminCounts struct {
 	Cards             int `json:"cards"`
 	SchedulingObjects int `json:"schedulingObjects"`
 	PropertyRows      int `json:"propertyRows"`
+	// Change-log rows, which [retention] change_log_days bounds.
+	CalendarChanges    int `json:"calendarChanges"`
+	AddressBookChanges int `json:"addressBookChanges"`
 }
 
 // Counts tallies every table the panel inspects.
@@ -49,6 +52,8 @@ func (q *AdminQueries) Counts(ctx context.Context) (*AdminCounts, error) {
 		{"cards", &c.Cards},
 		{"schedulingobjects", &c.SchedulingObjects},
 		{"propertystorage", &c.PropertyRows},
+		{"calendarchanges", &c.CalendarChanges},
+		{"addressbookchanges", &c.AddressBookChanges},
 	} {
 		if err := q.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+t.table).Scan(t.dst); err != nil {
 			return nil, fmt.Errorf("counting %s: %w", t.table, err)
@@ -74,8 +79,9 @@ func (q *AdminQueries) SchemaPresent(ctx context.Context) error {
 }
 
 // AdminChange is one change-log row for the dashboard's recent-activity
-// list. The change tables carry no timestamp (ADMIN-PLAN.md §3.1):
-// LastModified is joined from the live object and is nil for deletes.
+// list. LastModified is joined from the live object and is nil for deletes.
+// The change rows' own created column (migration 0003) is not used: rows
+// older than that migration all carry its time.
 type AdminChange struct {
 	Kind          string `json:"kind"` // "calendar" or "addressbook"
 	CollectionID  string `json:"collectionId"`
@@ -89,7 +95,8 @@ type AdminChange struct {
 
 // RecentChanges returns the newest change-log rows across calendars and
 // address books, most recent first (by change-row id per table, interleaved
-// by nothing better — there is no cross-table ordering without timestamps).
+// by nothing better; created is only meaningful for rows newer than
+// migration 0003).
 func (q *AdminQueries) RecentChanges(ctx context.Context, limit int) ([]AdminChange, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50

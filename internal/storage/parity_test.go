@@ -28,6 +28,8 @@ import (
 	"calendsd/internal/auth"
 	"calendsd/internal/server"
 	"calendsd/internal/storage"
+	"calendsd/internal/storage/storagetest"
+	"calendsd/scripts/schema"
 )
 
 const (
@@ -56,12 +58,19 @@ func TestParity(t *testing.T) {
 	if len(sqlFiles) == 0 {
 		t.Fatal("no schema files found")
 	}
-	// The calendsd extension tables are additive; loading them into the
-	// parity database (which a live sabre also runs against) proves sabre is
-	// unaffected by their presence.
-	extFile := filepath.Join(root, "scripts/schema/migrations/0002_extension.sql")
-	for _, f := range append(sqlFiles, extFile) {
+	// The calendsd migrations on top: running them over sabre's own schema
+	// and then sabre against the result proves sabre is unaffected by them.
+	for _, f := range sqlFiles {
 		run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-f", f)
+	}
+	parityConn, err := storage.Open(storagetest.DSN(parityDB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = schema.Apply(t.Context(), parityConn, 0)
+	parityConn.Close()
+	if err != nil {
+		t.Fatal(err)
 	}
 	run(t, root, "psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", parityDB, "-c",
 		`INSERT INTO calendars (synctoken, components) VALUES (1, 'VEVENT,VTODO');

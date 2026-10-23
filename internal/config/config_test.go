@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -43,6 +44,7 @@ auto_schedule_prefixes = ["resource", "location"]
 
 [retention]
 deleted_days = 14
+change_log_days = 30
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -84,6 +86,9 @@ deleted_days = 14
 	}
 	if cfg.Retention.DeletedDays != 14 {
 		t.Errorf("Retention.DeletedDays = %d, want 14", cfg.Retention.DeletedDays)
+	}
+	if cfg.Retention.ChangeLogDays != 30 {
+		t.Errorf("Retention.ChangeLogDays = %d, want 30", cfg.Retention.ChangeLogDays)
 	}
 }
 
@@ -211,5 +216,14 @@ func TestParseEscapedQuoteBeforeHash(t *testing.T) {
 	}
 	if got := flat["server.rcptd.token"]; got != `a"#b` {
 		t.Fatalf("token = %#v, want %q", got, `a"#b`)
+	}
+}
+
+func TestChangeLogRetention(t *testing.T) {
+	const day = 24 * time.Hour
+	for days, want := range map[int]time.Duration{0: DefaultChangeLogDays * day, 30: 30 * day, -1: 0} {
+		if got := ChangeLogRetention(days); got != want {
+			t.Errorf("ChangeLogRetention(%d) = %v, want %v", days, got, want)
+		}
 	}
 }

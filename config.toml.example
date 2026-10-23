@@ -212,7 +212,7 @@ addr = ""                   # Listen address (empty uses 127.0.0.1:8092). Basic
                             # auth resends the password: loopback/LAN or TLS only.
 
 
-# ACCOUNT RETENTION
+# RETENTION
 # =============================================================================
 # Soft-delete retention. `calctl principal delete <user>` schedules an account
 # for deletion instead of removing it immediately: the account can no longer
@@ -223,6 +223,10 @@ addr = ""                   # Listen address (empty uses 127.0.0.1:8092). Basic
 deleted_days = 30           # Days to keep a soft-deleted account before purge.
                             # 0 uses the built-in default (30). Changing this
                             # never moves an already-scheduled purge.
+change_log_days = 90        # Days to keep sync change rows. A client whose
+                            # sync token is older gets valid-sync-token and
+                            # resyncs the collection in full. 0 uses the
+                            # built-in default (90); negative keeps them all.
 
 
 # WEBDAV-PUSH

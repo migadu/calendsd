@@ -44,7 +44,7 @@ func (b *CardDAV) ChangesForAddressBook(ctx context.Context, addressBookID, sync
 
 // changesSince answers a sync REPORT for one collection. An empty token is an
 // initial sync (every member as added, at the current token); nil, nil means
-// an unknown collection or an unparseable token.
+// an unknown collection, an unparseable token, or one below the pruned floor.
 func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, syncToken string, limit int) (*dav.ChangeSet, error) {
 	if syncToken == "" {
 		var currentToken int64
@@ -110,6 +110,18 @@ func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	// Rows below the floor may have been pruned, so a token below it cannot
+	// be answered with a delta. Read after the rows: a prune deletes and
+	// raises the floor in one transaction, so one committing between the two
+	// reads shows here and the possibly incomplete rows are not used.
+	var floor int64
+	err = db.QueryRowContext(ctx, `SELECT synctoken_floor FROM `+log.collections+` WHERE id = $1`, collectionID).Scan(&floor)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if since < floor {
+		return nil, nil // pruned: the REPORT answers valid-sync-token
 	}
 
 	out := &dav.ChangeSet{SyncToken: syncToken}

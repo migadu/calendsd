@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -78,8 +79,9 @@ func main() {
 	var pushWorker *push.Worker
 	var jobQueue *jobs.Queue
 	var contactsAPI http.Handler
+	var db *sql.DB
 	if m.DSN != "" {
-		db, err := storage.OpenPool(m.DSN, m.DBPool)
+		db, err = storage.OpenPool(m.DSN, m.DBPool)
 		if err != nil {
 			slog.Error("opening database", "err", err)
 			os.Exit(1)
@@ -135,6 +137,17 @@ func main() {
 			defer background.Done()
 			pushWorker.Run(ctx)
 		}()
+	}
+
+	// Prune sync change rows older than [retention].change_log_days.
+	if db != nil {
+		if retention := config.ChangeLogRetention(m.File.Retention.ChangeLogDays); retention > 0 {
+			background.Add(1)
+			go func() {
+				defer background.Done()
+				storage.RunChangeLogPruner(ctx, db, retention, time.Hour)
+			}()
+		}
 	}
 
 	// Process durable scheduling sends (per-user retries + relay-native sends).

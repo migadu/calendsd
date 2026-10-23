@@ -58,6 +58,8 @@ func handleStats(ctx context.Context, args []string) {
 		{"cards", counts.Cards},
 		{"scheduling objects", counts.SchedulingObjects},
 		{"property rows", counts.PropertyRows},
+		{"calendar changes", counts.CalendarChanges},
+		{"address book changes", counts.AddressBookChanges},
 	} {
 		fmt.Fprintf(w, "%s\t%d\n", c.label, c.n)
 	}

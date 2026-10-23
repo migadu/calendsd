@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -158,6 +159,11 @@ type Config struct {
 		// purge job removes it. 0 means the built-in default (see
 		// RetentionDays). Only consulted when scheduling a deletion.
 		DeletedDays int
+		// ChangeLogDays is how long sync change rows are kept before the
+		// server prunes them; a client whose sync token is older resyncs in
+		// full. 0 means the built-in default, negative keeps them all (see
+		// ChangeLogRetention).
+		ChangeLogDays int
 	}
 	// Push holds WebDAV-Push settings (PUSH-PLAN.md). Off by default; when
 	// Enabled, the VAPID keys and TopicSecret must be set or the server fails
@@ -191,6 +197,22 @@ func RetentionDays(days int) int {
 		return DefaultRetentionDays
 	}
 	return days
+}
+
+// DefaultChangeLogDays is the change-log retention when
+// [retention].change_log_days is unset or 0.
+const DefaultChangeLogDays = 90
+
+// ChangeLogRetention turns [retention].change_log_days into a duration,
+// applying DefaultChangeLogDays; 0 means keep every change row.
+func ChangeLogRetention(days int) time.Duration {
+	switch {
+	case days < 0:
+		return 0
+	case days == 0:
+		days = DefaultChangeLogDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // Load reads and parses a TOML config file.
@@ -303,6 +325,7 @@ func Load(path string) (*Config, error) {
 	cfg.Admin.AuthFile = str("admin.auth_file")
 	cfg.Admin.Addr = str("admin.addr")
 	cfg.Retention.DeletedDays = integer("retention.deleted_days")
+	cfg.Retention.ChangeLogDays = integer("retention.change_log_days")
 	cfg.Push.Enabled = boolean("push.enabled")
 	cfg.Push.VAPIDSubject = str("push.vapid_subject")
 	cfg.Push.VAPIDPublicKey = str("push.vapid_public_key")
