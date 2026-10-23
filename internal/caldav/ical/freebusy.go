@@ -3,6 +3,7 @@ package ical
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -92,6 +93,7 @@ func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]
 	for _, data := range objects {
 		cal, err := Decode(data)
 		if err != nil {
+			logSkippedObject("decode", err)
 			continue
 		}
 		ResolveNonIANATZIDs(cal)
@@ -104,7 +106,12 @@ func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]
 				}
 				p, err := eventBusyPeriods(comp, start, end, loc, overrides)
 				if err != nil {
-					return nil, err
+					// One sabre-written object with an unparseable DTSTART or
+					// DURATION must not fail the whole free-busy answer
+					// (audit 6.14). The instance-cap fallback is handled
+					// inside eventBusyPeriods and never reaches here.
+					logSkippedObject("event", err)
+					continue
 				}
 				periods = append(periods, p...)
 			case "VFREEBUSY":
@@ -112,13 +119,22 @@ func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]
 				// periods, like vobject's FreeBusyGenerator::calculateBusy.
 				p, err := freeBusyComponentPeriods(comp, start, end)
 				if err != nil {
-					return nil, err
+					logSkippedObject("freebusy", err)
+					continue
 				}
 				periods = append(periods, p...)
 			}
 		}
 	}
 	return periods, nil
+}
+
+// logSkippedObject records an object free-busy could not use. Decode
+// failures were silently skipped before; a skip is now visible either way so
+// an operator can find the broken object instead of a user wondering why a
+// slot reads free.
+func logSkippedObject(stage string, err error) {
+	slog.Default().Warn("free-busy: skipping unusable object", "stage", stage, "err", err)
 }
 
 // Period is a half-open busy interval [Start, End).

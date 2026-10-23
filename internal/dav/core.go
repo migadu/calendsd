@@ -738,6 +738,12 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 	if strings.HasPrefix(destination, sourcePath+"/") {
 		return nil, ErrConflict("The destination may not be part of the same subtree as the source path.")
 	}
+	if strings.HasPrefix(sourcePath, destination+"/") {
+		// The converse: a COPY/MOVE of an object onto its own collection with
+		// Overwrite would delete the collection (and the source with it)
+		// before the copy could fail (audit 6.19). Same bug in sabre.
+		return nil, ErrForbidden("The destination may not be an ancestor of the source path.")
+	}
 	return &copyMoveInfo{destination: destination, destinationExists: destinationExists, depth: depth}, nil
 }
 

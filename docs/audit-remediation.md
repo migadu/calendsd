@@ -770,6 +770,50 @@ body → 413 (`api_test.go:330` already exercises 413 at a small cap).
 
 ## 6. Phase 4 — low severity (batch into one or two commits)
 
+**Status (2026-10-23): implemented and committed, all nineteen items, in
+three commits by area.** Deviations from the table: 6.1 AAD is
+`worker ‖ username ‖ recipient` (no job id, no fallback); 6.3 generic 500
+body with the cause logged, and the provisioning reason is generic at its
+source in `rcptd.go`; 6.4 is a `dav.TaggedURIGate` hook the ACL plugin
+implements, failing the whole If header before any token is evaluated; 6.5
+also drops notifications the principal *sent* as sharer, plus two doctor
+checks; 6.6 covers `RelayOverride` and `Cancel` too with `ErrJobExecuting`;
+6.7 is a 5-minute TTL; 6.8 adds `Proxy-Authorization` only; 6.9 raises both
+wire timeouts to 300 s and adds `server.WrapRequestDeadline` (a context
+deadline on every request); 6.10 removes the cwd entry from both lists and
+calctl now uses `config.DefaultConfigPaths`; 6.11 warns on stderr; 6.12 sets
+`URL.Path` directly; 6.13 is the `DO UPDATE ... WHERE principal_uri` form →
+409; 6.14 skips and logs; 6.16 reorders only; 6.17 keys on
+`storage.ErrNoPrincipal` (`SetPassword` now wraps it) and a small set of
+operator-guard phrasings; 6.18 cuts the href at `principals/`; 6.19 as
+described.
+
+**Post-review corrections (second review pass, same day).** The reviewer's
+findings on Phases 2–3, all fixed:
+- 4.4: the attendee cap applies to the **organizer's** copy only; an
+  attendee saving their own copy of a large meeting sends one REPLY and is
+  no longer refused or marked 5.3. The check moved from the caldav plugin's
+  interceptor into the scheduling plugin, which knows the owner's addresses.
+- 4.6: `SchedulePlugin.Now` pins the clock; the horizon test was anchored on
+  the wall clock and would have flipped on 2026-11-15. A too-dense incoming
+  series now reads as a conflict, not a free pass.
+- 5.2: the 403 for non-per-user properties is registered before the
+  per-user handler, so a read-only delegate's mixed PROPPATCH is
+  all-or-nothing (the per-user prop reports 424).
+- 5.8: the limiter takes the **last** X-Forwarded-For entry (the proxy's
+  own observation; the first is client-chosen); it counts only
+  `ReasonBadCredentials`, so an rcptd or provisioning fault cannot lock a
+  user out; the rcptd semaphore brackets only the bcrypt work, not the
+  lookup round trip; the unknown-user dummy is generated outside the cache
+  lock with its cost capped; the admin panel keys loopback callers per
+  username like the DAV limiter; a 429 carries no WWW-Authenticate and is
+  counted as `limiter/throttled`.
+- Noted, not changed: MOVE-overwrite's `BeforeUnbind` is ignored by the
+  scheduling plugin (pre-existing, same as its MOVE-source guard); a
+  SHA512-CRYPT-only deployment gets a bcrypt dummy for unknown users, which
+  inverts rather than removes the tell (document, or switch the dummy
+  scheme if such a deployment exists).
+
 | # | Item | File | Fix |
 |---|------|------|-----|
 | 6.1 | AEAD has no associated data | `jobs/aead.go:99` | AAD = `username ‖ worker ‖ recipient` from the job args. The job id is a DB serial assigned *after* `Seal` runs (`jobs.go:216` → `store.go:41`), so it cannot be bound. Old rows already fail-safe to discard (`errUndecryptable`) and live at most one credential TTL, so no fallback machinery: ship it. |

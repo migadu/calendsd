@@ -56,6 +56,16 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 	}
 	start := time.Now()
 	defer func() { b.Metrics.ObserveAuthCheck("digest", time.Since(start).Seconds()) }()
+	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
+	// downgrade path sabre's Digest also rejects. Checked before the user
+	// lookup so the answer does not differ between known and unknown users
+	// (audit 6.16).
+	if params["qop"] != "auth" {
+		// A protocol problem, not wrong credentials: "error", so a
+		// misbehaving client doesn't read as a brute force.
+		b.Metrics.AuthAttempt("digest", "error")
+		return "", errors.New("Unsupported digest qop value")
+	}
 	a1, err := b.HashA1(r.Context(), b.Realm, username)
 	if err != nil {
 		// An outage, not wrong credentials: "error", so it doesn't read as a
@@ -69,14 +79,6 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 		return "", ErrBadCredentials
 	}
 
-	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
-	// downgrade path sabre's Digest also rejects.
-	if params["qop"] != "auth" {
-		// A protocol problem, not wrong credentials: "error", so a
-		// misbehaving client doesn't read as a brute force.
-		b.Metrics.AuthAttempt("digest", "error")
-		return "", errors.New("Unsupported digest qop value")
-	}
 	issued, valid := b.verifyNonce(params["nonce"])
 	if !valid {
 		b.Metrics.AuthAttempt("digest", "error")

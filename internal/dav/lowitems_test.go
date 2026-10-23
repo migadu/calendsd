@@ -1,7 +1,7 @@
 package dav
 
-// Phase 4 low items at the dav layer: 500 bodies (6.3) and tagged-URI gating
-// in the If header (6.4).
+// Phase 4 low items at the dav layer: 500 bodies (6.3), tagged-URI gating in
+// the If header (6.4), COPY/MOVE onto an ancestor (6.19).
 
 import (
 	"context"
@@ -73,5 +73,25 @@ func TestIfHeaderTaggedURIIsGated(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("If on own resource = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCopyMoveOntoAncestorRefused(t *testing.T) {
+	for _, method := range []string{"COPY", "MOVE"} {
+		obj := &memFile{name: "e.ics", contents: []byte("e"), etag: `"e"`}
+		home := newMemColl("home", obj)
+		root := newMemColl("root", newMemColl("calendars", home))
+		s := NewServer("/", root)
+		req := httptest.NewRequest(method, "/calendars/home/e.ics", nil)
+		req.Header.Set("Destination", "/calendars/home")
+		req.Header.Set("Overwrite", "T")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s onto ancestor = %d, want 403: %s", method, rec.Code, rec.Body.String())
+		}
+		if !root.ChildExists(t.Context(), "calendars") || !home.ChildExists(t.Context(), "e.ics") {
+			t.Errorf("%s onto ancestor destroyed the collection or the source", method)
+		}
 	}
 }
