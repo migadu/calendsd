@@ -398,14 +398,26 @@ func (p *Plugin) expandPropertyReport(body []byte, path string, w http.ResponseW
 	if d := r.Header.Get("Depth"); d == "1" {
 		depth = 1
 	}
-	responses, err := p.expandProperties(r.Context(), path, req.Property, depth)
+	responses, err := p.expandProperties(r.Context(), path, req.Property, depth, 0)
 	if err != nil {
 		return err
 	}
 	return p.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: responses})
 }
 
-func (p *Plugin) expandProperties(ctx context.Context, path string, requested []expandPropEntry, depth int) ([]davxml.Response, error) {
+// maxExpandDepth bounds how deep nested <property> elements of an
+// expand-property REPORT may go. The nesting is request-driven, and each
+// level multiplies the fan-out over every href the level above returned, so
+// a few KB of body could expand a proxy-group cycle into an exponential
+// amount of work (audit 5.1). Sabre's own clients nest at most three deep.
+const maxExpandDepth = 8
+
+// expandProperties resolves one level of an expand-property REPORT. depth is
+// the request's Depth header; level is the nesting level of `requested`.
+func (p *Plugin) expandProperties(ctx context.Context, path string, requested []expandPropEntry, depth, level int) ([]davxml.Response, error) {
+	if level > maxExpandDepth {
+		return nil, dav.ErrBadRequest("expand-property nests more than %d levels deep", maxExpandDepth)
+	}
 	var names []xml.Name
 	childReq := map[xml.Name][]expandPropEntry{}
 	for _, entry := range requested {
@@ -437,8 +449,14 @@ func (p *Plugin) expandProperties(ctx context.Context, path string, requested []
 					if err != nil {
 						continue // not a resource on this server
 					}
-					sub, err := p.expandProperties(ctx, childPath, children, 0)
+					sub, err := p.expandProperties(ctx, childPath, children, 0, level+1)
 					if err != nil {
+						// An href may point anywhere; one that resolves to
+						// nothing yields nothing for that href rather than
+						// failing the whole report.
+						if dav.AsError(err).Status == http.StatusNotFound {
+							continue
+						}
 						return nil, err
 					}
 					nested = append(nested, sub...)

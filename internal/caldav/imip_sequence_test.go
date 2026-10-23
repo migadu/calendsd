@@ -3,7 +3,7 @@ package caldav
 import (
 	"testing"
 
-	"calserver/internal/caldav/ical"
+	"calendsd/internal/caldav/ical"
 )
 
 // The coalesce predicate casts args->>'sequence' in SQL, so the value must
