@@ -17,10 +17,14 @@ import (
 var maxDate = time.Date(2038, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // maxRecurrences bounds every recurrence-set iteration, mirroring sabre
-// vobject's RRuleIterator::maxRecurrences. Without it a crafted rule
-// (FREQ=SECONDLY, open-ended query range) would iterate billions of times
-// and pin a core — a remotely triggerable DoS. On reaching the cap we stop
-// as if the rule ended, which is what sabre does.
+// vobject's Settings::$maxRecurrences (its EventIterator::valid throws
+// MaxInstancesExceededException past it, which sabre lets escape as a 500).
+// Without it a crafted rule (FREQ=SECONDLY, open-ended query range) would
+// iterate billions of times and pin a core — a remotely triggerable DoS. A
+// finite rule still producing instances at the cap is NOT truncated to the
+// 3500th occurrence's end (that made the object vanish from time-range
+// queries on both servers past that date, audit 4.5): its bound is UNTIL
+// when it has one, else the 2038 sentinel, like an infinite rule.
 const maxRecurrences = 3500
 
 // ErrNoComponent is returned for calendar data without a VEVENT/VTODO/VJOURNAL.
