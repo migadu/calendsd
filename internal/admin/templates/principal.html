@@ -77,7 +77,7 @@
 {{else}}
 <h3 class="warn">Schedule deletion</h3>
 <p class="muted">Soft-delete {{.User.Username}}: it can no longer log in, but its data is kept until the retention window elapses and the purge job runs. Reversible with Restore until then.</p>
-<form class="inline" onsubmit="event.preventDefault(); adminPost('/api/schedule-delete', this, 'schedresult')">
+<form class="inline" onsubmit="event.preventDefault(); if (confirm('Schedule {{.User.Username}} for deletion? It can no longer log in from now on.')) adminPost('/api/schedule-delete', this, 'schedresult')">
 <input type="hidden" name="username" value="{{.User.Username}}">
 in <input name="days" type="number" min="1" size="4" placeholder="days"> days
 <input name="reason" size="24" placeholder="reason (optional)">

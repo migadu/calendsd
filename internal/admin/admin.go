@@ -109,7 +109,11 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'")
+		// frame-ancestors 'none' + X-Frame-Options: the panel is loopback-only
+		// and its mutations need the X-Admin-Request header, but a framed page
+		// is still a clickjacking surface (audit 5.7).
+		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		h.Set("X-Frame-Options", "DENY")
 		next.ServeHTTP(w, r)
 	})
 }
