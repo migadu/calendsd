@@ -39,9 +39,9 @@ func PruneChangeLogs(ctx context.Context, db *sql.DB, cutoff time.Time) (int64, 
 				removed += n
 			}
 			total += removed
-			// No candidates left, or only ones that cannot move: rows at or
-			// above their collection's current token, which no client token
-			// can have skipped. Asking again would return the same ones.
+			// No candidates left, or none this server could prune: another
+			// server holds their prune locks. Asking again would return the
+			// same ones.
 			if removed == 0 {
 				break
 			}
@@ -51,13 +51,16 @@ func PruneChangeLogs(ctx context.Context, db *sql.DB, cutoff time.Time) (int64, 
 }
 
 // pruneCandidates lists collections whose oldest change row is older than
-// cutoff: one probe of the (collection, synctoken) index per collection.
+// cutoff: one probe of the (collection, synctoken) index per collection. A
+// collection whose oldest row is at or above its current token is left out:
+// no prune can remove that row, and listing it again on every pass could
+// fill the LIMIT and starve the collections that can move.
 func pruneCandidates(ctx context.Context, db *sql.DB, log changeLog, cutoff time.Time) ([]int64, error) {
 	rows, err := db.QueryContext(ctx, `
 SELECT c.id FROM `+log.collections+` c
- CROSS JOIN LATERAL (SELECT created FROM `+log.changes+` ch
+ CROSS JOIN LATERAL (SELECT created, synctoken FROM `+log.changes+` ch
                       WHERE ch.`+log.idColumn+` = c.id ORDER BY synctoken LIMIT 1) oldest
- WHERE oldest.created < $1
+ WHERE oldest.created < $1 AND oldest.synctoken < c.synctoken
  LIMIT 100`, cutoff)
 	if err != nil {
 		return nil, err
@@ -76,10 +79,21 @@ SELECT c.id FROM `+log.collections+` c
 
 // pruneCollection removes one batch of a collection's old rows and raises its
 // floor, in one transaction. The floor update comes last, so the collection's
-// row lock, which every writer to it needs, is held only until the commit.
+// row lock, which every writer to it needs, is held only until the commit;
+// that is also the order a collection delete takes the two (change rows, then
+// the collection row), so the two cannot deadlock.
+//
+// Another server pruning the same collection could deadlock with this one on
+// the overlapping DELETEs, so a collection whose prune lock is taken is
+// skipped: the other server is doing it.
 func pruneCollection(ctx context.Context, db *sql.DB, log changeLog, id int64, cutoff time.Time) (int64, error) {
 	var n int64
 	err := withTx(ctx, db, func(tx *sql.Tx) error {
+		var locked bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT pg_try_advisory_xact_lock(hashtext($1), $2)`, log.changes, id).Scan(&locked); err != nil || !locked {
+			return err
+		}
 		var floor int64
 		if err := tx.QueryRowContext(ctx, `
 SELECT least(

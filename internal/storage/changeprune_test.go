@@ -18,8 +18,8 @@ func TestPruneChangeLogs(t *testing.T) {
 	db := storagetest.NewDB(t, "calserver_changeprune")
 	// Calendar 1: tokens 1–5 are old (3 twice, as rows that share a token),
 	// 6–10 recent. Calendar 2: only old rows. Calendar 3: an old row at its
-	// current token: the floor rises to it, the row stays, and the prune
-	// still finishes. Address book 1 like calendar 2.
+	// current token, which no prune can remove: it is left alone, and
+	// the prune still finishes. Address book 1 like calendar 2.
 	mustExec(t, db, `
 		INSERT INTO calendars (id, synctoken, components) VALUES (1, 11, 'VEVENT'), (2, 4, 'VEVENT'), (3, 5, 'VEVENT');
 		INSERT INTO calendarchanges (uri, synctoken, calendarid, operation, created)
@@ -58,7 +58,7 @@ func TestPruneChangeLogs(t *testing.T) {
 		table string
 		id    int
 		want  int
-	}{{"calendars", 1, 6}, {"calendars", 2, 4}, {"calendars", 3, 5}, {"addressbooks", 1, 3}} {
+	}{{"calendars", 1, 6}, {"calendars", 2, 4}, {"calendars", 3, 0}, {"addressbooks", 1, 3}} {
 		if got := floor(c.table, c.id); got != c.want {
 			t.Errorf("%s %d floor = %d, want %d", c.table, c.id, got, c.want)
 		}
@@ -96,5 +96,26 @@ func TestPruneChangeLogs(t *testing.T) {
 	card := &storage.CardDAV{DB: db}
 	if cs, err := card.ChangesForAddressBook(ctx, "1", "2", 1, 0); err != nil || cs != nil {
 		t.Errorf("address book token below the floor = %v, %v; want invalid-sync-token", cs, err)
+	}
+
+	// A collection another server is pruning (its prune lock held) is
+	// skipped, not waited for.
+	mustExec(t, db, `
+		INSERT INTO calendarchanges (uri, synctoken, calendarid, operation, created)
+		VALUES ('late.ics', 6, 2, 1, now() - interval '100 days');
+		UPDATE calendars SET synctoken = 8 WHERE id = 2;`)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('calendarchanges'), 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := storage.PruneChangeLogs(ctx, db, cutoff); err != nil || n != 0 {
+		t.Errorf("prune of a locked collection removed %d, %v; want it skipped", n, err)
+	}
+	tx.Rollback()
+	if n, err := storage.PruneChangeLogs(ctx, db, cutoff); err != nil || n != 1 {
+		t.Errorf("prune after the lock is released removed %d, %v; want 1", n, err)
 	}
 }
