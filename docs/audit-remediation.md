@@ -45,6 +45,24 @@ a real outage or a real leak here even where it is parity.
 
 ## 2. Phase 0 — before any code
 
+**Status (2026-10-23, run last, after Phases 1–4): `govulncheck ./...`
+ran from a connected host.** Against the Go 1.26.4 toolchain this tree
+was built with it reported 22 reachable advisories: 21 in the standard
+library (net/http ×9, crypto/tls ×3, html/template ×3, crypto/x509,
+encoding/asn1, encoding/xml, net/textproto, net/url, net/http/httputil),
+the last of them (GO-2026-6809, crypto/x509) fixed only in Go 1.26.10, and
+one in `golang.org/x/text` v0.40.0 (GO-2026-6629, fixed in v0.41.0).
+Remediation: the dev shell's flake (`ansible-freebsd3/flake.nix`, which the
+build roles use through `nix develop <repo> -c`) now builds Go 1.26.10 from
+the upstream source on top of the channel's derivation, `go.mod` requires
+`go 1.26.10` so an older toolchain cannot silently build a vulnerable
+binary, and `golang.org/x/text` is at v0.41.0. `golang.org/x/crypto` is
+bumped to v0.56.0 as well: its four advisories (ssh ×3, openpgp) are in
+packages calserver never imports, but the bump costs nothing. Rescan under
+Go 1.26.10: **0 reachable vulnerabilities**; the only residual is
+GO-2026-5932 (openpgp unmaintained, no fix), uncalled. Drop the flake pin
+once nixos-26.05 reaches 1.26.10.
+
 1. Run `govulncheck ./...` from a host with network access; file anything it
    reports as additional items here.
 2. Add a `testdata/hostile/` directory with the hand-made iCalendar objects

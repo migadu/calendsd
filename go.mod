@@ -1,6 +1,6 @@
 module calendsd
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
@@ -9,8 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/teambition/rrule-go v1.8.2
-	golang.org/x/crypto v0.54.0
-	shared v0.0.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
@@ -27,8 +26,9 @@ require (
 	github.com/prometheus/procfs v0.21.1 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	shared v0.0.0
 )
 
 replace shared => ../shared
