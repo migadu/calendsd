@@ -24,7 +24,14 @@ type Error struct {
 	Precondition []xml.Name
 	// RetryAfter, when set, is emitted as a Retry-After header (429s).
 	RetryAfter time.Duration
+	// cause is the underlying error of a 500 wrapped by AsError. It is
+	// logged, never sent: driver and file-system messages name tables,
+	// hosts and paths (audit 6.3).
+	cause error
 }
+
+// Cause returns the wrapped internal error of a 500, or nil.
+func (e *Error) Cause() error { return e.cause }
 
 // ErrTooManyRequests is a 429 carrying a Retry-After; the auth plugin returns
 // it for a throttled login (audit 5.8). No sabre counterpart.
@@ -105,6 +112,7 @@ func AsError(err error) *Error {
 	return &Error{
 		Status:    http.StatusInternalServerError,
 		Exception: `Exception`,
-		Message:   err.Error(),
+		Message:   "Internal Server Error",
+		cause:     err,
 	}
 }

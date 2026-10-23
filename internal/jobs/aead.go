@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,9 +87,24 @@ func newKeyEntry(k Key) (keyEntry, error) {
 // bytes don't authenticate. The worker maps it to a fail-safe discard (D12).
 var errUndecryptable = errors.New("jobs: credential undecryptable (unknown key_id or tampered ciphertext)")
 
-// Encrypt seals plaintext with the current key, returning the ciphertext, the
-// fresh random nonce, and the key_id used. Callers persist all three columns.
-func (k *Keyring) Encrypt(plaintext []byte) (ciphertext, nonce []byte, keyID int16, err error) {
+// credentialAAD binds a sealed credential to the job it was stored for: the
+// worker name plus the username and recipient from the args. Without
+// associated data a ciphertext could be moved between rows by anyone with
+// write access to the table and would still open (audit 6.1). The job id is
+// not usable here: it is assigned by the INSERT after sealing.
+func credentialAAD(worker string, args []byte) []byte {
+	var a struct {
+		Username  string `json:"username"`
+		Recipient string `json:"recipient"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return []byte(worker + "\x00" + a.Username + "\x00" + a.Recipient)
+}
+
+// Encrypt seals plaintext with the current key under aad, returning the
+// ciphertext, the fresh random nonce, and the key_id used. Callers persist
+// all three columns.
+func (k *Keyring) Encrypt(plaintext, aad []byte) (ciphertext, nonce []byte, keyID int16, err error) {
 	if k == nil {
 		return nil, nil, 0, errors.New("jobs: no encryption key configured")
 	}
@@ -96,14 +112,16 @@ func (k *Keyring) Encrypt(plaintext []byte) (ciphertext, nonce []byte, keyID int
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, nil, 0, fmt.Errorf("jobs: nonce: %w", err)
 	}
-	ciphertext = k.current.gcm.Seal(nil, nonce, plaintext, nil)
+	ciphertext = k.current.gcm.Seal(nil, nonce, plaintext, aad)
 	return ciphertext, nonce, k.current.id, nil
 }
 
-// Decrypt opens a ciphertext with the key named by keyID. It returns
-// errUndecryptable if that key is no longer in the ring or the bytes fail
-// authentication — never a partial or guessed plaintext.
-func (k *Keyring) Decrypt(ciphertext, nonce []byte, keyID int16) ([]byte, error) {
+// Decrypt opens a ciphertext with the key named by keyID under aad. It
+// returns errUndecryptable if that key is no longer in the ring, the bytes
+// fail authentication, or the associated data differs — never a partial or
+// guessed plaintext. Rows sealed before associated data existed fail here
+// too and are discarded fail-safe; they live at most one credential TTL.
+func (k *Keyring) Decrypt(ciphertext, nonce, aad []byte, keyID int16) ([]byte, error) {
 	if k == nil {
 		return nil, errors.New("jobs: no encryption key configured")
 	}
@@ -111,7 +129,7 @@ func (k *Keyring) Decrypt(ciphertext, nonce []byte, keyID int16) ([]byte, error)
 	if !ok {
 		return nil, errUndecryptable
 	}
-	pt, err := e.gcm.Open(nil, nonce, ciphertext, nil)
+	pt, err := e.gcm.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, errUndecryptable
 	}

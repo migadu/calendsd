@@ -446,3 +446,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	}
 	return true, nil
 }
+
+// MayReadTaggedURI implements dav.TaggedURIGate: a resource named in an If
+// header may only be consulted when the principal holds {DAV:}read on it.
+func (p *Plugin) MayReadTaggedURI(ctx context.Context, path string) bool {
+	return p.CheckPrivileges(ctx, path, "{DAV:}read") == nil
+}

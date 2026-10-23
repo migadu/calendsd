@@ -149,6 +149,17 @@ func (q *AdminQueries) Doctor(ctx context.Context, scanCap int) (*AdminDoctorRep
 			`SELECT 'free-busy visibility of ' || v.principal
 			   FROM free_busy_visibility v
 			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = v.principal)`},
+		{"orphaned-notification", "notifications row for a nonexistent recipient or sharer principal",
+			`SELECT 'notification id=' || n.id || ' (' || n.principaluri || ' from ' || n.organizer || ')'
+			   FROM notifications n
+			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = n.principaluri)
+			     OR NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = n.organizer)`},
+		{"orphaned-push-subscription", "push_subscriptions row for a nonexistent principal or collection",
+			`SELECT 'push subscription id=' || s.id || ' (' || s.principal_uri || ' on ' || s.collection_kind || ' ' || s.collection_id || ')'
+			   FROM push_subscriptions s
+			  WHERE NOT EXISTS (SELECT 1 FROM principals p WHERE p.uri = s.principal_uri)
+			     OR (s.collection_kind = 'calendar' AND NOT EXISTS (SELECT 1 FROM calendars c WHERE c.id::text = s.collection_id))
+			     OR (s.collection_kind = 'addressbook' AND NOT EXISTS (SELECT 1 FROM addressbooks a WHERE a.id::text = s.collection_id))`},
 	} {
 		rows, err := q.DB.QueryContext(ctx, c.query)
 		if err != nil {

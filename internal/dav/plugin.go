@@ -142,3 +142,14 @@ type ReportHandler interface {
 	// body. handled=false passes the report to the next plugin.
 	Report(name xml.Name, body []byte, path string, w http.ResponseWriter, r *http.Request) (handled bool, err error)
 }
+
+// TaggedURIGate is implemented by the ACL plugin: it decides whether the
+// current principal may read a resource named in an If header's tagged list
+// (or in a sync-token condition). Those URIs are client-chosen and were
+// resolved without any privilege check, which made the If header an ETag
+// and sync-token equality oracle on any path in the tree (audit 6.4). A URI
+// the principal may not read fails its condition outright, Not or no Not,
+// so negation cannot re-open the oracle.
+type TaggedURIGate interface {
+	MayReadTaggedURI(ctx context.Context, path string) bool
+}

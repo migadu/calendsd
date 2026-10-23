@@ -218,6 +218,19 @@ func (s *Server) checkIfConditions(r *http.Request, path string) error {
 	if len(conditions) == 0 {
 		return nil
 	}
+	// A tagged URI the principal may not read fails the whole header before
+	// any token or ETag is looked at, so the response reveals nothing about
+	// that resource (audit 6.4). Sabre resolves them unchecked; divergence.
+	for _, cond := range conditions {
+		if cond.URI == path {
+			continue
+		}
+		for gate := range Hooks[TaggedURIGate](s) {
+			if !gate.MayReadTaggedURI(r.Context(), cond.URI) {
+				return ErrPreconditionFailed("Failed to find a valid token/etag combination for %s", cond.URI)
+			}
+		}
+	}
 	for tv := range Hooks[TokenValidator](s) {
 		tv.ValidateTokens(r.Context(), conditions)
 	}

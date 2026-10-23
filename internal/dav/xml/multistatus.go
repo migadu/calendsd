@@ -178,7 +178,10 @@ func (ms *MultiStatus) Marshal() ([]byte, error) {
 			nextCustom++
 		}
 		prefix[ns] = p
-		nsAttrs = append(nsAttrs, fmt.Sprintf("xmlns:%s=%q", p, ns))
+		// %q would leave & unescaped and \u-escape non-ASCII, so a client
+		// property in a namespace like "urn:a&b" produced invalid XML; XML
+		// attribute escaping instead (audit 6.2).
+		nsAttrs = append(nsAttrs, fmt.Sprintf(`xmlns:%s="%s"`, p, escapeText(ns)))
 	}
 
 	var b bytes.Buffer

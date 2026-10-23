@@ -325,6 +325,13 @@ func (b *CalDAV) DeleteCalendar(ctx context.Context, id caldav.CalendarID) error
 // and the calendars row itself. Shared by DeleteCalendar's owner branch and
 // AdminWrites.DeleteUserCascade so the two delete paths cannot drift.
 func deleteCalendarRows(ctx context.Context, tx *sql.Tx, calendarID string) error {
+	// push_subscriptions has no foreign key (it is calendsd-only); a
+	// deleted calendar's subscriptions would otherwise linger until they
+	// expire (audit 6.5).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM push_subscriptions WHERE collection_kind = 'calendar' AND collection_id = $1::text`, calendarID); err != nil {
+		return err
+	}
 	for _, q := range []string{
 		`DELETE FROM calendarobjects WHERE calendarid = $1`,
 		`DELETE FROM calendarchanges WHERE calendarid = $1`,

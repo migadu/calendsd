@@ -209,7 +209,7 @@ func (q *Queue) Enqueue(ctx context.Context, worker string, args any, opts ...Op
 	}
 	var cred *encCredential
 	if o.credential != nil {
-		ct, nonce, keyID, err := q.cfg.Keyring.Encrypt(o.credential)
+		ct, nonce, keyID, err := q.cfg.Keyring.Encrypt(o.credential, credentialAAD(worker, raw))
 		if err != nil {
 			return fmt.Errorf("jobs: encrypt credential: %w", err)
 		}
@@ -347,7 +347,7 @@ func (q *Queue) process(ctx context.Context, c *claimed) {
 
 	j := Job{ID: c.id, Queue: c.queue, Worker: c.worker, Args: c.args, Attempt: c.attempt, MaxAttempts: c.maxAttempts}
 	if c.cred != nil {
-		pt, err := q.cfg.Keyring.Decrypt(c.cred.ciphertext, c.cred.nonce, c.cred.keyID)
+		pt, err := q.cfg.Keyring.Decrypt(c.cred.ciphertext, c.cred.nonce, credentialAAD(c.worker, c.args), c.cred.keyID)
 		if err != nil {
 			// Fail-safe (D12): a rotated-out or tampered credential is never
 			// worked around via an unmetered relay — discard and let D5b surface.

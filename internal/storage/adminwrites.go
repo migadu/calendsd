@@ -230,6 +230,17 @@ DELETE FROM groupmembers
 		`DELETE FROM schedulingobjects WHERE principaluri = $1`, principal); err != nil {
 		return err
 	}
+	// Share notifications the principal received, and the ones it sent as
+	// sharer (they name it as organizer); neither table has a foreign key
+	// (audit 6.5). Push subscriptions likewise.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM notifications WHERE principaluri = $1 OR organizer = $1`, principal); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM push_subscriptions WHERE principal_uri = $1`, principal); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM calendar_availability WHERE principal = $1`, principal); err != nil {
 		return err
@@ -449,7 +460,7 @@ func (w *AdminWrites) SetPassword(ctx context.Context, username, digestA1 string
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("no users row for %q", username)
+		return fmt.Errorf("no users row for %q: %w", username, ErrNoPrincipal)
 	}
 	return nil
 }

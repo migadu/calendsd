@@ -3,6 +3,7 @@ package dav
 import (
 	"context"
 	"encoding/xml"
+
 	"log/slog"
 	"math"
 	"net/http"
@@ -225,7 +226,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for hook := range Hooks[BeforeMethodHook](s) {
 		proceed, err := hook.BeforeMethod(w, r)
 		if err != nil {
-			s.WriteError(w, err)
+			s.writeError(w, r, err)
 			return
 		}
 		if !proceed {
@@ -233,7 +234,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if proceed, err := s.checkPreconditions(w, r); err != nil {
-		s.WriteError(w, err)
+		s.writeError(w, r, err)
 		return
 	} else if !proceed {
 		return
@@ -241,7 +242,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for mp := range Hooks[MethodProvider](s) {
 		handled, err := mp.HandleMethod(w, r)
 		if err != nil {
-			s.WriteError(w, err)
+			s.writeError(w, r, err)
 			return
 		}
 		if handled {
@@ -256,7 +257,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // WriteError serializes an error the way sabre does: an XML {DAV:}error body
 // carrying the exception identity.
 func (s *Server) WriteError(w http.ResponseWriter, err error) {
+	s.writeError(w, nil, err)
+}
+
+// writeError is WriteError with the request for the log line. A 500's
+// underlying error is logged here, with method and path, and never sent.
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	de := AsError(err)
+	if de.Status >= 500 {
+		attrs := []any{"status", de.Status, "err", err}
+		if de.cause != nil {
+			attrs = append(attrs, "cause", de.cause)
+		}
+		if r != nil {
+			attrs = append(attrs, "method", r.Method, "path", r.URL.Path)
+		}
+		slog.Error("request failed", attrs...)
+	}
 	h := w.Header()
 	h.Set("Content-Type", "application/xml; charset=utf-8")
 	if de.Status == http.StatusMethodNotAllowed {
