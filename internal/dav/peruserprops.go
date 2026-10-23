@@ -3,6 +3,7 @@ package dav
 import (
 	"context"
 	"encoding/xml"
+	"net/http"
 	"slices"
 )
 
@@ -32,6 +33,14 @@ type PerUserPropsPlugin struct {
 	// provisioning PROPPATCHes resource calendars as admin and expects the
 	// values to be globally visible.
 	Exempt []string
+	// MayWriteShared reports whether the principal may write the node's
+	// shared (non-per-user) properties; the server wires it to the ACL
+	// plugin's {DAV:}write-content check. A non-owner who may not is refused
+	// every property outside Names with 403 (audit 5.2): the caldav ACL
+	// grants read-only delegates {DAV:}write-properties so their per-user
+	// writes get through, and without this gate that grant also let them
+	// rename the owner's calendar. Nil fails closed.
+	MayWriteShared func(ctx context.Context, path string) bool
 }
 
 func (p *PerUserPropsPlugin) PluginName() string { return "per-user-properties" }
@@ -74,7 +83,9 @@ func (p *PerUserPropsPlugin) PropFindLate(pf *PropFind, node Node) error {
 // whitelisted per-user mutations before the node's own handlers run, so a
 // delegate's write of those cannot touch shared state. Everything else
 // falls through to the regular handlers (a delegate's other property writes
-// are shared, like Calendar Server).
+// are shared, like Calendar Server) — but only for a delegate who may write
+// the node; a read-only delegate's other properties fail with 403 and the
+// 424 cascade does the rest.
 func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node Node, pp *PropPatch) error {
 	perUser := p.perUserFor(ctx, path, node)
 	if perUser == "" {
@@ -90,5 +101,14 @@ func (p *PerUserPropsPlugin) PrePropPatch(ctx context.Context, path string, node
 		result, ok := inner.Commit()
 		return result, ok
 	})
+	if p.MayWriteShared == nil || !p.MayWriteShared(ctx, path) {
+		pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
+			result := make(map[xml.Name]int, len(values))
+			for n := range values {
+				result[n] = http.StatusForbidden
+			}
+			return result, false
+		})
+	}
 	return nil
 }

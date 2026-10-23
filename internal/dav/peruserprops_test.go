@@ -67,6 +67,8 @@ func TestPerUserProps(t *testing.T) {
 		Backend: store,
 		Names:   []xml.Name{color},
 		Exempt:  []string{"principals/admin"},
+		// user2 is a write delegate here: its other properties stay shared.
+		MayWriteShared: func(context.Context, string) bool { return true },
 	}
 	node := ownedColl{owner: "principals/user1"}
 	const path = "calendars/user1/cal"
