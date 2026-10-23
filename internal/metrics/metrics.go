@@ -200,6 +200,9 @@ func (c *jobDepthCollector) Collect(ch chan<- prometheus.Metric) {
 		return // best-effort: a scrape must not fail the whole endpoint
 	}
 	defer rows.Close()
+	// Collected first and sent only after a complete read: a result cut short
+	// would otherwise drop states, which reads as zero jobs in them.
+	var out []prometheus.Metric
 	for rows.Next() {
 		var (
 			state string
@@ -208,7 +211,13 @@ func (c *jobDepthCollector) Collect(ch chan<- prometheus.Metric) {
 		if err := rows.Scan(&state, &n); err != nil {
 			return
 		}
-		ch <- prometheus.MustNewConstMetric(jobDepthDesc, prometheus.GaugeValue, n, state)
+		out = append(out, prometheus.MustNewConstMetric(jobDepthDesc, prometheus.GaugeValue, n, state))
+	}
+	if rows.Err() != nil {
+		return
+	}
+	for _, m := range out {
+		ch <- m
 	}
 }
 
