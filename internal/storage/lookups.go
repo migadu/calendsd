@@ -16,6 +16,7 @@ var (
 	_ caldav.AddressResolver = (*Principals)(nil)
 	_ caldav.UIDLookup       = (*CalDAV)(nil)
 	_ caldav.MetaLister      = (*CalDAV)(nil)
+	_ caldav.BatchFetcher    = (*CalDAV)(nil)
 )
 
 // PrincipalByAddress returns the principal directly under prefix whose email

@@ -205,7 +205,9 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 	}
 	validator := &Validator{Loc: loc}
 
-	var matches []string
+	// The matched objects are already loaded, so their responses are built
+	// from these nodes rather than by resolving each path again.
+	var refs []objectRef
 	switch n := node.(type) {
 	case *CalendarObject:
 		if depth == 0 {
@@ -214,7 +216,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 				return err
 			}
 			if ok {
-				matches = append(matches, path)
+				refs = append(refs, objectRef{path: path, node: n})
 			}
 		}
 	case *Calendar:
@@ -239,16 +241,12 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 					continue
 				}
 				if ok {
-					matches = append(matches, path+"/"+obj.Name())
+					refs = append(refs, objectRef{path: path + "/" + obj.Name(), node: obj})
 				}
 			}
 		}
 	}
 
-	refs := make([]objectRef, len(matches))
-	for i, m := range matches {
-		refs[i] = objectRef{path: m}
-	}
 	return p.writeObjectResponses(r.Context(), w, refs, query.Props, query.Expand, query.JSON,
 		func(string) *time.Location { return loc })
 }
@@ -287,6 +285,7 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 		}
 		refs = append(refs, objectRef{path: path})
 	}
+	p.resolveObjectRefs(r.Context(), refs)
 	// The hrefs may span calendars, so each is expanded in its own
 	// calendar's timezone.
 	zones := map[string]*time.Location{}
@@ -304,9 +303,12 @@ func (p *Plugin) calendarMultigetReport(body []byte, w http.ResponseWriter, r *h
 
 // objectRef is one entry of a report's answer: an object's tree path, or for
 // a multiget href that names no path on this server, only the href as sent.
+// A report that already holds the object's node sets it, and the answer is
+// built from that node instead of resolving the path again.
 type objectRef struct {
 	path string
 	href string
+	node dav.Node
 }
 
 // writeObjectResponses builds the multistatus for matched objects, applying
@@ -320,7 +322,15 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 			continue
 		}
 		objPath := ref.path
-		responses, err := p.server.PropertiesForPath(ctx, objPath, props, 0)
+		var responses []davxml.Response
+		var err error
+		if ref.node != nil {
+			var resp davxml.Response
+			resp, err = p.server.PropertiesForNode(ctx, objPath, ref.node, props)
+			responses = []davxml.Response{resp}
+		} else {
+			responses, err = p.server.PropertiesForPath(ctx, objPath, props, 0)
+		}
 		if err != nil {
 			var davErr *dav.Error
 			if errors.As(err, &davErr) && davErr.Status == http.StatusNotFound {
@@ -349,6 +359,56 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 
 	w.Header().Set("Vary", "Brief,Prefer")
 	return p.server.WriteMultiStatus(w, ms)
+}
+
+// resolveObjectRefs fills in the nodes of refs that name objects of the same
+// calendar: the calendar is resolved once per distinct parent path and its
+// objects are fetched in one batch, instead of a tree walk per href. A
+// parent that is not a calendar, or fails to resolve, leaves its refs for
+// the per-path lookup, which answers them (404 included) as before.
+func (p *Plugin) resolveObjectRefs(ctx context.Context, refs []objectRef) {
+	byParent := map[string][]int{}
+	var parents []string
+	for i, ref := range refs {
+		if ref.path == "" {
+			continue
+		}
+		parent, _ := pathutil.Split(ref.path)
+		if _, seen := byParent[parent]; !seen {
+			parents = append(parents, parent)
+		}
+		byParent[parent] = append(byParent[parent], i)
+	}
+	for _, parent := range parents {
+		node, err := p.server.Tree.NodeForPath(ctx, parent)
+		if err != nil {
+			continue
+		}
+		cal, isCal := node.(*Calendar)
+		if !isCal {
+			continue
+		}
+		uris := make([]string, 0, len(byParent[parent]))
+		for _, i := range byParent[parent] {
+			_, uri := pathutil.Split(refs[i].path)
+			uris = append(uris, uri)
+		}
+		objs, err := cal.objectsByURI(ctx, uris)
+		if err != nil {
+			continue
+		}
+		for _, i := range byParent[parent] {
+			_, uri := pathutil.Split(refs[i].path)
+			if obj := objs[uri]; obj != nil {
+				refs[i].node = obj
+			} else {
+				// Resolved the calendar and the object is not there: the
+				// per-path lookup would say 404 too, without the walk.
+				refs[i].node = nil
+				refs[i].path, refs[i].href = "", p.server.Href(refs[i].path)
+			}
+		}
+	}
 }
 
 // jsonResponseData rewrites the calendar-data property of a response as

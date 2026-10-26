@@ -365,21 +365,39 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 
 	var out []davxml.Response
 	for _, item := range items {
-		if err := s.runPropFind(ctx, item.pf, item.node); err != nil {
+		resp, err := s.respond(ctx, item.pf, item.node)
+		if err != nil {
 			return nil, err
 		}
-		// WebDAV recommends (and iCal demands, for principals) a
-		// trailing slash on collection and principal hrefs.
-		href := s.Href(item.pf.Path())
-		types := s.ResourceTypesForNode(item.node)
-		slash := slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "collection"}) ||
-			slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "principal"})
-		if slash && !strings.HasSuffix(href, "/") {
-			href += "/"
-		}
-		out = append(out, item.pf.response(href))
+		out = append(out, resp)
 	}
 	return out, nil
+}
+
+// PropertiesForNode is PropertiesForPath at depth 0 for a node the caller
+// has already resolved, so a report answering for many objects of one
+// collection need not walk the tree again for each (see
+// caldav.writeObjectResponses). The property hooks, the ACL gate among
+// them, run exactly as for a path lookup.
+func (s *Server) PropertiesForNode(ctx context.Context, path string, node Node, names []xml.Name) (davxml.Response, error) {
+	return s.respond(ctx, NewPropFind(ctx, strings.Trim(path, "/"), names, 0), node)
+}
+
+// respond runs the property hooks for one node and renders its response.
+func (s *Server) respond(ctx context.Context, pf *PropFind, node Node) (davxml.Response, error) {
+	if err := s.runPropFind(ctx, pf, node); err != nil {
+		return davxml.Response{}, err
+	}
+	// WebDAV recommends (and iCal demands, for principals) a
+	// trailing slash on collection and principal hrefs.
+	href := s.Href(pf.Path())
+	types := s.ResourceTypesForNode(node)
+	slash := slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "collection"}) ||
+		slices.Contains(types, xml.Name{Space: davxml.NSDav, Local: "principal"})
+	if slash && !strings.HasSuffix(href, "/") {
+		href += "/"
+	}
+	return pf.response(href), nil
 }
 
 // runPropFind fires the property hooks for one node in sabre's order:

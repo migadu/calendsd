@@ -326,14 +326,41 @@ func (c *Calendar) QueryObjects(ctx context.Context, componentType string, start
 	if err != nil {
 		return nil, err
 	}
+	byURI, err := c.objectsByURI(ctx, uris)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]*CalendarObject, 0, len(uris))
+	for _, uri := range uris {
+		if obj := byURI[uri]; obj != nil {
+			out = append(out, obj)
+		}
+	}
+	return out, nil
+}
+
+// objectsByURI loads the named objects, in one query over a BatchFetcher and
+// one per URI otherwise. A URI with no object (deleted since it was named)
+// has no entry.
+func (c *Calendar) objectsByURI(ctx context.Context, uris []string) (map[string]*CalendarObject, error) {
+	out := make(map[string]*CalendarObject, len(uris))
+	if fetcher, ok := c.backend.(BatchFetcher); ok {
+		objs, err := fetcher.CalendarObjectsByURI(ctx, c.Info.ID, uris)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range objs {
+			out[obj.URI] = NewCalendarObject(c.backend, c.Info, obj)
+		}
+		return out, nil
+	}
 	for _, uri := range uris {
 		obj, err := c.backend.CalendarObject(ctx, c.Info.ID, uri)
 		if err != nil {
 			return nil, err
 		}
 		if obj != nil {
-			out = append(out, NewCalendarObject(c.backend, c.Info, *obj))
+			out[uri] = NewCalendarObject(c.backend, c.Info, *obj)
 		}
 	}
 	return out, nil

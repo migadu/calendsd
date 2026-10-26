@@ -110,6 +110,15 @@ type MetaLister interface {
 	CalendarObjectsMeta(ctx context.Context, calendarID CalendarID) ([]ObjectInfo, error)
 }
 
+// BatchFetcher is implemented by backends that fetch several objects of one
+// calendar in a single query (storage.CalDAV), so a calendar-query or
+// multiget over many objects is not one round trip per object.
+type BatchFetcher interface {
+	// CalendarObjectsByURI returns the objects among uris that exist, in any
+	// order; a URI with no object is simply absent.
+	CalendarObjectsByURI(ctx context.Context, calendarID CalendarID, uris []string) ([]ObjectInfo, error)
+}
+
 // UIDLookup is implemented by backends that find an object by its UID with an
 // index (storage.CalDAV) rather than by loading the whole calendar.
 type UIDLookup interface {

@@ -43,8 +43,24 @@ func (b *CalDAV) CalendarObjectsMeta(ctx context.Context, id caldav.CalendarID) 
 }
 
 func (b *CalDAV) listObjects(ctx context.Context, id caldav.CalendarID, columns string) ([]caldav.ObjectInfo, error) {
-	rows, err := b.DB.QueryContext(ctx,
-		`SELECT `+columns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
+	return b.scanObjects(ctx, id, `SELECT `+columns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
+}
+
+// CalendarObjectsByURI fetches the named objects of a calendar in one query,
+// served by calendarobjects_ukey. Implements caldav.BatchFetcher
+// (docs/slow-queries.md, item 4).
+func (b *CalDAV) CalendarObjectsByURI(ctx context.Context, id caldav.CalendarID, uris []string) ([]caldav.ObjectInfo, error) {
+	if len(uris) == 0 {
+		return nil, nil
+	}
+	defer b.Metrics.DBOpTimer("calendar_objects_by_uri")()
+	return b.scanObjects(ctx, id,
+		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1 AND uri = ANY($2)`,
+		id.Calendar, uris)
+}
+
+func (b *CalDAV) scanObjects(ctx context.Context, id caldav.CalendarID, query string, args ...any) ([]caldav.ObjectInfo, error) {
+	rows, err := b.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
