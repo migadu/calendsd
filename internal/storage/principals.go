@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/xml"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,48 @@ func (p *Principals) PrincipalsByPrefixInDomain(ctx context.Context, prefix, dom
  WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'
    AND email LIKE '%@_%' AND lower(split_part(email, '@', -1)) = $3`,
 		under, deeper, strings.ToLower(domain))
+}
+
+// PrincipalsPage lists one page of the principals directly under prefix in
+// URI order, by keyset: the first Limit after After, or the last Limit
+// before Before. A search term matches the start of the name or the email,
+// case-insensitively. Implements acl.Pager (docs/slow-queries.md, item 5).
+func (p *Principals) PrincipalsPage(ctx context.Context, prefix string, page acl.PageRequest) ([]acl.Principal, error) {
+	if page.Limit <= 0 {
+		page.Limit = acl.DefaultPageSize
+	}
+	under, deeper := prefixBounds(prefix)
+	args := []any{under, deeper}
+	where := `uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'`
+	if page.Search != "" {
+		term := escapeLike(strings.ToLower(page.Search))
+		namePattern := strings.ToLower(escapeLike(prefix)) + "/" + term + "%"
+		if prefix == "" {
+			namePattern = term + "%"
+		}
+		args = append(args, namePattern, term+"%")
+		where += ` AND (lower(uri) LIKE $3 ESCAPE '\' OR lower(email) LIKE $4 ESCAPE '\')`
+	}
+	order := `ORDER BY uri`
+	switch {
+	case page.Before != "":
+		args = append(args, page.Before)
+		where += ` AND uri < $` + strconv.Itoa(len(args))
+		order = `ORDER BY uri DESC`
+	case page.After != "":
+		args = append(args, page.After)
+		where += ` AND uri > $` + strconv.Itoa(len(args))
+	}
+	args = append(args, page.Limit)
+	out, err := p.scanPrincipals(ctx, `SELECT uri, email, displayname FROM principals
+ WHERE `+where+` `+order+` LIMIT $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	if page.Before != "" {
+		slices.Reverse(out) // fetched newest-first to take the last Limit; served in URI order
+	}
+	return out, nil
 }
 
 // prefixBounds returns the LIKE patterns for the URIs one segment below

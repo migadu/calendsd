@@ -54,6 +54,25 @@ type DomainLister interface {
 	PrincipalsByPrefixInDomain(ctx context.Context, prefix, domain string) ([]Principal, error)
 }
 
+// PageRequest selects one page of a principal listing ordered by URI: the
+// first Limit principals after After (exclusive) or, with Before set
+// instead, the last Limit before it. Search keeps the principals whose name
+// (the URI's last segment) or email starts with it, case-insensitively.
+type PageRequest struct {
+	Search string
+	After  string
+	Before string
+	Limit  int
+}
+
+// Pager is implemented by backends that can list principals a page at a
+// time with keyset pagination (storage.Principals). The admin panel and
+// calctl page their listings through PagePrincipals instead of loading every
+// principal (docs/slow-queries.md, item 5).
+type Pager interface {
+	PrincipalsPage(ctx context.Context, prefix string, page PageRequest) ([]Principal, error)
+}
+
 // EmailDomain returns the lowercased domain of an email address: what follows
 // the last "@", or "" when there is no "@" or nothing follows it. It is the
 // one definition of "domain" for the same-domain rules; storage's SQL

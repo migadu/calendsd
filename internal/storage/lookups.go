@@ -16,6 +16,7 @@ import (
 var (
 	_ caldav.AddressResolver = (*Principals)(nil)
 	_ acl.DomainLister       = (*Principals)(nil)
+	_ acl.Pager              = (*Principals)(nil)
 	_ caldav.UIDLookup       = (*CalDAV)(nil)
 	_ caldav.MetaLister      = (*CalDAV)(nil)
 	_ caldav.BatchFetcher    = (*CalDAV)(nil)

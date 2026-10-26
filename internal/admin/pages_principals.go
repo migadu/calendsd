@@ -79,26 +79,61 @@ func PrincipalRows(principals []acl.Principal, diags *storage.AdminAuthDiagnosti
 	return rows
 }
 
+// principalsPageSize is how many principals the panel lists per page; a
+// variable so a test can page a small corpus.
+var principalsPageSize = acl.DefaultPageSize
+
 type PrincipalsData struct {
 	Principals []PrincipalRow `json:"principals"`
 	// UsersWithoutPrincipal comes along so orphaned credentials are visible
 	// on the same page.
 	UsersWithoutPrincipal []string `json:"usersWithoutPrincipal"`
+	// Search is the name/email prefix the page is filtered by.
+	Search string `json:"search,omitempty"`
+	// NextAfter and PrevBefore are the cursors (?after=, ?before=) of the
+	// neighbouring pages; empty at the ends of the listing.
+	NextAfter  string `json:"nextAfter,omitempty"`
+	PrevBefore string `json:"prevBefore,omitempty"`
 }
 
+// principalsData serves one page of principals (docs/slow-queries.md, item
+// 5): ?q= filters by name or email prefix, ?after= and ?before= page by URI.
 func (a *App) principalsData(r *http.Request) (any, error) {
-	list, err := a.Principals.PrincipalsByPrefix(r.Context(), "principals")
+	q := r.URL.Query()
+	page := acl.PageRequest{Search: q.Get("q"), After: q.Get("after"), Before: q.Get("before"),
+		Limit: principalsPageSize + 1} // one more than shown says whether a page follows
+	list, err := acl.PagePrincipals(r.Context(), a.Principals, "principals", page)
 	if err != nil {
 		return nil, err
+	}
+	data := &PrincipalsData{Search: page.Search}
+	more := len(list) > principalsPageSize
+	if page.Before != "" {
+		// The last principalsPageSize+1 before the cursor: the extra one is
+		// the oldest, and its presence means a page precedes this one.
+		if more {
+			list = list[1:]
+			data.PrevBefore = list[0].URI
+		}
+		if len(list) > 0 {
+			data.NextAfter = list[len(list)-1].URI // the page the cursor came from
+		}
+	} else {
+		if more {
+			list = list[:principalsPageSize]
+			data.NextAfter = list[len(list)-1].URI
+		}
+		if page.After != "" && len(list) > 0 {
+			data.PrevBefore = list[0].URI
+		}
 	}
 	diags, err := a.Store.AuthDiagnostics(r.Context())
 	if err != nil {
 		return nil, err
 	}
-	return &PrincipalsData{
-		Principals:            PrincipalRows(list, diags),
-		UsersWithoutPrincipal: diags.UsersWithoutPrincipal,
-	}, nil
+	data.Principals = PrincipalRows(list, diags)
+	data.UsersWithoutPrincipal = diags.UsersWithoutPrincipal
+	return data, nil
 }
 
 // CollectionRef links an inspector page to one collection of a principal.

@@ -1,5 +1,10 @@
 {{define "principals"}}{{template "head"}}
 <h1>Principals</h1>
+<form class="inline" method="get" action="/principals">
+<input name="q" placeholder="name or email starts with" value="{{.Search}}">
+<button>search</button>
+{{if .Search}}<a href="/principals">clear</a>{{end}}
+</form>
 <table>
 <tr><th>uri</th><th>display name</th><th>email</th><th>credentials</th></tr>
 {{range .Principals}}
@@ -11,6 +16,10 @@
 </tr>
 {{else}}<tr><td colspan="4" class="muted">no principals</td></tr>{{end}}
 </table>
+<p class="muted">
+{{if .PrevBefore}}<a href="/principals?q={{.Search}}&amp;before={{.PrevBefore}}">&larr; previous</a>{{end}}
+{{if .NextAfter}}<a href="/principals?q={{.Search}}&amp;after={{.NextAfter}}">next &rarr;</a>{{end}}
+</p>
 {{if .UsersWithoutPrincipal}}
 <h2>Users without a principal</h2>
 <ul>{{range .UsersWithoutPrincipal}}<li class="warn">{{.}}</li>{{end}}</ul>

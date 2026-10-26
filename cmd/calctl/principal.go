@@ -6,10 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"calendsd/internal/acl"
 	"calendsd/internal/admin"
 	"calendsd/internal/auth"
 	"calendsd/internal/config"
@@ -85,14 +85,14 @@ func handlePrincipalAuth(ctx context.Context, args []string) {
 func handlePrincipalList(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("principal list", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")
+	limit := flags.Int("limit", acl.DefaultPageSize, "Principals per page")
+	after := flags.String("after", "", "List the principals after this URI (the cursor the previous page printed)")
+	all := flags.Bool("all", false, "Stream every principal, page by page, instead of one page")
+	search := flags.String("search", "", "Only principals whose name or email starts with this")
 	dsnOverride := dbFlag(flags)
 	flags.Parse(args)
 
 	q := openAdminQueries(ctx, *dsnOverride)
-	principals, err := (&storage.Principals{DB: q.DB}).PrincipalsByPrefix(ctx, "principals")
-	if err != nil {
-		fatalf("Failed to list principals: %v", err)
-	}
 	diags, err := q.AuthDiagnostics(ctx)
 	if err != nil {
 		fatalf("Failed to cross-check users: %v", err)
@@ -106,26 +106,66 @@ func handlePrincipalList(ctx context.Context, args []string) {
 		purgeDate[d.Principal] = d.PurgeAfter.Format("2006-01-02")
 	}
 
-	rows := admin.PrincipalRows(principals, diags)
-	for i := range rows {
-		rows[i].Deletion = purgeDate[rows[i].URI]
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].URI < rows[j].URI })
-
-	if *jsonOutput {
-		printJSON(rows)
-		return
-	}
+	var jsonRows []admin.PrincipalRow
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "URI\tDISPLAYNAME\tEMAIL\tUSER\tDELETION")
-	for _, r := range rows {
-		user := "yes"
-		if !r.HasUser {
-			user = "-"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.URI, dash(r.DisplayName), dash(r.Email), user, dash(r.Deletion))
+	if !*jsonOutput {
+		fmt.Fprintln(w, "URI\tDISPLAYNAME\tEMAIL\tUSER\tDELETION")
 	}
-	w.Flush()
+	next, err := forEachPrincipalPage(ctx, &storage.Principals{DB: q.DB}, *search, *after, *limit, *all,
+		func(principals []acl.Principal) {
+			rows := admin.PrincipalRows(principals, diags)
+			for i := range rows {
+				rows[i].Deletion = purgeDate[rows[i].URI]
+			}
+			if *jsonOutput {
+				jsonRows = append(jsonRows, rows...)
+				return
+			}
+			for _, r := range rows {
+				user := "yes"
+				if !r.HasUser {
+					user = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.URI, dash(r.DisplayName), dash(r.Email), user, dash(r.Deletion))
+			}
+			w.Flush() // a page at a time, so --all streams
+		})
+	if err != nil {
+		fatalf("Failed to list principals: %v", err)
+	}
+	if *jsonOutput {
+		if jsonRows == nil {
+			jsonRows = []admin.PrincipalRow{}
+		}
+		printJSON(jsonRows)
+	}
+	if next != "" {
+		fmt.Fprintf(os.Stderr, "more principals follow: --after %q (or --all)\n", next)
+	}
+}
+
+// forEachPrincipalPage lists principals in pages of limit, in URI order,
+// starting after the cursor, and hands each page to emit: one page, or with
+// all every page until the listing is exhausted. It returns the cursor of
+// the page that would follow, "" when none does.
+func forEachPrincipalPage(ctx context.Context, backend acl.Backend, search, after string, limit int, all bool, emit func([]acl.Principal)) (next string, err error) {
+	for {
+		page, err := acl.PagePrincipals(ctx, backend, "principals",
+			acl.PageRequest{Search: search, After: after, Limit: limit})
+		if err != nil {
+			return "", err
+		}
+		if len(page) > 0 {
+			emit(page)
+		}
+		if len(page) < limit {
+			return "", nil
+		}
+		after = page[len(page)-1].URI
+		if !all {
+			return after, nil
+		}
+	}
 }
 
 func handlePrincipalAdd(ctx context.Context, args []string) {
