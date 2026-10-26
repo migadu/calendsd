@@ -20,6 +20,30 @@ type principalState struct {
 	// every node of a multi-object response needs it for its ACL check.
 	principals    []string
 	principalsFor string
+	// values holds what plugins memoize for the request (a prefetch of
+	// stored properties, say), keyed by a type of the plugin's own.
+	values map[any]any
+}
+
+// RequestValue returns what SetRequestValue stored under key for this
+// request, or false when nothing is held or no request holder is present.
+func RequestValue(ctx context.Context, key any) (any, bool) {
+	if s, ok := ctx.Value(principalKey{}).(*principalState); ok {
+		v, ok := s.values[key]
+		return v, ok
+	}
+	return nil, false
+}
+
+// SetRequestValue memoizes value under key for the rest of the request. A
+// no-op without a request holder (a context not made by ServeHTTP).
+func SetRequestValue(ctx context.Context, key, value any) {
+	if s, ok := ctx.Value(principalKey{}).(*principalState); ok {
+		if s.values == nil {
+			s.values = map[any]any{}
+		}
+		s.values[key] = value
+	}
 }
 
 // RequestPrincipals returns the principal set memoized for the request's

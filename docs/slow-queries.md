@@ -271,22 +271,24 @@ Measured with the query log from item 1, on the test corpora:
 
 | Request | Queries before | Queries after |
 |---|---|---|
-| Depth:1 PROPFIND on `/calendars/`, 1000 principals in 3 domains | ~1001 | 2 on `principals`, 1 `propertystorage` read per listed home |
-| Depth:1 PROPFIND on a calendar for getetag/getcontentlength | 1 full-payload read | 1 metadata read, no `calendardata` |
-| calendar-multiget, 200 hrefs in one calendar | ~800 (4 per href) | 1 `calendarobjects` read + 1 `propertystorage` read per object |
-| calendar-query matching 200 objects | ~800 | 2 `calendarobjects` reads + 1 `propertystorage` read per object |
+| Depth:1 PROPFIND on `/calendars/`, 1000 principals in 3 domains | ~1001 | ≤ 15 in all (2 on `principals`) |
+| Depth:1 PROPFIND on a calendar for getetag/getcontentlength | 1 full-payload read + 3 per object | 1 metadata read, no `calendardata`; ≤ 15 in all |
+| calendar-multiget, 200 hrefs in one calendar | ~800 (4 per href) | 1 `calendarobjects` read; ≤ 20 in all |
+| calendar-query matching 200 objects | ~800 | 2 `calendarobjects` reads; ≤ 20 in all |
 
-Two things came out of the counting that were not in the plan:
+Two things came out of the counting that were not in the plan, each its
+own commit:
 
 - The ACL gate on every node of a response resolved the requester's
   principal and group membership again for each node: two queries per
   object of any multi-object response. The request's principal holder now
-  memoizes the set (`dav.RequestPrincipals`), its own commit after item 4.
-- One `propertystorage` read per node remains in every PROPFIND and
-  report, from the property-storage plugin's late hook, which is per node
-  as in sabre. It is the one per-object query left; batching it (one
-  `path = ANY($1)` per response) is the next item if the listings are
-  still slow.
+  memoizes the set (`dav.RequestPrincipals`).
+- The property-storage plugin read `propertystorage` once per node, from
+  its late hook, as sabre does. The server now announces the paths of a
+  Depth:1 listing or a multi-object report up front (`dav.PrefetchHook`,
+  `Server.PrefetchPaths`), the plugin reads them in one `path = ANY($1)`
+  query (`dav.PropPrefetcher`) and serves each node from the request memo.
+  Nothing per object is left in these responses.
 
 CalDAVTester (`scripts/caldavtester/run.sh`), the propfind and
 current-user-principal files for CalDAV and CardDAV, before (d483756) and

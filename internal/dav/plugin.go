@@ -108,6 +108,15 @@ type LatePropFindHook interface {
 	PropFindLate(pf *PropFind, node Node) error
 }
 
+// PrefetchHook lets a plugin load what it will need for a set of paths in
+// one go before the property hooks run for each of them: the server calls
+// it with every path of a Depth:1 listing or a multi-object report
+// (Server.PrefetchPaths). A plugin that cannot prefetch simply answers per
+// node as before.
+type PrefetchHook interface {
+	Prefetch(ctx context.Context, paths []string) error
+}
+
 // ChildFilterHook lets a plugin drop children from a Depth:1 listing before
 // they are enumerated into the multistatus, so a collection can hide the very
 // existence of siblings the requester may not see. This has no sabre

@@ -159,6 +159,9 @@ func TestPropfindListsCalendarWithoutPayload(t *testing.T) {
 	if len(objectQueries) != 1 {
 		t.Errorf("PROPFIND ran %d calendarobjects queries, want 1: %q", len(objectQueries), objectQueries)
 	}
+	if total := qlog.Count(); total > 15 {
+		t.Errorf("PROPFIND ran %d queries in all for 5 objects, want a handful: %q", total, qlog.Statements())
+	}
 
 	body = do("REPORT", "/calendars/bob/default/",
 		`<?xml version="1.0"?><c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">`+

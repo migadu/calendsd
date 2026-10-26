@@ -95,10 +95,9 @@ func TestMultigetIsBatched(t *testing.T) {
 	if objects != 1 {
 		t.Errorf("multiget ran %d calendarobjects queries, want 1: %q", objects, qlog.Statements())
 	}
-	// One propertystorage read per object remains; everything else is per
-	// request.
-	if total > 200+20 {
-		t.Errorf("multiget ran %d queries in all, want about one per object: %q", total, qlog.Statements())
+	// Everything else, the propertystorage read included, is per request.
+	if total > 20 {
+		t.Errorf("multiget ran %d queries in all, want a handful: %q", total, qlog.Statements())
 	}
 }
 
@@ -129,7 +128,7 @@ func TestCalendarQueryIsBatched(t *testing.T) {
 	if objects > 2 {
 		t.Errorf("calendar-query ran %d calendarobjects queries, want at most 2: %q", objects, qlog.Statements())
 	}
-	if total > 200+20 {
-		t.Errorf("calendar-query ran %d queries in all, want about one per object: %q", total, qlog.Statements())
+	if total > 20 {
+		t.Errorf("calendar-query ran %d queries in all, want a handful: %q", total, qlog.Statements())
 	}
 }

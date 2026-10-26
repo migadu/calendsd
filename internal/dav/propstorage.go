@@ -1,6 +1,10 @@
 package dav
 
-import "context"
+import (
+	"context"
+	"encoding/xml"
+	"net/http"
+)
 
 // PropStorageBackend persists arbitrary dead properties per path. Port of
 // sabre's PropertyStorage\Backend\BackendInterface.
@@ -13,6 +17,23 @@ type PropStorageBackend interface {
 	Delete(ctx context.Context, path string) error
 	// Move renames the property paths after a MOVE.
 	Move(ctx context.Context, source, destination string) error
+}
+
+// StoredProp is one stored dead property as PropPrefetcher returns it: the
+// value is what PropFind would Set, a string or an xml.Raw.
+type StoredProp struct {
+	Name  xml.Name
+	Value any
+}
+
+// PropPrefetcher is a PropStorageBackend that can read the properties of
+// many paths in one query (storage.PropertyStorage). With it, a Depth:1
+// listing or a report over many objects costs one propertystorage read
+// instead of one per node (docs/slow-queries.md, follow-up).
+type PropPrefetcher interface {
+	// PropFindMany returns the stored properties of each path, keyed by
+	// path; a path with none has no entry.
+	PropFindMany(ctx context.Context, paths []string) (map[string][]StoredProp, error)
 }
 
 // PropertyStoragePlugin persists any property no other subsystem claimed.
@@ -31,12 +52,58 @@ func (p *PropertyStoragePlugin) allowed(path string) bool {
 	return p.PathFilter == nil || p.PathFilter(path)
 }
 
+// prefetched is the request-scoped key under which Prefetch stores what it
+// read: the properties of every path it was given, an empty slice for a
+// path with none, so a missing entry means "not prefetched, ask per path".
+type prefetched struct{ plugin *PropertyStoragePlugin }
+
+// Prefetch implements PrefetchHook over a PropPrefetcher backend: one read
+// for every allowed path of the response, served from the request memo by
+// PropFindLate.
+func (p *PropertyStoragePlugin) Prefetch(ctx context.Context, paths []string) error {
+	prefetcher, ok := p.Backend.(PropPrefetcher)
+	if !ok {
+		return nil
+	}
+	var wanted []string
+	for _, path := range paths {
+		if p.allowed(path) {
+			wanted = append(wanted, path)
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	found, err := prefetcher.PropFindMany(ctx, wanted)
+	if err != nil {
+		return err
+	}
+	cache, _ := RequestValue(ctx, prefetched{p})
+	memo, _ := cache.(map[string][]StoredProp)
+	if memo == nil {
+		memo = map[string][]StoredProp{}
+		SetRequestValue(ctx, prefetched{p}, memo)
+	}
+	for _, path := range wanted {
+		memo[path] = found[path] // nil for a path without properties: still "known"
+	}
+	return nil
+}
+
 // PropFindLate implements LatePropFindHook (sabre priority 130: after node
 // dead properties).
 func (p *PropertyStoragePlugin) PropFindLate(pf *PropFind, node Node) error {
 	ctx := pf.Context()
 	if !p.allowed(pf.Path()) {
 		return nil
+	}
+	if cache, ok := RequestValue(ctx, prefetched{p}); ok {
+		if props, known := cache.(map[string][]StoredProp)[pf.Path()]; known {
+			for _, prop := range props {
+				pf.Set(prop.Name, prop.Value, http.StatusOK)
+			}
+			return nil
+		}
 	}
 	return p.Backend.PropFind(ctx, pf.Path(), pf)
 }

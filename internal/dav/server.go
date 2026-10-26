@@ -363,6 +363,15 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 		}
 	}
 
+	if len(items) > 1 {
+		paths := make([]string, len(items))
+		for i, item := range items {
+			paths[i] = item.pf.Path()
+		}
+		if err := s.PrefetchPaths(ctx, paths); err != nil {
+			return nil, err
+		}
+	}
 	var out []davxml.Response
 	for _, item := range items {
 		resp, err := s.respond(ctx, item.pf, item.node)
@@ -372,6 +381,20 @@ func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml
 		out = append(out, resp)
 	}
 	return out, nil
+}
+
+// PrefetchPaths tells every PrefetchHook which paths a multi-node response
+// is about to run the property hooks for, so each can load what it needs
+// in one query rather than one per node. PropertiesForPath does this for a
+// Depth:1 listing; a report answering for many nodes through
+// PropertiesForNode calls it itself.
+func (s *Server) PrefetchPaths(ctx context.Context, paths []string) error {
+	for hook := range Hooks[PrefetchHook](s) {
+		if err := hook.Prefetch(ctx, paths); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PropertiesForNode is PropertiesForPath at depth 0 for a node the caller

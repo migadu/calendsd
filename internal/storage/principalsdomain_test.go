@@ -139,7 +139,7 @@ func TestCalendarRootListingIsScopedInSQL(t *testing.T) {
 	if principalQueries > 3 {
 		t.Errorf("listing ran %d principals queries, want at most 3: %q", principalQueries, qlog.Statements())
 	}
-	if total := qlog.Count(); total > homes+10 {
-		t.Errorf("listing ran %d queries for %d homes, want about one per home: %q", total, homes, qlog.Statements())
+	if total := qlog.Count(); total > 15 {
+		t.Errorf("listing ran %d queries for %d homes, want a handful: %q", total, homes, qlog.Statements())
 	}
 }

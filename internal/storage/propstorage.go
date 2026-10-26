@@ -32,6 +32,8 @@ type PropertyStorage struct {
 
 var _ dav.PropStorageBackend = (*PropertyStorage)(nil)
 
+var _ dav.PropPrefetcher = (*PropertyStorage)(nil)
+
 func (p *PropertyStorage) PropFind(ctx context.Context, path string, pf *dav.PropFind) error {
 	rows, err := p.DB.QueryContext(ctx,
 		`SELECT name, value, valuetype FROM propertystorage WHERE path = $1`, path)
@@ -46,20 +48,54 @@ func (p *PropertyStorage) PropFind(ctx context.Context, path string, pf *dav.Pro
 		if err := rows.Scan(&name, &value, &valuetype); err != nil {
 			return err
 		}
-		xmlName, err := davxml.ParseClark(name)
-		if err != nil {
-			continue // non-clark names cannot round-trip; skip
-		}
-		switch valuetype.Int64 {
-		case vtString:
-			pf.Set(xmlName, string(value), http.StatusOK)
-		case vtXML:
-			pf.Set(xmlName, davxml.Raw(value), http.StatusOK)
-		case vtObject:
-			// PHP-serialized: sabre owns those rows (PLAN.md §5).
+		if prop, ok := storedProp(name, value, valuetype.Int64); ok {
+			pf.Set(prop.Name, prop.Value, http.StatusOK)
 		}
 	}
 	return rows.Err()
+}
+
+// PropFindMany reads the stored properties of many paths in one query.
+// Implements dav.PropPrefetcher, for the Depth:1 listings and reports that
+// otherwise read propertystorage once per node.
+func (p *PropertyStorage) PropFindMany(ctx context.Context, paths []string) (map[string][]dav.StoredProp, error) {
+	rows, err := p.DB.QueryContext(ctx,
+		`SELECT path, name, value, valuetype FROM propertystorage WHERE path = ANY($1)`, paths)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]dav.StoredProp{}
+	for rows.Next() {
+		var path, name string
+		var value []byte
+		var valuetype sql.NullInt64
+		if err := rows.Scan(&path, &name, &value, &valuetype); err != nil {
+			return nil, err
+		}
+		if prop, ok := storedProp(name, value, valuetype.Int64); ok {
+			out[path] = append(out[path], prop)
+		}
+	}
+	return out, rows.Err()
+}
+
+// storedProp turns a propertystorage row into the property a PropFind
+// serves: false for a name that cannot round-trip (not clark) or a value
+// type this server does not read (PHP-serialized objects, which sabre owns,
+// PLAN.md §5).
+func storedProp(name string, value []byte, valuetype int64) (dav.StoredProp, bool) {
+	xmlName, err := davxml.ParseClark(name)
+	if err != nil {
+		return dav.StoredProp{}, false
+	}
+	switch valuetype {
+	case vtString:
+		return dav.StoredProp{Name: xmlName, Value: string(value)}, true
+	case vtXML:
+		return dav.StoredProp{Name: xmlName, Value: davxml.Raw(value)}, true
+	}
+	return dav.StoredProp{}, false
 }
 
 func (p *PropertyStorage) PropPatch(ctx context.Context, path string, pp *dav.PropPatch) error {

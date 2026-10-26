@@ -315,6 +315,17 @@ type objectRef struct {
 // calendar-data expansion (in the timezone locFor gives for the object's
 // path) when requested.
 func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter, refs []objectRef, props []xml.Name, expand *TimeRange, asJSON bool, locFor func(string) *time.Location) error {
+	var paths []string
+	for _, ref := range refs {
+		if ref.path != "" {
+			paths = append(paths, ref.path)
+		}
+	}
+	if len(paths) > 1 {
+		if err := p.server.PrefetchPaths(ctx, paths); err != nil {
+			return err
+		}
+	}
 	ms := &davxml.MultiStatus{}
 	for _, ref := range refs {
 		if ref.path == "" {
