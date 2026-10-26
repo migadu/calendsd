@@ -136,9 +136,9 @@ from item 1 confirms the count.
   with no email domain, which matches what `FilterChildren` does today.
 - Admin requests keep the full listing. That is acceptable for now
   because it is rare, and item 5 covers the operator tools.
-- Also replace `FilterChildren`'s per-child `principalEmailDomain` with
-  one batched lookup (`uri = ANY($1)`). That way, collections that don't
-  implement `ScopedLister` no longer issue N queries either.
+- `FilterChildren`'s per-child `principalEmailDomain` stays as it is: after
+  this item every root in production implements `ScopedLister`, so the
+  per-child path only runs for a collection that opts out, and none does.
 
 **Open question.** A large domain could still list tens of thousands of
 users. If item 1 shows that no real client relies on the root listing
@@ -262,3 +262,34 @@ should drop to admin PROPFINDs and `calctl --all`, the `WHERE uri = $1`
 row's calls should drop by the per-child lookups, and the
 `calendarobjects WHERE calendarid` mean should fall roughly in proportion
 to the payload size.
+
+## Status (2026-10-26)
+
+All five items are implemented, one commit each, in the order 1, 3, 4, 2,
+5 (so migration 0004 is item 3's backfill and 0005 is item 2's index).
+Measured with the query log from item 1, on the test corpora:
+
+| Request | Queries before | Queries after |
+|---|---|---|
+| Depth:1 PROPFIND on `/calendars/`, 1000 principals in 3 domains | ~1001 | 2 on `principals`, 1 `propertystorage` read per listed home |
+| Depth:1 PROPFIND on a calendar for getetag/getcontentlength | 1 full-payload read | 1 metadata read, no `calendardata` |
+| calendar-multiget, 200 hrefs in one calendar | ~800 (4 per href) | 1 `calendarobjects` read + 1 `propertystorage` read per object |
+| calendar-query matching 200 objects | ~800 | 2 `calendarobjects` reads + 1 `propertystorage` read per object |
+
+Two things came out of the counting that were not in the plan:
+
+- The ACL gate on every node of a response resolved the requester's
+  principal and group membership again for each node: two queries per
+  object of any multi-object response. The request's principal holder now
+  memoizes the set (`dav.RequestPrincipals`), its own commit after item 4.
+- One `propertystorage` read per node remains in every PROPFIND and
+  report, from the property-storage plugin's late hook, which is per node
+  as in sabre. It is the one per-object query left; batching it (one
+  `path = ANY($1)` per response) is the next item if the listings are
+  still slow.
+
+CalDAVTester (`scripts/caldavtester/run.sh`), the propfind and
+current-user-principal files for CalDAV and CardDAV, before (d483756) and
+after: identical, 32 ok / 16 fail / 3 ignored in total, with the same
+per-file counts (CalDAV/propfind 14/12/1, CardDAV/propfind 12/4/0, the two
+current-user-principal files 3/0/1). The 16 failures predate this work.
