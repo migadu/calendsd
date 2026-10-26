@@ -192,8 +192,8 @@ func (p *Plugin) addressbookQueryReport(body []byte, path string, w http.Respons
 			return err
 		}
 		for _, child := range cards {
-			c := child.(*Card)
-			if !query.match(c.Data()) {
+			c, isCard := child.(*Card)
+			if !isCard || !query.match(c.Data()) {
 				continue
 			}
 			if query.limit > 0 && len(matches) == query.limit {

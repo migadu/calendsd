@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -284,12 +285,12 @@ func (q *Queue) EnqueueLatest(ctx context.Context, worker, key string, generatio
 func (q *Queue) Start(ctx context.Context) {
 	for _, queue := range q.cfg.Queues {
 		for i := 0; i < q.cfg.Workers; i++ {
-			q.goRun(func() { q.workerLoop(ctx, queue) })
+			q.goRun(ctx, "worker "+queue, func() { q.workerLoop(ctx, queue) })
 		}
 	}
-	q.goRun(func() { q.sweepLoop(ctx) })
+	q.goRun(ctx, "sweep", func() { q.sweepLoop(ctx) })
 	if q.cfg.DSN != "" {
-		q.goRun(func() { q.listenLoop(ctx) })
+		q.goRun(ctx, "listen", func() { q.listenLoop(ctx) })
 	}
 }
 
@@ -298,12 +299,39 @@ func (q *Queue) Start(ctx context.Context) {
 // recorded.
 func (q *Queue) Wait() { q.running.Wait() }
 
-func (q *Queue) goRun(fn func()) {
+// goRun runs loop on its own goroutine until it returns. A panic outside a
+// handler (claiming, settling, sweeping) is logged and the loop restarted
+// after a pause, so the queue keeps running instead of taking the process
+// down; a job claimed when it hit is reclaimed by the sweep.
+func (q *Queue) goRun(ctx context.Context, name string, loop func()) {
 	q.running.Add(1)
 	go func() {
 		defer q.running.Done()
-		fn()
+		for !q.runLoop(name, loop) {
+			t := time.NewTimer(loopRestartDelay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+			case <-t.C:
+			}
+		}
 	}()
+}
+
+// loopRestartDelay is the pause before a panicked loop is restarted, so a
+// panic that recurs on every pass does not spin.
+var loopRestartDelay = 5 * time.Second
+
+// runLoop runs loop, reporting false if it panicked.
+func (q *Queue) runLoop(name string, loop func()) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			q.log.Error("jobs: loop panic; restarting", "loop", name, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	loop()
+	return true
 }
 
 // workerLoop claims and processes jobs for one queue until ctx is cancelled,
@@ -382,6 +410,7 @@ func (q *Queue) process(ctx context.Context, c *claimed) {
 func runHandler(ctx context.Context, h Handler, j Job) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			slog.Error("jobs: handler panic", "worker", j.Worker, "id", j.ID, "panic", r, "stack", string(debug.Stack()))
 			err = fmt.Errorf("jobs: handler panic: %v", r)
 		}
 	}()

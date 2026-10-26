@@ -65,11 +65,21 @@ func (p *provisioner) ensure(ctx context.Context, principal, email string) error
 		p.inflight[principal] = done
 		p.mu.Unlock()
 
-		err := p.create(ctx, principal, email)
+		return p.createHeld(ctx, principal, email, done)
+	}
+}
 
+// createHeld runs create while holding principal's in-flight slot, and gives
+// the slot up in a defer: a panic in create (recovered by WrapRecover) must
+// not leave the slot taken, or every later login for this principal would
+// wait out its request deadline on a done that never closes.
+func (p *provisioner) createHeld(ctx context.Context, principal, email string, done chan struct{}) error {
+	var err error
+	finished := false // still false here means create panicked
+	defer func() {
 		p.mu.Lock()
 		delete(p.inflight, principal)
-		if err == nil {
+		if finished && err == nil {
 			if p.seen == nil {
 				p.seen = map[string]time.Time{}
 			}
@@ -77,8 +87,10 @@ func (p *provisioner) ensure(ctx context.Context, principal, email string) error
 		}
 		p.mu.Unlock()
 		close(done)
-		return err
-	}
+	}()
+	err = p.create(ctx, principal, email)
+	finished = true
+	return err
 }
 
 // create looks principal up and inserts it when absent. Callers hold the

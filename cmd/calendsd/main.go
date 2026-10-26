@@ -104,7 +104,7 @@ func main() {
 		// (litmus props class) can exercise PROPPATCH.
 		davSrv := dav.NewServer(m.Server.BaseURI, mock.NewPropCollection("root", nil))
 		davSrv.Metrics = set
-		srv = server.WrapMetrics(server.WrapHealth(davSrv, nil), set, davSrv.BaseURI)
+		srv = server.WrapMetrics(server.WrapHealth(server.WrapRecover(davSrv), nil), set, davSrv.BaseURI)
 	}
 
 	if metricsAddrV != "" {

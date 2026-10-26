@@ -2,8 +2,10 @@ package push
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -126,7 +128,15 @@ func (w *Worker) Run(ctx context.Context) {
 
 // listen holds one LISTEN connection and dispatches coalesced notifications
 // until the connection fails or ctx is cancelled.
-func (w *Worker) listen(ctx context.Context, housekeeping *time.Ticker) error {
+func (w *Worker) listen(ctx context.Context, housekeeping *time.Ticker) (err error) {
+	// A panic anywhere in the loop drops this connection like any other
+	// failure, and Run reconnects, instead of taking the process down.
+	defer func() {
+		if p := recover(); p != nil {
+			w.log.Error("webdav-push: listen loop panic", "panic", p, "stack", string(debug.Stack()))
+			err = fmt.Errorf("webdav-push: listen loop panic: %v", p)
+		}
+	}()
 	cfg, err := pgdial.Config(w.dsn)
 	if err != nil {
 		return err
@@ -154,6 +164,12 @@ func (w *Worker) listen(ctx context.Context, housekeeping *time.Ticker) error {
 	errc := make(chan error, 1)
 	go func() {
 		defer close(readerDone)
+		defer func() {
+			if p := recover(); p != nil {
+				w.log.Error("webdav-push: notification reader panic", "panic", p, "stack", string(debug.Stack()))
+				errc <- fmt.Errorf("webdav-push: notification reader panic: %v", p)
+			}
+		}()
 		for {
 			n, err := conn.WaitForNotification(lctx)
 			if err != nil {
@@ -342,6 +358,14 @@ func (r *retrySet) arm(now time.Time) {
 // service answered with a temporary failure (429 or 5xx), so the delivery
 // should be retried.
 func (w *Worker) dispatch(ctx context.Context, key string) (retry bool) {
+	// Runs on its own goroutine (dispatchAsync); a panic is logged and the
+	// key left to the housekeeping reconcile.
+	defer func() {
+		if p := recover(); p != nil {
+			w.log.Error("webdav-push: dispatch panic", "key", key, "panic", p, "stack", string(debug.Stack()))
+			retry = false
+		}
+	}()
 	w.init()
 	kind, id, ok := splitKey(key)
 	if !ok {
@@ -400,6 +424,13 @@ sends:
 // subscription's state from the push service's answer. It reports whether
 // the push service answered with a temporary failure (429 or 5xx).
 func (w *Worker) send(ctx context.Context, s Subscription, topic string, token int64, payload []byte) (retry bool) {
+	// Runs on its own goroutine (dispatch); a panic counts as a failed send.
+	defer func() {
+		if p := recover(); p != nil {
+			w.log.Error("webdav-push: send panic", "endpoint", s.PushResource, "panic", p, "stack", string(debug.Stack()))
+			retry = false
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, w.sendTimeout)
 	defer cancel()
 	// Re-check that the subscriber can still read the collection; a

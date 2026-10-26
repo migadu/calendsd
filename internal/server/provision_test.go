@@ -98,3 +98,29 @@ func TestProvisionStallDoesNotBlockOthers(t *testing.T) {
 		t.Error("a failed provisioning was memoized as seen")
 	}
 }
+
+// A panic in create still reaches the caller (WrapRecover answers it), but
+// gives up the in-flight slot: the next login for the same principal runs
+// create again instead of waiting out its deadline on the panicked attempt.
+func TestProvisionPanicReleasesSlot(t *testing.T) {
+	p := &provisioner{} // nil principals: create panics
+	ensure := func(ctx context.Context) (panicked bool, err error) {
+		defer func() { panicked = recover() != nil }()
+		return false, p.ensure(ctx, "principals/u@example.org", "u@example.org")
+	}
+	if panicked, _ := ensure(context.Background()); !panicked {
+		t.Fatal("create's panic was swallowed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	panicked, err := ensure(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("second ensure waited on the panicked attempt's slot")
+	}
+	if !panicked {
+		t.Fatalf("second ensure did not reach create: err=%v", err)
+	}
+	if _, memoized := p.seen["principals/u@example.org"]; memoized {
+		t.Fatal("a panicked create was memoized as provisioned")
+	}
+}

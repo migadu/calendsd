@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"time"
 )
 
@@ -126,7 +128,7 @@ func RunChangeLogPruner(ctx context.Context, db *sql.DB, retention, interval tim
 	defer t.Stop()
 	for {
 		start := time.Now()
-		n, err := PruneChangeLogs(ctx, db, start.Add(-retention))
+		n, err := pruneChangeLogsRecovered(ctx, db, start.Add(-retention))
 		switch {
 		case err != nil && ctx.Err() == nil:
 			slog.Warn("change-log prune failed", "err", err, "removed", n)
@@ -139,4 +141,17 @@ func RunChangeLogPruner(ctx context.Context, db *sql.DB, retention, interval tim
 		case <-t.C:
 		}
 	}
+}
+
+// pruneChangeLogsRecovered is PruneChangeLogs with a panic turned into an
+// error, so one bad pass is logged and retried next interval rather than
+// taking the server down from its background goroutine.
+func pruneChangeLogsRecovered(ctx context.Context, db *sql.DB, cutoff time.Time) (n int64, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("change-log prune panic", "panic", p, "stack", string(debug.Stack()))
+			err = fmt.Errorf("change-log prune panic: %v", p)
+		}
+	}()
+	return PruneChangeLogs(ctx, db, cutoff)
 }

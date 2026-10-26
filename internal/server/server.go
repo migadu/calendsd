@@ -248,9 +248,9 @@ type Built struct {
 // same credential backend as the DAV server this Built holds. Serve it on its
 // own loopback listener ([server] api_addr); never mount it on the DAV one.
 func (b *Built) ContactsAPI(db *sql.DB) http.Handler {
-	return WrapAccessLogPathOnly(contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
+	return WrapAccessLogPathOnly(WrapRecoverJSON(contactsapi.New(db, b.Auth, b.Tombstoned, contactsapi.Options{
 		Logger: slog.Default(),
-	}), b.accessLog)
+	})), b.accessLog)
 }
 
 // Build composes the storage-backed server, wrapped with the
@@ -270,7 +270,9 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	if dsn != "" {
 		queue = buildIMipQueue(db, cfg, dsn, srv)
 	}
-	var h http.Handler = WrapWellKnown(srv, srv.BaseURI)
+	// Recovery sits innermost, so every wrapper below records a panic as the
+	// 500 it is answered with.
+	var h http.Handler = WrapWellKnown(WrapRecover(srv), srv.BaseURI)
 	// Request logging wraps outside the well-known redirect so it captures the
 	// final status of every request, including redirects and auth challenges.
 	h = WrapRequestLog(h, cfg.RequestLogDir)
