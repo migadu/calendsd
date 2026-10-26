@@ -86,9 +86,10 @@ func OpenPool(dsn string, pool Pool) (*sql.DB, error) {
 // CalDAV\Backend\PDO.
 type CalDAV struct {
 	DB *sql.DB
-	// Metrics times the named expensive operations (calendar_query,
-	// changes_for_calendar, create/update_object, scheduling_objects) —
-	// deliberately not every query. A nil Set records nothing.
+	// Metrics times the named expensive operations (calendar_objects,
+	// calendar_query, changes_for_calendar, create/update_object,
+	// scheduling_objects) — deliberately not every query. A nil Set records
+	// nothing.
 	Metrics *metrics.Set
 }
 

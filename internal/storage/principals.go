@@ -12,18 +12,24 @@ import (
 
 	"calendsd/internal/acl"
 	davxml "calendsd/internal/dav/xml"
+	"calendsd/internal/metrics"
 )
 
 // Principals is the principal backend over the sabre schema. Port of
 // DAVACL\PrincipalBackend\PDO.
 type Principals struct {
 	DB *sql.DB
+	// Metrics times the full listing (principals_by_prefix), the one
+	// operation here whose cost grows with the number of users. A nil Set
+	// records nothing.
+	Metrics *metrics.Set
 }
 
 // PrincipalsByPrefix lists the principals directly under prefix (one more
 // path segment, so not the proxy sub-principals), filtered in SQL rather
 // than by reading the whole table.
 func (p *Principals) PrincipalsByPrefix(ctx context.Context, prefix string) ([]acl.Principal, error) {
+	defer p.Metrics.DBOpTimer("principals_by_prefix")()
 	under, deeper := "%", "%/%" // prefix "": URIs with no slash at all
 	if prefix != "" {
 		under = escapeLike(prefix) + "/%"

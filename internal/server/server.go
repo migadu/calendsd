@@ -381,7 +381,7 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		cfg.Realm = DefaultRealm
 	}
 
-	principals := &storage.Principals{DB: db}
+	principals := &storage.Principals{DB: db, Metrics: cfg.Metrics}
 	calendars := &storage.CalDAV{DB: db, Metrics: cfg.Metrics}
 	users := &storage.Users{DB: db}
 

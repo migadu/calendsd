@@ -24,6 +24,7 @@ type rowScanner interface {
 }
 
 func (b *CalDAV) CalendarObjects(ctx context.Context, id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
+	defer b.Metrics.DBOpTimer("calendar_objects")()
 	rows, err := b.DB.QueryContext(ctx,
 		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
 	if err != nil {

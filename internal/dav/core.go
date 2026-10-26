@@ -301,10 +301,12 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 	}
 	// allprop with <include> still requests the included properties
 	// (RFC 4918 §9.1) without turning off allprop semantics.
+	logListing := listingLogger(r, path, depth)
 	responses, err := c.server.PropertiesForPath(r.Context(), path, names, depth, pf.Include...)
 	if err != nil {
 		return err
 	}
+	logListing(len(responses) - 1)
 	switch {
 	case pf.Type == davxml.PropfindPropName:
 		// propname: return only the names of the properties that exist,
