@@ -36,7 +36,7 @@ func (h *Handler) suggestions(w http.ResponseWriter, r *http.Request) {
 	principal := principalOf(r)
 
 	// Over-fetch from the table so the union has room to re-rank.
-	ranked, err := h.frecency.Suggest(r.Context(), principal, q, limit*3)
+	ranked, cards, err := h.contacts.SuggestionSources(r.Context(), principal, q, limit*3, h.opts.SuggestionScanLimit)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -49,34 +49,22 @@ func (h *Handler) suggestions(w http.ResponseWriter, r *http.Request) {
 		out = append(out, s)
 	}
 
-	n, err := h.contacts.CardCount(r.Context(), principal)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	if n <= h.opts.SuggestionScanLimit {
-		cards, err := h.contacts.Cards(r.Context(), principal)
-		if err != nil {
-			h.fail(w, r, err)
-			return
+	for _, c := range cards {
+		p, ok := parseCard(c.Data)
+		if !ok || !p.matches(q) {
+			continue
 		}
-		for _, c := range cards {
-			p, ok := parseCard(c.Data)
-			if !ok || !p.matches(q) {
+		for _, email := range p.Emails {
+			key := strings.ToLower(email)
+			if s, seen := byEmail[key]; seen {
+				if p.FN != "" {
+					s.Name = p.FN
+				}
 				continue
 			}
-			for _, email := range p.Emails {
-				key := strings.ToLower(email)
-				if s, seen := byEmail[key]; seen {
-					if p.FN != "" {
-						s.Name = p.FN
-					}
-					continue
-				}
-				s := &storage.Suggestion{Email: email, Name: p.FN}
-				byEmail[key] = s
-				out = append(out, s)
-			}
+			s := &storage.Suggestion{Email: email, Name: p.FN}
+			byEmail[key] = s
+			out = append(out, s)
 		}
 	}
 

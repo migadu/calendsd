@@ -75,12 +75,23 @@ func (c *Contacts) Books(ctx context.Context, principalURI string) ([]AddressBoo
 	return out, rows.Err()
 }
 
+// queryer is what a read needs from the pool or from one connection taken out
+// of it, so the same query can run on either.
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // Cards returns every card the principal owns, across all books, in a
 // deterministic (book uri, card uri) order. One round trip; the API filters,
 // sorts and pages in Go (Phase 1 of the indexing plan: the p99 user has 446
 // cards, and nothing here is worse than what the DAV REPORT path already does).
 func (c *Contacts) Cards(ctx context.Context, principalURI string) ([]ContactCard, error) {
-	rows, err := c.DB.QueryContext(ctx, `
+	return cards(ctx, c.DB, principalURI)
+}
+
+func cards(ctx context.Context, db queryer, principalURI string) ([]ContactCard, error) {
+	rows, err := db.QueryContext(ctx, `
 SELECT c.id, a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified, 0)
   FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1
@@ -102,15 +113,46 @@ SELECT c.id, a.id, a.uri, c.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmo
 	return out, rows.Err()
 }
 
-// CardCount is the number of cards the principal owns across all books — the
+// cardCount is the number of cards the principal owns across all books — the
 // guard the suggestions path uses to decide whether scanning card content per
 // keystroke is affordable.
-func (c *Contacts) CardCount(ctx context.Context, principalURI string) (int, error) {
+func cardCount(ctx context.Context, db queryer, principalURI string) (int, error) {
 	var n int
-	err := c.DB.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 SELECT count(*) FROM cards c JOIN addressbooks a ON a.id = c.addressbookid
  WHERE a.principaluri = $1`, principalURI).Scan(&n)
 	return n, err
+}
+
+// SuggestionSources reads both halves of an autocomplete answer on one pooled
+// connection: the frecency matches for q (see suggest), and every card
+// the principal owns when there are at most scanLimit of them (nil above it).
+// The three queries run back to back, so a keystroke waits for the pool once
+// rather than three times, and holds one connection rather than queueing
+// behind other users' reads between its own.
+func (c *Contacts) SuggestionSources(ctx context.Context, principalURI, q string, limit, scanLimit int) ([]Suggestion, []ContactCard, error) {
+	conn, err := c.DB.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer conn.Close()
+
+	ranked, err := suggest(ctx, conn, principalURI, q, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	n, err := cardCount(ctx, conn, principalURI)
+	if err != nil {
+		return nil, nil, err
+	}
+	if n > scanLimit {
+		return ranked, nil, nil
+	}
+	all, err := cards(ctx, conn, principalURI)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ranked, all, nil
 }
 
 // CardByID returns one card by its row id, or nil when it does not exist or
@@ -261,16 +303,16 @@ ON CONFLICT (principal, email) DO UPDATE
 	})
 }
 
-// Suggest returns the principal's most-used addresses matching q (a
+// suggest returns the principal's most-used addresses matching q (a
 // case-insensitive substring of the address or the name; empty q matches
 // everything), highest count first. It reads the indexed table only — the
 // caller unions in card-derived pairs when the book is small enough to scan.
-func (f *Frecency) Suggest(ctx context.Context, principalURI, q string, limit int) ([]Suggestion, error) {
+func suggest(ctx context.Context, db queryer, principalURI, q string, limit int) ([]Suggestion, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	pattern := "%" + escapeLike(strings.ToLower(strings.TrimSpace(q))) + "%"
-	rows, err := f.DB.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 SELECT email, coalesce(name, ''), frec + seed_frec AS score
   FROM contact_frecency
  WHERE principal = $1 AND (email LIKE $2 OR lower(coalesce(name, '')) LIKE $2)
