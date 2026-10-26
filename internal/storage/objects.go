@@ -18,6 +18,12 @@ import (
 // value a write would have stored, so no client ever sees an empty etag.
 const objectColumns = `id, uri, lastmodified, coalesce(etag, md5(calendardata)), calendardata, size, componenttype`
 
+// metaColumns is objectColumns without the payload: a listing that serves
+// getetag and getcontentlength never reads the TOASTed data. The etag needs
+// no md5 fallback since migration 0004 filled every NULL in; the NULL stands
+// in the payload's position so scanObject reads both shapes.
+const metaColumns = `id, uri, lastmodified, etag, NULL::bytea, size, componenttype`
+
 // rowScanner is what *sql.Row and *sql.Rows have in common.
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -25,8 +31,20 @@ type rowScanner interface {
 
 func (b *CalDAV) CalendarObjects(ctx context.Context, id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
 	defer b.Metrics.DBOpTimer("calendar_objects")()
+	return b.listObjects(ctx, id, objectColumns)
+}
+
+// CalendarObjectsMeta lists a calendar's objects with CalendarData left nil.
+// Implements caldav.MetaLister, for the Depth:1 listing that only compares
+// etags (docs/slow-queries.md, item 3).
+func (b *CalDAV) CalendarObjectsMeta(ctx context.Context, id caldav.CalendarID) ([]caldav.ObjectInfo, error) {
+	defer b.Metrics.DBOpTimer("calendar_objects_meta")()
+	return b.listObjects(ctx, id, metaColumns)
+}
+
+func (b *CalDAV) listObjects(ctx context.Context, id caldav.CalendarID, columns string) ([]caldav.ObjectInfo, error) {
 	rows, err := b.DB.QueryContext(ctx,
-		`SELECT `+objectColumns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
+		`SELECT `+columns+` FROM calendarobjects WHERE calendarid = $1`, id.Calendar)
 	if err != nil {
 		return nil, err
 	}

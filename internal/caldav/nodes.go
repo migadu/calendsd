@@ -271,14 +271,38 @@ func (c *Calendar) Delete(ctx context.Context) error {
 }
 func (c *Calendar) LastModified() time.Time { return time.Time{} }
 
+// Children lists the calendar's objects. Over a MetaLister the payloads
+// stay in the database: the usual Depth:1 PROPFIND compares getetag and
+// getcontentlength, and an object whose data is actually read (a
+// calendar-data property, GET, COPY) fetches its own on first use.
 func (c *Calendar) Children(ctx context.Context) ([]dav.Node, error) {
-	objs, err := c.backend.CalendarObjects(ctx, c.Info.ID)
+	lister, lazy := c.backend.(MetaLister)
+	var objs []ObjectInfo
+	var err error
+	if lazy {
+		objs, err = lister.CalendarObjectsMeta(ctx, c.Info.ID)
+	} else {
+		objs, err = c.backend.CalendarObjects(ctx, c.Info.ID)
+	}
 	if err != nil {
 		return nil, err
 	}
 	var out []dav.Node
 	for _, obj := range objs {
-		out = append(out, NewCalendarObject(c.backend, c.Info, obj))
+		node := NewCalendarObject(c.backend, c.Info, obj)
+		if lazy {
+			node.load = func() ([]byte, error) {
+				full, err := c.backend.CalendarObject(ctx, c.Info.ID, obj.URI)
+				if err != nil {
+					return nil, err
+				}
+				if full == nil { // deleted between the listing and this read
+					return nil, dav.ErrNotFound("Calendar object not found")
+				}
+				return full.CalendarData, nil
+			}
+		}
+		out = append(out, node)
 	}
 	return out, nil
 }
@@ -557,6 +581,11 @@ type CalendarObject struct {
 	calendar CalendarInfo
 	obj      ObjectInfo
 	view     []byte // memoized per-view payload (see viewData); nil until first served
+	// load fetches the payload of an object that was listed without it
+	// (Calendar.Children over a MetaLister). It runs once, on the first read
+	// of the data; nil for a node built from a full row or once it has run.
+	load    func() ([]byte, error)
+	loadErr error // what load returned, so later reads fail the same way
 }
 
 // NewCalendarObject wraps object info into a file node.
@@ -576,7 +605,26 @@ func (o *CalendarObject) Delete(ctx context.Context) error {
 func (o *CalendarObject) LastModified() time.Time { return time.Time{} }
 
 func (o *CalendarObject) Get(ctx context.Context) (io.ReadCloser, error) {
+	if _, err := o.data(); err != nil {
+		return nil, err
+	}
 	return dav.BytesBody(o.viewData()), nil
+}
+
+// data returns the stored payload, fetching it on the first call for an
+// object listed without it. A failed fetch is remembered: the node has no
+// data to serve, and every later read reports the same error.
+func (o *CalendarObject) data() ([]byte, error) {
+	if o.load != nil {
+		o.obj.CalendarData, o.loadErr = o.load()
+		o.load = nil
+	}
+	return o.obj.CalendarData, o.loadErr
+}
+
+// readOnlyView reports whether this node is a sharee's read-only view.
+func (o *CalendarObject) readOnlyView() bool {
+	return (&Calendar{Info: o.calendar}).readOnly()
 }
 
 // viewData is the object as served for this particular view. On a read-only
@@ -588,11 +636,15 @@ func (o *CalendarObject) Get(ctx context.Context) (io.ReadCloser, error) {
 // off (storage sets it for ACCESS_READ). The result is memoized because Get,
 // Data, and Size each ask for it within one request.
 func (o *CalendarObject) viewData() []byte {
-	if !(&Calendar{Info: o.calendar}).readOnly() {
-		return o.obj.CalendarData
+	raw, err := o.data()
+	if err != nil {
+		return nil
+	}
+	if !o.readOnlyView() {
+		return raw
 	}
 	if o.view == nil {
-		o.view = ical.RedactRestricted(o.obj.CalendarData)
+		o.view = ical.RedactRestricted(raw)
 	}
 	return o.view
 }
@@ -646,7 +698,17 @@ func (o *CalendarObject) ContentType() string {
 	}
 	return ct
 }
-func (o *CalendarObject) Size() int64  { return int64(len(o.viewData())) }
+
+// Size is the length of the served payload. An object listed without its
+// payload answers from the stored size, which every write records as the
+// payload length, except on a read-only view, where the served payload is
+// the redacted one and has to be built.
+func (o *CalendarObject) Size() int64 {
+	if o.load != nil && !o.readOnlyView() {
+		return o.obj.Size
+	}
+	return int64(len(o.viewData()))
+}
 func (o *CalendarObject) ETag() string { return o.obj.QuotedETag() }
 
 // Data exposes the iCalendar payload as served for this view (confidential

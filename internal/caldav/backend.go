@@ -101,6 +101,15 @@ type Backend interface {
 	ChangesForCalendar(ctx context.Context, calendarID CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error)
 }
 
+// MetaLister is implemented by backends that can list a calendar's objects
+// without their payloads (storage.CalDAV). Calendar.Children prefers it: a
+// Depth:1 PROPFIND compares etags and sizes, and the payload is fetched only
+// for an object whose data is actually read.
+type MetaLister interface {
+	// CalendarObjectsMeta is CalendarObjects with CalendarData left nil.
+	CalendarObjectsMeta(ctx context.Context, calendarID CalendarID) ([]ObjectInfo, error)
+}
+
 // UIDLookup is implemented by backends that find an object by its UID with an
 // index (storage.CalDAV) rather than by loading the whole calendar.
 type UIDLookup interface {

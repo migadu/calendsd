@@ -1,6 +1,8 @@
 -- Read-only audit of everything internal/schema/migrations/0002_extension.sql is
 -- responsible for: the tables and indexes it creates, the index it drops, the
--- sabre columns it widens, and the columns of the tables it owns.
+-- sabre columns it widens, and the columns of the tables it owns; plus the
+-- data invariant 0004_object_etags.sql establishes (no object without an
+-- etag).
 --
 -- Nothing here writes or locks, so it is safe against a live database. Run it
 -- to answer "has this file been applied, and is what is there still what the
@@ -105,6 +107,15 @@ WITH checks AS (
       LEFT JOIN pg_attribute a
              ON a.attrelid = to_regclass(v.tbl) AND a.attname = v.col
             AND a.attnum > 0 AND NOT a.attisdropped
+
+    UNION ALL
+
+    -- Objects without an etag. 0004 backfilled them once and every write
+    -- stores one; the metadata-only listing relies on it.
+    SELECT 5, 'data', 'calendarobjects.etag', 'none NULL',
+           CASE WHEN n.c = 0 THEN 'none NULL' ELSE n.c || ' NULL' END,
+           n.c = 0
+      FROM (SELECT count(*) AS c FROM calendarobjects WHERE etag IS NULL) n
 )
 SELECT kind, object, expected, found,
        CASE WHEN ok THEN 'ok' ELSE '<<< FIX' END AS status
@@ -138,6 +149,8 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
         ('addressbooks','principaluri',320),
         ('deleted_principals','principal',320), ('deleted_principals','username',255)
       ) AS v(tbl, col, len)
+    UNION ALL
+    SELECT NOT EXISTS (SELECT 1 FROM calendarobjects WHERE etag IS NULL)
     UNION ALL
     SELECT EXISTS (SELECT 1 FROM pg_attribute a
                     WHERE a.attrelid = to_regclass(v.tbl) AND a.attname = v.col
