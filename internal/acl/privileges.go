@@ -315,10 +315,7 @@ func (p *Plugin) principalEmailDomain(ctx context.Context, principalPath string)
 		return ""
 	}
 	email, _ := props[emailName].(string)
-	if at := strings.LastIndex(email, "@"); at >= 0 && at < len(email)-1 {
-		return strings.ToLower(email[at+1:])
-	}
-	return ""
+	return EmailDomain(email)
 }
 
 // CheckPrivileges verifies the current principal holds every listed

@@ -51,6 +51,20 @@ func (r *CalendarRoot) Children(ctx context.Context) ([]dav.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.homes(principals), nil
+}
+
+// ChildrenScoped implements dav.ScopedLister: homes of the requester and its
+// email domain only (acl.ScopedPrincipals).
+func (r *CalendarRoot) ChildrenScoped(ctx context.Context, scope dav.ChildScope) ([]dav.Node, error) {
+	principals, err := acl.ScopedPrincipals(ctx, r.principals, r.principalPrefix, scope)
+	if err != nil {
+		return nil, err
+	}
+	return r.homes(principals), nil
+}
+
+func (r *CalendarRoot) homes(principals []acl.Principal) []dav.Node {
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
 		home := NewCalendarHome(r.backend, p.URI)
@@ -58,7 +72,7 @@ func (r *CalendarRoot) Children(ctx context.Context) ([]dav.Node, error) {
 		home.perUserProps = r.PerUserProps
 		out[i] = home
 	}
-	return out, nil
+	return out
 }
 
 func (r *CalendarRoot) Child(ctx context.Context, name string) (dav.Node, error) {

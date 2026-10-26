@@ -502,11 +502,32 @@ func isCollectionNode(n Node) bool {
 // from the requester (e.g. domain-scoped principal listings). Every listing
 // goes through here, so a filtered child leaves no trace in any response.
 func (s *Server) VisibleChildren(ctx context.Context, path string, coll Collection) ([]Node, error) {
-	children, err := coll.Children(ctx)
-	if err != nil {
-		return nil, err
+	var children []Node
+	var scoped ChildFilterHook // the hook whose filter the listing already applied
+	if lister, ok := coll.(ScopedLister); ok {
+		for hook := range Hooks[ChildScopeHook](s) {
+			scope, ok := hook.ChildScope(ctx, path)
+			if !ok {
+				continue
+			}
+			var err error
+			if children, err = lister.ChildrenScoped(ctx, scope); err != nil {
+				return nil, err
+			}
+			scoped = hook
+			break
+		}
+	}
+	if scoped == nil {
+		var err error
+		if children, err = coll.Children(ctx); err != nil {
+			return nil, err
+		}
 	}
 	for hook := range Hooks[ChildFilterHook](s) {
+		if hook == scoped {
+			continue
+		}
 		children = hook.FilterChildren(ctx, path, children)
 	}
 	return children, nil

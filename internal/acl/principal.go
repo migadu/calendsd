@@ -197,11 +197,25 @@ func (c *PrincipalCollection) Children(ctx context.Context) ([]dav.Node, error) 
 	if err != nil {
 		return nil, err
 	}
+	return c.wrapAll(principals), nil
+}
+
+// ChildrenScoped implements dav.ScopedLister: the requester and its email
+// domain, listed as such instead of filtered out of everyone.
+func (c *PrincipalCollection) ChildrenScoped(ctx context.Context, scope dav.ChildScope) ([]dav.Node, error) {
+	principals, err := ScopedPrincipals(ctx, c.backend, c.prefix, scope)
+	if err != nil {
+		return nil, err
+	}
+	return c.wrapAll(principals), nil
+}
+
+func (c *PrincipalCollection) wrapAll(principals []Principal) []dav.Node {
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
 		out[i] = c.wrap(p)
 	}
-	return out, nil
+	return out
 }
 
 func (c *PrincipalCollection) ChildExists(ctx context.Context, name string) bool {

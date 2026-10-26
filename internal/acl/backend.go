@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"calendsd/internal/dav"
+	davxml "calendsd/internal/dav/xml"
 	"calendsd/internal/pathutil"
 )
 
@@ -44,6 +45,32 @@ type Backend interface {
 
 // MemoryBackend is an in-memory principal backend, used by tests and the
 // corpus runner. Port of sabre's PrincipalBackend\Mock.
+// DomainLister is implemented by backends that can list the principals of an
+// email domain in one indexed query (storage.Principals); ScopedPrincipals
+// filters the full listing in Go otherwise.
+type DomainLister interface {
+	// PrincipalsByPrefixInDomain is PrincipalsByPrefix narrowed to the
+	// principals whose email-address domain is domain, by EmailDomain's rule.
+	PrincipalsByPrefixInDomain(ctx context.Context, prefix, domain string) ([]Principal, error)
+}
+
+// EmailDomain returns the lowercased domain of an email address: what follows
+// the last "@", or "" when there is no "@" or nothing follows it. It is the
+// one definition of "domain" for the same-domain rules; storage's SQL
+// (split_part(email, '@', -1)) restates it.
+func EmailDomain(email string) string {
+	if at := strings.LastIndex(email, "@"); at >= 0 && at < len(email)-1 {
+		return strings.ToLower(email[at+1:])
+	}
+	return ""
+}
+
+// principalEmail returns a principal's {sabredav}email-address, or "".
+func principalEmail(p Principal) string {
+	email, _ := p.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "email-address"}].(string)
+	return email
+}
+
 type MemoryBackend struct {
 	Principals []Principal
 	// Groups maps group principal path to member paths.

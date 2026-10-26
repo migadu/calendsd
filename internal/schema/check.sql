@@ -35,7 +35,8 @@ WITH checks AS (
         ('contact_frecency'), ('contact_frecency_rank_ix'),
         ('contact_import'), ('contact_import_run_ix'),
         ('calendar_availability'), ('free_busy_visibility'),
-        ('principals_lower_email'), ('calendarobjects_calendarid_uid')
+        ('principals_lower_email'), ('calendarobjects_calendarid_uid'),
+        ('principals_email_domain')
       ) AS v(name)
 
     UNION ALL
@@ -136,7 +137,9 @@ SELECT count(*) FILTER (WHERE NOT ok) AS problems,
       ('jobs_latest_ix'), ('domain_scheduling_policy'),
       ('contact_frecency'), ('contact_frecency_rank_ix'),
       ('contact_import'), ('contact_import_run_ix'),
-      ('calendar_availability'), ('free_busy_visibility')) AS v(name)
+      ('calendar_availability'), ('free_busy_visibility'),
+      ('principals_lower_email'), ('calendarobjects_calendarid_uid'),
+      ('principals_email_domain')) AS v(name)
     UNION ALL
     SELECT to_regclass('calendarinstances_principaluri_share_href') IS NULL
     UNION ALL

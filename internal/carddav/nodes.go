@@ -44,13 +44,27 @@ func (r *AddressBookRoot) Children(ctx context.Context) ([]dav.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.homes(principals), nil
+}
+
+// ChildrenScoped implements dav.ScopedLister: homes of the requester and its
+// email domain only (acl.ScopedPrincipals).
+func (r *AddressBookRoot) ChildrenScoped(ctx context.Context, scope dav.ChildScope) ([]dav.Node, error) {
+	principals, err := acl.ScopedPrincipals(ctx, r.principals, r.principalPrefix, scope)
+	if err != nil {
+		return nil, err
+	}
+	return r.homes(principals), nil
+}
+
+func (r *AddressBookRoot) homes(principals []acl.Principal) []dav.Node {
 	out := make([]dav.Node, len(principals))
 	for i, p := range principals {
 		home := NewAddressBookHome(r.backend, p.URI)
 		home.autoProvision = r.AutoProvision
 		out[i] = home
 	}
-	return out, nil
+	return out
 }
 
 func (r *AddressBookRoot) Child(ctx context.Context, name string) (dav.Node, error) {

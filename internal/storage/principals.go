@@ -30,13 +30,37 @@ type Principals struct {
 // than by reading the whole table.
 func (p *Principals) PrincipalsByPrefix(ctx context.Context, prefix string) ([]acl.Principal, error) {
 	defer p.Metrics.DBOpTimer("principals_by_prefix")()
-	under, deeper := "%", "%/%" // prefix "": URIs with no slash at all
-	if prefix != "" {
-		under = escapeLike(prefix) + "/%"
-		deeper = under + "/%"
-	}
-	rows, err := p.DB.QueryContext(ctx, `SELECT uri, email, displayname FROM principals
+	under, deeper := prefixBounds(prefix)
+	return p.scanPrincipals(ctx, `SELECT uri, email, displayname FROM principals
  WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'`, under, deeper)
+}
+
+// PrincipalsByPrefixInDomain is PrincipalsByPrefix narrowed to one email
+// domain, by acl.EmailDomain's rule: the text after the last "@", with at
+// least one character after it, compared lowercased. Implements
+// acl.DomainLister; served by the principals_email_domain index
+// (docs/slow-queries.md, item 2).
+func (p *Principals) PrincipalsByPrefixInDomain(ctx context.Context, prefix, domain string) ([]acl.Principal, error) {
+	defer p.Metrics.DBOpTimer("principals_by_prefix_in_domain")()
+	under, deeper := prefixBounds(prefix)
+	return p.scanPrincipals(ctx, `SELECT uri, email, displayname FROM principals
+ WHERE uri LIKE $1 ESCAPE '\' AND uri NOT LIKE $2 ESCAPE '\'
+   AND email LIKE '%@_%' AND lower(split_part(email, '@', -1)) = $3`,
+		under, deeper, strings.ToLower(domain))
+}
+
+// prefixBounds returns the LIKE patterns for the URIs one segment below
+// prefix: under them, and (to exclude) deeper than that.
+func prefixBounds(prefix string) (under, deeper string) {
+	if prefix == "" {
+		return "%", "%/%" // URIs with no slash at all
+	}
+	under = escapeLike(prefix) + "/%"
+	return under, under + "/%"
+}
+
+func (p *Principals) scanPrincipals(ctx context.Context, query string, args ...any) ([]acl.Principal, error) {
+	rows, err := p.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,11 @@
+-- Index for the domain-scoped root listings (docs/slow-queries.md, item 2).
+--
+-- A Depth:1 PROPFIND on /principals/, /calendars/ or /addressbooks/ shows a
+-- user the principals of their own email domain. That used to be a scan of
+-- every principal followed by one lookup per principal to read its email;
+-- storage.Principals.PrincipalsByPrefixInDomain now asks for the domain in
+-- SQL, and this expression index serves it. The expression is the SQL form
+-- of acl.EmailDomain: the text after the last "@", lowercased.
+-- principals_lower_email (0002) indexes the whole address and cannot serve
+-- a suffix match.
+CREATE INDEX IF NOT EXISTS principals_email_domain ON principals (lower(split_part(email, '@', -1)));

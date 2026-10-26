@@ -9,11 +9,13 @@ import (
 	"errors"
 	"strings"
 
+	"calendsd/internal/acl"
 	"calendsd/internal/caldav"
 )
 
 var (
 	_ caldav.AddressResolver = (*Principals)(nil)
+	_ acl.DomainLister       = (*Principals)(nil)
 	_ caldav.UIDLookup       = (*CalDAV)(nil)
 	_ caldav.MetaLister      = (*CalDAV)(nil)
 	_ caldav.BatchFetcher    = (*CalDAV)(nil)

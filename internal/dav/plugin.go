@@ -118,6 +118,35 @@ type ChildFilterHook interface {
 	FilterChildren(ctx context.Context, parentPath string, children []Node) []Node
 }
 
+// ChildScope is a requester a listing can be narrowed to up front: the
+// principal, which always sees itself, and its email domain, "" when it has
+// none. See ChildScopeHook and ScopedLister.
+type ChildScope struct {
+	Principal string
+	Domain    string
+}
+
+// ChildScopeHook is a ChildFilterHook that can state what its filter keeps
+// before the children are listed. ChildScope returns false for a path the
+// hook does not filter, or a requester it would not narrow (an admin); with a
+// scope, VisibleChildren lets a ScopedLister collection list only the
+// children in it and skips this hook's FilterChildren. With one child per
+// user under the roots, that is the difference between a scan of every
+// principal plus one lookup per child and a single indexed query
+// (docs/slow-queries.md, item 2).
+type ChildScopeHook interface {
+	ChildFilterHook
+	ChildScope(ctx context.Context, parentPath string) (ChildScope, bool)
+}
+
+// ScopedLister is a collection that can list only the children the
+// requester may see, instead of listing all of them for ChildFilterHook to
+// prune. ChildrenScoped must return exactly what Children followed by the
+// scoping hook's FilterChildren would.
+type ScopedLister interface {
+	ChildrenScoped(ctx context.Context, scope ChildScope) ([]Node, error)
+}
+
 // AfterUnbindHook fires after a node was removed (sabre's afterUnbind).
 type AfterUnbindHook interface {
 	AfterUnbind(ctx context.Context, path string) error
