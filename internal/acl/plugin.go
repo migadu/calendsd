@@ -67,6 +67,11 @@ func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
 	if current == "" {
 		return nil, nil
 	}
+	// The set is the same for every node of the request, and a PROPFIND or
+	// report over many objects asks for it once per node.
+	if memo, ok := dav.RequestPrincipals(ctx); ok {
+		return memo, nil
+	}
 	out := []string{current}
 	node, err := p.server.Tree.NodeForPath(ctx, current)
 	if err != nil {
@@ -79,6 +84,7 @@ func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
 		}
 		out = append(out, groups...)
 	}
+	dav.SetRequestPrincipals(ctx, out)
 	return out, nil
 }
 

@@ -91,8 +91,14 @@ func TestMultigetIsBatched(t *testing.T) {
 	if !strings.Contains(out, "missing.ics") || strings.Count(out, "HTTP/1.1 404") != 1 {
 		t.Errorf("missing href is not answered 404 (%d 404s):\n%s", strings.Count(out, "HTTP/1.1 404"), out[:min(len(out), 600)])
 	}
-	if objects, _ := reportQueries(t, qlog); objects != 1 {
+	objects, total := reportQueries(t, qlog)
+	if objects != 1 {
 		t.Errorf("multiget ran %d calendarobjects queries, want 1: %q", objects, qlog.Statements())
+	}
+	// One propertystorage read per object remains; everything else is per
+	// request.
+	if total > 200+20 {
+		t.Errorf("multiget ran %d queries in all, want about one per object: %q", total, qlog.Statements())
 	}
 }
 
@@ -119,7 +125,11 @@ func TestCalendarQueryIsBatched(t *testing.T) {
 	if n := strings.Count(w.Body.String(), "SUMMARY:Meta ev"); n != 200 {
 		t.Errorf("%d payloads in the calendar-query response, want 200", n)
 	}
-	if objects, _ := reportQueries(t, qlog); objects > 2 {
+	objects, total := reportQueries(t, qlog)
+	if objects > 2 {
 		t.Errorf("calendar-query ran %d calendarobjects queries, want at most 2: %q", objects, qlog.Statements())
+	}
+	if total > 200+20 {
+		t.Errorf("calendar-query ran %d queries in all, want about one per object: %q", total, qlog.Statements())
 	}
 }

@@ -15,6 +15,29 @@ type principalState struct {
 	// logged, never persisted, dropped when the request ends. Empty for logins
 	// that carry no reusable plaintext (Digest, fixed-principal test logins).
 	secret string
+	// principals memoizes the requester's principal set (itself plus its
+	// groups) for the request, keyed by the principal it was computed for;
+	// every node of a multi-object response needs it for its ACL check.
+	principals    []string
+	principalsFor string
+}
+
+// RequestPrincipals returns the principal set memoized for the request's
+// current principal by SetRequestPrincipals, or false when none is held.
+func RequestPrincipals(ctx context.Context) ([]string, bool) {
+	s, ok := ctx.Value(principalKey{}).(*principalState)
+	if !ok || s.principalsFor == "" || s.principalsFor != s.principal {
+		return nil, false
+	}
+	return s.principals, true
+}
+
+// SetRequestPrincipals memoizes the current principal's set for the rest of
+// the request. A no-op when no holder is present or no principal is set.
+func SetRequestPrincipals(ctx context.Context, principals []string) {
+	if s, ok := ctx.Value(principalKey{}).(*principalState); ok && s.principal != "" {
+		s.principals, s.principalsFor = principals, s.principal
+	}
 }
 
 type principalKey struct{}
