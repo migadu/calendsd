@@ -128,61 +128,73 @@ test('setMasterProps replaces, inserts, removes — and spares the VALARM', () =
   assert.match(out, /DESCRIPTION:reminder/);
 });
 
-test('eventLines emits a DISPLAY VALARM for a reminder trigger', () => {
+test('eventLines emits one DISPLAY VALARM per reminder trigger', () => {
   const lines = ical.eventLines({
     uid: 'x', summary: 'Call, Bob', start: '2026-07-15T10:00:00Z',
-    end: '2026-07-15T11:00:00Z', alarm: '-PT15M',
+    end: '2026-07-15T11:00:00Z', alarms: ['-PT15M', 'PT0S'],
   });
   const i = lines.indexOf('BEGIN:VALARM');
   assert.ok(i > 0, 'VALARM present');
-  assert.deepEqual(lines.slice(i, i + 5), [
+  assert.deepEqual(lines.slice(i, i + 10), [
     'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Call\\, Bob',
     'TRIGGER;RELATED=START:-PT15M', 'END:VALARM',
+    'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Call\\, Bob',
+    'TRIGGER;RELATED=START:PT0S', 'END:VALARM',
   ]);
-  // no alarm field → no VALARM
+  // no alarms field → no VALARM
   assert.ok(!ical.eventLines({
     uid: 'x', summary: 's', start: '2026-07-15T10:00:00Z', end: '2026-07-15T11:00:00Z',
   }).includes('BEGIN:VALARM'));
 });
 
-test('alarmPreset reads a simple reminder and flags the rest as CUSTOM', () => {
+test('readReminders lists plain relative reminders and flags the rest as custom', () => {
   const ev = t => ical.components(ical.parse(
     `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\n${t}END:VEVENT\r\nEND:VCALENDAR\r\n`), 'VEVENT')[0];
-  assert.equal(ical.alarmPreset(ev('')), '');                                   // no alarm
-  assert.equal(ical.alarmPreset(ev(
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=START:-PT15M\r\nEND:VALARM\r\n')), '-PT15M');
-  assert.equal(ical.alarmPreset(ev(                                            // -PT60M ≡ -PT1H preset
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT60M\r\nEND:VALARM\r\n')), '-PT1H');
-  assert.equal(ical.alarmPreset(ev(                                            // at-start preset
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:PT0S\r\nEND:VALARM\r\n')), 'PT0S');
-  assert.equal(ical.alarmPreset(ev(                                            // EMAIL action → custom
-    'BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n')), 'CUSTOM');
-  assert.equal(ical.alarmPreset(ev(                                            // odd offset → custom
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n')), 'CUSTOM');
-  assert.equal(ical.alarmPreset(ev(                                            // relative to END → custom
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=END:-PT15M\r\nEND:VALARM\r\n')), 'CUSTOM');
-  assert.equal(ical.alarmPreset(ev(                                            // absolute trigger → custom
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;VALUE=DATE-TIME:20260715T094500Z\r\nEND:VALARM\r\n')), 'CUSTOM');
-  assert.equal(ical.alarmPreset(ev(                                            // several alarms → custom
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n' +
-    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n')), 'CUSTOM');
+  const plain = (...triggers) => ({ triggers, custom: false });
+  const custom = { triggers: [], custom: true };
+  assert.deepEqual(ical.readReminders(ev('')), plain());                     // no alarm
+  assert.deepEqual(ical.readReminders(ev(
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=START:-PT15M\r\nEND:VALARM\r\n')), plain('-PT15M'));
+  assert.deepEqual(ical.readReminders(ev(                                    // any offset, several alarms
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n' +
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:PT0S\r\nEND:VALARM\r\n')), plain('-PT10M', 'PT0S'));
+  assert.deepEqual(ical.readReminders(ev(                                    // EMAIL action
+    'BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n')), custom);
+  assert.deepEqual(ical.readReminders(ev(                                    // relative to END on an event
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=END:-PT15M\r\nEND:VALARM\r\n')), custom);
+  assert.deepEqual(ical.readReminders(ev(                                    // absolute trigger
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;VALUE=DATE-TIME:20260715T094500Z\r\nEND:VALARM\r\n')), custom);
+  assert.deepEqual(ical.readReminders(ev(                                    // a task's DUE-relative reminder
+    'BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;RELATED=END:-PT1H\r\nEND:VALARM\r\n'), 'END'), plain('-PT1H'));
 });
 
-test('setMasterAlarm replaces alarms on the master and can clear them', () => {
-  const set = ical.setMasterAlarm(SAMPLE, '-PT30M', 'Team sync');
-  assert.equal(ical.unfold(set).filter(l => l === 'BEGIN:VALARM').length, 1);
+test('offsetToTrigger and triggerToOffset round-trip the editor offsets', () => {
+  assert.equal(ical.offsetToTrigger({ when: 'at' }), 'PT0S');
+  assert.equal(ical.offsetToTrigger({ when: 'before', amount: 15, unit: 'minutes' }), '-PT15M');
+  assert.equal(ical.offsetToTrigger({ when: 'after', amount: 2, unit: 'days' }), 'P2D');
+  assert.equal(ical.offsetToTrigger({ when: 'before', amount: 1, unit: 'weeks' }), '-P1W');
+  assert.deepEqual(ical.triggerToOffset('-PT60M'), { when: 'before', amount: 1, unit: 'hours' });
+  assert.deepEqual(ical.triggerToOffset('-P7D'), { when: 'before', amount: 1, unit: 'weeks' });
+  assert.deepEqual(ical.triggerToOffset('PT0S'), { when: 'at', amount: 0, unit: 'minutes' });
+  assert.equal(ical.triggerToOffset('20260715T094500Z'), null);
+});
+
+test('setMasterAlarms replaces alarms on the master and can clear them', () => {
+  const set = ical.setMasterAlarms(SAMPLE, ['-PT30M', '-P1D'], 'Team sync');
+  assert.equal(ical.unfold(set).filter(l => l === 'BEGIN:VALARM').length, 2);
   assert.match(set, /TRIGGER;RELATED=START:-PT30M/);
+  assert.match(set, /TRIGGER;RELATED=START:-P1D/);
   assert.doesNotMatch(set, /DESCRIPTION:reminder/);          // the old VALARM is gone
   assert.match(set, /SUMMARY:Team sync/);                    // top-level props untouched
-  // empty trigger clears every alarm
-  assert.ok(!ical.setMasterAlarm(SAMPLE, '').includes('BEGIN:VALARM'));
+  // an empty list clears every alarm
+  assert.ok(!ical.setMasterAlarms(SAMPLE, []).includes('BEGIN:VALARM'));
 });
 
-test('setMasterAlarm leaves an override VEVENT alone', () => {
+test('setMasterAlarms leaves an override VEVENT alone', () => {
   const withOverride = ical.addOverride(SAMPLE,
     ['UID:abc', 'RECURRENCE-ID:20260716T100000Z', 'SUMMARY:Override',
      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:o', 'TRIGGER:-PT5M', 'END:VALARM']);
-  const out = ical.setMasterAlarm(withOverride, '');
+  const out = ical.setMasterAlarms(withOverride, []);
   assert.match(out, /DESCRIPTION:o/);                        // override's alarm survives
   assert.equal(ical.unfold(out).filter(l => l === 'BEGIN:VALARM').length, 1);
 });
