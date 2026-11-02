@@ -74,7 +74,7 @@ export async function revokeDelegate(access, principalHref) {
 // email} or null.
 export async function resolvePrincipal(email) {
   const needle = email.trim().toLowerCase();
-  // Match on sabre's {s}email-address — the searchable index the server exposes
+  // Match on {s}email-address — the searchable index the server exposes
   // (calendar-user-address-set is not searchable). The search returns the
   // principal href even when reading its props is forbidden; the server scopes
   // results to our own email domain.

@@ -13,10 +13,9 @@ export default {
   render(main) {
     main.append(html`<div>
       <h2>Calendar sharing</h2>
-      <p class="hint">The Postgres storage backend does not implement sharing,
-      notifications, or invite replies (sabre PDO parity) — these requests
-      demonstrate the protocol and surface the server's honest 403/501/404 in
-      the drawer. Mock-backend test servers accept them.</p>
+      <p class="hint">Each request shows its protocol exchange in the drawer:
+      share/unshare on the owner's calendar, then the sharee's notification
+      and invite reply.</p>
       <fieldset><legend>Share / unshare (POST {cs}share to the calendar)</legend>
         ${calSelect}
         <label class="fld">sharee href<input id="sh-href" value="mailto:bob@example.org" size="30"></label>

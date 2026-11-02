@@ -27,7 +27,7 @@ function mapCalendar(x, extra = {}) {
     order: parseInt(x.props.get(key(NS.a, 'calendar-order'))?.textContent ?? '', 10),
     description: x.props.get(key(NS.c, 'calendar-description'))?.textContent ?? '',
     ctag: x.props.get(key(NS.cs, 'getctag'))?.textContent ?? '',
-    // Sabre marks a calendar shared to us read-only ({s}read-only = "1"); the
+    // The server marks a calendar shared to us read-only ({s}read-only = "1"); the
     // server sends no such property on our own calendars, so absent = writable.
     readOnly: truthyProp(x.props.get(key(NS.s, 'read-only'))),
     // A task/journal-only collection can't hold VEVENTs; an absent set means
@@ -130,7 +130,8 @@ function compNames(el) {
     .map(c => c.getAttribute('name')).filter(Boolean);
 }
 
-// truthyProp reads sabre's "1"/"0" boolean-ish marker properties.
+// truthyProp reads the "1"/"0" boolean-ish marker properties in the {s}
+// namespace.
 function truthyProp(el) {
   if (!el) return false;
   const v = el.textContent.trim();
