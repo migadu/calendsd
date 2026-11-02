@@ -1,8 +1,8 @@
 // iTIP scheduling broker: generates scheduling messages from calendar-object
-// changes and applies incoming messages to recipient copies. Port of the
-// core flows of sabre/vobject's ITip\Broker (new invites, updates,
-// cancellations, attendee replies), including the per-instance
-// (RECURRENCE-ID-scoped) attendee matrix: each attendee receives only the
+// changes and applies incoming messages to recipient copies. It covers new
+// invites, updates, cancellations and attendee replies, including the
+// per-instance (RECURRENCE-ID-scoped) attendee matrix: each attendee receives
+// only the
 // occurrences they belong to, with EXDATE synthesized on the master for
 // excluded instances, and replies scoped to the instances whose PARTSTAT
 // changed.
@@ -44,7 +44,7 @@ func (m *Message) ScheduleStatusCode() string {
 }
 
 // eventSummary captures the scheduling-relevant view of an object, including
-// the per-instance (RECURRENCE-ID) attendee matrix sabre's broker needs.
+// the per-instance (RECURRENCE-ID) attendee matrix.
 type eventSummary struct {
 	uid       string
 	organizer string
@@ -80,15 +80,13 @@ type attendeeState struct {
 	forceSend bool
 }
 
-// sigProps are the properties whose change makes an update significant (sabre
-// Broker::$significantChangeProperties).
+// sigProps are the properties whose change makes an update significant.
 var sigProps = []string{"DTSTART", "DTEND", "DURATION", "DUE", "RRULE", "RDATE", "EXDATE", "STATUS"}
 
-// summarize builds the scheduling view of cal. skipClientAgents applies
-// sabre's scheduleAgentServerRules: ATTENDEEs marked SCHEDULE-AGENT=CLIENT are
-// left out of the matrix. That is right when generating messages
-// (Broker::parseEventInfo) but not when applying an incoming REPLY — sabre's
-// processMessageReply reads the ATTENDEE regardless of its SCHEDULE-AGENT, so
+// summarize builds the scheduling view of cal. With skipClientAgents,
+// ATTENDEEs marked SCHEDULE-AGENT=CLIENT are left out of the matrix. That is
+// right when generating messages but not when applying an incoming REPLY,
+// which must read the ATTENDEE regardless of its SCHEDULE-AGENT, so
 // ProcessMessage summarizes unfiltered.
 func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 	if cal == nil {
@@ -134,7 +132,7 @@ func summarize(cal *goical.Calendar, skipClientAgents bool) *eventSummary {
 		for _, att := range comp.Props.Values("ATTENDEE") {
 			// SCHEDULE-AGENT=CLIENT: the client does the scheduling with this
 			// attendee itself, so leave them out of the matrix and the server
-			// sends them nothing (RFC 6638 §7.1; sabre Broker::parseEventInfo).
+			// sends them nothing (RFC 6638 §7.1).
 			if skipClientAgents && strings.EqualFold(att.Params.Get("SCHEDULE-AGENT"), "CLIENT") {
 				continue
 			}
@@ -293,7 +291,7 @@ func splitList(v string) []string {
 
 // ParseEvent computes the scheduling messages a change requires. newCal is
 // nil for deletions, oldCal nil for creations; addresses are the acting
-// user's calendar-user addresses. Port of Broker::parseEvent.
+// user's calendar-user addresses.
 func ParseEvent(newCal *goical.Calendar, addresses []string, oldCal *goical.Calendar) ([]*Message, error) {
 	newInfo, oldInfo := summarize(newCal, true), summarize(oldCal, true)
 	base := newInfo
@@ -316,9 +314,9 @@ func ParseEvent(newCal *goical.Calendar, addresses []string, oldCal *goical.Cale
 }
 
 // parseAsOrganizer generates the per-attendee REQUEST/CANCEL messages for an
-// organizer-side change. Port of Broker::parseEventForOrganizer: each attendee
-// receives only the instances they belong to, with EXDATE synthesized for the
-// master when they are excluded from some occurrences.
+// organizer-side change. Each attendee receives only the instances they
+// belong to, with EXDATE synthesized for the master when they are excluded
+// from some occurrences.
 func parseAsOrganizer(newInfo, oldInfo *eventSummary) ([]*Message, error) {
 	base := newInfo
 	if base == nil {
@@ -411,7 +409,7 @@ func instancesDiffer(oldSt, newSt *attendeeState) bool {
 // requestMessage builds the REQUEST body an attendee receives: only the
 // instances they belong to, VTIMEZONEs, and (on the master) EXDATE for the
 // occurrences they are excluded from, with server-only scheduling parameters
-// stripped. Port of the REQUEST branch of Broker::parseEventForOrganizer.
+// stripped.
 func requestMessage(info *eventSummary, att *attendeeState) *goical.Calendar {
 	out := goical.NewCalendar()
 	out.Props.SetText(goical.PropVersion, "2.0")
@@ -487,10 +485,9 @@ func cancelMessage(info *eventSummary, href, name string) *goical.Calendar {
 	return out
 }
 
-// parseAsAttendee generates the attendee's REPLY, per instance. Port of
-// Broker::parseEventForAttendee: a REPLY carries only the instances whose
-// PARTSTAT changed (plus DECLINEs for occurrences the attendee dropped via a
-// new EXDATE).
+// parseAsAttendee generates the attendee's REPLY, per instance. A REPLY
+// carries only the instances whose PARTSTAT changed (plus DECLINEs for
+// occurrences the attendee dropped via a new EXDATE).
 func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) ([]*Message, error) {
 	base := newInfo
 	if base == nil {
@@ -500,15 +497,14 @@ func parseAsAttendee(newInfo, oldInfo *eventSummary, addresses map[string]bool) 
 		return nil, nil
 	}
 	// SCHEDULE-AGENT=CLIENT on the ORGANIZER: the client communicates with the
-	// organizer itself, so the server generates no REPLY (RFC 6638 §7.1; sabre
-	// Broker::parseEventForAttendee).
+	// organizer itself, so the server generates no REPLY (RFC 6638 §7.1).
 	if base.orgScheduleAgent == "CLIENT" {
 		return nil, nil
 	}
 	// The old-copy fallback serves the delete flow only: when a new copy
 	// exists, an acting attendee absent from it (removed, or now marked
-	// SCHEDULE-AGENT=CLIENT) gets no server REPLY — sabre keys attendee
-	// membership off the new summary alone.
+	// SCHEDULE-AGENT=CLIENT) gets no server REPLY: attendee membership is
+	// keyed off the new summary alone.
 	href := actingAttendee(newInfo, addresses)
 	if href == "" && newInfo == nil {
 		href = actingAttendee(oldInfo, addresses)
@@ -824,7 +820,7 @@ func incSequence(n int) string {
 
 // ProcessMessage applies an incoming iTIP message to the recipient's
 // existing copy (nil for none), returning the new object state or nil when
-// the message is not understood. Port of Broker::processMessage.
+// the message is not understood.
 func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, error) {
 	switch msg.Method {
 	case "REQUEST":
@@ -850,7 +846,7 @@ func ProcessMessage(msg *Message, existing *goical.Calendar) (*goical.Calendar, 
 		}
 		replier := replyInfo.attOrder[0]
 		// SCHEDULE-STATUS comes from the reply's REQUEST-STATUS, defaulting
-		// to 2.0, and a reply clears RSVP (Broker::processMessageReply).
+		// to 2.0, and a reply clears RSVP.
 		requestStatus := "2.0"
 		if p := replyInfo.master.Props.Get("REQUEST-STATUS"); p != nil {
 			requestStatus, _, _ = strings.Cut(p.Value, ";")

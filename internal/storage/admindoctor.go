@@ -56,7 +56,7 @@ SELECT c.uri, c.synctoken, c.operation, o.lastmodified
 }
 
 // PendingShareInvites lists one principal's calendar instances whose
-// sharee has not responded (share_invitestatus = 1). The shared sabre
+// sharee has not responded (share_invitestatus = 1). The sabre-derived
 // schema stores no notification objects, so this is the DB truth for
 // "pending invites".
 func (q *AdminQueries) PendingShareInvites(ctx context.Context, principalURI string) ([]AdminCalendarInstance, error) {
@@ -432,7 +432,7 @@ const imipPendingMarker = "Scheduling message is queued for delivery"
 
 // flagStaleIMipPending reports each pending object whose UID has no live
 // (available|executing) imip_send job. When the jobs table is absent (a
-// sabre-only or queue-less database) it skips silently — pending-at-1.0 can't be
+// queue-less database) it skips silently — pending-at-1.0 can't be
 // reconciled against a queue that doesn't exist. Any other failure is an
 // error: reporting every pending object as stale, or none, off a half-read
 // job list would be wrong either way.

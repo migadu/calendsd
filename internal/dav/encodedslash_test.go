@@ -27,7 +27,7 @@ func TestEncodedSlashDestinationIsRefused(t *testing.T) {
 			if rec.Code != http.StatusForbidden {
 				t.Errorf("%s to %q = %d, want 403: %s", method, dest, rec.Code, rec.Body.String())
 			}
-			if !root.ChildExists(t.Context(), "src.txt") {
+			if !childExists(t, root, "src.txt") {
 				t.Errorf("%s to %q deleted the source", method, dest)
 			}
 		}
@@ -47,7 +47,7 @@ func TestEncodedSlashRequestPathIsRefused(t *testing.T) {
 			t.Errorf("DELETE %s = %d, want 403: %s", path, rec.Code, rec.Body.String())
 		}
 	}
-	if !root.ChildExists(t.Context(), "coll") || !coll.ChildExists(t.Context(), "x.txt") {
+	if !childExists(t, root, "coll") || !childExists(t, coll, "x.txt") {
 		t.Error("an encoded-slash DELETE removed a node")
 	}
 }

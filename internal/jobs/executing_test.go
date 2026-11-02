@@ -16,10 +16,10 @@ func TestMutationsRefuseExecutingJob(t *testing.T) {
 	if _, err := q.store.claim(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
-	for name, fn := range map[string]func(int64) error{
+	for name, fn := range map[string]func(context.Context, int64) error{
 		"Retry": ops.Retry, "RelayOverride": ops.RelayOverride,
 	} {
-		if err := fn(id); !errors.Is(err, ErrJobExecuting) {
+		if err := fn(t.Context(), id); !errors.Is(err, ErrJobExecuting) {
 			t.Errorf("%s on an executing job: err = %v, want ErrJobExecuting", name, err)
 		}
 	}
@@ -28,7 +28,7 @@ func TestMutationsRefuseExecutingJob(t *testing.T) {
 	}
 	// Cancel is the exception: it may stop a running job, and the worker's
 	// settle cannot resurrect it (stale-claim check in store).
-	if err := ops.Cancel(id); err != nil {
+	if err := ops.Cancel(t.Context(), id); err != nil {
 		t.Errorf("Cancel on an executing job: %v", err)
 	}
 	if r := getJob(t, db, id); r.state != "discarded" || r.credSet {

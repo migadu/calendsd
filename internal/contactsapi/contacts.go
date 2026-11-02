@@ -14,8 +14,8 @@ import (
 
 // contact is the wire form of one card. id is the cards row's serial — a
 // number, because SnappyMail's own action layer runs contact ids through
-// intval() before any driver sees them (Actions\Contacts::DoContactsDelete
-// filters a non-numeric id away silently). book and uri say where the row
+// intval() before any driver sees them (its contact delete action filters a
+// non-numeric id away silently). book and uri say where the row
 // lives, which stays debuggable in a log line. etag is the bare md5 the column
 // stores; the client sends it back in If-Match on update.
 type contact struct {
@@ -136,10 +136,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toContact(*c))
 }
 
-// byUID is GetContactByID with $bIsStrID: lookup by vCard UID. Both the
-// migration and this API name a card <uid>.vcf, so the direct uri lookup
-// answers almost every call in one indexed read; the scan behind it covers a
-// card some other client named differently.
+// byUID is GetContactByID with the string-id flag set: lookup by vCard UID.
+// Both the migration and this API name a card <uid>.vcf, so the direct uri
+// lookup answers almost every call in one indexed read; the scan behind it
+// covers a card some other client named differently.
 func (h *Handler) byUID(w http.ResponseWriter, r *http.Request) {
 	uid := strings.TrimSpace(r.PathValue("uid"))
 	if uid == "" {

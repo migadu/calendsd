@@ -19,7 +19,7 @@ type SchedulingObjectInfo struct {
 }
 
 // SchedulingBackend stores schedule inbox messages (the schedulingobjects
-// table). Port of sabre's Backend\SchedulingSupport.
+// table).
 type SchedulingBackend interface {
 	SchedulingObjects(ctx context.Context, principalURI string) ([]SchedulingObjectInfo, error)
 	SchedulingObject(ctx context.Context, principalURI, objectURI string) (*SchedulingObjectInfo, error)
@@ -107,9 +107,9 @@ func (i *Inbox) Child(ctx context.Context, name string) (dav.Node, error) {
 	return &SchedulingObject{backend: i.backend, info: *obj}, nil
 }
 
-func (i *Inbox) ChildExists(ctx context.Context, name string) bool {
-	obj, err := i.backend.SchedulingObject(ctx, i.principalURI, name)
-	return err == nil && obj != nil
+func (i *Inbox) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := i.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (i *Inbox) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
@@ -124,8 +124,7 @@ func (i *Inbox) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in the inbox is not allowed")
 }
 
-// ACL grants the owner full access and authenticated users delivery rights,
-// like sabre's Inbox::getACL.
+// ACL grants the owner full access and authenticated users delivery rights.
 func (i *Inbox) ACL() []acl.ACE {
 	return []acl.ACE{
 		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
@@ -139,8 +138,7 @@ func (i *Inbox) SupportedPrivileges() *acl.Privilege {
 	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
 		{Name: "{DAV:}read"},
 		// write-properties lets the owner PROPPATCH the inbox's own
-		// properties; like sabre's default set, which its
-		// Inbox extends with schedule-deliver.
+		// properties.
 		{Name: "{DAV:}write", Aggregates: []acl.Privilege{
 			{Name: "{DAV:}write-properties"}, {Name: "{DAV:}write-content"},
 			{Name: "{DAV:}bind"}, {Name: "{DAV:}unbind"},
@@ -245,7 +243,7 @@ func (o *Outbox) SupportedPrivileges() *acl.Privilege {
 		}},
 	}}
 }
-func (o *Outbox) ChildExists(context.Context, string) bool { return false }
+func (o *Outbox) ChildExists(context.Context, string) (bool, error) { return false, nil }
 func (o *Outbox) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in the outbox is not allowed")
 }
@@ -254,7 +252,7 @@ func (o *Outbox) CreateDirectory(context.Context, string) error {
 }
 
 // MockSchedulingBackend adds in-memory scheduling storage to the mock
-// calendar backend, like sabre's Backend\MockScheduling.
+// calendar backend.
 type MockSchedulingBackend struct {
 	MockBackend
 	// Scheduling maps principal → uri → data.

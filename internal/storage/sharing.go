@@ -1,11 +1,10 @@
 package storage
 
-// Calendar sharing over the sabre schema: the SharingSupport port of
-// CalDAV\Backend\PDO's updateInvites/getInvites. A share lives entirely in
-// calendarinstances — the owner's row (access=1) plus one row per sharee,
-// each cloned from the owner's instance and carrying its own access level,
-// share_href (the invitee's calendar-user-address), and share_invitestatus.
-// The values written here must be readable by a live sabre on the same DB.
+// Calendar sharing over the sabre schema (caldav.SharingSupport). A share
+// lives entirely in calendarinstances — the owner's row (access=1) plus one
+// row per sharee, each cloned from the owner's instance and carrying its own
+// access level, share_href (the invitee's calendar-user-address), and
+// share_invitestatus.
 
 import (
 	"context"
@@ -22,8 +21,7 @@ import (
 // {cs}share / invite-reply / publish POSTs mutate real state, and the
 // notification inbox is served from Postgres. SharingSupport lives on the
 // sabre calendarinstances table; the notification inbox and publish state use
-// the additive calendsd extension tables (internal/schema/migrations/0002_extension.sql)
-// that a live sabre on the same database never touches.
+// the calendsd extension tables (internal/schema/migrations/0002_extension.sql).
 var (
 	_ caldav.SharingSupport       = (*CalDAV)(nil)
 	_ caldav.ReplySupport         = (*CalDAV)(nil)
@@ -33,8 +31,8 @@ var (
 )
 
 // Invites returns the sharees of a calendar — the owner plus every principal
-// it has been shared with. Port of sabre's PDO::getInvites: the invite list
-// is exactly the set of calendarinstances rows for the shared calendarid.
+// it has been shared with: the invite list is exactly the set of
+// calendarinstances rows for the shared calendarid.
 func (b *CalDAV) Invites(ctx context.Context, id caldav.CalendarID) ([]caldav.Sharee, error) {
 	rows, err := b.DB.QueryContext(ctx, `
 SELECT principaluri, access, share_href, share_displayname, share_invitestatus
@@ -53,8 +51,8 @@ SELECT principaluri, access, share_href, share_displayname, share_invitestatus
 		if err := rows.Scan(&principal, &access, &shareHref, &shareDisplayName, &inviteStatus); err != nil {
 			return nil, err
 		}
-		// sabre falls back to encodePath(principaluri) when no share_href is
-		// stored (the owner's own row); ASCII principal URIs pass through.
+		// With no share_href stored (the owner's own row) the href falls back
+		// to the principal URI, unencoded; ASCII principal URIs need none.
 		href := shareHref.String
 		if href == "" {
 			href = principal.String
@@ -70,14 +68,13 @@ SELECT principaluri, access, share_href, share_displayname, share_invitestatus
 	return out, rows.Err()
 }
 
-// UpdateInvites applies a set of sharee changes to a calendar. Port of sabre's
-// PDO::updateInvites: a NOACCESS entry deletes the matching sharee instance; a
-// known sharee's instance is updated in place; a new one clones the owner's
-// instance into a fresh per-sharee row. Because there is no invitation UI, a
-// resolved principal is auto-accepted and an unresolved one is recorded as
-// invalid, exactly as sabre does.
+// UpdateInvites applies a set of sharee changes to a calendar: a NOACCESS
+// entry deletes the matching sharee instance; a known sharee's instance is
+// updated in place; a new one clones the owner's instance into a fresh
+// per-sharee row. Because there is no invitation UI, a resolved principal is
+// auto-accepted and an unresolved one is recorded as invalid.
 //
-// Unlike sabre it is serialized per calendar and reports what it committed
+// It is serialized per calendar and reports what it committed
 // (docs/share-invite-email.md): the owner's instance row is locked FOR UPDATE
 // before the roster is read, so two concurrent share requests for the same
 // calendar apply one after the other and the second sees the first's result.
@@ -108,7 +105,7 @@ func (b *CalDAV) UpdateInvites(ctx context.Context, id caldav.CalendarID, sharee
 // lockOwnerInstance takes the per-calendar sharing lock — a row lock on the
 // owner's (access=1) instance — and returns the owner principal. Every sharing
 // mutation (UpdateInvites, ShareReply) takes it first, so they never
-// interleave. A co-resident sabre does not follow this protocol.
+// interleave.
 func lockOwnerInstance(ctx context.Context, tx *sql.Tx, calendarID string) (string, error) {
 	var owner sql.NullString
 	err := tx.QueryRowContext(ctx,
@@ -155,8 +152,8 @@ SELECT id, uri, principaluri, share_href, share_displayname
 // principal for a resolved sharee, falling back to an unresolved row with the
 // same address (an invite that now resolves). An unresolved entry matches by
 // address — an unresolved row first, else any row stored under it (an address
-// that no longer resolves still names the row it was shared under, as in
-// sabre, rather than adding a second one).
+// that no longer resolves still names the row it was shared under, rather
+// than adding a second one).
 func matchSharee(current []shareeRow, s caldav.Sharee) *shareeRow {
 	if s.Principal != "" {
 		for i := range current {
@@ -196,8 +193,8 @@ func applyShareeChanges(ctx context.Context, tx *sql.Tx, id caldav.CalendarID, f
 		if sharee.Access == caldav.AccessNoAccess {
 			// Removal: only sharee rows (access 2/3) match, so the owner's
 			// own row can never be dropped by a share request. An unresolved
-			// address also clears any other pre-existing row stored under it
-			// (sabre removes by share_href).
+			// address also clears any other pre-existing row stored under it,
+			// since removal matches by share_href.
 			var drop []int64
 			if match != nil && !granted[match.id] {
 				drop = append(drop, match.id)
@@ -230,10 +227,10 @@ func applyShareeChanges(ctx context.Context, tx *sql.Tx, id caldav.CalendarID, f
 
 		if match != nil {
 			// Update in place. Keep the prior display name when the request
-			// omits a common-name (sabre merges the old properties in). An
-			// unresolved row that now resolves is bound to its principal; a
-			// bound row matched by an address that no longer resolves keeps
-			// its principal (only its status becomes invalid, as in sabre).
+			// omits a common-name. An unresolved row that now resolves is
+			// bound to its principal; a bound row matched by an address that
+			// no longer resolves keeps its principal (only its status becomes
+			// invalid).
 			displayName := sharee.CommonName
 			if displayName == "" {
 				displayName = match.displayName
@@ -326,8 +323,7 @@ func nullIfEmpty(s string) any {
 	return s
 }
 
-// newUUID returns a random RFC 4122 v4 UUID, matching the identifiers sabre's
-// UUIDUtil writes into a new instance's uri column.
+// newUUID returns a random RFC 4122 v4 UUID for a new instance's uri column.
 func newUUID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -343,8 +339,7 @@ func newUUID() (string, error) {
 // exists; a reply simply confirms it (marking share_invitestatus accepted and
 // returning the sharee's calendar path) or, on decline, drops the sharee's own
 // instance row — exactly what a sharee deleting their shared calendar does.
-// It touches only the sharee's own instance and the sabre-owned
-// share_invitestatus column, so a live sabre reads the result unchanged.
+// It touches only the sharee's own instance.
 //
 // href is the invite's hosturl: the owner's calendar path (…/calendars/<owner>/<uri>).
 func (b *CalDAV) ShareReply(ctx context.Context, principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
@@ -478,8 +473,7 @@ func (b *CalDAV) DeleteNotification(ctx context.Context, principalURI, id string
 
 // SetPublishStatus publishes or unpublishes a calendar. Publishing mints an
 // opaque public URI stored in the calendsd calendarpublications table;
-// unpublishing removes the row. Port of the calendarserver publish POST that
-// sabre's PDO backend leaves unimplemented.
+// unpublishing removes the row. It backs the calendarserver publish POST.
 func (b *CalDAV) SetPublishStatus(ctx context.Context, id caldav.CalendarID, value bool) error {
 	if !value {
 		_, err := b.DB.ExecContext(ctx, `DELETE FROM calendarpublications WHERE calendarid = $1`, id.Calendar)

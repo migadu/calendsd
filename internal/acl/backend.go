@@ -1,6 +1,5 @@
 // Package acl implements principals and access control: principal nodes, the
-// principal backend abstraction, and the ACL plugin. Port of sabre's
-// lib/DAVACL.
+// principal backend abstraction, and the ACL plugin.
 package acl
 
 import (
@@ -22,8 +21,7 @@ type Principal struct {
 	Props map[xml.Name]any
 }
 
-// Backend provides principal storage. Port of sabre's
-// PrincipalBackend\BackendInterface (the subset the MVP needs).
+// Backend provides principal storage.
 type Backend interface {
 	// PrincipalsByPrefix lists principals directly under a prefix such as
 	// "principals".
@@ -39,12 +37,12 @@ type Backend interface {
 	SetGroupMemberSet(ctx context.Context, principal string, members []string) error
 	// SearchPrincipals returns principal paths under prefix whose
 	// properties match every (test=allof) or any (test=anyof) of the
-	// searched name→substring pairs. Port of searchPrincipals.
+	// searched name→substring pairs.
 	SearchPrincipals(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error)
 }
 
 // MemoryBackend is an in-memory principal backend, used by tests and the
-// corpus runner. Port of sabre's PrincipalBackend\Mock.
+// corpus runner.
 // DomainLister is implemented by backends that can list the principals of an
 // email domain in one indexed query (storage.Principals); ScopedPrincipals
 // filters the full listing in Go otherwise.

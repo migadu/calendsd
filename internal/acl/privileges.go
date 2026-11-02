@@ -20,15 +20,14 @@ type Privilege struct {
 	Aggregates []Privilege
 }
 
-// SupportedPrivilegeProvider lets nodes extend the default privilege tree
-// (sabre's IACL::getSupportedPrivilegeSet), e.g. calendars adding
-// read-free-busy.
+// SupportedPrivilegeProvider lets nodes extend the default privilege tree,
+// e.g. calendars adding read-free-busy.
 type SupportedPrivilegeProvider interface {
 	SupportedPrivileges() *Privilege
 }
 
-// supportedPrivileges returns the privilege tree for a node, mirroring
-// sabre's getSupportedPrivilegeSet default.
+// supportedPrivileges returns the privilege tree for a node: its own if it
+// provides one, otherwise the default tree.
 func supportedPrivileges(node dav.Node) Privilege {
 	if provider, ok := node.(SupportedPrivilegeProvider); ok {
 		if p := provider.SupportedPrivileges(); p != nil {
@@ -77,13 +76,13 @@ func flatPrivileges(root Privilege) map[string][]string {
 
 // defaultACL applies to nodes without their own ACL: the fixed collections
 // above the homes (root, principals, calendars, addressbooks), which any
-// authenticated user may read but nobody may write. Sabre's $defaultAcl grants
+// authenticated user may read but nobody may write. sabre/dav's default grants
 // {DAV:}all here, which made those shared nodes writable (dead properties) and
 // any node that forgot its ACL writable by everyone.
 var defaultACL = []ACE{{Privilege: "{DAV:}read", Principal: "{DAV:}authenticated", Protected: true}}
 
 // nodeACL returns the effective ACL: node ACL (or the default) plus admin
-// ACEs. Port of sabre's Plugin::getAcl.
+// ACEs.
 func (p *Plugin) nodeACL(node dav.Node) []ACE {
 	var acl []ACE
 	if holder, isACL := node.(ACLHolder); isACL {
@@ -93,7 +92,7 @@ func (p *Plugin) nodeACL(node dav.Node) []ACE {
 	}
 	// Calendar-Server compat: any authenticated user may read principal
 	// resources (delegation and invite UIs browse other users). Off by
-	// default — stock sabre principals are owner-only.
+	// default, which keeps principals owner-only.
 	if p.PrincipalsReadableByAuthenticated {
 		switch node.(type) {
 		case *PrincipalNode, *UserPrincipalNode, *ProxyPrincipalNode:
@@ -107,7 +106,7 @@ func (p *Plugin) nodeACL(node dav.Node) []ACE {
 }
 
 // CurrentUserPrivileges computes the expanded privilege set the current
-// principal holds on a node. Port of sabre's getCurrentUserPrivilegeSet.
+// principal holds on a node.
 func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]string, error) {
 	principals, err := p.CurrentUserPrincipals(ctx)
 	if err != nil {
@@ -152,8 +151,7 @@ func (p *Plugin) CurrentUserPrivileges(ctx context.Context, node dav.Node) ([]st
 		}
 	}
 
-	// Expand aggregates transitively; unknown privileges are ignored,
-	// like sabre.
+	// Expand aggregates transitively; unknown privileges are ignored.
 	flat := flatPrivileges(supportedPrivileges(node))
 	seen := map[string]bool{}
 	var out []string
@@ -319,8 +317,7 @@ func (p *Plugin) principalEmailDomain(ctx context.Context, principalPath string)
 }
 
 // CheckPrivileges verifies the current principal holds every listed
-// privilege on path. Port of sabre's checkPrivileges (throwExceptions
-// variant).
+// privilege on path, and returns an error naming the missing ones otherwise.
 func (p *Plugin) CheckPrivileges(ctx context.Context, path string, privileges ...string) error {
 	node, err := p.server.Tree.NodeForPath(ctx, path)
 	if err != nil {
@@ -354,16 +351,18 @@ func (p *Plugin) CheckPrivileges(ctx context.Context, path string, privileges ..
 	}
 }
 
-// BeforeMethod enforces per-method privileges before dispatch, mirroring
-// sabre's beforeMethod table plus the beforeBind/beforeUnbind event checks
-// (which our port derives from method semantics rather than events).
+// BeforeMethod enforces per-method privileges before dispatch, including the
+// bind/unbind checks on the parent that creating or removing a resource needs.
 func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	ctx := r.Context()
 	path, err := p.server.Path(r)
 	if err != nil {
 		return true, nil // URI errors surface in the method handler
 	}
-	exists := p.server.Tree.NodeExists(ctx, path)
+	exists, err := p.server.Tree.NodeExists(ctx, path)
+	if err != nil {
+		return false, err
+	}
 	parent := func() string {
 		parentPath, _ := pathutil.Split(path)
 		return parentPath
@@ -378,12 +377,12 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 
 	switch r.Method {
 	case "GET", "HEAD", "OPTIONS", "REPORT":
-		// Sabre's beforeMethod gates GET/HEAD/OPTIONS with {DAV:}read.
+		// GET/HEAD/OPTIONS require {DAV:}read.
 		// PROPFIND is deliberately NOT gated here: the propFind hook marks
 		// every property 403 instead, so a foreign-principal PROPFIND yields
-		// a 207 with 403 propstats, not a request-level 403 (sabre parity —
-		// CalDAVTester's proxy suites read other principals this way).
-		// REPORT stays gated (stricter than sabre): our calendar-query
+		// a 207 with 403 propstats, not a request-level 403 (CalDAVTester's
+		// proxy suites read other principals this way).
+		// REPORT stays gated: our calendar-query
 		// prefilter would otherwise leak matching object hrefs.
 		if exists {
 			return check(path, "{DAV:}read")
@@ -410,9 +409,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 		// handler would otherwise reach an unauthorized destination before
 		// it notices the source is missing.
 		//
-		// Sabre passes R_RECURSIVE here, but its checkPrivileges ignores
-		// the recursion argument entirely — the effective behavior (and
-		// ours) checks the top node only.
+		// Only the top node is checked, not its descendants. sabre/dav asked
+		// for a recursive check here but never implemented one; this keeps
+		// that behavior.
 		if exists {
 			if ok, err := check(path, "{DAV:}read"); !ok {
 				return ok, err
@@ -423,7 +422,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 			return true, nil // handler reports the bad destination
 		}
 		destParent, _ := pathutil.Split(dest)
-		if p.server.Tree.NodeExists(ctx, dest) {
+		if destExists, err := p.server.Tree.NodeExists(ctx, dest); err != nil {
+			return false, err
+		} else if destExists {
 			if ok, err := check(destParent, "{DAV:}unbind"); !ok {
 				return ok, err
 			}

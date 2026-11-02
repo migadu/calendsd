@@ -12,9 +12,8 @@ import (
 )
 
 // PropFind tracks requested properties and their resolved values for one
-// node. Port of sabre's PropFind. Handlers claim properties they can produce;
-// unclaimed ones report 404 in the multistatus (except for allprop requests,
-// which omit them).
+// node. Handlers claim properties they can produce; unclaimed ones report 404
+// in the multistatus (except for allprop requests, which omit them).
 type PropFind struct {
 	ctx      context.Context
 	path     string
@@ -35,8 +34,8 @@ type propEntry struct {
 	value  any
 }
 
-// allPropDefaults is the property set an allprop request expands to,
-// matching sabre (RFC 4918 allows omitting expensive properties).
+// allPropDefaults is the property set an allprop request expands to, the
+// same as sabre/dav's (RFC 4918 allows omitting expensive properties).
 var allPropDefaults = []xml.Name{
 	{Space: davxml.NSDav, Local: "getlastmodified"},
 	{Space: davxml.NSDav, Local: "getcontentlength"},
@@ -48,7 +47,7 @@ var allPropDefaults = []xml.Name{
 }
 
 // NewPropFind creates a PropFind for one node. Empty names means allprop
-// (sabre treats propname the same way).
+// (a propname request is treated the same way, as sabre/dav did).
 func NewPropFind(ctx context.Context, path string, names []xml.Name, depth int) *PropFind {
 	pf := &PropFind{
 		ctx:      ctx,
@@ -131,7 +130,7 @@ func (pf *PropFind) Handle(name xml.Name, fn func() any) {
 }
 
 // Set forces a property value and status. Unrequested properties are only
-// admitted for allprop requests, like sabre.
+// admitted for allprop requests.
 func (pf *PropFind) Set(name xml.Name, value any, status int) {
 	if pf.denied && status/100 == 2 {
 		return
@@ -163,7 +162,7 @@ func (pf *PropFind) Props404() []xml.Name {
 
 // response converts the result into a multistatus response element for the
 // given href. Statuses are grouped 200 first, then 404 (dropped for allprop),
-// then others ascending — matching sabre's getResultForMultiStatus.
+// then others ascending, the order sabre/dav emitted.
 func (pf *PropFind) response(href string) davxml.Response {
 	byStatus := map[int][]davxml.Property{}
 	var statuses []int

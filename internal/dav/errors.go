@@ -8,19 +8,19 @@ import (
 	"time"
 )
 
-// Error is a protocol error carrying the HTTP status and the sabre exception
-// identity. Wire compatibility: sabre serializes errors as {DAV:}error with a
-// {http://sabredav.org/ns}exception class name that clients (and the corpus)
-// can observe, so the port preserves those names.
+// Error is a protocol error carrying the HTTP status and an exception
+// identity. Error bodies are {DAV:}error documents with a
+// {http://sabredav.org/ns}exception class name, as sabre/dav sent them;
+// clients (and the corpus) can observe those names, so they are kept.
 type Error struct {
 	Status int
-	// Exception is the sabre exception class name, e.g.
-	// "Sabre\DAV\Exception\NotFound".
+	// Exception is the class name sent as {http://sabredav.org/ns}exception,
+	// e.g. "Sabre\DAV\Exception\NotFound".
 	Exception string
 	Message   string
 	// Precondition names protocol precondition/postcondition elements
-	// (e.g. {urn:ietf:params:xml:ns:caldav}valid-calendar-data) that sabre
-	// serializes as children of {DAV:}error alongside the exception.
+	// (e.g. {urn:ietf:params:xml:ns:caldav}valid-calendar-data), serialized
+	// as children of {DAV:}error alongside the exception.
 	Precondition []xml.Name
 	// RetryAfter, when set, is emitted as a Retry-After header (429s).
 	RetryAfter time.Duration
@@ -34,7 +34,8 @@ type Error struct {
 func (e *Error) Cause() error { return e.cause }
 
 // ErrTooManyRequests is a 429 carrying a Retry-After; the auth plugin returns
-// it for a throttled login (audit 5.8). No sabre counterpart.
+// it for a throttled login (audit 5.8). Its exception name has no sabre/dav
+// counterpart.
 func ErrTooManyRequests(retryAfter time.Duration, format string, args ...any) *Error {
 	e := davError(http.StatusTooManyRequests, "TooManyRequests", format, args...)
 	e.RetryAfter = retryAfter
@@ -53,7 +54,25 @@ func davError(status int, exception, format string, args ...any) *Error {
 	}
 }
 
-// The constructors below mirror sabre's lib/DAV/Exception/* classes.
+// IsNotFound reports whether err is a 404 protocol error.
+func IsNotFound(err error) bool {
+	var de *Error
+	return errors.As(err, &de) && de.Status == http.StatusNotFound
+}
+
+// Found turns the error of a lookup into an existence check: nil means
+// found, a 404 means not found, and any other error is returned.
+func Found(err error) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+// The constructors below pair each status with its sabre/dav exception name.
 
 func ErrNotFound(format string, args ...any) *Error {
 	return davError(http.StatusNotFound, "NotFound", format, args...)
@@ -95,8 +114,7 @@ func ErrReportNotSupported() *Error {
 	return davError(http.StatusUnsupportedMediaType, "ReportNotSupported", "The report you requested is not supported")
 }
 
-// AsError extracts a protocol *Error, wrapping unknown errors as 500s the way
-// sabre wraps uncaught exceptions.
+// AsError extracts a protocol *Error, wrapping unknown errors as 500s.
 func AsError(err error) *Error {
 	var de *Error
 	if errors.As(err, &de) {

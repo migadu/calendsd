@@ -23,7 +23,7 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// iCal abuses MKCALENDAR to create subscriptions: a resourcetype in
-	// the body overrides the default, like sabre.
+	// the body overrides the default.
 	resourceTypes := []xml.Name{
 		{Space: davxml.NSDav, Local: "collection"}, nameCalendar,
 	}
@@ -39,7 +39,9 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		props = parsed
 	}
 
-	if p.server.Tree.NodeExists(r.Context(), path) {
+	if exists, err := p.server.Tree.NodeExists(r.Context(), path); err != nil {
+		return err
+	} else if exists {
 		return dav.ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
 	parentPath, name := pathutil.Split(path)

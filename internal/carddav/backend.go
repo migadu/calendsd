@@ -1,6 +1,6 @@
 // Package carddav implements the CardDAV layer: address book nodes, the
 // CardDAV plugin (properties + reports), the addressbook-query engine, and
-// the storage backend abstraction. Port of sabre's lib/CardDAV.
+// the storage backend abstraction.
 package carddav
 
 import (
@@ -43,8 +43,7 @@ func (c *CardInfo) QuotedETag() string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-// Backend provides address book storage. Port of the sabre
-// CardDAV\Backend\BackendInterface subset the MVP needs.
+// Backend provides address book storage.
 type Backend interface {
 	AddressBooksForUser(ctx context.Context, principalURI string) ([]AddressBookInfo, error)
 	CreateAddressBook(ctx context.Context, principalURI, uri string, props map[xml.Name]any) (string, error)
@@ -63,7 +62,6 @@ type Backend interface {
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
-// Port of sabre's CardDAV\Backend\Mock.
 type MockBackend struct {
 	AddressBooks []AddressBookInfo
 	// CardsByBook maps address book ID → card URI → card.

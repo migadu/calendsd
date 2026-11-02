@@ -21,7 +21,7 @@ import (
 const defaultPanelAddr = "127.0.0.1:8092"
 
 // handlePanel runs `calctl panel`, the admin panel (docs/design/ADMIN-PLAN.md): a
-// read-first debugging UI over the same shared sabre database calendsd
+// read-first debugging UI over the same database calendsd
 // serves. It takes the same config file and Calendar-Server flags as
 // calendsd — resolved through the same config.SharedServerFlags code — so
 // the effective-config echo on the dashboard matches the server's startup log
@@ -32,7 +32,7 @@ const defaultPanelAddr = "127.0.0.1:8092"
 // --config has already been consumed by main; it is handed back as -config.
 func handlePanel(args []string, configPath string) {
 	flag.CommandLine = flag.NewFlagSet("calctl panel", flag.ExitOnError)
-	resolve := config.SharedServerFlags("Postgres DSN of the shared sabre database (required)")
+	resolve := config.SharedServerFlags("Postgres DSN of the calendsd database (required)")
 	addr := flag.String("addr", defaultPanelAddr, "listen address (Basic auth resends the password: loopback/LAN or behind TLS only)")
 	authFile := flag.String("admin-auth", "", "htpasswd file with bcrypt entries (htpasswd -B) for admin logins (required)")
 	readonly := flag.Bool("readonly", true, "disable write actions (Phase C); reads only")

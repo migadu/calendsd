@@ -21,23 +21,22 @@ import (
 // TempFileFilterPlugin intercepts the garbage files operating systems and
 // applications create when a WebDAV share is mounted as a disk (OS X resource
 // forks and .DS_Store, Windows desktop.ini/Thumbs.db, editor swap files) and
-// keeps them out of the calendar/contact backend. A faithful port of sabre's
-// TemporaryFileFilterPlugin: matching names are served from a scratch
-// directory on disk instead of the tree, so a client's junk PUT no longer hits
-// the calendar-data validator (415) or ACL (403) on a real collection.
+// keeps them out of the calendar/contact backend. Matching names are served
+// from a scratch directory on disk instead of the tree, so a client's junk PUT
+// no longer hits the calendar-data validator (415) or ACL (403) on a real
+// collection.
 //
 // The files are never deleted automatically; point DataDir at something an
-// external sweep prunes (sabre suggests a 24h expiry). Opt-in, like sabre's
-// example server which adds it explicitly — calendsd core does not run it by
-// default so the pinned corpus (sabre's own unit suite, which has no temp
-// filter) is unaffected.
+// external sweep prunes (sabre/dav suggests a 24h expiry). Opt-in: calendsd
+// core does not run it by default so the pinned corpus (sabre/dav's own unit
+// suite, which has no temp filter) is unaffected.
 type TempFileFilterPlugin struct {
 	server *Server
 	// DataDir is where intercepted files are stored. Required; created lazily
 	// on first write.
 	DataDir string
 	// Patterns is the set of basename patterns treated as temporary. Nil uses
-	// the sabre default set.
+	// defaultTempFilePatterns.
 	Patterns []*regexp.Regexp
 
 	mu    sync.Mutex
@@ -63,9 +62,10 @@ type privilegeChecker interface {
 	CheckPrivileges(ctx context.Context, path string, privileges ...string) error
 }
 
-// defaultTempFilePatterns mirrors sabre's temporaryFilePatterns. The literal
-// dots that sabre left unescaped (matching any char) are escaped here — the
-// intent is the fixed filenames, and the practical match set is identical.
+// defaultTempFilePatterns are sabre/dav's default temporary-file patterns.
+// The literal dots that sabre/dav left unescaped (matching any char) are
+// escaped here — the intent is the fixed filenames, and the practical match
+// set is identical.
 var defaultTempFilePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^\._`),           // OS X resource forks
 	regexp.MustCompile(`^\.DS_Store$`),   // OS X custom folder settings
@@ -86,10 +86,10 @@ func (p *TempFileFilterPlugin) Init(s *Server) {
 }
 
 // BeforeMethod runs after auth (so temp requests are still authenticated) and
-// before precondition checks and the core method handlers, matching sabre's
-// beforeMethod:*. A non-temp path, or a GET/DELETE/PROPFIND on a temp name that
-// was never written, returns proceed=true to fall through to normal handling
-// (which 404s the nonexistent node, exactly as sabre does).
+// before precondition checks and the core method handlers. A non-temp path, or
+// a GET/DELETE/PROPFIND on a temp name that was never written, returns
+// proceed=true to fall through to normal handling (which 404s the nonexistent
+// node).
 func (p *TempFileFilterPlugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	reqPath, err := p.server.Path(r)
 	if err != nil {
@@ -237,9 +237,9 @@ func (p *TempFileFilterPlugin) delete(w http.ResponseWriter, loc string) (bool, 
 	return false, nil
 }
 
-// propfind answers with a fixed minimal property set (sabre's "lazy" propfind:
-// it does not parse the requested properties), enough for a client that PUT a
-// temp file to then stat it.
+// propfind answers with a fixed minimal property set (it does not parse the
+// requested properties), enough for a client that PUT a temp file to then stat
+// it.
 func (p *TempFileFilterPlugin) propfind(w http.ResponseWriter, reqPath, loc string) (bool, error) {
 	info, err := os.Stat(loc)
 	if os.IsNotExist(err) {

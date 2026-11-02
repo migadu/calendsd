@@ -14,8 +14,8 @@ import (
 	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
-// Share access levels and invite statuses, mirroring sabre's
-// DAV\Sharing\Plugin constants (also the calendarinstances.access column).
+// Share access levels and invite statuses (the access levels are also the
+// calendarinstances.access column values).
 const (
 	AccessNotShared   = 0
 	AccessSharedOwner = 1
@@ -29,7 +29,7 @@ const (
 	InviteInvalid    = 4
 )
 
-// Sharee is one entry of a calendar's invite list. Port of DAV\Xml\Element\Sharee.
+// Sharee is one entry of a calendar's invite list.
 type Sharee struct {
 	Href         string
 	Principal    string
@@ -78,7 +78,7 @@ type ReplySupport interface {
 	ShareReply(ctx context.Context, principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error)
 }
 
-// MockSharingBackend ports sabre's Backend\MockSharing (with notification
+// MockSharingBackend is an in-memory sharing backend (with notification
 // support so the sharee round-trip can be exercised).
 type MockSharingBackend struct {
 	MockBackend
@@ -139,7 +139,7 @@ func (m *MockSharingBackend) SetPublishStatus(ctx context.Context, id CalendarID
 	return nil
 }
 
-// ShareReply mirrors sabre's mock: accepting yields a fixed calendar path.
+// ShareReply returns a fixed calendar path when accepting.
 func (m *MockSharingBackend) ShareReply(ctx context.Context, principalURI, href string, status int, calendarURI, inReplyTo, summary string) (string, error) {
 	if status == InviteAccepted {
 		return "calendars/blabla/calendar", nil
@@ -147,8 +147,7 @@ func (m *MockSharingBackend) ShareReply(ctx context.Context, principalURI, href 
 	return "", nil
 }
 
-// SharingPlugin handles the calendarserver sharing POSTs. Port of
-// CalDAV\SharingPlugin + the relevant DAV\Sharing\Plugin behavior.
+// SharingPlugin handles the calendarserver sharing POSTs.
 type SharingPlugin struct {
 	// Notifier, when non-nil, is told about every sharee a {cs}share request
 	// newly granted a usable local share, so it can email them.
@@ -255,10 +254,10 @@ func (p *SharingPlugin) shareRequest(w http.ResponseWriter, r *http.Request, cal
 	}
 	// Drop an invite-notification into the inbox of each local sharee the
 	// committed result keeps, so their client's notification feed surfaces
-	// the share (like sabre). The request's raw entries are not used: a set
-	// overridden by a later remove, or a duplicate spelling, did not share
-	// anything. The share has committed, so a failed notification is logged
-	// rather than failing the request.
+	// the share. The request's raw entries are not used: a set overridden by
+	// a later remove, or a duplicate spelling, did not share anything. The
+	// share has committed, so a failed notification is logged rather than
+	// failing the request.
 	if notif, ok := calNode.backend.(NotificationsBackend); ok {
 		for _, c := range changes {
 			if c.Principal == "" || c.Principal == calNode.Owner() {
@@ -394,9 +393,8 @@ func (p *SharingPlugin) inviteReply(w http.ResponseWriter, r *http.Request, path
 	}
 	w.Header().Set("X-Sabre-Status", "everything-went-well")
 	if url != "" {
-		// sabre resolves the returned href relative to the request URL
-		// (LocalHref with contextUri = request path), so a home at
-		// /calendars/user1 yields /calendars/<returned-path>. The request path
+		// The returned href resolves relative to the request URL, so a home
+		// at /calendars/user1 yields /calendars/<returned-path>. The request path
 		// already carries the BaseURI, so a request-relative return keeps the
 		// prefix — an absolute (leading-slash) return would drop it.
 		body, err := xml.Marshal(sharedAsXML{Href: resolveHref(r.URL.Path, url)})
@@ -431,7 +429,7 @@ func (p *SharingPlugin) publish(w http.ResponseWriter, r *http.Request, path str
 	}
 	w.Header().Set("X-Sabre-Status", "everything-went-well")
 	if value {
-		// iCloud sends back the 202, so sabre (and we) do too.
+		// iCloud sends back the 202, so we do too.
 		w.WriteHeader(http.StatusAccepted)
 	} else {
 		w.WriteHeader(http.StatusOK)
@@ -551,7 +549,7 @@ func parseInviteReply(body []byte) (*inviteReply, error) {
 }
 
 // resolveHref resolves a relative href against a request path, replacing the
-// last path segment (RFC 3986 relative resolution, as sabre's LocalHref does).
+// last path segment (RFC 3986 relative resolution).
 func resolveHref(requestPath, href string) string {
 	if strings.HasPrefix(href, "/") {
 		return href

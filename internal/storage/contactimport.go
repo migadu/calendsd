@@ -88,7 +88,7 @@ type ImportRequest struct {
 	BookName    string  // "Webmail contacts"
 	BookDesc    string
 	Digest      string // the bundle's per-principal sentinel digest
-	ExporterVer string // exporter + Sabre\VObject version that produced it
+	ExporterVer string // exporter + sabre/vobject version that produced it
 	ExportEpoch int64  // fallback for a card with no source timestamp
 
 	Cards    []ImportCard

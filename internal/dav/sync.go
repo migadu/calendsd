@@ -10,13 +10,12 @@ import (
 	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
-// SyncTokenPrefix is the client-facing token prefix, identical to sabre's
-// Sync\Plugin::SYNCTOKEN_PREFIX — existing clients have these stored
+// SyncTokenPrefix is the client-facing token prefix, the same as
+// sabre/dav's — existing clients have these stored
 // (docs/design/PLAN.md §5).
 const SyncTokenPrefix = "http://sabre.io/ns/sync/"
 
-// ChangeSet is the result of a sync query. Port of the getChanges result
-// array.
+// ChangeSet is the result of a sync query.
 type ChangeSet struct {
 	// SyncToken is the collection's token after these changes (bare, no
 	// prefix).
@@ -28,7 +27,6 @@ type ChangeSet struct {
 }
 
 // SyncCollection is a collection supporting RFC 6578 collection sync.
-// Port of sabre's ISyncCollection.
 type SyncCollection interface {
 	Collection
 	// SyncToken returns the current token, or "" when sync information is
@@ -40,7 +38,6 @@ type SyncCollection interface {
 }
 
 // SyncPlugin implements the sync-collection REPORT and sync-token property.
-// Port of sabre's Sync\Plugin.
 type SyncPlugin struct {
 	server *Server
 }
@@ -63,7 +60,7 @@ func (p *SyncPlugin) PropFind(pf *PropFind, node Node) error {
 }
 
 // SupportedReports advertises sync-collection on sync-capable collections
-// with sync info, like sabre's getSupportedReportSet.
+// with sync info.
 func (p *SyncPlugin) SupportedReports(node Node, path string) []xml.Name {
 	if sc, ok := node.(SyncCollection); ok && sc.SyncToken() != "" {
 		return []xml.Name{{Space: davxml.NSDav, Local: "sync-collection"}}
@@ -71,8 +68,7 @@ func (p *SyncPlugin) SupportedReports(node Node, path string) []xml.Name {
 	return nil
 }
 
-// ValidateTokens implements the If-header token validation for sync tokens,
-// mirroring sabre's validateTokens listener.
+// ValidateTokens implements the If-header token validation for sync tokens.
 func (p *SyncPlugin) ValidateTokens(ctx context.Context, conditions []IfCondition) {
 	for ci := range conditions {
 		for ti := range conditions[ci].Tokens {
@@ -193,8 +189,8 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 		itemPath := joinPath(item)
 		responses, err := p.server.PropertiesForPath(ctx, itemPath, props, 0)
 		if err != nil {
-			if AsError(err).Status == http.StatusNotFound {
-				continue // changed then deleted; skip like sabre's multi-path fetch
+			if IsNotFound(err) {
+				continue // changed then deleted; skip it
 			}
 			return err
 		}
@@ -235,12 +231,12 @@ func syncResourceLabel(collectionPath string) string {
 	return "other"
 }
 
-// ErrInvalidSyncToken mirrors sabre's Exception\InvalidSyncToken (403 with
-// its own exception identity).
+// ErrInvalidSyncToken is a 403 with its own exception identity
+// (InvalidSyncToken).
 func ErrInvalidSyncToken() *Error {
 	e := davError(http.StatusForbidden, "InvalidSyncToken", "Invalid or unknown sync token")
 	// RFC 6578 §3.2 requires the {DAV:}valid-sync-token precondition in the
-	// error body, like sabre.
+	// error body.
 	e.Precondition = []xml.Name{{Space: davxml.NSDav, Local: "valid-sync-token"}}
 	return e
 }

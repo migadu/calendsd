@@ -8,9 +8,8 @@ import (
 	"errors"
 )
 
-// Users reads the shared users table for authentication. Port of
-// DAV\Auth\Backend\PDO: digesta1 = md5(user:realm:pass) with the realm baked
-// in (docs/design/PLAN.md §5).
+// Users reads the users table for authentication: digesta1 =
+// md5(user:realm:pass) with the realm baked in (docs/design/PLAN.md §5).
 type Users struct {
 	DB *sql.DB
 }

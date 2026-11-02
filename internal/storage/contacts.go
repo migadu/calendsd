@@ -31,7 +31,7 @@ const cardETagExpr = `coalesce(c.etag, md5(c.carddata))`
 // ContactCard is one stored card with the book it lives in. ID is the cards
 // row's serial, which is what the API hands out as the contact id: SnappyMail's
 // own action layer runs contact ids through intval() before they reach any
-// driver (Actions\Contacts::DoContactsDelete), so the id has to be a number.
+// driver (its contact delete action among them), so the id has to be a number.
 // ETag is the bare md5 as the column stores it — not the quoted form CardInfo
 // carries — because the API compares it against If-Match after unquoting and
 // hands it to the client bare.

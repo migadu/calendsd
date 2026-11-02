@@ -12,9 +12,9 @@ import (
 const DepthInfinity = -1
 
 // Tree resolves URL paths to nodes and implements the recursive copy/move
-// operations. Port of sabre's DAV\Tree (without the node cache: in-memory
-// backends make lookups cheap, and the cache invalidation subtleties aren't
-// worth porting until a profile says otherwise).
+// operations. It keeps no node cache: in-memory backends make lookups cheap,
+// and the cache invalidation subtleties aren't worth it until a profile says
+// otherwise.
 type Tree struct {
 	root Collection
 }
@@ -48,18 +48,22 @@ func (t *Tree) NodeForPath(ctx context.Context, path string) (Node, error) {
 	return node, nil
 }
 
-// NodeExists reports whether a node exists at path.
-func (t *Tree) NodeExists(ctx context.Context, path string) bool {
+// NodeExists reports whether a node exists at path. A missing parent is a
+// false; a failed lookup is an error.
+func (t *Tree) NodeExists(ctx context.Context, path string) (bool, error) {
 	if strings.Trim(path, "/") == "" {
-		return true
+		return true, nil
 	}
 	parent, base := pathutil.Split(strings.Trim(path, "/"))
 	parentNode, err := t.NodeForPath(ctx, parent)
 	if err != nil {
-		return false
+		return Found(err)
 	}
 	coll, isColl := parentNode.(Collection)
-	return isColl && coll.ChildExists(ctx, base)
+	if !isColl {
+		return false, nil
+	}
+	return coll.ChildExists(ctx, base)
 }
 
 // Delete removes the node at path.
@@ -108,7 +112,7 @@ func (t *Tree) Copy(ctx context.Context, sourcePath, destinationPath string, dep
 }
 
 // Move moves the node at sourcePath to destinationPath. A move within one
-// parent is a rename; otherwise it's copy + delete, like sabre.
+// parent is a rename; otherwise it's copy + delete.
 func (t *Tree) Move(ctx context.Context, sourcePath, destinationPath string) error {
 	if pathContainsOrEquals(sourcePath, destinationPath) {
 		return ErrForbidden("Cannot move a resource into itself or a descendant")
@@ -133,8 +137,7 @@ func (t *Tree) Move(ctx context.Context, sourcePath, destinationPath string) err
 	return source.Delete(ctx)
 }
 
-// copyNode clones source into destinationParent under destinationName,
-// mirroring sabre's Tree::copyNode.
+// copyNode clones source into destinationParent under destinationName.
 func (t *Tree) copyNode(ctx context.Context, source Node, destParent Collection, destName string, depth int) error {
 	if destName == "" {
 		destName = source.Name()
@@ -175,7 +178,7 @@ func (t *Tree) copyNode(ctx context.Context, source Node, destParent Collection,
 		}
 	default:
 		// A node that is neither File nor Collection copies as an empty
-		// file, like sabre's fallback.
+		// file.
 		if _, err := destParent.CreateFile(ctx, destName, emptyReader{}); err != nil {
 			return err
 		}
@@ -191,8 +194,8 @@ func (t *Tree) copyNode(ctx context.Context, source Node, destParent Collection,
 	return nil
 }
 
-// copyProperties transfers all custom properties, matching sabre's behavior
-// of replaying them through PropPatch on the destination.
+// copyProperties transfers all custom properties by replaying them through
+// PropPatch on the destination.
 func copyProperties(ctx context.Context, src, dst PropNode) {
 	values, err := src.Props(ctx, nil)
 	if err != nil || len(values) == 0 {

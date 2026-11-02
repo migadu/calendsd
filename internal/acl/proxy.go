@@ -14,9 +14,8 @@ import (
 )
 
 // UserPrincipalNode is a user principal that also acts as a collection hosting
-// its calendar-proxy-read/-write sub-principals. Port of sabre's
-// CalDAV\Principal\User. Used only when proxy delegation is enabled, so plain
-// DAVACL principals stay leaf nodes.
+// its calendar-proxy-read/-write sub-principals. Used only when proxy
+// delegation is enabled, so plain principals stay leaf nodes.
 type UserPrincipalNode struct {
 	*PrincipalNode
 }
@@ -45,8 +44,8 @@ func (u *UserPrincipalNode) Children(ctx context.Context) ([]dav.Node, error) {
 	return []dav.Node{read, write}, nil
 }
 
-func (u *UserPrincipalNode) ChildExists(ctx context.Context, name string) bool {
-	return name == proxyReadName || name == proxyWriteName
+func (u *UserPrincipalNode) ChildExists(ctx context.Context, name string) (bool, error) {
+	return name == proxyReadName || name == proxyWriteName, nil
 }
 
 func (u *UserPrincipalNode) CreateFile(context.Context, string, io.Reader) (string, error) {
@@ -67,7 +66,7 @@ const (
 // ProxyPrincipalNode is a calendar-proxy-read / -write group principal beneath a
 // user principal. Its group-member-set is the set of principals granted proxy
 // (delegate) access to the user's calendars — read-only for -read, read-write
-// for -write. Port of sabre's CalDAV\Principal\ProxyRead / ProxyWrite.
+// for -write.
 type ProxyPrincipalNode struct {
 	backend  Backend
 	uri      string

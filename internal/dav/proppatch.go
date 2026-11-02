@@ -5,10 +5,10 @@ import (
 )
 
 // PropPatch collects property mutations from a PROPPATCH request and lets
-// nodes/plugins claim the ones they can apply. Port of sabre's PropPatch,
-// including its status-code protocol: claimed properties are 202 (pending)
-// until their handler runs; unclaimed ones fail with 403; any failure (>=400)
-// turns every pending/successful property into 424 Failed Dependency.
+// nodes/plugins claim the ones they can apply. Claimed properties are 202
+// (pending) until their handler runs; unclaimed ones fail with 403; any
+// failure (>=400) turns every pending/successful property into 424 Failed
+// Dependency.
 type PropPatch struct {
 	// mutations maps property name to the new value: string for text
 	// content, []byte for a raw XML fragment, nil for removal.
@@ -20,7 +20,7 @@ type PropPatch struct {
 
 // PatchHandler applies a set of mutations. It returns per-property status
 // codes, or nil and ok to signal uniform success (200/204) or failure (403)
-// for all values, mirroring sabre's bool-or-array callback returns.
+// for all values.
 type PatchHandler func(values map[xml.Name]any) (statuses map[xml.Name]int, ok bool)
 
 type patchCallback struct {

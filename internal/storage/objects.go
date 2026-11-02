@@ -77,9 +77,9 @@ func (b *CalDAV) scanObjects(ctx context.Context, id caldav.CalendarID, query st
 }
 
 // CalendarQuery prefilters candidate objects in SQL by component type and the
-// denormalized firstoccurence/lastoccurence bounds, transcribing sabre's PDO
-// calendarQuery. The occurrence filters are NULL-safe so objects without
-// computed bounds are never wrongly excluded — the caller's validator refines.
+// denormalized firstoccurence/lastoccurence bounds. The occurrence filters are
+// NULL-safe so objects without computed bounds are never wrongly excluded —
+// the caller's validator refines.
 func (b *CalDAV) CalendarQuery(ctx context.Context, id caldav.CalendarID, componentType string, start, end time.Time) ([]string, error) {
 	defer b.Metrics.DBOpTimer("calendar_query")()
 	q := `SELECT uri FROM calendarobjects WHERE calendarid = $1`
@@ -145,9 +145,8 @@ func scanObject(row rowScanner, id caldav.CalendarID) (*caldav.ObjectInfo, error
 	}, nil
 }
 
-// CreateCalendarObject mirrors sabre's createCalendarObject + addChange,
-// wrapped in one transaction (deliberately safer than sabre's unwrapped
-// statements — see docs/design/PLAN.md §5).
+// CreateCalendarObject inserts the object and records the change in one
+// transaction (see docs/design/PLAN.md §5).
 func (b *CalDAV) CreateCalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string, data []byte) (string, error) {
 	defer b.Metrics.DBOpTimer("create_object")()
 	d, err := ical.Denormalize(data)

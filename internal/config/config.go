@@ -65,9 +65,9 @@ type Config struct {
 		// instead of the users table (see [server] passwd_file).
 		PasswdFile string
 		// TempFileFilter intercepts OS junk files (._*, .DS_Store, ...) into a
-		// scratch directory instead of the backend, like sabre's
-		// TemporaryFileFilterPlugin. TempFileDir is that directory (defaults to
-		// a subdir of the system temp dir when empty). Off by default.
+		// scratch directory instead of the backend. TempFileDir is that
+		// directory (defaults to a subdir of the system temp dir when empty).
+		// Off by default.
 		TempFileFilter bool
 		TempFileDir    string
 		// WebURL is the calclient origin (e.g. https://calendar.example.org)
@@ -79,7 +79,7 @@ type Config struct {
 		DSN string
 		// Connection-pool bounds. All optional; zero/empty means the
 		// storage.DefaultPool value. Tune these when calendsd shares a
-		// Postgres with a live sabre instance and load could otherwise open
+		// Postgres server with other services and load could otherwise open
 		// too many connections.
 		MaxOpenConns int
 		MaxIdleConns int
@@ -141,7 +141,7 @@ type Config struct {
 		}
 	}
 	// CalendarServer holds the Calendar-Server compatibility extensions.
-	// Every one defaults to false/empty (sabre parity) when omitted.
+	// Every one defaults to false/empty when omitted.
 	CalendarServer struct {
 		Browser              bool
 		AutoProvision        bool

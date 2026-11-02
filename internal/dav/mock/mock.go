@@ -1,6 +1,6 @@
-// Package mock provides in-memory DAV nodes, a port of sabre's test mocks
-// (tests/Sabre/DAV/Mock). The corpus runner seeds these from recorded
-// fixtures; unit tests use them directly.
+// Package mock provides in-memory DAV nodes that behave like the mocks of
+// sabre/dav's unit suite, which the corpus was recorded against. The corpus
+// runner seeds these from recorded fixtures; unit tests use them directly.
 package mock
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/migadu/calendsd/internal/dav"
 )
 
-// Collection is an in-memory collection. Port of Sabre\DAV\Mock\Collection.
+// Collection is an in-memory collection.
 type Collection struct {
 	name     string
 	children []dav.Node
@@ -65,9 +65,9 @@ func (c *Collection) Child(ctx context.Context, name string) (dav.Node, error) {
 
 func (c *Collection) Children(ctx context.Context) ([]dav.Node, error) { return c.children, nil }
 
-func (c *Collection) ChildExists(ctx context.Context, name string) bool {
+func (c *Collection) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := c.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 func (c *Collection) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
@@ -101,7 +101,7 @@ func (c *Collection) Delete(ctx context.Context) error {
 	return nil
 }
 
-// File is an in-memory file. Port of Sabre\DAV\Mock\File.
+// File is an in-memory file.
 type File struct {
 	name         string
 	contents     []byte
@@ -155,8 +155,7 @@ func (f *File) Delete(ctx context.Context) error {
 	return nil
 }
 
-// MemoryPropStorage is an in-memory dead-property store, port of sabre's
-// PropertyStorage\Backend\Mock.
+// MemoryPropStorage is an in-memory dead-property store.
 type MemoryPropStorage struct {
 	// Props maps path → property name → value.
 	Props map[string]map[xml.Name]any
@@ -207,8 +206,8 @@ func (m *MemoryPropStorage) Move(ctx context.Context, source, destination string
 	return nil
 }
 
-// StreamingFile is a file whose size may be unknown (-1), like sabre's
-// Mock\StreamingFile with a null size: no Content-Length, no ranges.
+// StreamingFile is a file whose size may be unknown (-1): no Content-Length,
+// no ranges.
 type StreamingFile struct {
 	File
 	size int64
@@ -221,8 +220,7 @@ func NewStreamingFile(name, contents string, size int64) *StreamingFile {
 
 func (s *StreamingFile) Size() int64 { return s.size }
 
-// FailMode mirrors the failMode knob of sabre's Mock\PropertiesCollection,
-// controlling how PropPatch mutations are answered.
+// FailMode controls how a PropCollection answers PropPatch mutations.
 type FailMode string
 
 const (
@@ -233,7 +231,6 @@ const (
 )
 
 // PropCollection is a collection carrying custom properties.
-// Port of Sabre\DAV\Mock\PropertiesCollection.
 type PropCollection struct {
 	Collection
 	Mode  FailMode
@@ -290,7 +287,7 @@ func (pc *PropCollection) PropPatch(ctx context.Context, pp *dav.PropPatch) {
 	})
 }
 
-// CreateDirectory mirrors sabre's override: children of a properties
+// CreateDirectory overrides Collection's: children of a properties
 // collection are properties collections with the same fail mode.
 func (pc *PropCollection) CreateDirectory(ctx context.Context, name string) error {
 	child := NewPropCollection(name, nil)

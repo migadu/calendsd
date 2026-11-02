@@ -19,7 +19,7 @@ type SubscriptionInfo struct {
 }
 
 // SubscriptionsBackend stores subscriptions (the calendarsubscriptions
-// table). Port of sabre's Backend\SubscriptionSupport.
+// table).
 type SubscriptionsBackend interface {
 	SubscriptionsForUser(ctx context.Context, principalURI string) ([]SubscriptionInfo, error)
 	CreateSubscription(ctx context.Context, principalURI, uri string, props map[xml.Name]any) (string, error)
@@ -29,7 +29,8 @@ type SubscriptionsBackend interface {
 // nameSubscribed is the resourcetype marking a subscription collection.
 var nameSubscribed = xml.Name{Space: davxml.NSCalendarServer, Local: "subscribed"}
 
-// MockSubscriptionBackend ports sabre's Backend\MockSubscriptionSupport.
+// MockSubscriptionBackend adds in-memory subscription storage to the mock
+// calendar backend.
 type MockSubscriptionBackend struct {
 	MockBackend
 	Subscriptions []SubscriptionInfo

@@ -14,18 +14,17 @@ import (
 
 type xmlName = xml.Name
 
-// Property storage value types, shared with sabre's
-// PropertyStorage\Backend\PDO (docs/design/PLAN.md §5). Type 3 (PHP-serialized objects)
-// is language-specific: never written, treated as opaque on read.
+// Property storage value types of the sabre-derived propertystorage table
+// (docs/design/PLAN.md §5). Type 3 (PHP-serialized objects) is
+// language-specific: never written, treated as opaque on read.
 const (
 	vtString = 1
 	vtXML    = 2
 	vtObject = 3
 )
 
-// PropertyStorage persists arbitrary dead properties in the shared
-// propertystorage table. Port of sabre's PropertyStorage\Backend\PDO,
-// limited to the cross-readable value types 1 (string) and 2 (XML).
+// PropertyStorage persists arbitrary dead properties in the propertystorage
+// table, limited to the value types 1 (string) and 2 (XML).
 type PropertyStorage struct {
 	DB *sql.DB
 }
@@ -82,7 +81,7 @@ func (p *PropertyStorage) PropFindMany(ctx context.Context, paths []string) (map
 
 // storedProp turns a propertystorage row into the property a PropFind
 // serves: false for a name that cannot round-trip (not clark) or a value
-// type this server does not read (PHP-serialized objects, which sabre owns,
+// type this server does not read (PHP-serialized objects left by sabre/dav,
 // docs/design/PLAN.md §5).
 func storedProp(name string, value []byte, valuetype int64) (dav.StoredProp, bool) {
 	xmlName, err := davxml.ParseClark(name)
@@ -146,8 +145,8 @@ func (p *PropertyStorage) Delete(ctx context.Context, path string) error {
 	return err
 }
 
-// Move renames the exact path and all children, like sabre's PDO backend, in
-// one statement, so a failure cannot leave the property subtree half-renamed.
+// Move renames the exact path and all children in one statement, so a
+// failure cannot leave the property subtree half-renamed.
 func (p *PropertyStorage) Move(ctx context.Context, source, destination string) error {
 	_, err := p.DB.ExecContext(ctx, `
 UPDATE propertystorage SET path = $2 || substr(path, length($1) + 1)

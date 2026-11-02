@@ -17,8 +17,7 @@ import (
 )
 
 // InviteNotification is a share invitation delivered to a sharee's
-// notification inbox. Port of the fields sabre's Xml\Notification\Invite
-// serializes.
+// notification inbox.
 type InviteNotification struct {
 	// ID is the notification's stable identifier (also its file name stem).
 	ID string
@@ -37,16 +36,14 @@ type InviteNotification struct {
 	Summary string
 }
 
-// NotificationsBackend stores per-principal notifications. Port of sabre's
-// Backend\NotificationSupport (invite subset).
+// NotificationsBackend stores per-principal notifications (invites only).
 type NotificationsBackend interface {
 	NotificationsForPrincipal(ctx context.Context, principalURI string) ([]InviteNotification, error)
 	AddNotification(ctx context.Context, principalURI string, n InviteNotification) error
 	DeleteNotification(ctx context.Context, principalURI, id string) error
 }
 
-// Notifications is a principal's notification collection. Port of
-// CalDAV\Notifications\Collection.
+// Notifications is a principal's notification collection.
 type Notifications struct {
 	backend      NotificationsBackend
 	principalURI string
@@ -93,9 +90,9 @@ func (n *Notifications) Child(ctx context.Context, name string) (dav.Node, error
 	return nil, dav.ErrNotFound("Notification not found")
 }
 
-func (n *Notifications) ChildExists(ctx context.Context, name string) bool {
+func (n *Notifications) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := n.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 func (n *Notifications) CreateFile(context.Context, string, io.Reader) (string, error) {
@@ -110,8 +107,7 @@ func (n *Notifications) ACL() []acl.ACE {
 	return []acl.ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
 }
 
-// NotificationNode is one notification item (an invite). Port of
-// CalDAV\Notifications\Node.
+// NotificationNode is one notification item (an invite).
 type NotificationNode struct {
 	backend      NotificationsBackend
 	principalURI string
@@ -218,10 +214,9 @@ func notificationID(calendarPath, sharee string) string {
 }
 
 // NotificationsPlugin adds the calendarserver notification inbox: the
-// notification-URL principal property and GET of notification items. Port of
-// the CalDAV\Notifications\Plugin subset. The inbox is exposed as a
-// CalendarHome child when the calendar backend implements
-// NotificationsBackend.
+// notification-URL principal property and GET of notification items. The
+// inbox is exposed as a CalendarHome child when the calendar backend
+// implements NotificationsBackend.
 type NotificationsPlugin struct {
 	server *dav.Server
 }

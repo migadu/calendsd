@@ -9,9 +9,8 @@ import (
 	"strings"
 )
 
-// BrowserPlugin answers GET on collections with a minimal HTML index, like a
-// stripped-down sabre Browser plugin (listing only — no POST actions, no
-// asset serving). Without it a GET on a collection is a 501, which is
+// BrowserPlugin answers GET on collections with a minimal HTML index
+// (listing only — no POST actions, no asset serving). Without it a GET on a collection is a 501, which is
 // sabre's default and what the corpus pins, so the plugin is opt-in
 // (-browser flag); CalDAVTester start blocks GET calendar collections and
 // need the 200.

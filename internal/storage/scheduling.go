@@ -14,8 +14,8 @@ import (
 	"github.com/migadu/calendsd/internal/caldav"
 )
 
-// SchedulingObjects reads a principal's schedule inbox from the shared
-// schedulingobjects table. Port of PDO getSchedulingObjects.
+// SchedulingObjects reads a principal's schedule inbox from the
+// schedulingobjects table.
 func (b *CalDAV) SchedulingObjects(ctx context.Context, principalURI string) ([]caldav.SchedulingObjectInfo, error) {
 	defer b.Metrics.DBOpTimer("scheduling_objects")()
 	rows, err := b.DB.QueryContext(ctx,
@@ -52,8 +52,8 @@ func (b *CalDAV) SchedulingObject(ctx context.Context, principalURI, objectURI s
 	return &caldav.SchedulingObjectInfo{URI: objectURI, PrincipalURI: principalURI, CalendarData: data}, nil
 }
 
-// CreateSchedulingObject transcribes PDO createSchedulingObject: md5 etag,
-// size, epoch lastmodified.
+// CreateSchedulingObject stores an inbox object with an md5 etag, its size,
+// and an epoch lastmodified.
 func (b *CalDAV) CreateSchedulingObject(ctx context.Context, principalURI, objectURI string, data []byte) error {
 	sum := md5.Sum(data)
 	_, err := b.DB.ExecContext(ctx, `

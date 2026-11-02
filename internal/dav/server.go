@@ -18,8 +18,7 @@ import (
 )
 
 // Server is the WebDAV protocol engine: an http.Handler dispatching methods
-// across an ordered plugin chain over a node tree. Port of sabre's
-// DAV\Server.
+// across an ordered plugin chain over a node tree.
 type Server struct {
 	// BaseURI is the URI prefix the server is mounted at, e.g. "/dav/".
 	// Always begins and ends with "/".
@@ -29,13 +28,11 @@ type Server struct {
 
 	plugins []Plugin
 
-	// ProtectedProperties cannot be changed via PROPPATCH; mirrors
-	// sabre's Server::$protectedProperties.
+	// ProtectedProperties cannot be changed via PROPPATCH.
 	ProtectedProperties []xml.Name
 
-	// resourceTypeMappings mirror sabre's Server::$resourceTypeMapping:
-	// plugins register predicates that add resourcetype values (e.g.
-	// {DAV:}principal for principal nodes).
+	// resourceTypeMappings are predicates plugins register to add
+	// resourcetype values (e.g. {DAV:}principal for principal nodes).
 	resourceTypeMappings []func(Node) []xml.Name
 
 	// MaxRequestBodySize caps how many bytes any request body may deliver;
@@ -58,8 +55,7 @@ func (s *Server) AddResourceTypeMapping(fn func(Node) []xml.Name) {
 	s.resourceTypeMappings = append(s.resourceTypeMappings, fn)
 }
 
-// ResourceTypesForNode computes a node's {DAV:}resourcetype values,
-// mirroring sabre's getResourceTypeForNode.
+// ResourceTypesForNode computes a node's {DAV:}resourcetype values.
 func (s *Server) ResourceTypesForNode(node Node) []xml.Name {
 	var out []xml.Name
 	if isCollectionNode(node) {
@@ -166,7 +162,7 @@ func (s *Server) AllowedMethods(ctx context.Context, path string) []string {
 }
 
 // Path translates a request URI into a server-relative path with the BaseURI
-// stripped, mirroring sabre's calculateUri: no leading or trailing slash.
+// stripped: no leading or trailing slash.
 func (s *Server) Path(r *http.Request) (string, error) {
 	return s.stripBase(r.URL.EscapedPath())
 }
@@ -187,8 +183,8 @@ func (s *Server) stripBase(p string) (string, error) {
 		}
 		p = u.EscapedPath()
 	}
-	// Normalize ./.. segments and duplicate slashes like sabre's
-	// Uri\normalize before comparing against the base URI.
+	// Normalize ./.. segments and duplicate slashes before comparing
+	// against the base URI.
 	if p != "" {
 		trailing := strings.HasSuffix(p, "/")
 		p = gopath.Clean("/" + strings.TrimPrefix(p, "/"))
@@ -217,9 +213,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	r = r.WithContext(withPrincipalState(r.Context()))
-	// beforeMethod hooks (auth, then ACL) run before precondition checks,
-	// matching sabre's event order. The order is load-bearing for privacy,
-	// not just parity: because ACL rejects an unauthorized principal here
+	// BeforeMethod hooks (auth, then ACL) run before precondition checks.
+	// The order is load-bearing for privacy: because ACL rejects an
+	// unauthorized principal here
 	// first, a conditional request never reaches checkPreconditions below,
 	// so a 412/304 can't reveal a resource's existence or ETag to a client
 	// that lacks privilege on it. Do not move preconditions ahead of ACL.
@@ -254,8 +250,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Method))
 }
 
-// WriteError serializes an error the way sabre does: an XML {DAV:}error body
-// carrying the exception identity.
+// WriteError serializes an error as an XML {DAV:}error body carrying the
+// exception identity.
 func (s *Server) WriteError(w http.ResponseWriter, err error) {
 	s.writeError(w, nil, err)
 }
@@ -277,8 +273,9 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	h := w.Header()
 	h.Set("Content-Type", "application/xml; charset=utf-8")
 	if de.Status == http.StatusMethodNotAllowed {
-		// Mirrors sabre's MethodNotAllowed::getHTTPHeaders. The methods of
-		// the in-memory root need no storage, so no request context.
+		// A 405 carries an Allow header with the root's methods. The
+		// methods of the in-memory root need no storage, so no request
+		// context.
 		h.Set("Allow", strings.Join(s.AllowedMethods(context.Background(), ""), ", "))
 	}
 	if de.RetryAfter > 0 {
@@ -297,7 +294,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // errorBody is the {DAV:}error document WriteError sends: the precondition
-// elements, then the sabre exception identity.
+// elements, then the exception identity.
 type errorBody struct {
 	XMLName      xml.Name `xml:"DAV: error"`
 	Precondition []emptyElement
@@ -323,8 +320,7 @@ func (s *Server) WriteMultiStatus(w http.ResponseWriter, ms *davxml.MultiStatus)
 }
 
 // PropertiesForPath runs the PROPFIND machinery for a path: depth 0 or 1,
-// one multistatus response element per visited node. Port of sabre's
-// getPropertiesIteratorForPath.
+// one multistatus response element per visited node.
 func (s *Server) PropertiesForPath(ctx context.Context, path string, names []xml.Name, depth int, include ...xml.Name) ([]davxml.Response, error) {
 	if depth != 0 {
 		depth = 1 // propfind depth infinity stays disabled, like sabre's default
@@ -423,8 +419,8 @@ func (s *Server) respond(ctx context.Context, pf *PropFind, node Node) (davxml.R
 	return pf.response(href), nil
 }
 
-// runPropFind fires the property hooks for one node in sabre's order:
-// core defaults, plugins, then node-supplied dead properties.
+// runPropFind fires the property hooks for one node in order: core
+// defaults, plugins, then node-supplied dead properties.
 func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error {
 	corePropFind(s, pf, node)
 	for hook := range Hooks[PropFindHook](s) {
@@ -432,7 +428,7 @@ func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error
 			return err
 		}
 	}
-	// Late phase: node dead properties (sabre's propFindNode at 120).
+	// Late phase: node dead properties.
 	if props, ok := node.(PropNode); ok {
 		var want []xml.Name
 		if !pf.IsAllProps() {
@@ -448,7 +444,7 @@ func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error
 			}
 		}
 	}
-	// Very late phase: property storage (sabre's priority 130).
+	// Very late phase: property storage.
 	for hook := range Hooks[LatePropFindHook](s) {
 		if err := hook.PropFindLate(pf, node); err != nil {
 			return err
@@ -457,8 +453,8 @@ func (s *Server) runPropFind(ctx context.Context, pf *PropFind, node Node) error
 	return nil
 }
 
-// UpdateProperties runs the PROPPATCH machinery for a path. Port of sabre's
-// updateProperties: protected-property rejection, then node handlers.
+// UpdateProperties runs the PROPPATCH machinery for a path:
+// protected-property rejection, then node handlers.
 func (s *Server) UpdateProperties(ctx context.Context, path string, update *davxml.PropertyUpdate) (map[xml.Name]int, error) {
 	pp := NewPropPatch(update.Values)
 
@@ -485,7 +481,7 @@ func (s *Server) UpdateProperties(ctx context.Context, path string, update *davx
 	if props, ok := node.(PropNode); ok {
 		props.PropPatch(ctx, pp)
 	}
-	// Property-storage plugins claim the remainder (sabre priority 300).
+	// Property-storage plugins claim the remainder.
 	for hook := range Hooks[PropPatchHook](s) {
 		if err := hook.PropPatch(ctx, path, pp); err != nil {
 			return nil, err
@@ -562,8 +558,7 @@ func (s *Server) Href(path string) string {
 	return s.BaseURI + encodePath(path)
 }
 
-// encodePath percent-encodes a path, segment-preserving, like sabre's
-// HTTP\encodePath.
+// encodePath percent-encodes a path, segment-preserving.
 func encodePath(p string) string {
 	segs := strings.Split(p, "/")
 	for i, seg := range segs {

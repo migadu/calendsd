@@ -10,8 +10,7 @@ import (
 )
 
 // ErrTooManyInstances is returned when a recurrence rule produces more
-// instances than a scan is willing to materialise. It is the Go counterpart of
-// sabre vobject's MaxInstancesExceededException; callers decide what the
+// instances than a scan is willing to materialise. Callers decide what the
 // conservative answer is (time-range: match; free-busy: busy; PUT: refuse).
 var ErrTooManyInstances = errors.New("recurrence rule produces too many instances")
 
@@ -22,11 +21,8 @@ var ErrTooManyInstances = errors.New("recurrence rule produces too many instance
 // rule cannot spin for minutes. Instances inside the window count against the
 // shared maxRecurrences cap instead (audit item 3.1, D7).
 //
-// Sabre's EventIterator throws MaxInstancesExceededException after
-// Settings::$maxRecurrences (3500) instances *counted from DTSTART*, including
-// inside VEvent::isInTimeRange, because its fastForward iterates rather than
-// jumps. Counting only in-window instances is deliberately more lenient to
-// long-running series; counting pre-window ones at all is what sabre lacks.
+// Counting only in-window instances against maxRecurrences, rather than every
+// instance from DTSTART, is deliberately lenient to long-running series.
 const maxPreWindowScan = 100_000
 
 // maxTimeRangeScan bounds the skip-ahead loops that look for one target
@@ -34,9 +30,9 @@ const maxPreWindowScan = 100_000
 // the same budget as the pre-window skip, for the same reason.
 const maxTimeRangeScan = maxPreWindowScan
 
-// maxAlarmRepeat caps a VALARM's REPEAT. The value is also what sabre's
-// iterator would tolerate for a recurrence; a client-supplied
-// REPEAT:9223372036854775807 otherwise pins a core (audit item 3.2).
+// maxAlarmRepeat caps a VALARM's REPEAT, at the same value as maxRecurrences;
+// a client-supplied REPEAT:9223372036854775807 otherwise pins a core (audit
+// item 3.2).
 const maxAlarmRepeat = 3500
 
 // scanWindow walks a recurrence iterator over [start, end), calling visit for
@@ -73,7 +69,7 @@ func scanWindow(next func() (time.Time, bool), endOf func(time.Time) time.Time, 
 }
 
 // EventInTimeRange reports whether a VEVENT overlaps [start, end).
-// Port of vobject VEvent::isInTimeRange: recurring events match if any
+// Recurring events match if any
 // occurrence overlaps; DTEND is non-inclusive. loc resolves floating times.
 func EventInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
 	dtstartProp := comp.Props.Get(goical.PropDateTimeStart)
@@ -166,9 +162,9 @@ func occurrenceEnd(comp *goical.Component, dtstartProp *goical.Prop, dtstart tim
 	return func(t time.Time) time.Time { return t.AddDate(0, 0, days).Add(rest) }, nil
 }
 
-// TodoInTimeRange ports vobject VTodo::isInTimeRange: DTSTART/DURATION/DUE
-// combinations, falling back to COMPLETED/CREATED, and matching everything
-// for a bare VTODO.
+// TodoInTimeRange reports whether a VTODO overlaps [start, end): it uses
+// DTSTART/DURATION/DUE combinations, falling back to COMPLETED/CREATED, and
+// matching everything for a bare VTODO.
 func TodoInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
 	get := func(name string) (time.Time, bool, error) {
 		prop := comp.Props.Get(name)
@@ -225,8 +221,9 @@ func TodoInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Loc
 	return true, nil
 }
 
-// JournalInTimeRange ports vobject VJournal::isInTimeRange: DTSTART-based
-// (all-day entries span one day); journals without DTSTART never match.
+// JournalInTimeRange reports whether a VJOURNAL overlaps [start, end), by
+// DTSTART (all-day entries span one day); journals without DTSTART never
+// match.
 func JournalInTimeRange(comp *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
 	prop := comp.Props.Get(goical.PropDateTimeStart)
 	if prop == nil {
@@ -244,7 +241,7 @@ func JournalInTimeRange(comp *goical.Component, start, end time.Time, loc *time.
 }
 
 // EffectiveTriggerTime resolves a VALARM's trigger, relative to its parent
-// VEVENT or VTODO. Port of vobject VAlarm::getEffectiveTriggerTime.
+// VEVENT or VTODO.
 func EffectiveTriggerTime(alarm, parent *goical.Component, loc *time.Location) (time.Time, error) {
 	trigger := alarm.Props.Get("TRIGGER")
 	if trigger == nil {
@@ -317,8 +314,8 @@ func todoAlarmAnchor(todo *goical.Component, relatedEnd bool, loc *time.Location
 }
 
 // AlarmsInTimeRangeRecurring evaluates the VALARMs of a recurring VEVENT,
-// porting sabre's recurring branch of validateTimeRange (the Issue 220
-// behavior) exactly: instances are walked in order with overridden instances
+// matching sabre/dav's behavior exactly (its Issue 220, pinned by the
+// corpus): instances are walked in order with overridden instances
 // (RECURRENCE-ID) substituted; an instance *without* alarms aborts the whole
 // search as a no-match; the walk also stops once the earliest relative
 // trigger of an instance passes the range end.
@@ -343,8 +340,8 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 	}
 
 	next := set.Iterator()
-	// Sabre relies on firstAlarm growing past $end for termination; the
-	// cap guards against pathological rules it would spin on.
+	// The walk normally ends once the first alarm passes end; the cap
+	// guards against pathological rules that would spin.
 	for i := 0; i < maxRecurrences; i++ {
 		occStart, more := next()
 		if !more {
@@ -372,7 +369,7 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 		}
 		if len(alarms) == 0 {
 			// "No alarm that will change for every instance was found" —
-			// sabre assumes no match and stops here.
+			// assume no match and stop here.
 			return false, nil
 		}
 
@@ -421,10 +418,10 @@ func AlarmsInTimeRangeRecurring(cal *goical.Calendar, master *goical.Component, 
 
 // alarmRepetition reads a VALARM's DURATION and REPEAT: how far apart its
 // repetitions are and how many follow the trigger. Without DURATION there are
-// none; with one, REPEAT defaults to 1 (sabre's DatePeriod with
-// recurrences=N yields the start plus N repetitions, and PHP reads a missing,
-// unparseable or zero REPEAT as 1). REPEAT is capped at maxAlarmRepeat so a
-// client-supplied REPEAT:9223372036854775807 cannot pin a core (audit 3.2).
+// none; with one, the trigger is followed by REPEAT repetitions, and a
+// missing, unparseable or zero REPEAT counts as 1 (as in sabre/dav). REPEAT
+// is capped at maxAlarmRepeat so a client-supplied
+// REPEAT:9223372036854775807 cannot pin a core (audit 3.2).
 func alarmRepetition(alarm *goical.Component) (time.Duration, int, error) {
 	durProp := alarm.Props.Get(goical.PropDuration)
 	if durProp == nil {
@@ -479,7 +476,7 @@ func repetitionInRange(trigger time.Time, dur time.Duration, repeat int, start, 
 }
 
 // AlarmInTimeRange reports whether a VALARM's (possibly repeating) trigger
-// falls within [start, end). Port of vobject VAlarm::isInTimeRange.
+// falls within [start, end).
 func AlarmInTimeRange(alarm, parent *goical.Component, start, end time.Time, loc *time.Location) (bool, error) {
 	trigger, err := EffectiveTriggerTime(alarm, parent, loc)
 	if err != nil {

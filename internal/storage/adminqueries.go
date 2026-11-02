@@ -344,7 +344,7 @@ type AdminPropRow struct {
 	Name             string `json:"name"`
 	ValueType        int    `json:"valueType"`
 	Value            string `json:"value"`
-	SabreOnly        bool   `json:"sabreOnly"` // valuetype 3: PHP-serialized, sabre owns it
+	SabreOnly        bool   `json:"sabreOnly"` // valuetype 3: PHP-serialized by sabre/dav, unreadable here
 	OverlayPrincipal string `json:"overlayPrincipal"`
 }
 

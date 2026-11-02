@@ -15,8 +15,7 @@ import (
 	"github.com/migadu/calendsd/internal/pathutil"
 )
 
-// defaultCalendarPath picks the principal's first VEVENT-capable calendar,
-// like sabre's default-calendar search.
+// defaultCalendarPath picks the principal's first VEVENT-capable calendar.
 func (p *SchedulePlugin) defaultCalendarPath(ctx context.Context, principalURI string) string {
 	_, name := pathutil.Split(principalURI)
 	home, err := p.server.Tree.NodeForPath(ctx, "calendars/"+name)
@@ -94,7 +93,7 @@ type AddressResolver interface {
 }
 
 // principalForAddress finds the principal owning a calendar user address
-// (sabre's getPrincipalByUri via calendar-user-address-set). Scheduling and
+// (via calendar-user-address-set). Scheduling and
 // sharing both resolve through here. The calendar root's principal backend
 // answers directly when it is an AddressResolver; otherwise every principal
 // is listed and its alternate-URI-set compared.

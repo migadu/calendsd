@@ -17,11 +17,11 @@ import (
 	"github.com/migadu/calendsd/internal/pathutil"
 )
 
-// InterceptWrite implements dav.WriteInterceptor for calendar-object PUTs,
-// mirroring sabre's validateICalendar: a jCal (RFC 7265) body is converted to
-// iCalendar, and the object's component type is checked against the calendar's
-// supported-calendar-component-set. Runs before the scheduling broker
-// (registration order), so downstream sees validated iCalendar.
+// InterceptWrite implements dav.WriteInterceptor for calendar-object PUTs: a
+// jCal (RFC 7265) body is converted to iCalendar, and the object's component
+// type is checked against the calendar's supported-calendar-component-set.
+// Runs before the scheduling broker (registration order), so downstream sees
+// validated iCalendar.
 func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
 	parentPath, _ := pathutil.Split(path)
 	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)
@@ -48,9 +48,9 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 		data = ical.EncodeLenient(decoded)
 	}
 
-	// A body that will not parse as iCalendar is rejected up front, the way
-	// sabre's validateICalendar does, rather than handed to the backend, which
-	// would surface the failure as an opaque 500.
+	// A body that will not parse as iCalendar is rejected up front rather
+	// than handed to the backend, which would surface the failure as an
+	// opaque 500.
 	cal, err := ical.Decode(data)
 	if err != nil {
 		return nil, dav.ErrUnsupportedMediaType(
@@ -89,16 +89,16 @@ func (p *Plugin) InterceptWrite(r *http.Request, path string, data []byte, isNew
 
 // invalidCalendarData reports iCalendar that parses but is not usable (bad
 // durations, dates, or recurrence rules) as a 400 carrying the RFC 4791
-// {CALDAV:}valid-calendar-data precondition, mirroring sabre's precondition
-// reporting rather than leaking an internal error as a 500.
+// {CALDAV:}valid-calendar-data precondition, rather than leaking an internal
+// error as a 500.
 func invalidCalendarData(format string, args ...any) error {
 	e := dav.ErrBadRequest(format, args...)
 	e.Precondition = []xml.Name{{Space: davxml.NSCalDAV, Local: "valid-calendar-data"}}
 	return e
 }
 
-// invalidComponentType mirrors sabre's Sabre\CalDAV\Exception\InvalidComponentType
-// (a 403 Forbidden subclass) so the error identity matches on the wire.
+// invalidComponentType is a 403 carrying sabre/dav's InvalidComponentType
+// exception name, which clients see in the error body.
 func invalidComponentType(msg string) error {
 	return &dav.Error{
 		Status:    http.StatusForbidden,

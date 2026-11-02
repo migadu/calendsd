@@ -46,7 +46,7 @@ func checkXMLNestingDepth(body []byte, max int) error {
 	}
 }
 
-// Filter trees mirror RFC 4791 §9.7 and sabre's parsed filter arrays.
+// Filter trees mirror RFC 4791 §9.7.
 
 // CompFilter matches a component by name, sub-filters, or time range.
 type CompFilter struct {
@@ -352,8 +352,8 @@ func convertTextMatch(in *textMatchXML) (*TextMatch, error) {
 	}, nil
 }
 
-// timeRangeableProps are the date properties sabre allows time-range
-// filters on (its validateTimeRange property cases).
+// timeRangeableProps are the date properties that allow time-range
+// filters.
 var timeRangeableProps = map[string]bool{
 	"COMPLETED": true, "CREATED": true, "DTEND": true, "DTSTAMP": true,
 	"DTSTART": true, "DUE": true, "LAST-MODIFIED": true,
@@ -373,16 +373,15 @@ func convertTimeRange(in *timeRangeXML) (*TimeRange, error) {
 	if err != nil {
 		return nil, dav.ErrBadRequest("The 'end' attribute of the time-range element is invalid: %s", in.End)
 	}
-	// sabre rejects an inverted range (only when both bounds are given) at
-	// parse time; an open-ended range is still allowed. See CompFilter.php /
-	// PropFilter.php.
+	// Reject an inverted range (only when both bounds are given) at parse
+	// time; an open-ended range is still allowed.
 	if !start.IsZero() && !end.IsZero() && !end.After(start) {
 		return nil, dav.ErrBadRequest("The end-date must be larger than the start-date")
 	}
 	return &TimeRange{Start: start, End: end}, nil
 }
 
-// bounds applies sabre's defaults for open-ended ranges.
+// bounds applies the defaults for open-ended ranges.
 func (tr *TimeRange) bounds() (time.Time, time.Time) {
 	start, end := tr.Start, tr.End
 	if start.IsZero() {
@@ -394,8 +393,8 @@ func (tr *TimeRange) bounds() (time.Time, time.Time) {
 	return start, end
 }
 
-// Validator checks calendar objects against a filter tree. Port of sabre's
-// CalendarQueryValidator. loc resolves floating times.
+// Validator checks calendar objects against a filter tree. loc resolves
+// floating times.
 type Validator struct {
 	Loc *time.Location
 	// cal is the object being validated (recurring-VALARM checks need
@@ -501,8 +500,8 @@ nextFilter:
 		}
 
 		if filter.TimeRange != nil {
-			// Sabre restricts property time-ranges to the date properties
-			// and matches with an inclusive end ($start <= dt && $end >= dt).
+			// Property time-ranges are restricted to the date properties
+			// and match with an inclusive end (start <= dt <= end).
 			if !timeRangeableProps[filter.Name] {
 				return false, dav.ErrBadRequest("You cannot create a time-range filter on a %s component", filter.Name)
 			}
@@ -562,11 +561,10 @@ nextFilter:
 	return true, nil
 }
 
-// matchText ports sabre's StringUtil::textMatch for the two mandatory
-// collations (both effectively case-insensitive substring matching; octet is
-// case-sensitive).
+// matchText implements text-match for the two mandatory collations (both
+// effectively case-insensitive substring matching; octet is case-sensitive).
 func matchText(haystack string, tm *TextMatch) bool {
-	// Fold per collation exactly like sabre's StringUtil::textMatch:
+	// Fold per collation:
 	// i;ascii-casemap uppercases ASCII a-z only, i;unicode-casemap uppercases
 	// with full Unicode, i;octet is byte-exact. CalDAV text-match has no
 	// match-type, so the comparison is always "contains".
@@ -574,7 +572,7 @@ func matchText(haystack string, tm *TextMatch) bool {
 	return tm.Negate != matched
 }
 
-// foldCollation case-folds s per the RFC 4790 collation, matching sabre.
+// foldCollation case-folds s per the RFC 4790 collation.
 func foldCollation(s, collation string) string {
 	switch collation {
 	case "i;octet":
@@ -591,8 +589,7 @@ func foldCollation(s, collation string) string {
 	}
 }
 
-// componentInTimeRange dispatches per component type, mirroring sabre's
-// validateTimeRange.
+// componentInTimeRange dispatches per component type.
 func (v *Validator) componentInTimeRange(comp, parent *goical.Component, start, end time.Time) (bool, error) {
 	switch comp.Name {
 	case goical.CompEvent:

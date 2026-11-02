@@ -251,10 +251,10 @@ func TestOpsRequeueRespectsLatest(t *testing.T) {
 	enqueueLatest(t, q, "a", 5, "old")
 	old := discard("a")
 	enqueueLatest(t, q, "a", 7, "new")
-	if err := ops.Retry(old); !errors.Is(err, ErrNewerPending) {
+	if err := ops.Retry(t.Context(), old); !errors.Is(err, ErrNewerPending) {
 		t.Fatalf("Retry of a superseded job = %v, want ErrNewerPending", err)
 	}
-	if err := ops.RelayOverride(old); !errors.Is(err, ErrNewerPending) {
+	if err := ops.RelayOverride(t.Context(), old); !errors.Is(err, ErrNewerPending) {
 		t.Fatalf("RelayOverride of a superseded job = %v, want ErrNewerPending", err)
 	}
 
@@ -262,7 +262,7 @@ func TestOpsRequeueRespectsLatest(t *testing.T) {
 	enqueueLatest(t, q, "b", 9, "new")
 	newer := discard("b")
 	enqueueLatest(t, q, "b", 8, "delayed")
-	if err := ops.Retry(newer); err != nil {
+	if err := ops.Retry(t.Context(), newer); err != nil {
 		t.Fatalf("Retry: %v", err)
 	}
 	_, states, gens := jobsFor(t, q, "b")
@@ -271,7 +271,7 @@ func TestOpsRequeueRespectsLatest(t *testing.T) {
 	}
 
 	// Errors for missing and completed jobs are unchanged.
-	if err := ops.Retry(999999); !errors.Is(err, ErrNoJob) {
+	if err := ops.Retry(t.Context(), 999999); !errors.Is(err, ErrNoJob) {
 		t.Errorf("Retry(missing) = %v", err)
 	}
 }

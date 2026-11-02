@@ -1,6 +1,6 @@
 // Package caldav implements the CalDAV layer: calendar nodes, the CalDAV
 // plugin (properties + reports), the calendar-query engine, and the storage
-// backend abstraction. Port of sabre's lib/CalDAV.
+// backend abstraction.
 package caldav
 
 import (
@@ -15,8 +15,8 @@ import (
 	"github.com/migadu/calendsd/internal/dav"
 )
 
-// CalendarID addresses a calendar by the sabre backend convention: the
-// shared calendars row plus the per-principal calendarinstances row
+// CalendarID addresses a calendar by two keys: the shared calendars row plus
+// the per-principal calendarinstances row
 // (docs/design/PLAN.md §5). In-memory backends leave Instance empty.
 type CalendarID struct {
 	Calendar string
@@ -25,8 +25,7 @@ type CalendarID struct {
 
 // CalendarInfo describes one calendar of a principal. Props carries
 // clark-named calendar properties (displayname, supported-calendar-
-// component-set, calendar-timezone, ...), mirroring the array rows sabre's
-// backends return.
+// component-set, calendar-timezone, ...).
 type CalendarInfo struct {
 	// ID is the backend's calendar identifier.
 	ID CalendarID
@@ -41,8 +40,7 @@ type CalendarInfo struct {
 	ShareAccess int
 }
 
-// ObjectInfo is one calendar object (event/todo). Port of the row arrays
-// sabre backends return.
+// ObjectInfo is one calendar object (event/todo).
 type ObjectInfo struct {
 	URI          string
 	CalendarID   CalendarID
@@ -66,8 +64,7 @@ func (o *ObjectInfo) QuotedETag() string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-// Backend provides calendar storage. Port of the sabre
-// CalDAV\Backend\BackendInterface subset the MVP needs.
+// Backend provides calendar storage.
 type Backend interface {
 	// CalendarsForUser lists the calendars owned by a principal.
 	CalendarsForUser(ctx context.Context, principalURI string) ([]CalendarInfo, error)
@@ -76,7 +73,7 @@ type Backend interface {
 	// DeleteCalendar removes a calendar with its objects.
 	DeleteCalendar(ctx context.Context, calendarID CalendarID) error
 	// UpdateCalendar registers PropPatch handlers for the calendar
-	// properties the backend persists (sabre's updateCalendar).
+	// properties the backend persists.
 	UpdateCalendar(ctx context.Context, calendarID CalendarID, pp *dav.PropPatch)
 
 	// CalendarObjects lists all objects of a calendar.
@@ -85,7 +82,7 @@ type Backend interface {
 	// the given top-level component type ("" = no constraint) and optional
 	// time range (zero Start/End = unconstrained). It is a coarse prefilter
 	// that must return a superset of the true matches; the caller validates
-	// each candidate. Port of sabre's BackendInterface::calendarQuery.
+	// each candidate.
 	CalendarQuery(ctx context.Context, calendarID CalendarID, componentType string, start, end time.Time) ([]string, error)
 	// CalendarObject fetches one object, or nil if absent.
 	CalendarObject(ctx context.Context, calendarID CalendarID, objectURI string) (*ObjectInfo, error)
@@ -127,7 +124,6 @@ type UIDLookup interface {
 }
 
 // MockBackend is the in-memory backend used by tests and the corpus runner.
-// Port of sabre's CalDAV\Backend\Mock.
 type MockBackend struct {
 	Calendars []CalendarInfo
 	// Objects maps calendar ID → object URI → object.
@@ -267,8 +263,7 @@ func (m *MockBackend) DeleteCalendarObject(ctx context.Context, calendarID Calen
 	return nil
 }
 
-// UpdateCalendar accepts all mutations into the in-memory props, like
-// sabre's mock.
+// UpdateCalendar accepts all mutations into the in-memory props.
 func (m *MockBackend) UpdateCalendar(ctx context.Context, calendarID CalendarID, pp *dav.PropPatch) {
 	pp.HandleRemaining(func(values map[xml.Name]any) (map[xml.Name]int, bool) {
 		m.mu.Lock()
@@ -289,7 +284,7 @@ func (m *MockBackend) UpdateCalendar(ctx context.Context, calendarID CalendarID,
 	})
 }
 
-// ChangesForCalendar reports no sync support, like sabre's plain mock.
+// ChangesForCalendar reports no sync support.
 func (m *MockBackend) ChangesForCalendar(context.Context, CalendarID, string, int, int) (*dav.ChangeSet, error) {
 	return nil, nil
 }

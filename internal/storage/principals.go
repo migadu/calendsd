@@ -16,8 +16,7 @@ import (
 	"github.com/migadu/calendsd/internal/metrics"
 )
 
-// Principals is the principal backend over the sabre schema. Port of
-// DAVACL\PrincipalBackend\PDO.
+// Principals is the principal backend over the sabre schema.
 type Principals struct {
 	DB *sql.DB
 	// Metrics times the full listing (principals_by_prefix), the one
@@ -162,9 +161,9 @@ SELECT groups.uri
  WHERE members.uri = $1`, principal)
 }
 
-// SetGroupMemberSet replaces a group's members, transcribing sabre's PDO
-// setGroupMemberSet: resolve principal ids, delete the old rows, insert the new
-// ones. The group and every member must already exist as principals.
+// SetGroupMemberSet replaces a group's members: resolve principal ids, delete
+// the old rows, insert the new ones. The group and every member must already
+// exist as principals.
 func (p *Principals) SetGroupMemberSet(ctx context.Context, principal string, members []string) error {
 	return withTx(ctx, p.DB, func(tx *sql.Tx) error {
 		var groupID int64
@@ -196,7 +195,7 @@ var searchColumns = map[xml.Name]string{
 }
 
 // SearchPrincipals implements a substring search over the searchable
-// principal columns. Port of PrincipalBackend\PDO::searchPrincipals.
+// principal columns.
 func (p *Principals) SearchPrincipals(ctx context.Context, prefix string, search map[xml.Name]string, test string) ([]string, error) {
 	if len(search) == 0 {
 		return nil, nil

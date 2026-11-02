@@ -15,19 +15,18 @@ import (
 )
 
 // Plugin implements access control: principal properties, principal reports,
-// and privilege enforcement. Port of sabre's DAVACL\Plugin.
+// and privilege enforcement.
 type Plugin struct {
 	server *dav.Server
 
-	// AdminPrincipals get an implicit {DAV:}all ACE on every node,
-	// mirroring sabre's adminPrincipals.
+	// AdminPrincipals get an implicit {DAV:}all ACE on every node.
 	AdminPrincipals []string
 	// PrincipalsReadableByAuthenticated grants every authenticated user
 	// {DAV:}read on principal resources (Calendar-Server behavior needed by
-	// delegation clients). Off by default: stock sabre keeps principals
+	// delegation clients). Off by default, which keeps principals
 	// owner-only.
 	PrincipalsReadableByAuthenticated bool
-	// AllowUnauthenticatedAccess mirrors sabre's flag. When true, a
+	// AllowUnauthenticatedAccess, when true, means a
 	// privilege check that fails for an unauthenticated request returns
 	// 401 (prompting login) rather than 403, so anonymous clients get a
 	// chance to authenticate. When false, the failure is a plain 403.
@@ -61,7 +60,7 @@ func (p *Plugin) Features() []string {
 }
 
 // CurrentUserPrincipals returns the current principal plus its group
-// membership, mirroring sabre's getCurrentUserPrincipals.
+// membership.
 func (p *Plugin) CurrentUserPrincipals(ctx context.Context) ([]string, error) {
 	current := dav.Principal(ctx)
 	if current == "" {
@@ -99,9 +98,9 @@ func (p *Plugin) ACLForNode(node dav.Node) []ACE {
 func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	davName := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
 
-	// Without {DAV:}read every requested property reports 403, mirroring
-	// sabre's propFind gating (hideNodesFromListings stays off). The gate
-	// fails closed: an error computing privileges denies, never grants.
+	// Without {DAV:}read every requested property reports 403; the node is
+	// still listed, not hidden. The gate fails closed: an error computing
+	// privileges denies, never grants.
 	held, err := p.CurrentUserPrivileges(pf.Context(), node)
 	readable := err == nil && slices.Contains(held, "{DAV:}read")
 	if !readable {
@@ -172,12 +171,11 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 	return nil
 }
 
-// Methods contributes no methods to the Allow header: sabre registers the ACL
-// handler but does not advertise ACL in OPTIONS, so neither do we.
+// Methods contributes no methods to the Allow header: the ACL method is
+// handled but not advertised in OPTIONS, as in sabre/dav.
 func (p *Plugin) Methods(ctx context.Context, path string) []string { return nil }
 
-// HandleMethod implements the ACL method (RFC 3744 §8.1), mirroring sabre's
-// DAVACL\Plugin::httpAcl.
+// HandleMethod implements the ACL method (RFC 3744 §8.1).
 func (p *Plugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool, error) {
 	if r.Method != "ACL" {
 		return false, nil
@@ -193,8 +191,7 @@ func (p *Plugin) httpACL(w http.ResponseWriter, r *http.Request) error {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return dav.ErrBadRequest("XML body expected in ACL request")
 	}
-	// sabre's xml->expect('{DAV:}acl', body) rejects a body that is not a
-	// well-formed {DAV:}acl document with a 400.
+	// A body that is not a well-formed {DAV:}acl document is a 400.
 	var doc struct {
 		XMLName xml.Name `xml:"DAV: acl"`
 	}
@@ -213,10 +210,9 @@ func (p *Plugin) httpACL(w http.ResponseWriter, r *http.Request) error {
 	if _, isACL := node.(ACLHolder); !isACL {
 		return dav.ErrMethodNotAllowed("This node does not support the ACL method")
 	}
-	// Every node in this server carries a fixed, owner-derived ACL and does not
-	// implement setACL — exactly like sabre's ACLTrait, whose setACL throws
-	// Forbidden. So a well-formed ACL request is recognized but cannot be
-	// applied, yielding the same 403 stock sabre returns against this backend.
+	// Every node in this server carries a fixed, owner-derived ACL that cannot
+	// be changed, so a well-formed ACL request is recognized but answered
+	// with 403, as sabre/dav does for nodes with a fixed ACL.
 	return dav.ErrForbidden("Setting ACL is not supported on this node")
 }
 
@@ -243,7 +239,7 @@ func (p *Plugin) SupportedReports(node dav.Node, path string) []xml.Name {
 }
 
 // principalSearchProps are the properties this server allows searching over,
-// with human descriptions (sabre's default $principalSearchPropertySet).
+// with human descriptions.
 var principalSearchProps = []struct {
 	name        xml.Name
 	description string
@@ -415,7 +411,7 @@ func (p *Plugin) expandPropertyReport(body []byte, path string, w http.ResponseW
 // expand-property REPORT may go. The nesting is request-driven, and each
 // level multiplies the fan-out over every href the level above returned, so
 // a few KB of body could expand a proxy-group cycle into an exponential
-// amount of work (audit 5.1). Sabre's own clients nest at most three deep.
+// amount of work (audit 5.1). Real clients nest at most three deep.
 const maxExpandDepth = 8
 
 // expandProperties resolves one level of an expand-property REPORT. depth is
@@ -460,7 +456,7 @@ func (p *Plugin) expandProperties(ctx context.Context, path string, requested []
 						// An href may point anywhere; one that resolves to
 						// nothing yields nothing for that href rather than
 						// failing the whole report.
-						if dav.AsError(err).Status == http.StatusNotFound {
+						if dav.IsNotFound(err) {
 							continue
 						}
 						return nil, err
@@ -475,7 +471,7 @@ func (p *Plugin) expandProperties(ctx context.Context, path string, requested []
 }
 
 func (e expandPropEntry) xmlName() xml.Name {
-	// sabre's ExpandPropertyReport defaults an absent namespace to DAV:.
+	// An absent namespace defaults to DAV:.
 	ns := e.Namespace
 	if ns == "" {
 		ns = davxml.NSDav

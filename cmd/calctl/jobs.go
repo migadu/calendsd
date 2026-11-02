@@ -59,7 +59,7 @@ func jobsList(ctx context.Context, args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(args)
 
-	rows, err := jobsOps(ctx, *dsn).List(jobs.ListFilter{
+	rows, err := jobsOps(ctx, *dsn).List(ctx, jobs.ListFilter{
 		State: *state, Worker: *worker, Queue: *queue,
 		Recipient: *recipient, Failed: *failed, Limit: *limit,
 	})
@@ -92,7 +92,7 @@ func jobsShow(ctx context.Context, args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	j, err := jobsOps(ctx, *dsn).Get(id)
+	j, err := jobsOps(ctx, *dsn).Get(ctx, id)
 	if err != nil {
 		fatalf("Failed to load job %d: %v", id, err)
 	}
@@ -134,7 +134,7 @@ func jobsRetry(ctx context.Context, args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	if err := jobsOps(ctx, *dsn).Retry(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Retry(ctx, id); err != nil {
 		reportMutationErr("retry", id, err)
 	}
 	fmt.Printf("Job %d reset to run now (state=available, attempt cleared).\n", id)
@@ -146,7 +146,7 @@ func jobsCancel(ctx context.Context, args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(rest)
 
-	if err := jobsOps(ctx, *dsn).Cancel(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Cancel(ctx, id); err != nil {
 		reportMutationErr("cancel", id, err)
 	}
 	fmt.Printf("Job %d cancelled (state=discarded); any retained credential was dropped.\n", id)
@@ -163,7 +163,7 @@ func jobsReschedule(ctx context.Context, args []string) {
 	}
 	when := parseAt(*at)
 
-	if err := jobsOps(ctx, *dsn).Reschedule(id, when); err != nil {
+	if err := jobsOps(ctx, *dsn).Reschedule(ctx, id, when); err != nil {
 		reportMutationErr("reschedule", id, err)
 	}
 	fmt.Printf("Job %d rescheduled for %s.\n", id, when.Format(time.RFC3339))
@@ -178,7 +178,7 @@ func jobsDelete(ctx context.Context, args []string) {
 	if !*confirm {
 		fatalf("This hard-deletes job %d (and any retained credential). Re-run with --confirm.", id)
 	}
-	if err := jobsOps(ctx, *dsn).Delete(id); err != nil {
+	if err := jobsOps(ctx, *dsn).Delete(ctx, id); err != nil {
 		reportMutationErr("delete", id, err)
 	}
 	fmt.Printf("Job %d deleted.\n", id)
@@ -213,7 +213,7 @@ func imipPending(ctx context.Context, args []string) {
 	dsn := dbFlag(flags)
 	flags.Parse(args)
 
-	rows, err := jobsOps(ctx, *dsn).List(jobs.ListFilter{Worker: "imip_send", Failed: true, Limit: *limit})
+	rows, err := jobsOps(ctx, *dsn).List(ctx, jobs.ListFilter{Worker: "imip_send", Failed: true, Limit: *limit})
 	if err != nil {
 		fatalf("Failed to list pending iMIP sends: %v", err)
 	}
@@ -248,7 +248,7 @@ func imipResend(ctx context.Context, args []string) {
 	flags.Parse(rest)
 
 	ops := jobsOps(ctx, *dsn)
-	j, err := ops.Get(id)
+	j, err := ops.Get(ctx, id)
 	if err != nil {
 		fatalf("Failed to load job %d: %v", id, err)
 	}
@@ -262,7 +262,7 @@ func imipResend(ctx context.Context, args []string) {
 	if *relay {
 		// The deliberate unmetered override: relay via the server identity. Logged
 		// here and reflected in the job's outcome metric when the worker sends it.
-		if err := ops.RelayOverride(id); err != nil {
+		if err := ops.RelayOverride(ctx, id); err != nil {
 			reportMutationErr("resend --relay", id, err)
 		}
 		fmt.Printf("Job %d re-queued to send via the server RELAY (UNMETERED — does not count against %s's limits).\n",
@@ -282,7 +282,7 @@ func imipResend(ctx context.Context, args []string) {
 				"`calctl imip resend %d --relay` to send it UNMETERED via the server.\n", id, j.Username, id)
 		os.Exit(1)
 	}
-	if err := ops.Retry(id); err != nil {
+	if err := ops.Retry(ctx, id); err != nil {
 		reportMutationErr("resend", id, err)
 	}
 	fmt.Printf("Job %d re-queued for delivery.\n", id)

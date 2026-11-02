@@ -1,7 +1,6 @@
-// Package server composes the full calendsd DAV server from a shared sabre
-// Postgres database: tree (principals + calendars), auth, ACL, and CalDAV
-// plugins. Mirrors scripts/sabre-server.php so both servers expose the same
-// feature set during parity testing.
+// Package server composes the full calendsd DAV server from its Postgres
+// database: tree (principals + calendars), auth, ACL, and CalDAV
+// plugins.
 package server
 
 import (
@@ -61,12 +60,11 @@ type Config struct {
 	// submission connection; false uses STARTTLS (:587).
 	IMipSubmissionImplicitTLS bool
 	// Browser serves HTML indexes for GET on collections (off by default:
-	// sabre without its Browser plugin answers 501, which the corpus pins).
+	// GET on a collection then answers 501, which the corpus pins).
 	Browser bool
 	// TempFileFilter intercepts OS junk files (._*, .DS_Store, Thumbs.db,
-	// editor swap files) into a scratch directory instead of the backend,
-	// like sabre's TemporaryFileFilterPlugin. Off by default (sabre core has
-	// no such plugin); TempFileDir names the scratch directory when on.
+	// editor swap files) into a scratch directory instead of the backend.
+	// Off by default; TempFileDir names the scratch directory when on.
 	TempFileFilter bool
 	TempFileDir    string
 	// AutoProvision recreates the default calendar/addressbook when a
@@ -82,13 +80,13 @@ type Config struct {
 	// zero means caldav.DefaultMaxAttendees.
 	MaxAttendees int
 	// PrincipalsReadable grants authenticated users read on principal
-	// resources (Calendar-Server behavior); off by default (sabre parity).
+	// resources (Calendar-Server behavior); off by default.
 	PrincipalsReadable bool
 	// AutoSchedulePrefixes lists principal-name prefixes (e.g.
 	// "resource,location" split on commas by the caller) whose scheduling
 	// messages are auto-processed Calendar-Server style: accept into the
 	// default calendar (decline on conflict), REPLY to the organizer, no
-	// inbox drop. Empty disables auto-scheduling (sabre behavior).
+	// inbox drop. Empty disables auto-scheduling.
 	AutoSchedulePrefixes []string
 	// RcptdURL, when non-empty, switches authentication to an rcptd daemon's
 	// /auth endpoint (Dovecot password hashes verified locally) instead of the
@@ -359,7 +357,7 @@ func buildIMipQueue(db *sql.DB, cfg Config, dsn string, srv *dav.Server) *jobs.Q
 // WrapWellKnown adds the /.well-known/caldav and /.well-known/carddav →
 // base-URI redirects (RFC 6764). It matches the two paths itself rather than
 // through an http.ServeMux, which would redirect every unclean path (such as
-// "/calendars//") before the DAV server could normalize it, like sabre does.
+// "/calendars//") before the DAV server could normalize it.
 func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 	redirect := http.RedirectHandler(baseURI, http.StatusMovedPermanently)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -488,8 +486,8 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		// read-free-busy (docs/design/VAVAILABILITY-PLAN.md §10).
 		FreeBusyPolicy: calendars,
 	})
-	// AddVTimezones departs from sabre deliberately: bare IANA TZIDs (calweb
-	// writes them) get the VTIMEZONE RFC 5545 requires.
+	// AddVTimezones: bare IANA TZIDs (calweb writes them) get the VTIMEZONE
+	// RFC 5545 requires.
 	srv.AddPlugin(&caldav.Plugin{AddVTimezones: true, MaxAttendees: cfg.MaxAttendees})
 	// WebDAV-Push (docs/design/PUSH-PLAN.md). Registered here on purpose: after the ACL
 	// plugin (so its PropFind values honor the read-deny latch) and after

@@ -241,9 +241,9 @@ func checkDateTimes(comp *goical.Component, zones availabilityZoneSet) error {
 // marks as unavailable. Each VAVAILABILITY's coverage (DTSTART/DTEND, either
 // unbounded) minus the union of its AVAILABLE instances is unavailable. A
 // component decides all the time it covers over every lower-PRIORITY one
-// (RFC 7953 §4, like sabre's FreeBusyGenerator); components of equal priority
-// combine, so time unavailable in any of them is unavailable. Every instance
-// is computed in its own zone before conversion to UTC, which is what keeps a
+// (RFC 7953 §4); components of equal priority combine, so time unavailable in
+// any of them is unavailable. Every instance is computed in its own zone
+// before conversion to UTC, which is what keeps a
 // 09:00 day at 09:00 local across DST (docs/design/VAVAILABILITY-PLAN.md §4.1). Errors
 // wrap ErrInvalidAvailability.
 func unavailablePeriods(data []byte, start, end time.Time) ([]busyPeriod, error) {

@@ -1,7 +1,6 @@
 // Package ical wraps go-ical and rrule-go with the calendar-object semantics
 // the server needs: parsing, serialization, and the denormalized metadata
-// sabre computes on every PUT. It replaces the subset of sabre/vobject the
-// CalDAV plugin depends on.
+// computed on every PUT.
 package ical
 
 import (
@@ -200,10 +199,10 @@ func Encode(cal *goical.Calendar) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// EncodeLenient serializes without validation, like sabre/vobject: real-world
-// objects (and sabre's own test fixtures) omit required properties such as
-// DTSTAMP, and the server must round-trip them anyway. Property order is
-// name-sorted (go-ical's prop map loses source order).
+// EncodeLenient serializes without validation: real-world objects (and the
+// corpus fixtures) omit required properties such as DTSTAMP, and the server
+// must round-trip them anyway. Property order is name-sorted (go-ical's prop
+// map loses source order).
 func EncodeLenient(cal *goical.Calendar) []byte {
 	var buf bytes.Buffer
 	encodeComponent(&buf, cal.Component)

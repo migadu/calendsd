@@ -9,8 +9,7 @@ import (
 	vcard "github.com/emersion/go-vcard"
 )
 
-// addressbookQuery is a parsed addressbook-query REPORT. Port of the filter
-// subset of sabre's Plugin::validateFilters.
+// addressbookQuery is a parsed addressbook-query REPORT.
 type addressbookQuery struct {
 	props    []xml.Name
 	test     string // anyof | allof
@@ -21,10 +20,9 @@ type addressbookQuery struct {
 
 // addressDataSpec captures the requested address-data transformation from a
 // REPORT: a target vCard version and, for addressbook-query, an optional
-// property whitelist. Port of sabre's address-data content-type/version/prop
-// handling.
+// property whitelist.
 type addressDataSpec struct {
-	version string   // "3.0" or "4.0"; sabre defaults to 3.0
+	version string   // "3.0" or "4.0"; defaults to 3.0
 	props   []string // property whitelist; nil => whole card
 }
 
@@ -36,8 +34,8 @@ type addressDataXML struct {
 }
 
 // parseAddressData builds the spec from a parsed <address-data> element.
-// withProps is false for addressbook-multiget, which — matching sabre — only
-// negotiates the version and ignores any nested <prop> filters.
+// withProps is false for addressbook-multiget, which only negotiates the
+// version and ignores any nested <prop> filters, as sabre/dav did.
 func parseAddressData(in *addressDataXML, withProps bool) *addressDataSpec {
 	if in == nil {
 		return nil
@@ -195,10 +193,9 @@ func convertPropFilter(in propFilterXML) (propFilter, error) {
 	return out, nil
 }
 
-// convertTextMatch mirrors sabre's parse-time validation: an unknown match-type
+// convertTextMatch validates a text-match at parse time: an unknown match-type
 // or collation is a 400 rather than being silently treated as contains /
-// case-insensitive. (Sabre rejects match-type in the XML deserializer and the
-// collation in StringUtil::textMatch; both surface as BadRequest.)
+// case-insensitive.
 func convertTextMatch(in textMatchXML) (textMatch, error) {
 	matchType := in.MatchType
 	if matchType == "" {
@@ -252,8 +249,7 @@ func parseAddressbookMultiget(body []byte) (*multigetQuery, error) {
 		for _, n := range q.Prop.Names {
 			out.props = append(out.props, n.XMLName)
 		}
-		// Multiget negotiates only the version, never a property filter
-		// (sabre passes no propertiesFilter to convertVCard here).
+		// Multiget negotiates only the version, never a property filter.
 		if q.Prop.AddressData != nil {
 			out.props = append(out.props, nameAddressData)
 			out.addrData = parseAddressData(q.Prop.AddressData, false)
@@ -262,15 +258,14 @@ func parseAddressbookMultiget(body []byte) (*multigetQuery, error) {
 	return out, nil
 }
 
-// match reports whether a vCard satisfies the query filters. Port of
-// Plugin::validateFilters.
+// match reports whether a vCard satisfies the query filters.
 func (q *addressbookQuery) match(data []byte) bool {
 	if len(q.filters) == 0 {
 		return true
 	}
 	card, err := decodeVCard(data)
 	if err != nil {
-		return false // unparseable cards never match, like sabre
+		return false // unparseable cards never match
 	}
 	for _, filter := range q.filters {
 		success := q.matchFilter(card, filter)
@@ -326,8 +321,8 @@ func matchParamFilters(fields []*vcard.Field, filters []paramFilter, test string
 				success = len(values) > 0
 			} else {
 				// Compute the aggregate "does any value match?" first, then
-				// let negate flip the aggregate (sabre's validateTextMatches:
-				// negate is applied after the haystack loop, not per value).
+				// let negate flip the aggregate, not each value (as sabre/dav
+				// does).
 				anyMatch := false
 				for _, v := range values {
 					if pf.textMatch.matches(v) {
@@ -354,8 +349,7 @@ func matchParamFilters(fields []*vcard.Field, filters []paramFilter, test string
 func matchTextMatches(texts []string, matches []textMatch, test string) bool {
 	for _, tm := range matches {
 		// Compute the aggregate "does any instance match?" first, then let
-		// negate flip the aggregate (sabre's validateTextMatches applies
-		// negate after the haystack loop, not per instance).
+		// negate flip the aggregate, not each instance (as sabre/dav does).
 		anyMatch := false
 		for _, text := range texts {
 			if tm.matches(text) {
@@ -376,7 +370,7 @@ func matchTextMatches(texts []string, matches []textMatch, test string) bool {
 
 // matches applies a text-match's match-type to a single instance, WITHOUT
 // negation: negate is a quantifier over "does any instance match?" and is
-// applied by the callers after the instance loop (sabre's validateTextMatches).
+// applied by the callers after the instance loop.
 // Both mandatory collations are case-insensitive; i;octet is case-sensitive.
 func (tm textMatch) matches(haystack string) bool {
 	h, needle := foldCollation(haystack, tm.collation), foldCollation(tm.value, tm.collation)
@@ -392,10 +386,9 @@ func (tm textMatch) matches(haystack string) bool {
 	}
 }
 
-// foldCollation case-folds s per the RFC 4790 collation, matching sabre's
-// StringUtil::textMatch: i;ascii-casemap uppercases ASCII a-z only (non-ASCII
-// bytes untouched), i;unicode-casemap uppercases with full Unicode semantics,
-// and i;octet is byte-exact.
+// foldCollation case-folds s per the RFC 4790 collation: i;ascii-casemap
+// uppercases ASCII a-z only (non-ASCII bytes untouched), i;unicode-casemap
+// uppercases with full Unicode semantics, and i;octet is byte-exact.
 func foldCollation(s, collation string) string {
 	switch collation {
 	case "i;octet":
@@ -416,15 +409,14 @@ func asciiUpper(s string) string {
 	}, s)
 }
 
-// forcedCardProps are the properties sabre always keeps when a property filter
-// is applied (convertVCard), regardless of the requested set.
+// forcedCardProps are the properties always kept when a property filter is
+// applied, regardless of the requested set.
 var forcedCardProps = []string{"UID", "VERSION", "FN"}
 
-// convertCardData applies sabre's convertVCard to a stored vCard: it optionally
+// convertCardData prepares a stored vCard for a response: it optionally
 // restricts the card to a whitelist of properties (always keeping UID/VERSION/FN)
 // and converts it to the requested version. When neither a property filter nor a
-// version change is needed, the original bytes are returned untouched — matching
-// sabre's raw passthrough for the common case.
+// version change is needed, the original bytes are returned untouched.
 //
 // Note on downgrade: go-vcard has no native 4.0->3.0 conversion, so that
 // direction is a best-effort remap (toVCard3); 3.0->4.0 uses go-vcard's ToV4.
@@ -459,7 +451,7 @@ func convertCardData(data []byte, spec *addressDataSpec) ([]byte, error) {
 		} else {
 			vcard.ToV4(card)
 		}
-	default: // "3" (sabre's default target)
+	default: // "3" (the default target)
 		if stored == "3" {
 			if !filtered {
 				return data, nil
@@ -477,8 +469,7 @@ func convertCardData(data []byte, spec *addressDataSpec) ([]byte, error) {
 }
 
 // majorVCardVersion returns the leading version digit ("3" or "4"), defaulting
-// to "3" when the version is missing or unrecognized (sabre treats an absent
-// version as vCard 3).
+// to "3" when the version is missing or unrecognized.
 func majorVCardVersion(v string) string {
 	if strings.HasPrefix(v, "4") {
 		return "4"
@@ -488,7 +479,7 @@ func majorVCardVersion(v string) string {
 
 // toVCard3 is a best-effort vCard 4.0 -> 3.0 downgrade. go-vcard ships no native
 // downgrade, so this stamps the version and remaps KIND to the
-// X-ADDRESSBOOKSERVER-KIND property that sabre and Apple clients expect on 3.0;
+// X-ADDRESSBOOKSERVER-KIND property that Apple clients expect on 3.0;
 // other 4.0-only constructs are left as-is.
 func toVCard3(card vcard.Card) {
 	card.SetValue(vcard.FieldVersion, "3.0")

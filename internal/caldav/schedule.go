@@ -22,8 +22,8 @@ import (
 
 // SchedulePlugin implements CalDAV scheduling (RFC 6638): scheduling
 // properties, iTIP delivery on calendar-object writes and deletes, and the
-// schedule outbox POST. Port of the local-delivery core of sabre's
-// Schedule\Plugin (iMip email delivery is out of scope).
+// schedule outbox POST. Email delivery is left to an ExternalDeliverer
+// (IMipPlugin).
 type SchedulePlugin struct {
 	server *dav.Server
 
@@ -43,7 +43,7 @@ type SchedulePlugin struct {
 	// (Calendar-Server resource/location semantics): REQUESTs are accepted
 	// into their default calendar — or declined on a free-busy conflict —
 	// without an inbox drop, and a REPLY goes back to the organizer.
-	// Nil disables auto-processing (sabre behavior).
+	// Nil disables auto-processing.
 	AutoSchedule func(principalURI string) bool
 
 	// pending holds each in-flight request's deferred scheduling work, produced
@@ -174,10 +174,10 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		hrefs = append(hrefs, p.server.Href(ph.PrincipalURL())+"/")
 		return hrefs
 	})
-	// sabre's Schedule\Plugin reports every principal as an INDIVIDUAL; we
-	// additionally surface auto-schedule principals (rooms/resources, matched by
-	// the same prefix callback that drives their auto-accept) as ROOM, so a
-	// client can distinguish a bookable room from a person in the attendee picker
+	// Every principal reports as an INDIVIDUAL, except auto-schedule
+	// principals (rooms/resources, matched by the same prefix callback that
+	// drives their auto-accept), which report as ROOM, so a client can
+	// distinguish a bookable room from a person in the attendee picker
 	// (RFC 5545 §3.2.3 CUTYPE). Nothing on the server keys off this value — the
 	// auto-processing decision is the AutoSchedule callback, not this property.
 	pf.Handle(cal("calendar-user-type"), func() any {
@@ -203,7 +203,7 @@ func (p *SchedulePlugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 
 // InterceptWrite implements dav.WriteInterceptor: PUTs of calendar objects
 // run through the iTIP broker; SCHEDULE-STATUS updates are written back into
-// the stored object (sabre's calendarObjectChange + $modified).
+// the stored object.
 func (p *SchedulePlugin) InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error) {
 	parentPath, _ := pathutil.Split(path)
 	parent, err := p.server.Tree.NodeForPath(r.Context(), parentPath)

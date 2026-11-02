@@ -207,8 +207,7 @@ func writeResponse(b *bytes.Buffer, r *Response, prefix map[string]string) {
 		}
 		fmt.Fprintf(b, "   </d:prop>\n   <d:status>HTTP/1.1 %s</d:status>\n  </d:propstat>\n", statusLine(ps.Status))
 	}
-	// A status-only response (no propstats), like sabre's Response
-	// serialization.
+	// A status-only response (no propstats).
 	if r.Status != 0 && len(r.Propstats) == 0 {
 		fmt.Fprintf(b, "  <d:status>HTTP/1.1 %s</d:status>\n", statusLine(r.Status))
 	}
@@ -292,9 +291,9 @@ func writeProperty(b *bytes.Buffer, p Property, prefix map[string]string) {
 	}
 }
 
-// writeSupportedPrivilege renders one privilege subtree, mirroring sabre's
-// SupportedPrivilegeSet::serializePriv (privilege, optional abstract, then
-// nested supported-privilege children; no description, like sabre).
+// writeSupportedPrivilege renders one privilege subtree: the privilege, an
+// optional abstract, then nested supported-privilege children (no
+// description; see SupportedPrivilege).
 func writeSupportedPrivilege(b *bytes.Buffer, sp SupportedPrivilege, prefix map[string]string) {
 	b.WriteString("<d:supported-privilege>")
 	fmt.Fprintf(b, "<d:privilege><%s/></d:privilege>", qualify(sp.Name, prefix))
