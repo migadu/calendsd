@@ -180,6 +180,8 @@ func (h *CalendarHome) Child(ctx context.Context, name string) (dav.Node, error)
 // provisioned lists the principal's calendars, recreating the default
 // "calendar" first when auto-provisioning is on and none are left (Calendar
 // Server regenerates it after deletion; the CalDAVTester suite relies on it).
+// Two first requests can race to create it; the loser's insert fails on the
+// unique URI, and it uses the winner's calendar instead.
 func (h *CalendarHome) provisioned(ctx context.Context) ([]CalendarInfo, error) {
 	infos, err := h.backend.CalendarsForUser(ctx, h.principalURI)
 	if err != nil || !h.autoProvision || len(infos) > 0 {
@@ -188,6 +190,9 @@ func (h *CalendarHome) provisioned(ctx context.Context) ([]CalendarInfo, error) 
 	if _, err := h.backend.CreateCalendar(ctx, h.principalURI, "calendar", map[xml.Name]any{
 		{Space: davxml.NSDav, Local: "displayname"}: "calendar",
 	}); err != nil {
+		if infos, lerr := h.backend.CalendarsForUser(ctx, h.principalURI); lerr == nil && len(infos) > 0 {
+			return infos, nil
+		}
 		return nil, err
 	}
 	return h.backend.CalendarsForUser(ctx, h.principalURI)

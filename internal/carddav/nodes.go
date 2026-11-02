@@ -159,7 +159,8 @@ func (h *AddressBookHome) ChildExists(ctx context.Context, name string) (bool, e
 
 // provisioned lists the principal's address books, recreating the default
 // "addressbook" first when auto-provisioning is on and none are left
-// (Calendar-Server behavior the CalDAVTester suite relies on).
+// (Calendar-Server behavior the CalDAVTester suite relies on). A racing first
+// request whose insert loses on the unique URI uses the winner's address book.
 func (h *AddressBookHome) provisioned(ctx context.Context) ([]AddressBookInfo, error) {
 	infos, err := h.backend.AddressBooksForUser(ctx, h.principalURI)
 	if err != nil || !h.autoProvision || len(infos) > 0 {
@@ -168,6 +169,9 @@ func (h *AddressBookHome) provisioned(ctx context.Context) ([]AddressBookInfo, e
 	if _, err := h.backend.CreateAddressBook(ctx, h.principalURI, "addressbook", map[xml.Name]any{
 		{Space: davxml.NSDav, Local: "displayname"}: "addressbook",
 	}); err != nil {
+		if infos, lerr := h.backend.AddressBooksForUser(ctx, h.principalURI); lerr == nil && len(infos) > 0 {
+			return infos, nil
+		}
 		return nil, err
 	}
 	return h.backend.AddressBooksForUser(ctx, h.principalURI)
