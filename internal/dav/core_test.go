@@ -502,3 +502,16 @@ func TestPutFailsWhenExistenceCheckFails(t *testing.T) {
 		t.Error("PUT created the resource although its existence could not be checked")
 	}
 }
+
+// Names reach Postgres text columns, which refuse invalid UTF-8 and NUL: such
+// a path is the client's error, not a 500 from the storage lookup.
+func TestPathRejectsInvalidUTF8AndNUL(t *testing.T) {
+	s := NewServer("/", newMemColl("root"))
+	for _, uri := range []string{"/%FF", "/a%00b"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest("PROPFIND", uri, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("PROPFIND %s = %d, want 400", uri, rec.Code)
+		}
+	}
+}

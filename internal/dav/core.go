@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	davxml "github.com/migadu/calendsd/internal/dav/xml"
 	"github.com/migadu/calendsd/internal/pathutil"
@@ -890,6 +891,11 @@ func unescapePath(p string) (string, error) {
 		// a backend as a literal name.
 		if dec == "." || dec == ".." || dec == "" || strings.Contains(dec, "/") {
 			return "", ErrForbidden("Path contains invalid encoded segment %q", seg)
+		}
+		// Names are stored as Postgres text, which refuses invalid UTF-8
+		// and NUL; reject them here as the client's error, not a 500.
+		if !utf8.ValidString(dec) || strings.ContainsRune(dec, 0) {
+			return "", ErrBadRequest("Path segment %q is not valid UTF-8 text", seg)
 		}
 		segs[i] = dec
 	}
