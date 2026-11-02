@@ -1,0 +1,25 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # Deferred after Commit, where it returns sql.ErrTxDone by design.
+        - (*database/sql.Tx).Rollback
+        # Every calctl FlagSet is flag.ExitOnError, so Parse exits instead of
+        # returning an error; parseGlobal, the one that may not, checks it.
+        - (*flag.FlagSet).Parse
+  exclusions:
+    # std-error-handling skips the unchecked errors Go code conventionally
+    # ignores: deferred Close/Flush, fmt.Fprint* to a writer, os.Remove.
+    presets:
+      - std-error-handling
+      - common-false-positives
+    paths:
+      # The reference sabre/dav checkout (PHP, plus vendored code).
+      - dav/
+    rules:
+      # The auth errors reach clients verbatim and keep sabre/dav's wording.
+      - path: internal/auth/
+        text: "ST1005:"
+        linters: [staticcheck]

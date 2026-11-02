@@ -48,7 +48,7 @@ func (f *fakeRcptd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forced", f.status)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"password_hashes": hashes,
 		"allowed_from":    []string{email},
 	})
@@ -312,7 +312,7 @@ calserver_rcptd_requests_total{code="other"} 1
 // so the rcptd health alert sees the outage.
 func TestRcptdMalformedBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("<html>this is not JSON</html>"))
+		_, _ = w.Write([]byte("<html>this is not JSON</html>"))
 	}))
 	t.Cleanup(ts.Close)
 	b := NewRcptdBackend("Realm", ts.URL, "", 0)

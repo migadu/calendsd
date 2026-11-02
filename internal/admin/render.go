@@ -43,7 +43,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(v)
+	// The header is out, so a failure can only be logged: an unencodable
+	// value is a bug, a write error a client that went away.
+	if err := enc.Encode(v); err != nil {
+		slog.Warn("admin: writing JSON response", "err", err)
+	}
 }
 
 func propString(props map[xmlName]any, space, local string) string {

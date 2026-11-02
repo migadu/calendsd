@@ -77,7 +77,7 @@ func TestRcptdBackendMetrics(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("email") {
 		case "hans@example.org":
-			w.Write([]byte(`{"password_hashes":["` + hash + `"]}`))
+			_, _ = w.Write([]byte(`{"password_hashes":["` + hash + `"]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

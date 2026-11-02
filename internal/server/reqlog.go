@@ -122,7 +122,7 @@ func sanitizeMethod(m string) string {
 		return "UNKNOWN"
 	}
 	for _, c := range m {
-		if !(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
 			return "OTHER"
 		}
 	}

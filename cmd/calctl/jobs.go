@@ -355,7 +355,10 @@ func printArgs(raw json.RawMessage, fullBody bool) {
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false) // read '<16 bytes...>' cleanly, not '<'
 	enc.SetIndent("  ", "  ")
-	enc.Encode(m)
+	if err := enc.Encode(m); err != nil {
+		fmt.Printf("  <args not printable: %v>\n", err)
+		return
+	}
 	fmt.Print("  " + buf.String())
 }
 

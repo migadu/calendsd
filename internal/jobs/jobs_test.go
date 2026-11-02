@@ -13,9 +13,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -23,15 +20,6 @@ import (
 
 	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
-
-func testDSN(dbName string) string {
-	return "postgres:///" + dbName + "?host=" + os.Getenv("PGHOST")
-}
-
-func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-}
 
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
 	return storagetest.NewDB(t, dbName)

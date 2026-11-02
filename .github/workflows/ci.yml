@@ -17,6 +17,9 @@ jobs:
       - name: Unit tests + corpus
         run: nix develop -c sh -c 'scripts/dev-db.sh start && go vet ./... && go test ./...'
 
+      - name: golangci-lint
+        run: nix develop -c golangci-lint run ./...
+
       # litmus is packaged for Linux only; results are informational until
       # the WebDAV class coverage is reviewed and pinned.
       - name: litmus WebDAV suite (informational)

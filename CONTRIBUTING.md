@@ -86,7 +86,8 @@ make corpus  # replay the protocol corpus extracted from sabre/dav's own tests
 
 ## Changes
 
-- Run `gofmt` (`make fmt`) and `go vet`. CI runs both, plus the tests.
+- Run `gofmt` (`make fmt`), `go vet` and `golangci-lint run`
+  (configured in `.golangci.yml`). CI runs all three, plus the tests.
 - **Schema changes** go in a new numbered file in
   `internal/schema/migrations/`. Never edit a migration that has shipped:
   databases record migrations by version, so an edit would never reach them.

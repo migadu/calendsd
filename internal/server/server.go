@@ -280,7 +280,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 	}
 	// Recovery sits innermost, so every wrapper below records a panic as the
 	// 500 it is answered with.
-	var h http.Handler = WrapWellKnown(WrapRecover(srv), srv.BaseURI)
+	h := WrapWellKnown(WrapRecover(srv), srv.BaseURI)
 	// Request logging wraps outside the well-known redirect so it captures the
 	// final status of every request, including redirects and auth challenges.
 	h = WrapRequestLog(h, cfg.RequestLogDir)

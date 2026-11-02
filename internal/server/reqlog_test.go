@@ -14,10 +14,10 @@ import (
 // and writes a fixed response.
 func echoHandler(status int, respBody string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
+		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(status)
-		io.WriteString(w, respBody)
+		_, _ = io.WriteString(w, respBody)
 	})
 }
 

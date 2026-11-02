@@ -354,12 +354,6 @@ func (p *Plugin) CheckPrivileges(ctx context.Context, path string, privileges ..
 	}
 }
 
-// hasPrivilege is CheckPrivileges without the error (sabre's
-// throwExceptions=false form).
-func (p *Plugin) hasPrivilege(ctx context.Context, path, privilege string) bool {
-	return p.CheckPrivileges(ctx, path, privilege) == nil
-}
-
 // BeforeMethod enforces per-method privileges before dispatch, mirroring
 // sabre's beforeMethod table plus the beforeBind/beforeUnbind event checks
 // (which our port derives from method semantics rather than events).

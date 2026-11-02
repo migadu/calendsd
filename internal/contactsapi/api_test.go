@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -30,11 +28,6 @@ import (
 	"github.com/migadu/calendsd/internal/storage"
 	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
-
-func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-}
 
 func openScratchDB(t *testing.T, dbName string) *sql.DB {
 	return storagetest.NewDB(t, dbName)

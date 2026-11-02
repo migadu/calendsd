@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,11 +25,6 @@ import (
 
 func testDSN(dbName string) string {
 	return fmt.Sprintf("postgres:///%s?host=%s", dbName, os.Getenv("PGHOST"))
-}
-
-func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
 // openScratchDB builds a fresh database with every migration applied.

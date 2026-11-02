@@ -322,7 +322,7 @@ func (b *RcptdBackend) lookup(ctx context.Context, email string) (hashes []strin
 
 	if resp.StatusCode != http.StatusOK {
 		// Drain a bounded amount so the connection can be reused.
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 		b.Metrics.RcptdRequest(rcptdCodeLabel(resp.StatusCode), time.Since(start).Seconds())
 		return nil, resp.StatusCode, nil
 	}
