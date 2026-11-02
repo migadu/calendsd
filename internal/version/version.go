@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 )
 
-// Stamped via -ldflags "-X calendsd/internal/version.Version=..." (see the
+// Stamped via -ldflags "-X github.com/migadu/calendsd/internal/version.Version=..." (see the
 // Makefile). Version also surfaces as the calserver_build_info metric label.
 var (
 	Version = "dev" // git describe --always --dirty

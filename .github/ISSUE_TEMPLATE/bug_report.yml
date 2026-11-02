@@ -1,0 +1,42 @@
+name: Bug report
+description: Something calendsd does wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go through private reporting instead, see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: client
+    attributes:
+      label: Client
+      description: The CalDAV/CardDAV client and version (e.g. Apple Calendar on macOS 26, DAVx5 4.5, Thunderbird 140).
+  - type: textarea
+    id: exchange
+    attributes:
+      label: Request and response
+      description: |
+        If you can, the failing HTTP request and calendsd's response, with
+        passwords, tokens and personal data removed. `-log-level debug` and
+        `[logging]` request logging help here.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: calendsd version
+      description: Output of `calendsd -version`.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: The parts of config.toml that matter, secrets removed.
+      render: toml
