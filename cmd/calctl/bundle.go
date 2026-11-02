@@ -1,7 +1,7 @@
 package main
 
-// Reader for the export bundle produced by scripts/snappymail-export-contacts.php
-// in the ansible repo (docs/snappymail-calserver-contacts.md § The bundle).
+// Reader for the export bundle produced by the webmail-side contacts exporter
+// (docs/webmail-contacts.md § The bundle).
 //
 // The bundle is deliberately a file and not a pipe: produced once, checksummed,
 // then read as many times as the import needs. That is what lets the import be

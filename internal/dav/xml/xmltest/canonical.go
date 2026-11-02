@@ -14,7 +14,7 @@ import (
 )
 
 // Canonicalize reduces an XML document to a deterministic textual form for
-// semantic comparison (PLAN.md §7): namespace *prefixes* are erased (every
+// semantic comparison (docs/design/PLAN.md §7): namespace *prefixes* are erased (every
 // name renders in clark notation), xmlns declarations are dropped, attributes
 // are sorted, whitespace-only text is removed, and unordered element sets are
 // sorted — {DAV:}response siblings (by href) and {DAV:}prop children (by

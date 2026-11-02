@@ -49,7 +49,7 @@ type Denormalized struct {
 }
 
 // Denormalize computes the metadata sabre stores alongside a calendar object.
-// Behavioral contract (PLAN.md §5): any divergence from sabre here makes
+// Behavioral contract (docs/design/PLAN.md §5): any divergence from sabre here makes
 // time-range prefilters disagree between the two servers.
 func Denormalize(data []byte) (*Denormalized, error) {
 	cal, err := Decode(data)

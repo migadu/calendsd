@@ -1,6 +1,6 @@
 package admin
 
-// Handler tests in the established style (ADMIN-PLAN.md §6): mock backends
+// Handler tests in the established style (docs/design/ADMIN-PLAN.md §6): mock backends
 // plus a fake Store, httptest against the admin mux. Every HTML page gets a
 // render smoke test — template field mistakes only fail at execute time.
 

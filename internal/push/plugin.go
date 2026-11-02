@@ -32,7 +32,7 @@ const subscriptionTTL = 7 * 24 * time.Hour
 // POST), and handles unsubscribe (BeforeMethodHook on DELETE). Delivery is the
 // worker's job, not the plugin's.
 //
-// Registration order matters (see PUSH-PLAN.md §5.4/§5.5): the plugin is added
+// Registration order matters (see docs/design/PUSH-PLAN.md §5.4/§5.5): the plugin is added
 // right after caldav.Plugin — after the ACL plugin, so its PropFind values
 // respect the ACL read-deny latch; before caldav.SharingPlugin, so it sees a
 // collection POST first and can pass a non-push body on intact.

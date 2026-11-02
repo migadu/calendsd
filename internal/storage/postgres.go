@@ -1,5 +1,5 @@
 // Package storage implements the backends against the shared sabre/dav
-// Postgres schema (PLAN.md §5). Every query is transcribed from sabre's
+// Postgres schema (docs/design/PLAN.md §5). Every query is transcribed from sabre's
 // Backend\PDO classes; every value written must be readable by a live sabre
 // instance on the same database, and vice versa. The schema is the
 // compatibility contract — no DDL lives here.

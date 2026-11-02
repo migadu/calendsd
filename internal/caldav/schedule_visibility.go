@@ -15,7 +15,7 @@ import (
 	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
-// Free-busy visibility (VAVAILABILITY-PLAN.md §10): who may see the owner's
+// Free-busy visibility (docs/design/VAVAILABILITY-PLAN.md §10): who may see the owner's
 // busy time and working hours, as a live, owner-only property of the
 // schedule inbox. The ACL plugin enforces it through acl.FreeBusyAudience.
 const nsCalendsd = "urn:x-calserver"

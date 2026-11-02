@@ -20,7 +20,7 @@ import (
 // DAV, 8081 the contacts API, 8090 rcptd, 8091 calclient.
 const defaultPanelAddr = "127.0.0.1:8092"
 
-// handlePanel runs `calctl panel`, the admin panel (ADMIN-PLAN.md): a
+// handlePanel runs `calctl panel`, the admin panel (docs/design/ADMIN-PLAN.md): a
 // read-first debugging UI over the same shared sabre database calendsd
 // serves. It takes the same config file and Calendar-Server flags as
 // calendsd — resolved through the same config.SharedServerFlags code — so

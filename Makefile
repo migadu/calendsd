@@ -71,7 +71,7 @@ build: ## Build the server, demo-client, and CLI (incl. admin panel) binaries in
 	$(GO) build $(LDFLAGS) -o bin/calclient ./cmd/calclient
 	$(GO) build $(LDFLAGS) -o bin/calctl ./cmd/calctl
 
-freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64, consumed by the ansible calendsd role)
+freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64)
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calendsd-freebsd-amd64 ./cmd/calendsd
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calclient-freebsd-amd64 ./cmd/calclient
 	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/calctl-freebsd-amd64 ./cmd/calctl

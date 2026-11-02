@@ -1,4 +1,4 @@
-// Admin panel read-only aggregates (ADMIN-PLAN.md §4). The backend
+// Admin panel read-only aggregates (docs/design/ADMIN-PLAN.md §4). The backend
 // interfaces are per-principal shaped; the dashboard, inspectors, and object
 // browser need cross-user joins and counts, collected here. Everything in
 // this file is SELECT-only — admin mutations go through the regular backends
@@ -159,7 +159,7 @@ SELECT c.addressbookid, coalesce(ab.uri, ''), coalesce(ab.principaluri, ''),
 }
 
 // AdminAuthDiagnostics surfaces the classic silent-login-failure setups
-// (ADMIN-PLAN.md §3.2). A realm mismatch cannot be detected offline —
+// (docs/design/ADMIN-PLAN.md §3.2). A realm mismatch cannot be detected offline —
 // digesta1 is an opaque md5 — so that check is the interactive credential
 // test in the admin app, not a query here.
 type AdminAuthDiagnostics struct {
@@ -237,7 +237,7 @@ func (q *AdminQueries) UserForPrincipal(ctx context.Context, principalURI string
 }
 
 // AdminCalendarInstance is one calendarinstances row: a principal's view of
-// a shared calendar. Sharing state lives here (ADMIN-PLAN.md §3.3).
+// a shared calendar. Sharing state lives here (docs/design/ADMIN-PLAN.md §3.3).
 type AdminCalendarInstance struct {
 	InstanceID       string `json:"instanceId"`
 	CalendarID       string `json:"calendarId"`
@@ -338,7 +338,7 @@ func (q *AdminQueries) CalendarMeta(ctx context.Context, calendarID string) (*Ad
 
 // AdminPropRow is one propertystorage row for a collection path: a dead
 // property, or a per-user overlay when OverlayPrincipal is set (the
-// path + "/\n" + principal synthetic rows, ADMIN-PLAN.md §3.3).
+// path + "/\n" + principal synthetic rows, docs/design/ADMIN-PLAN.md §3.3).
 type AdminPropRow struct {
 	Path             string `json:"path"`
 	Name             string `json:"name"`
@@ -440,7 +440,7 @@ func (q *AdminQueries) LookupAddressBook(ctx context.Context, principalURI, uri 
 
 // AdminObjectRow is one calendarobjects row's stored (denormalized)
 // metadata; the browser diffs these against values recomputed from
-// calendardata (ADMIN-PLAN.md §3.4).
+// calendardata (docs/design/ADMIN-PLAN.md §3.4).
 type AdminObjectRow struct {
 	URI             string `json:"uri"`
 	UID             string `json:"uid"`
@@ -453,7 +453,7 @@ type AdminObjectRow struct {
 }
 
 // AdminObjectQuery scopes an object-browser search to one calendar
-// (ADMIN-PLAN.md §3.4: never a whole-table scan).
+// (docs/design/ADMIN-PLAN.md §3.4: never a whole-table scan).
 type AdminObjectQuery struct {
 	CalendarID string
 	// Match is a case-insensitive substring tested against uri and uid —

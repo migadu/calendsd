@@ -94,7 +94,7 @@ calserver_http_requests_total{code="500",method="REPORT",route="calendar"} 1
 	}
 }
 
-// TestWrapMetricsCardinality is the cardinality guard (METRICS-PLAN.md §7): a
+// TestWrapMetricsCardinality is the cardinality guard (docs/design/METRICS-PLAN.md §7): a
 // hostile spread of methods and paths must not grow the label sets beyond the
 // closed method x route x code space.
 func TestWrapMetricsCardinality(t *testing.T) {

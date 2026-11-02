@@ -49,7 +49,7 @@ non-passing results that are **not** calendsd bugs:
 ### Known failures in `CalDAV/availability.xml`
 
 Two of its seven tests fail, by design, not because of a calendsd bug
-(VAVAILABILITY-PLAN.md §7):
+(docs/design/VAVAILABILITY-PLAN.md §7):
 
 - `Capabilities/2` expects VTIMEZONE and VFREEBUSY in a calendar's
   `supported-calendar-component-set` (CalendarServer's default). calendsd's

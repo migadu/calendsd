@@ -29,7 +29,7 @@ type SchedulingBackend interface {
 
 // AvailabilityBackend stores a principal's working hours: the RFC 7953
 // calendar-availability property of their schedule inbox, as one VCALENDAR
-// (VAVAILABILITY-PLAN.md §3.1). A scheduling backend that implements it turns
+// (docs/design/VAVAILABILITY-PLAN.md §3.1). A scheduling backend that implements it turns
 // the property on; Availability returns nil data when none is set.
 type AvailabilityBackend interface {
 	Availability(ctx context.Context, principalURI string) ([]byte, error)
@@ -38,7 +38,7 @@ type AvailabilityBackend interface {
 }
 
 // FreeBusyVisibilityBackend stores who may see a principal's free-busy
-// (VAVAILABILITY-PLAN.md §10). A scheduling backend that implements it turns
+// (docs/design/VAVAILABILITY-PLAN.md §10). A scheduling backend that implements it turns
 // on the inbox's free-busy-visibility property; the same store is what the
 // ACL plugin's FreeBusyPolicy reads. FreeBusyVisibility returns the zero
 // value (the default) when nothing is set.

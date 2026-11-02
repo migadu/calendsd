@@ -6,7 +6,7 @@ package storage_test
 // the CardDAV and concurrency tests.
 //
 // The subject is the re-run decision table in
-// docs/snappymail-calserver-contacts.md: which of (ledger row, bundle digest,
+// docs/webmail-contacts.md: which of (ledger row, bundle digest,
 // book synctoken) leads to a COPY, a diff, a skip, or a refusal. Those
 // decisions are the difference between a re-run being something you do casually
 // and a re-run duplicating 2.96M contacts, and none of them is visible from

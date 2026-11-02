@@ -22,7 +22,7 @@ metrics_addr = ""       # Second listener serving Prometheus /metrics and Go
                         # auth: bind loopback or a firewalled interface, never
                         # the public one. Empty = disabled.
 api_addr = ""           # Third listener serving the webmail contacts JSON API
-                        # (docs/snappymail-calserver-contacts.md), e.g.
+                        # (docs/webmail-contacts.md), e.g.
                         # "127.0.0.1:8081". Plain HTTP; Basic auth with the
                         # user's own mailbox credentials through the same
                         # backend as DAV. Loopback only — it must never be
@@ -31,7 +31,7 @@ api_addr = ""           # Third listener serving the webmail contacts JSON API
 base_uri = "/"          # URI prefix the server is mounted at (e.g. "/dav/").
 realm = "SabreDAV"      # Auth realm. MUST match the realm baked into
                         # users.digesta1 in the shared database, forever, for
-                        # both Digest and Basic (see PLAN.md §5).
+                        # both Digest and Basic (see docs/design/PLAN.md §5).
 temp_file_filter = false # Intercept OS junk files (._*, .DS_Store, Thumbs.db,
                         # editor swap files) into a scratch directory instead of
                         # the backend, like sabre's TemporaryFileFilterPlugin
@@ -167,7 +167,7 @@ submission_implicit_tls = false  # true: implicit TLS (SMTPS, :465).
                         # false: STARTTLS (:587). The connection is always TLS;
                         # credentials are never sent on an unencrypted link.
 
-# Durable job queue for scheduling mail (JOB-QUEUE-PLAN.md). A failed send is
+# Durable job queue for scheduling mail (docs/design/JOB-QUEUE-PLAN.md). A failed send is
 # retried in Postgres so it survives a restart instead of being lost. With a
 # credential_key, a per-user (submission) send that fails transiently is retried
 # AS the user — encrypting their password at rest so the retry stays metered —
@@ -246,7 +246,7 @@ change_log_days = 90        # Days to keep sync change rows. A client whose
 
 # WEBDAV-PUSH
 # =============================================================================
-# Server-initiated change notifications (PUSH-PLAN.md), so clients that speak
+# Server-initiated change notifications (docs/design/PUSH-PLAN.md), so clients that speak
 # WebDAV-Push (DAVx5 >= 4.4.2, and this project's web client) learn of calendar
 # / address-book changes within seconds instead of polling. Delivered as
 # encrypted Web Push (RFC 8030/8291) authenticated with VAPID (RFC 8292).

@@ -73,7 +73,7 @@ func (b *CalDAV) DeleteSchedulingObject(ctx context.Context, principalURI, objec
 var _ caldav.AvailabilityBackend = (*CalDAV)(nil)
 
 // Availability reads a principal's working hours from calendar_availability
-// (VAVAILABILITY-PLAN.md §3.1); nil when none are set.
+// (docs/design/VAVAILABILITY-PLAN.md §3.1); nil when none are set.
 func (b *CalDAV) Availability(ctx context.Context, principalURI string) ([]byte, error) {
 	defer b.Metrics.DBOpTimer("availability")()
 	var data []byte
@@ -101,7 +101,7 @@ func (b *CalDAV) DeleteAvailability(ctx context.Context, principalURI string) er
 var _ caldav.FreeBusyVisibilityBackend = (*CalDAV)(nil)
 
 // FreeBusyVisibility reads who may see a principal's free-busy
-// (VAVAILABILITY-PLAN.md §10); the zero value (their mail domain) when no
+// (docs/design/VAVAILABILITY-PLAN.md §10); the zero value (their mail domain) when no
 // row exists. It backs the ACL plugin's FreeBusyPolicy, so it runs on every
 // non-owner read-free-busy check.
 func (b *CalDAV) FreeBusyVisibility(ctx context.Context, principalURI string) (acl.FreeBusyVisibility, error) {

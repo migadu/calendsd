@@ -1,5 +1,5 @@
 // Package corpus loads and replays the behavioral test corpus extracted from
-// sabre/dav's own suite (PLAN.md §7). Records are produced by the
+// sabre/dav's own suite (docs/design/PLAN.md §7). Records are produced by the
 // CorpusRecorder shim in dav/tests/Sabre; regenerate with:
 //
 //	cd dav && CORPUS_DIR=../testdata/corpus vendor/bin/phpunit \
@@ -153,7 +153,7 @@ func Load(dir string) ([]Record, error) {
 }
 
 // UsesUnsupportedFeatures reports whether the record depends on fixtures
-// outside the MVP port scope (PLAN.md §1); such records stay pending
+// outside the MVP port scope (docs/design/PLAN.md §1); such records stay pending
 // indefinitely rather than counting against coverage.
 func (r *Record) UsesUnsupportedFeatures() bool {
 	s := r.Setup

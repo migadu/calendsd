@@ -44,7 +44,7 @@ type Config struct {
 		// firewalled interface; it has no TLS and no auth.
 		MetricsAddr string
 		// APIAddr, when set, serves the webmail contacts JSON API
-		// (docs/snappymail-calserver-contacts.md) on a third plain-HTTP
+		// (docs/webmail-contacts.md) on a third plain-HTTP
 		// listener, authenticated with the user's own mailbox credentials via
 		// the same backend as DAV. Loopback only: it is never meant to be
 		// reachable through the public DAV hostname.
@@ -117,7 +117,7 @@ type Config struct {
 			SubmissionImplicitTLS bool
 			// CredentialKey is the base64-encoded 32-byte AEAD key that encrypts
 			// stored submission passwords for the durable, metered per-user retry
-			// (JOB-QUEUE-PLAN.md D12). Empty disables the per-user durable path —
+			// (docs/design/JOB-QUEUE-PLAN.md D12). Empty disables the per-user durable path —
 			// per-user sends then fall back to a synchronous send. A secret:
 			// keep it out of DB backups. $CALSERVER_IMIP_CREDENTIAL_KEY overrides
 			// this value.
@@ -172,7 +172,7 @@ type Config struct {
 		// ChangeLogRetention).
 		ChangeLogDays int
 	}
-	// Push holds WebDAV-Push settings (PUSH-PLAN.md). Off by default; when
+	// Push holds WebDAV-Push settings (docs/design/PUSH-PLAN.md). Off by default; when
 	// Enabled, the VAPID keys and TopicSecret must be set or the server fails
 	// closed at startup.
 	Push struct {

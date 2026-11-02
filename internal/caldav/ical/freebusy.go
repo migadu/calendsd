@@ -35,7 +35,7 @@ func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location
 // GenerateFreeBusyWithAvailability is GenerateFreeBusy plus the principal's
 // working hours: time in [start, end) that the calendar-availability value
 // marks unavailable is reported as FBTYPE=BUSY-UNAVAILABLE
-// (VAVAILABILITY-PLAN.md §4.2). Only the outbox POST passes availability;
+// (docs/design/VAVAILABILITY-PLAN.md §4.2). Only the outbox POST passes availability;
 // the free-busy-query REPORT and the auto-schedule conflict check keep using
 // GenerateFreeBusy. An unusable availability value returns an error wrapping
 // ErrInvalidAvailability, so the caller can fall back to GenerateFreeBusy.

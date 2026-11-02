@@ -1,7 +1,7 @@
 package storage_test
 
 // AdminQueries integration test against a scratch Postgres with the sabre
-// schema (ADMIN-PLAN.md §6): seeds one of each thing the admin panel
+// schema (docs/design/ADMIN-PLAN.md §6): seeds one of each thing the admin panel
 // inspects — a shared calendar, a per-user property overlay, a stale
 // change-log row — and asserts the aggregates. Skips when the dev Postgres
 // isn't reachable, like the concurrency test.

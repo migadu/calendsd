@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS deleted_principals_purge_after_ix
     ON deleted_principals USING btree (purge_after);
 
 
--- WebDAV-Push subscriptions (PUSH-PLAN.md). One row per (collection, Web Push
+-- WebDAV-Push subscriptions (docs/design/PUSH-PLAN.md). One row per (collection, Web Push
 -- endpoint): a client POSTs a {https://bitfire.at/webdav-push}push-register body
 -- to a calendar/addressbook collection and the dispatcher (internal/push) sends
 -- an encrypted Web Push message when that collection's synctoken changes. This
@@ -167,7 +167,7 @@ CREATE INDEX IF NOT EXISTS push_subscriptions_lookup
     ON push_subscriptions (collection_kind, collection_id);
 
 
--- Durable background-job queue (JOB-QUEUE-PLAN.md). A NEW calendsd-only table;
+-- Durable background-job queue (docs/design/JOB-QUEUE-PLAN.md). A NEW calendsd-only table;
 -- a co-resident sabre never references it. Oban-shaped so a future Elixir/Oban
 -- migration is a column mapping. iMIP send is the first (and, for now, only)
 -- worker: it survives a process restart the in-memory SendQueue could not.
@@ -230,7 +230,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS jobs_latest_ix ON jobs (
 -- Per-recipient-domain notification policy. A domain operator opts its users
 -- in to calendsd emails that are not part of CalDAV itself; a domain with no
 -- row gets the defaults, so nothing changes until an admin inserts one. Keyed
--- on the RECIPIENT's email domain, stored lowercased. Edited by SQL/ansible.
+-- on the RECIPIENT's email domain, stored lowercased. Edited by SQL.
 --   share_notify  'email' = email a local user when a calendar is newly
 --                 shared with them (docs/share-invite-email.md)
 --   local_notify  reserved for docs/local-attendee-email.md (not yet read)
@@ -291,7 +291,7 @@ DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
 -- until the block above was applied. A bulk import that creates a book per
 -- principal hits it directly.
 --
--- deleted_principals was added by calendsd (SOFT-DELETE-PLAN.md) with column
+-- deleted_principals was added by calendsd (docs/design/SOFT-DELETE-PLAN.md) with column
 -- widths copied from the pre-widening sabre schema, so it would refuse the
 -- soft-delete of exactly the long-address accounts the block above unblocked.
 --
@@ -300,7 +300,7 @@ DROP INDEX IF EXISTS calendarinstances_principaluri_share_href;
 
 
 -- Per-correspondent usage counts behind webmail's "most used" address
--- suggestions (docs/snappymail-calserver-contacts.md). SnappyMail's own driver
+-- suggestions (docs/webmail-contacts.md). SnappyMail's own driver
 -- keeps this as a prop_frec column on its normalized property rows, which has
 -- no home in sabre's schema — sabre stores whole vCards and nothing per
 -- address. A NEW calendsd-only table; a co-resident sabre never references it.
@@ -339,7 +339,7 @@ CREATE INDEX IF NOT EXISTS contact_frecency_rank_ix
 
 -- Import ledger for the webmail contacts migration: one row per principal
 -- whose contacts `calctl contacts import` has landed
--- (docs/snappymail-calserver-contacts.md § Making the import re-runnable). A
+-- (docs/webmail-contacts.md § Making the import re-runnable). A
 -- NEW calendsd-only table; a co-resident sabre never references it.
 --
 -- The row is what makes a re-run a no-op instead of a duplication. Two stored
@@ -380,7 +380,7 @@ CREATE TABLE IF NOT EXISTS contact_import (
 CREATE INDEX IF NOT EXISTS contact_import_run_ix ON contact_import (run_id);
 
 
--- A principal's working hours (VAVAILABILITY-PLAN.md §3): the RFC 7953
+-- A principal's working hours (docs/design/VAVAILABILITY-PLAN.md §3): the RFC 7953
 -- calendar-availability property of their schedule inbox, one VCALENDAR per
 -- principal with CRLF line endings. Outbox free-busy reports the time outside
 -- these hours as BUSY-UNAVAILABLE. A NEW calendsd-only table, keyed by the
@@ -440,7 +440,7 @@ DELETE FROM propertystorage ps
 
 
 -- Who may see a principal's free-busy and working hours
--- (VAVAILABILITY-PLAN.md §10): 'domain' (everyone in their mail domain, the
+-- (docs/design/VAVAILABILITY-PLAN.md §10): 'domain' (everyone in their mail domain, the
 -- default when there is no row) or 'nobody', plus principals that may always
 -- see it. Enforced by the read-free-busy ACE of every calendar. A NEW
 -- calendsd-only table; AdminWrites' user deletes remove the principal's row

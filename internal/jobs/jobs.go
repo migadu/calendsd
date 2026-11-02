@@ -1,4 +1,4 @@
-// Package jobs is a small durable, Postgres-backed work queue (JOB-QUEUE-PLAN.md).
+// Package jobs is a small durable, Postgres-backed work queue (docs/design/JOB-QUEUE-PLAN.md).
 // It exists so background work — today only iMIP scheduling mail — survives a
 // process restart, which the in-memory caldav.SendQueue could not.
 //

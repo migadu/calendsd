@@ -38,7 +38,7 @@ const SameDomain = "{urn:x-calserver}same-domain"
 
 // FreeBusyAudience is a calendsd extension pseudo-principal for
 // read-free-busy: it matches whoever the node owner's free-busy visibility
-// lets in (VAVAILABILITY-PLAN.md §10): the owner, anyone on the owner's
+// lets in (docs/design/VAVAILABILITY-PLAN.md §10): the owner, anyone on the owner's
 // Allowed list (directly or through a group), and, unless the owner chose
 // "nobody", the SameDomain audience. Without a FreeBusyPolicy it is exactly
 // SameDomain.

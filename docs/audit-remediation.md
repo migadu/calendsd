@@ -52,8 +52,8 @@ library (net/http ×9, crypto/tls ×3, html/template ×3, crypto/x509,
 encoding/asn1, encoding/xml, net/textproto, net/url, net/http/httputil),
 the last of them (GO-2026-6809, crypto/x509) fixed only in Go 1.26.10, and
 one in `golang.org/x/text` v0.40.0 (GO-2026-6629, fixed in v0.41.0).
-Remediation: the dev shell's flake (`ansible-freebsd3/flake.nix`, which the
-build roles use through `nix develop <repo> -c`) now builds Go 1.26.10 from
+Remediation: the deployment's dev-shell flake (which the build uses through
+`nix develop <repo> -c`) now builds Go 1.26.10 from
 the upstream source on top of the channel's derivation, `go.mod` requires
 `go 1.26.10` so an older toolchain cannot silently build a vulnerable
 binary, and `golang.org/x/text` is at v0.41.0. `golang.org/x/crypto` is
@@ -917,7 +917,7 @@ is reachable by any authenticated mailbox user today.
 ## 9. Out of scope
 
 - Dependency CVEs until `govulncheck` has run (Phase 0).
-- Full invisibility of soft-deleted principals (SOFT-DELETE-PLAN.md §10).
+- Full invisibility of soft-deleted principals (docs/design/SOFT-DELETE-PLAN.md §10).
 - PROPFIND Depth:1 listing child hrefs of a foreign collection with 403
   propstats (sabre parity, documented in `samedomain_enum_test`).
 - Digest nonce replay (stateless by design; TLS is the documented mitigation).

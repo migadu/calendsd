@@ -1,6 +1,6 @@
 package storage_test
 
-// The live co-existence parity test (PLAN.md §5): the Go server and a real
+// The live co-existence parity test (docs/design/PLAN.md §5): the Go server and a real
 // sabre/dav instance run against the same Postgres database; every value one
 // writes must be readable by the other. This is the acceptance gate for
 // "runs alongside sabre-dav".
@@ -545,7 +545,7 @@ func TestParity(t *testing.T) {
 	})
 
 	t.Run("AdminMadeUserWorksInSabre", func(t *testing.T) {
-		// Phase C acceptance (ADMIN-PLAN.md §5): a user created through
+		// Phase C acceptance (docs/design/ADMIN-PLAN.md §5): a user created through
 		// the admin carve-out — digesta1 minted from the realm, principal
 		// triple inserted, default calendar auto-provisioned through the
 		// production code path — must be fully usable via real sabre.

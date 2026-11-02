@@ -16,7 +16,7 @@ delivery. These map to the ways calendsd actually fails in practice:
 **Non-goals**: tracing, per-user/per-calendar breakdowns (cardinality;
 that's the admin panel's job), metrics for `calendsd-admin` itself (low
 traffic, basic-auth'd, logs suffice), pushgateway/remote-write, dashboards
-(out of tree — flatmail ansible owns Prometheus/Grafana config).
+(out of tree — the deployment owns Prometheus/Grafana config).
 
 ## 1. Hard constraints
 
@@ -263,7 +263,7 @@ intermediate state working.
 - Cardinality guard: a test that scrapes after a spread of synthetic
   requests and asserts total series stays under a fixed budget.
 
-## 8. Alerting sketch (for the ansible side, not this repo)
+## 8. Alerting sketch (for the deployment side, not this repo)
 
 - `rcptd_requests_total{code!~"200|404"}` rate > 0 for 5m — auth backend sick
 - `auth_attempts_total{outcome="bad_credentials"}` sudden rate spike;

@@ -170,7 +170,7 @@ var passing = map[string]bool{
 }
 
 // outOfScopePrefixes are sabre plugins outside the MVP port scope
-// (PLAN.md §1): PATCH partial updates, sharing, scheduling, subscriptions,
+// (docs/design/PLAN.md §1): PATCH partial updates, sharing, scheduling, subscriptions,
 // and the export/jCal conveniences.
 var outOfScopePrefixes = []string{
 	`Sabre\DAV\PartialUpdate\`,

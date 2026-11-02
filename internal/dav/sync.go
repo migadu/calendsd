@@ -12,7 +12,7 @@ import (
 
 // SyncTokenPrefix is the client-facing token prefix, identical to sabre's
 // Sync\Plugin::SYNCTOKEN_PREFIX — existing clients have these stored
-// (PLAN.md §5).
+// (docs/design/PLAN.md §5).
 const SyncTokenPrefix = "http://sabre.io/ns/sync/"
 
 // ChangeSet is the result of a sync query. Port of the getChanges result
@@ -208,7 +208,7 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 	}
 	if changes.Truncated {
 		// The single choke point where both backends' truncation surfaces
-		// (METRICS-PLAN.md §5); the resource type falls out of the path.
+		// (docs/design/METRICS-PLAN.md §5); the resource type falls out of the path.
 		p.server.Metrics.SyncTruncated(syncResourceLabel(collectionPath))
 		href := p.server.BaseURI
 		if collectionPath != "" {

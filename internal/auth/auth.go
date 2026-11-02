@@ -91,7 +91,7 @@ type Plugin struct {
 	// principal has been soft-deleted (scheduled for deletion). Such requests
 	// are rejected with 403 even though the credentials are valid, disabling
 	// the account immediately without destroying its password. Nil disables
-	// the check — parity with the pre-soft-delete server (SOFT-DELETE-PLAN.md
+	// the check — parity with the pre-soft-delete server (docs/design/SOFT-DELETE-PLAN.md
 	// §5). It runs above the backends, so it covers every auth mechanism.
 	Tombstoned func(ctx context.Context, principal string) bool
 }

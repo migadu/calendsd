@@ -272,7 +272,7 @@ keeps its current meaning), but flag it for sign-off.
 ## 8. Purge scheduling (deployment)
 
 No in-process scheduler — the purge is a `calctl` invocation, matching the
-FreeBSD + ansible deployment. Add to the ansible role a daily job:
+cron-driven deployment. Add a daily job:
 
 ```cron
 # /usr/local/etc/cron.d/calendsd-purge  (or a periodic(8) script)
@@ -349,7 +349,7 @@ These touch more surfaces and DAV semantics; keep them out of v1.
 | CLI | `cmd/calctl/principal.go` | `delete`, `restore`, `purge-expired`; `list` column |
 | Admin API | `internal/admin/writes.go`, `admin.go` | `schedule-delete`, `restore-user` + interface + routes |
 | Admin UI | `internal/admin/templates/principal.html` | schedule/restore forms |
-| Deployment | ansible role (out of this repo) | daily `calctl principal purge-expired` |
+| Deployment | deployment config (out of this repo) | daily `calctl principal purge-expired` |
 | Tests | storage / auth / admin / config `*_test.go` | per §9 |
 
 ## 12. Decisions (resolved)

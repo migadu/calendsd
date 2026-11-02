@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Reference sabre/dav CalDAV server for the co-existence harness (PLAN.md §5).
+ * Reference sabre/dav CalDAV server for the co-existence harness (docs/design/PLAN.md §5).
  * Runs against the shared dev Postgres (scripts/dev-db.sh) over its unix
  * socket. Start with:
  *
@@ -24,7 +24,7 @@ $pdo = new PDO(sprintf('pgsql:host=%s;dbname=%s', $socketDir, $database));
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 $authBackend = new Sabre\DAV\Auth\Backend\PDO($pdo);
-$authBackend->setRealm('SabreDAV'); // baked into users.digesta1 — see PLAN.md §5
+$authBackend->setRealm('SabreDAV'); // baked into users.digesta1 — see docs/design/PLAN.md §5
 $calendarBackend = new Sabre\CalDAV\Backend\PDO($pdo);
 $carddavBackend = new Sabre\CardDAV\Backend\PDO($pdo);
 $principalBackend = new Sabre\DAVACL\PrincipalBackend\PDO($pdo);

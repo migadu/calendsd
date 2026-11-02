@@ -66,7 +66,7 @@ For every message, calendsd classifies the sender:
 ## Durable delivery
 
 Background sends go through a **Postgres-backed job queue** (see
-`JOB-QUEUE-PLAN.md`). A PUT or DELETE enqueues the send and returns; a worker
+`docs/design/JOB-QUEUE-PLAN.md`). A PUT or DELETE enqueues the send and returns; a worker
 delivers it off the request path. The stored `SCHEDULE-STATUS` is `1.0` (pending)
 until the send settles, then the worker patches the terminal status back onto the
 object. Unlike the old in-memory queue, a pending send **survives a process

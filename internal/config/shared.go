@@ -14,8 +14,8 @@ import (
 // DefaultConfigPaths are the locations searched, in order, for a config file
 // when -config is not given explicitly. Every binary that reads calendsd's
 // config (calendsd, calctl) discovers it through FindDefaultConfig. The
-// calserver paths are the pre-rename locations, still found on hosts the
-// ansible role has not yet migrated. The working directory is deliberately
+// calserver paths are the pre-rename locations, still found on hosts that
+// have not been migrated. The working directory is deliberately
 // not searched: calctl runs privileged actions, and a config.toml planted in
 // whatever directory an operator happens to run it from would redirect them
 // (audit 6.10). Pass -config for a file elsewhere.
@@ -96,7 +96,7 @@ func (m *Merged) Bool(name string, flagVal, fileVal bool) bool {
 // `calctl panel` both resolve through this one function, so the two
 // processes can never drift in how they turn identical inputs into a
 // server.Config — the property the Canonical() config echo depends on
-// (ADMIN-PLAN.md §2). The returned resolver must run after flag.Parse.
+// (docs/design/ADMIN-PLAN.md §2). The returned resolver must run after flag.Parse.
 func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	configPath := flag.String("config", "", "path to a TOML config file (see config.toml.example); command-line flags override its values. When empty, the first existing of /etc/calendsd/config.toml, /usr/local/etc/calendsd/config.toml, the pre-rename /etc/calserver and /usr/local/etc/calserver paths, ./config.toml is used")
 	dsn := flag.String("db", "", dbUsage)

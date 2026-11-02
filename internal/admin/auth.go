@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// LoadHTPasswd reads an htpasswd file of user:hash lines (ADMIN-PLAN.md
+// LoadHTPasswd reads an htpasswd file of user:hash lines (docs/design/ADMIN-PLAN.md
 // §2.1). Only bcrypt hashes are accepted — `htpasswd -B` output ($2y$…) —
 // so a stray MD5/SHA htpasswd entry fails loudly at startup instead of
 // silently never matching.

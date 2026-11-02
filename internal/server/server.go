@@ -38,7 +38,7 @@ const DefaultRealm = "SabreDAV"
 // Config carries server composition options.
 type Config struct {
 	BaseURI string
-	// Realm must match the realm baked into users.digesta1 (PLAN.md §5).
+	// Realm must match the realm baked into users.digesta1 (docs/design/PLAN.md §5).
 	Realm string
 	// IMipSender and IMipSMTP enable emailing invites to external attendees.
 	// iMip is enabled when either IMipSMTP (the shared relay) or IMipSubmission
@@ -115,16 +115,16 @@ type Config struct {
 	// bodies, so it is safe to leave on. Off by default.
 	AccessLog bool
 	// Metrics, when non-nil, receives Prometheus observations from the HTTP
-	// middleware, auth backends, storage, and iMip (METRICS-PLAN.md). Not
+	// middleware, auth backends, storage, and iMip (docs/design/METRICS-PLAN.md). Not
 	// part of Canonical(): it changes no DAV semantics.
 	Metrics *metrics.Set
 	// RetentionDays is the default grace period, in days, for soft-deleted
-	// accounts (SOFT-DELETE-PLAN.md). Read only when scheduling a deletion;
+	// accounts (docs/design/SOFT-DELETE-PLAN.md). Read only when scheduling a deletion;
 	// the auth gate and purge job work off the stored purge_after. Resolved
 	// with config.RetentionDays so it is never zero here. Not part of
 	// Canonical(): it changes no DAV semantics.
 	RetentionDays int
-	// Push holds WebDAV-Push settings (PUSH-PLAN.md). When Enabled, compose()
+	// Push holds WebDAV-Push settings (docs/design/PUSH-PLAN.md). When Enabled, compose()
 	// registers the push plugin and asserts the VAPID keys / topic secret are
 	// present (fail closed). The worker that delivers notifications is
 	// returned by Build and started separately.
@@ -134,7 +134,7 @@ type Config struct {
 	// domain without share_notify = 'email', and a missing relay (IMipSMTP).
 	// Not part of Canonical(): it changes no DAV semantics.
 	WebURL string
-	// IMipQueue holds the durable iMIP job-queue settings (JOB-QUEUE-PLAN.md).
+	// IMipQueue holds the durable iMIP job-queue settings (docs/design/JOB-QUEUE-PLAN.md).
 	// The queue is constructed by Build and started separately; its
 	// CredentialKey gates the metered per-user durable retry.
 	IMipQueue IMipQueueConfig
@@ -176,7 +176,7 @@ type PushConfig struct {
 // Both calendsd and the admin panel (`calctl panel`) log it at startup, and
 // the dashboard echoes its own copy, so config drift between the two processes
 // (which would make the admin privilege simulator lie) reduces to comparing
-// two strings (ADMIN-PLAN.md §2). Values are normalized the way the server
+// two strings (docs/design/ADMIN-PLAN.md §2). Values are normalized the way the server
 // applies them (base-URI slashes, realm default), so equivalent configs
 // always render the same line. No secrets: DSN and SMTP host stay out.
 func (c Config) Canonical() string {
@@ -316,7 +316,7 @@ func Build(db *sql.DB, cfg Config, dsn string) *Built {
 
 // buildIMipQueue constructs the durable iMIP job queue, wires it into the
 // server's iMIP plugin (so per-user retries hand off with the credential
-// encrypted and relay-native sends go durable — JOB-QUEUE-PLAN.md), and
+// encrypted and relay-native sends go durable — docs/design/JOB-QUEUE-PLAN.md), and
 // registers the imip_send handler. Returns nil when the server has no iMIP
 // plugin. The caller MUST run queue.Start(ctx). A configured credential key
 // enables the metered per-user durable path; without one, only relay-native
@@ -382,7 +382,7 @@ func WrapWellKnown(h http.Handler, baseURI string) http.Handler {
 // NewLoggedIn builds the production plugin stack with authentication
 // replaced by a fixed principal (the auth.NewLoggedInPlugin test pattern).
 // The admin privilege simulator uses it to answer "what would user X see on
-// path Y" through the identical composition (ADMIN-PLAN.md §3.5).
+// path Y" through the identical composition (docs/design/ADMIN-PLAN.md §3.5).
 func NewLoggedIn(db *sql.DB, cfg Config, principal string) *dav.Server {
 	srv, _ := compose(db, cfg, auth.NewLoggedInPlugin(principal))
 	return srv
@@ -492,13 +492,13 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		AdminPrincipals:                   []string{"principals/admin"},
 		PrincipalsReadableByAuthenticated: cfg.PrincipalsReadable,
 		// Each owner's free-busy visibility decides who passes calendars'
-		// read-free-busy (VAVAILABILITY-PLAN.md §10).
+		// read-free-busy (docs/design/VAVAILABILITY-PLAN.md §10).
 		FreeBusyPolicy: calendars,
 	})
 	// AddVTimezones departs from sabre deliberately: bare IANA TZIDs (calweb
 	// writes them) get the VTIMEZONE RFC 5545 requires.
 	srv.AddPlugin(&caldav.Plugin{AddVTimezones: true, MaxAttendees: cfg.MaxAttendees})
-	// WebDAV-Push (PUSH-PLAN.md). Registered here on purpose: after the ACL
+	// WebDAV-Push (docs/design/PUSH-PLAN.md). Registered here on purpose: after the ACL
 	// plugin (so its PropFind values honor the read-deny latch) and after
 	// caldav.Plugin, but before SharingPlugin (so a collection POST reaches it
 	// first and a non-push body is passed on intact). Enabled-but-unconfigured

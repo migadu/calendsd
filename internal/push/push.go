@@ -2,7 +2,7 @@
 // advertises push support on calendar and address-book collections, accepts
 // Web Push subscription registrations, and delivers an encrypted Web Push
 // notification (RFC 8030/8291, VAPID RFC 8292) whenever a subscribed
-// collection's synctoken changes. See PUSH-PLAN.md.
+// collection's synctoken changes. See docs/design/PUSH-PLAN.md.
 //
 // The trigger is a Postgres LISTEN/NOTIFY channel ("dav_push"): the storage
 // write path emits pg_notify('dav_push', 'calendar:<id>') inside the same

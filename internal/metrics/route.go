@@ -22,7 +22,7 @@ func NormalizeMethod(m string) string {
 }
 
 // RoutePattern maps a request path onto a fixed pattern set
-// (METRICS-PLAN.md §4). path is the escaped URL path as received; baseURI is
+// (docs/design/METRICS-PLAN.md §4). path is the escaped URL path as received; baseURI is
 // the server's normalized base URI ("/" or "/prefix/"). Classification is by
 // path-segment count under the known roots, never by matching user data, so
 // the return value is always one of a dozen constants:

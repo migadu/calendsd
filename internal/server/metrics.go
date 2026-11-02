@@ -10,7 +10,7 @@ import (
 
 // WrapMetrics records request count, duration, and in-flight gauge for every
 // request. It wraps outside WrapWellKnown so discovery redirects are counted
-// too (METRICS-PLAN.md §3). A nil set returns next unchanged.
+// too (docs/design/METRICS-PLAN.md §3). A nil set returns next unchanged.
 func WrapMetrics(next http.Handler, set *metrics.Set, baseURI string) http.Handler {
 	if set == nil {
 		return next

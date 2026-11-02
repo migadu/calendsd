@@ -1,5 +1,5 @@
 // Doctor: read-only invariant checks over the shared schema
-// (ADMIN-PLAN.md §3.7), plus the per-collection change log and pending
+// (docs/design/ADMIN-PLAN.md §3.7), plus the per-collection change log and pending
 // share invites the scheduling/sync debugger needs (§3.6).
 package storage
 
@@ -305,7 +305,7 @@ func orphanedPropertyRows(ctx context.Context, q interface {
 		case parts[0] == "calendars" && len(parts) == 3 && (parts[2] == "inbox" || parts[2] == "outbox"):
 			// The schedule inbox/outbox exist for as long as the principal
 			// does; they are not calendarinstances rows. The inbox carries
-			// calendar-availability (VAVAILABILITY-PLAN.md §3.4).
+			// calendar-availability (docs/design/VAVAILABILITY-PLAN.md §3.4).
 			ok = principals["principals/"+parts[1]]
 		case parts[0] == "calendars" && len(parts) == 3:
 			ok = calendarInstances[pair("principals/"+parts[1], parts[2])]

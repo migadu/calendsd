@@ -242,7 +242,7 @@ func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker Privi
 	// Working hours apply only now that the requester has passed the
 	// read-free-busy check, so they reach exactly who could already see busy
 	// time. A principal whose calendars are all private still reports them:
-	// hours are not calendar content (VAVAILABILITY-PLAN.md §4.3).
+	// hours are not calendar content (docs/design/VAVAILABILITY-PLAN.md §4.3).
 	if availability := p.availabilityFor(ctx, name); availability != nil {
 		fb, err = ical.GenerateFreeBusyWithAvailability(payloads, availability, start, end, time.UTC, time.Now(), extraProps...)
 		if !errors.Is(err, ical.ErrInvalidAvailability) {

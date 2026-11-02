@@ -126,7 +126,7 @@ type IMipPlugin struct {
 	// slog.Default(). Never receives credentials.
 	Logger *slog.Logger
 	// Durable, when non-nil, is the restart-surviving job queue (internal/jobs)
-	// every background send goes on (JOB-QUEUE-PLAN.md): relay-identity sends
+	// every background send goes on (docs/design/JOB-QUEUE-PLAN.md): relay-identity sends
 	// credential-free; per-user sends with the submission password encrypted at
 	// rest (D12), so the send is off the request path, metered, and survives a
 	// restart. Nil (an in-memory server with no DB) makes external sends

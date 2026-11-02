@@ -10,7 +10,7 @@ sent. Only **remote** attendees (no local principal) get an email, via iMIP
 (`internal/caldav/imip.go`).
 
 Exchange/Outlook and Google instead unify mail and calendar, so every attendee —
-internal included — effectively gets an email. Some flatmail domains want that
+internal included — effectively gets an email. Some domains want that
 "you always get an email" behaviour; others are happy with inbox-only.
 
 ## Goal
@@ -49,7 +49,7 @@ CREATE TABLE domain_scheduling_policy (
 
 - `domain` is stored lowercased; lookups lowercase the recipient's domain.
 - Absent row → `inbox_only`.
-- Migration snippet (for existing DBs, applied by ansible) ships alongside the
+- Migration snippet (for existing DBs, applied by the deployment) ships alongside the
   schema change.
 
 ## Storage layer
@@ -187,7 +187,7 @@ Runtime-editable via the admin app (`internal/admin`), mirroring the
 - `POST /api/delete-domain-policy` — `{domain}`.
 - Optional: a small admin UI page listing domains with a policy dropdown.
 
-Also editable directly by SQL/ansible for provisioning.
+Also editable directly by SQL for provisioning.
 
 ## Metrics & logging
 

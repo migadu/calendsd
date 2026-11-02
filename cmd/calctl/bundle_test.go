@@ -1,7 +1,7 @@
 package main
 
-// Bundle-reader tests, including the cross-language contract with
-// scripts/snappymail-export-contacts.php in the ansible repo.
+// Bundle-reader tests, including the cross-language contract with the PHP
+// exporter on the webmail side (docs/webmail-contacts.md § The bundle).
 //
 // That contract is the riskiest seam in the migration and the least visible: the
 // exporter is PHP on the webmail host, the importer is Go wherever the DSN

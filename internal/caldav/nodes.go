@@ -587,7 +587,7 @@ func (c *Calendar) transparent() bool {
 // read-free-busy to {DAV:}authenticated, while we grant it to the owner's
 // free-busy audience: their email domain by default, so users cannot probe
 // availability across domains, narrowed or extended by the owner's
-// free-busy visibility (VAVAILABILITY-PLAN.md §10). Both the free-busy-query
+// free-busy visibility (docs/design/VAVAILABILITY-PLAN.md §10). Both the free-busy-query
 // REPORT and the outbox POST honor it.
 func (c *Calendar) ACL() []acl.ACE {
 	owner := c.Owner()

@@ -10,7 +10,7 @@ import (
 // order sorted within each component, sibling components sorted by their
 // canonical form. Property order is not significant in iCalendar (RFC 5545
 // §3.6), so this compares meaning, not byte order — the corpus contract
-// (PLAN.md §7).
+// (docs/design/PLAN.md §7).
 func canonicalizeICS(text string) string {
 	if !strings.Contains(text, "BEGIN:VCALENDAR") {
 		return text

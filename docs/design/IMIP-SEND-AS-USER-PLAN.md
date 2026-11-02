@@ -17,7 +17,7 @@ their own credentials through the `mizu_out` submission tier — so that it is:
 
 Sending through `mizu_out` submission is the *only* path that counts toward the
 user's limits (the limits live in mizu_out's `[server.rate_limit]` and the
-rspamd `migadu_counters`/`migadu_suspender`). Any internal-ingest shortcut or
+rspamd rate counters and suspender). Any internal-ingest shortcut or
 shared-relay send would bypass them.
 
 ## Core rule
@@ -273,5 +273,5 @@ within the user's allowed set and authenticates as the user.
 - `internal/server/server.go` — rcptd auth backend (~line 258), iMIP plugin wiring (~line 333)
 - `internal/config/config.go`, `internal/config/shared.go` — config plumbing
 - `config.toml.example` — `[scheduling.imip]` section
-- Infra reference: `roles/mizu` and `inventory/group_vars/mizu_out/vars.yml`
-  (submission servers, rcptd `/auth`, `allowed_from`, rate limits)
+- Infra reference: the mizu_out deployment configuration (submission
+  servers, rcptd `/auth`, `allowed_from`, rate limits)

@@ -132,7 +132,7 @@ or invitations URL today. Add one route:
 The absolute base comes from a new calendsd flag:
 
 ```
--web-url https://calendar.migadu.com   # calclient origin for links in emails; empty disables share emails
+-web-url https://calendar.example.com   # calclient origin for links in emails; empty disables share emails
 ```
 
 Empty `-web-url` disables the feature regardless of domain policy — an email
@@ -154,7 +154,7 @@ You can view and edit events.            # or: You can view events.
 
 <optional comment the sharer typed — the {cs}share summary>
 
-Open it: https://calendar.migadu.com/cal/calendar?cal=<uri>
+Open it: https://calendar.example.com/cal/calendar?cal=<uri>
 
 It's already in your calendar list. If you don't want it, open the
 invitations panel (bell icon) and choose Decline.
@@ -168,7 +168,7 @@ invitations panel (bell icon) and choose Decline.
 - Sent **from the server address** with the sharer in the display name and
   `Reply-To`, i.e. the relay identity. Not send-as-user: that needs the
   sharer's submission credential in the request and brings in the DKIM/From
-  constraints of `IMIP-SEND-AS-USER-PLAN.md` for no real gain in a
+  constraints of `docs/design/IMIP-SEND-AS-USER-PLAN.md` for no real gain in a
   notification.
 
 ## Wiring
@@ -431,7 +431,7 @@ Where the implementation differs from or refines the text above:
   almost always the one the email was about.
 - A manual `calctl` retry of a discarded `share_notify` job while a newer one
   is pending fails with a unique violation; the pending one is the one to keep.
-- Policy rows are managed by SQL/ansible; no admin endpoint yet.
+- Policy rows are managed by SQL; no admin endpoint yet.
 - Known, not addressed here: the iMIP coalesce index has the same
   retry/reclaim-versus-newer-pending collision that `share_notify` now handles;
   its reclaim sweep can fail as a whole if it occurs.

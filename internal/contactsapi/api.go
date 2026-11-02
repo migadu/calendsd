@@ -1,5 +1,5 @@
 // Package contactsapi is the JSON contacts API webmail talks to
-// (docs/snappymail-calserver-contacts.md § The API): a thin per-user layer
+// (docs/webmail-contacts.md § The API): a thin per-user layer
 // over the same cards rows CardDAV serves, shaped one-to-one after
 // SnappyMail's AddressBookInterface so the PHP plugin stays thin.
 //
@@ -181,7 +181,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.tombstoned != nil && h.tombstoned(ctx, principal) {
 		// Valid credentials, account scheduled for deletion: the same 403 the
-		// DAV gate gives, so nothing runs as them (SOFT-DELETE-PLAN.md §5).
+		// DAV gate gives, so nothing runs as them (docs/design/SOFT-DELETE-PLAN.md §5).
 		writeError(w, http.StatusForbidden, "this account is scheduled for deletion")
 		return
 	}

@@ -120,7 +120,7 @@ test also fails locally when PHP is not set up.
 1. Drop the parity step from CI; keep `TestParity` behind `PARITY=1` for one
    release, then delete it with `scripts/sabre-server.php`.
 2. Mark `docs/strangler-fig.md` historical (or delete it); update README and
-   PLAN.md.
+   docs/design/PLAN.md.
 3. Keep `testdata/corpus/`. It is derived from sabre but not tied to PHP, and
    it still catches regressions. Stop regenerating it and freeze the outputs of
    `scripts/*-golden.php`.
@@ -228,9 +228,8 @@ CalDAVTester and the JS/Playwright suites are not in CI.
   only truncate the body: log it and abort the connection so the client sees
   an incomplete download rather than a valid-looking short file.
 - **`rows.Err()`** in the job-depth collector — done (f1d4aa4).
-- **Stale role comment** in `roles/calendsd/tasks/schema.yml` — rewritten for
-  the migrations, which also report `changed` now; in the parent repo,
-  uncommitted.
+- **Stale deployment comment** about the schema step — rewritten for the
+  migrations, which also report `changed` now; outside this repo.
 
 ## 8. `/health` endpoint — done
 

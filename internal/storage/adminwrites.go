@@ -1,4 +1,4 @@
-// AdminWrites is the Phase C carve-out (ADMIN-PLAN.md §1, §3.8): the only
+// AdminWrites is the Phase C carve-out (docs/design/ADMIN-PLAN.md §1, §3.8): the only
 // raw mutation SQL in the admin app, for rows no backend can write —
 // users/principals (no backend write path exists, no sync state) and
 // orphaned rows (their parent collection is gone, so no backend can reach

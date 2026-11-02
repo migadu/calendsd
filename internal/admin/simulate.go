@@ -1,6 +1,6 @@
 package admin
 
-// Privilege simulator (ADMIN-PLAN.md §3.5): answers "what can user X do on
+// Privilege simulator (docs/design/ADMIN-PLAN.md §3.5): answers "what can user X do on
 // path Y" through the production composition (server.NewLoggedIn). The
 // privilege check runs as a synthetic PROPFIND through the full plugin
 // chain — a 403/404 status is itself the answer to "why can't X see Y" —

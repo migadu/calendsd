@@ -11,7 +11,7 @@ import (
 	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
-// Working hours (VAVAILABILITY-PLAN.md §3): the inbox's calendar-availability
+// Working hours (docs/design/VAVAILABILITY-PLAN.md §3): the inbox's calendar-availability
 // property, live and backed by AvailabilityBackend rather than dead property
 // storage. Both names address the same value.
 var (

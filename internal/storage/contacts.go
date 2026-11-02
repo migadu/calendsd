@@ -1,5 +1,5 @@
 // Read and write primitives behind the webmail contacts API
-// (docs/snappymail-calserver-contacts.md § The API). These are the queries the
+// (docs/webmail-contacts.md § The API). These are the queries the
 // API needs that the CardDAV backend does not already express: every card a
 // principal owns across all their books in one round trip, a card by its
 // (book uri, card uri) path, and the contact_frecency table that SnappyMail's
@@ -225,7 +225,7 @@ SELECT c.id, a.id, a.uri, c.carddata, `+cardETagExpr+`, coalesce(c.lastmodified,
 
 // Frecency is the per-correspondent usage count behind "most used" address
 // suggestions: SnappyMail's prop_frec, which has no home in sabre's schema
-// (docs/snappymail-calserver-contacts.md § Suggestions, frecency, and the
+// (docs/webmail-contacts.md § Suggestions, frecency, and the
 // indexing question). frec is owned here and only ever incremented; seed_frec
 // is owned by the importer and replaced on every run; ranking reads the sum.
 type Frecency struct {

@@ -147,9 +147,9 @@ for); a "Details" disclosure shows status + message for bug reports.
   contacts). Extend it with one all-day event and a second calendar
   ("Private", different color) so the month grid shows multi-calendar color
   mixing and the all-day lane.
-- The FreeBSD/ansible deployment can expose calclient (with calweb) behind
+- A deployment can expose calclient (with calweb) behind
   the existing TLS termination for real users; document `-addr` binding and
-  the Basic-over-TLS requirement in the role.
+  the Basic-over-TLS requirement.
 
 ## Verification
 

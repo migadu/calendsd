@@ -13,7 +13,7 @@ import (
 )
 
 // handleStats prints the admin dashboard's overview from the command line:
-// per-table row counts plus the newest change-log rows (ADMIN-PLAN.md §3.1).
+// per-table row counts plus the newest change-log rows (docs/design/ADMIN-PLAN.md §3.1).
 func handleStats(ctx context.Context, args []string) {
 	flags := flag.NewFlagSet("stats", flag.ExitOnError)
 	jsonOutput := flags.Bool("json", false, "Output as JSON")

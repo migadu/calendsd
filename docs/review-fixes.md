@@ -6,7 +6,7 @@ against callers before it was listed; the top three security findings
 (MOVE/COPY destination delete, `ShareAccess` never set, mock root) were
 re-checked by hand.
 
-Sabre compatibility is no longer a constraint (see PLAN.md / strangler-fig.md),
+Sabre compatibility is no longer a constraint (see docs/design/PLAN.md / strangler-fig.md),
 so sabre quirks are removed rather than preserved.
 
 ## Execution
@@ -38,8 +38,8 @@ authenticated) let any user GET/PUT another user's contacts. Cards now carry
 the owner ACL and the default ACL is `{DAV:}read`. S7 changed
 `auth.Backend.Challenge` to take the request (for `stale=true`).
 
-Prod column: **live** = reachable with the ansible role's defaults
-(`roles/calserver/defaults/main.yml`: rcptd mode, so Basic-only; browser on;
+Prod column: **live** = reachable with the production deployment's defaults
+(rcptd mode, so Basic-only; browser on;
 push off; temp-file filter not templated, off by default). **latent** = only
 reachable with a non-default config. Fix both, live first.
 

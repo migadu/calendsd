@@ -234,7 +234,7 @@ UPDATE cards SET carddata = $1, lastmodified = extract(epoch from now())::int, e
 // read-compare-write that is not. It returns the new quoted etag and
 // matched=true on success; matched=false with no write and no change row when
 // the card is missing or its etag moved. An empty expected never matches.
-// Backs the API's If-Match (docs/snappymail-calserver-contacts.md § Endpoints).
+// Backs the API's If-Match (docs/webmail-contacts.md § The API).
 func (b *CardDAV) UpdateCardIfMatch(ctx context.Context, addressBookID, uri string, data []byte, expected string) (string, bool, error) {
 	if expected == "" {
 		return "", false, nil

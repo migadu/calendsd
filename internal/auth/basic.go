@@ -65,7 +65,7 @@ func (b *BasicBackend) Check(r *http.Request) (string, error) {
 func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) { basicChallenge(h, b.Realm) }
 
 // DigestA1 computes md5(username:realm:password) — the digesta1 convention
-// shared with sabre's users table (PLAN.md §5). It lets Basic credentials be
+// shared with sabre's users table (docs/design/PLAN.md §5). It lets Basic credentials be
 // verified against the stored Digest hash.
 func DigestA1(username, realm, password string) string {
 	sum := md5.Sum([]byte(username + ":" + realm + ":" + password))

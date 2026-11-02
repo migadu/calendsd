@@ -147,7 +147,7 @@ func scanObject(row rowScanner, id caldav.CalendarID) (*caldav.ObjectInfo, error
 
 // CreateCalendarObject mirrors sabre's createCalendarObject + addChange,
 // wrapped in one transaction (deliberately safer than sabre's unwrapped
-// statements — see PLAN.md §5).
+// statements — see docs/design/PLAN.md §5).
 func (b *CalDAV) CreateCalendarObject(ctx context.Context, id caldav.CalendarID, objectURI string, data []byte) (string, error) {
 	defer b.Metrics.DBOpTimer("create_object")()
 	d, err := ical.Denormalize(data)

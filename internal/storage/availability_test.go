@@ -3,7 +3,7 @@ package storage_test
 // calendar_availability against a scratch Postgres: the one-time move of
 // inbox dead properties when the extension migration is applied, the backend
 // round-trip, the user-delete cleanup and the doctor's orphan check
-// (VAVAILABILITY-PLAN.md §3). Skips when the dev Postgres isn't reachable.
+// (docs/design/VAVAILABILITY-PLAN.md §3). Skips when the dev Postgres isn't reachable.
 
 import (
 	"strings"
@@ -127,7 +127,7 @@ func TestCalendarAvailability(t *testing.T) {
 		t.Error("DeleteOrphans removed a live user's availability")
 	}
 
-	// Free-busy visibility round-trip (VAVAILABILITY-PLAN.md §10).
+	// Free-busy visibility round-trip (docs/design/VAVAILABILITY-PLAN.md §10).
 	vis := func(principal string) acl.FreeBusyVisibility {
 		t.Helper()
 		v, err := backend.FreeBusyVisibility(t.Context(), principal)

@@ -3,7 +3,7 @@
 A Go CalDAV server ported from [sabre/dav](https://sabre.io/). It still stores
 its data in sabre's tables, but sabre is no longer a rollback target: the
 schema is calendsd's own now (`internal/schema/migrations/`, applied by
-`calctl schema apply`). See [PLAN.md](PLAN.md) for the porting plan; `dav/` is
+`calctl schema apply`). See [docs/design/PLAN.md](docs/design/PLAN.md) for the porting plan; `dav/` is
 the reference sabre/dav checkout the port is derived from.
 
 ## Dev environment
@@ -20,7 +20,7 @@ go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # default :8080
 ```
 
 Credentials: `admin` / `admin` (Basic or Digest, realm `SabreDAV` — the realm
-is baked into `users.digesta1`, see PLAN.md §5).
+is baked into `users.digesta1`, see docs/design/PLAN.md §5).
 
 The **live parity test** (the §5 acceptance gate during the migration) spins
 up a fresh database, a real sabre instance, and the Go server, then
@@ -34,7 +34,7 @@ PARITY=1 go test ./internal/storage/ -run TestParity -v
 ## Admin panel
 
 `calctl panel` serves a debugging UI over the same shared database
-(see [ADMIN-PLAN.md](ADMIN-PLAN.md)): principal/calendar/object inspectors, a
+(see [docs/design/ADMIN-PLAN.md](docs/design/ADMIN-PLAN.md)): principal/calendar/object inspectors, a
 privilege simulator that answers "what can user X do on path Y" through the
 production plugin chain, a scheduling/sync debugger, a consistency doctor,
 and (behind `-readonly=false`) gated setup actions — every page doubles as a
@@ -114,7 +114,7 @@ curl -fsS http://127.0.0.1:8080/health
 ## Metrics
 
 Set `-metrics-addr` (or `[server].metrics_addr`) to serve Prometheus metrics
-and Go pprof on a second plain-HTTP listener (METRICS-PLAN.md has the full
+and Go pprof on a second plain-HTTP listener (docs/design/METRICS-PLAN.md has the full
 design and metric inventory):
 
 ```sh
@@ -139,7 +139,7 @@ scrape_configs:
 ## Test corpus
 
 The port is driven red→green against fixtures extracted from sabre's own test
-suite into `testdata/corpus/` (see PLAN.md §7). Regenerate after bumping the
+suite into `testdata/corpus/` (see docs/design/PLAN.md §7). Regenerate after bumping the
 sabre checkout:
 
 ```sh

@@ -14,7 +14,7 @@ import (
 
 // TestDigestA1SeedCompatibility pins the digesta1 convention against the
 // value sabre seeds in examples/sql/pgsql.users.sql for admin/admin in realm
-// "SabreDAV" (PLAN.md §5: the realm is baked into the hash).
+// "SabreDAV" (docs/design/PLAN.md §5: the realm is baked into the hash).
 func TestDigestA1SeedCompatibility(t *testing.T) {
 	got := DigestA1("admin", "SabreDAV", "admin")
 	if want := "87fd274b7b6c01e48d7c2f965da8ddf7"; got != want {

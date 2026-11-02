@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 )
 
-// handleDoctor runs the read-only invariant checks (ADMIN-PLAN.md §3.7) and
+// handleDoctor runs the read-only invariant checks (docs/design/ADMIN-PLAN.md §3.7) and
 // reports every finding. Exit code 1 when anything is wrong, so it can sit
 // in monitoring next to `calctl health`.
 func handleDoctor(ctx context.Context, args []string) {

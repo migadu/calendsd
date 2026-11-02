@@ -1,6 +1,6 @@
 package admin
 
-// Phase B data handlers (ADMIN-PLAN.md §3.6, §3.7): scheduling inbox,
+// Phase B data handlers (docs/design/ADMIN-PLAN.md §3.6, §3.7): scheduling inbox,
 // sync-collection preview, and the doctor.
 
 import (

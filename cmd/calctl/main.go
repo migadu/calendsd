@@ -162,7 +162,7 @@ Commands:
   contacts import --bundle DIR [--only ADDR] [--shard NNN] [--workers N] [--dry-run]
                   [--resume=false] [--force-overwrite] [--force-version] [--report FILE]
                                            Import a webmail contacts export bundle (see
-                                           docs/snappymail-calserver-contacts.md); re-runnable,
+                                           docs/webmail-contacts.md); re-runnable,
                                            never deletes, --dry-run decides without writing.
                                            Exit 1 on errors or unreadable shards, 2 when
                                            principals were refused or an --only address was

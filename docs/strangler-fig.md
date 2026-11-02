@@ -4,7 +4,7 @@
 > target: calendsd may add tables and columns sabre does not know about
 > (`internal/schema/migrations/`). Kept as a record of how the cutover was run.
 
-Both servers run against the same Postgres database (PLAN.md §5), so the Go
+Both servers run against the same Postgres database (docs/design/PLAN.md §5), so the Go
 server can take over incrementally: front both with a reverse proxy and move
 routes over as confidence grows. The live parity test
 (`PARITY=1 go test ./internal/storage/ -run TestParity`) gates each routing

@@ -17,7 +17,7 @@ import (
 
 // CalendarID addresses a calendar by the sabre backend convention: the
 // shared calendars row plus the per-principal calendarinstances row
-// (PLAN.md §5). In-memory backends leave Instance empty.
+// (docs/design/PLAN.md §5). In-memory backends leave Instance empty.
 type CalendarID struct {
 	Calendar string
 	Instance string

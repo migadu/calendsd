@@ -1,9 +1,8 @@
 package main
 
 // `calctl contacts` — the calendsd half of the webmail contacts migration
-// (docs/snappymail-calserver-contacts.md). The other half is
-// scripts/snappymail-export-contacts.php in the ansible repo, which produces
-// the bundle this reads.
+// (docs/webmail-contacts.md). The other half is the webmail-side exporter,
+// which produces the bundle this reads.
 //
 // Every stage is a pure function of the bundle plus a fixed configuration, so a
 // re-run is either a no-op or a repair, never a duplication. The decisions all

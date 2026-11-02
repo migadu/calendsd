@@ -29,7 +29,7 @@ func TestRoutePattern(t *testing.T) {
 		{"/addressbooks/hans/contacts;add-member", "/", "addressbook"},
 
 		// Pinned decisions: bare roots and proxy principals are "other",
-		// not accidents (METRICS-PLAN.md §4).
+		// not accidents (docs/design/METRICS-PLAN.md §4).
 		{"/calendars", "/", "other"},
 		{"/addressbooks", "/", "other"},
 		{"/principals", "/", "other"},

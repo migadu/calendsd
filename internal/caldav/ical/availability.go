@@ -15,7 +15,7 @@ import (
 // VAVAILABILITY (RFC 7953) support: a user's working hours, stored as the
 // calendar-availability property of their schedule inbox, turn the time
 // outside those hours into BUSY-UNAVAILABLE free-busy periods
-// (VAVAILABILITY-PLAN.md §3–§4).
+// (docs/design/VAVAILABILITY-PLAN.md §3–§4).
 
 const (
 	compAvailability = "VAVAILABILITY"
@@ -54,7 +54,7 @@ func invalidAvailability(format string, args ...any) error {
 }
 
 // ValidateAvailability checks a calendar-availability value before it is
-// stored (VAVAILABILITY-PLAN.md §3.3). data must already have CRLF line
+// stored (docs/design/VAVAILABILITY-PLAN.md §3.3). data must already have CRLF line
 // endings (NormalizeCRLF). Every date-time must be anchored to a zone: a
 // floating time cannot say whose 09:00 it means.
 func ValidateAvailability(data []byte) error {
@@ -244,7 +244,7 @@ func checkDateTimes(comp *goical.Component, zones availabilityZoneSet) error {
 // (RFC 7953 §4, like sabre's FreeBusyGenerator); components of equal priority
 // combine, so time unavailable in any of them is unavailable. Every instance
 // is computed in its own zone before conversion to UTC, which is what keeps a
-// 09:00 day at 09:00 local across DST (VAVAILABILITY-PLAN.md §4.1). Errors
+// 09:00 day at 09:00 local across DST (docs/design/VAVAILABILITY-PLAN.md §4.1). Errors
 // wrap ErrInvalidAvailability.
 func unavailablePeriods(data []byte, start, end time.Time) ([]busyPeriod, error) {
 	cal, err := Decode([]byte(NormalizeCRLF(string(data))))

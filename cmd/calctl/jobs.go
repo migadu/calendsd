@@ -18,7 +18,7 @@ import (
 
 // handleJobs dispatches the generic `calctl jobs` subcommands: read-only
 // list/show and the guarded state mutations retry/cancel/reschedule/delete. It
-// operates on the durable job table (JOB-QUEUE-PLAN.md) by id and never touches
+// operates on the durable job table (docs/design/JOB-QUEUE-PLAN.md) by id and never touches
 // the encryption key or the credential — only queue state (redacted to presence).
 func handleJobs(ctx context.Context, args []string) {
 	if len(args) == 0 {

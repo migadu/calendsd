@@ -306,7 +306,7 @@ func TestAvailabilityAdvertised(t *testing.T) {
 }
 
 // A room with working hours still auto-accepts a booking outside them: the
-// auto-schedule conflict check uses plain free-busy (VAVAILABILITY-PLAN.md §1).
+// auto-schedule conflict check uses plain free-busy (docs/design/VAVAILABILITY-PLAN.md §1).
 func TestAutoScheduleIgnoresAvailability(t *testing.T) {
 	srv, backend := newAutoScheduleServer()
 	backend.Availabilities = map[string][]byte{"principals/resource1": []byte(workingHours)}

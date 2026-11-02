@@ -15,7 +15,7 @@ import (
 type xmlName = xml.Name
 
 // Property storage value types, shared with sabre's
-// PropertyStorage\Backend\PDO (PLAN.md §5). Type 3 (PHP-serialized objects)
+// PropertyStorage\Backend\PDO (docs/design/PLAN.md §5). Type 3 (PHP-serialized objects)
 // is language-specific: never written, treated as opaque on read.
 const (
 	vtString = 1
@@ -83,7 +83,7 @@ func (p *PropertyStorage) PropFindMany(ctx context.Context, paths []string) (map
 // storedProp turns a propertystorage row into the property a PropFind
 // serves: false for a name that cannot round-trip (not clark) or a value
 // type this server does not read (PHP-serialized objects, which sabre owns,
-// PLAN.md §5).
+// docs/design/PLAN.md §5).
 func storedProp(name string, value []byte, valuetype int64) (dav.StoredProp, bool) {
 	xmlName, err := davxml.ParseClark(name)
 	if err != nil {

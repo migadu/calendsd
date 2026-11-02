@@ -1,7 +1,7 @@
 // Bulk import of webmail address books into the sabre schema
-// (docs/snappymail-calserver-contacts.md § Migration). The counterpart of
-// scripts/snappymail-export-contacts.php in the ansible repo, which produces
-// the bundle this reads; `calctl contacts import` is the CLI over it.
+// (docs/webmail-contacts.md § Migration). The counterpart of the webmail-side
+// exporter, which produces the bundle this reads; `calctl contacts import` is
+// the CLI over it.
 //
 // The whole design is arranged around one property: a re-run is a no-op or a
 // repair, never a duplication. That rests on four invariants the exporter

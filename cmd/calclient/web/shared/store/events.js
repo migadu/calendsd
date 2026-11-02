@@ -265,7 +265,7 @@ export async function moveEvent(inst, to) {
 // resendInvitations re-sends the invitation to attendees whose delivery failed
 // or is stuck, by marking them SCHEDULE-FORCE-SEND=REQUEST and re-PUTting the
 // event. A plain re-save wouldn't re-send (no significant change), so this is
-// the organizer's recovery path (JOB-QUEUE-PLAN.md D5b). The request carries the
+// the organizer's recovery path (docs/design/JOB-QUEUE-PLAN.md D5b). The request carries the
 // organizer's own credentials, so the resend stays metered.
 export async function resendInvitations(inst, emails) {
   if (!emails || !emails.length) return;

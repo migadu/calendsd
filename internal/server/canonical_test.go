@@ -13,7 +13,7 @@ func TestDefaultRealmIsPinned(t *testing.T) {
 	}
 }
 
-// Canonical is compared as a string across two processes (ADMIN-PLAN.md
+// Canonical is compared as a string across two processes (docs/design/ADMIN-PLAN.md
 // §2); equivalent configurations must render identical lines.
 func TestCanonicalNormalizes(t *testing.T) {
 	variants := []Config{

@@ -1,6 +1,6 @@
 package admin
 
-// Phase C write endpoints (ADMIN-PLAN.md §3.8), all POST, all behind the
+// Phase C write endpoints (docs/design/ADMIN-PLAN.md §3.8), all POST, all behind the
 // CSRF header and the -readonly gate, all emitting a structured audit log
 // line (no audit table, per §1). Delegation and collection properties go
 // through the production backends/plugin chain; users/principals and
