@@ -479,7 +479,7 @@ func TestSettleIgnoresStaleClaim(t *testing.T) {
 	}
 
 	// A job cancelled while executing stays cancelled when its handler ends.
-	if err := (&Ops{DB: db}).Cancel(id); err != nil {
+	if err := (&Ops{DB: db}).Cancel(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 	q.process(ctx, second)

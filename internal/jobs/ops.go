@@ -51,12 +51,12 @@ type ListFilter struct {
 }
 
 // List returns matching jobs, newest first. It never selects enc_credential.
-func (o *Ops) List(f ListFilter) ([]JobRow, error) {
+func (o *Ops) List(ctx context.Context, f ListFilter) ([]JobRow, error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := o.DB.Query(`
+	rows, err := o.DB.QueryContext(ctx, `
 SELECT id, queue, worker, state,
        coalesce(args->>'recipient',''), coalesce(args->>'method',''), coalesce(args->>'uid',''),
        attempt, max_attempts, scheduled_at, inserted_at, completed_at,
@@ -100,14 +100,14 @@ SELECT id, queue, worker, state,
 // Get returns one job in full (including its inspectable args, which never hold a
 // secret — D8), or nil if there is no such id. enc_credential is reported only as
 // HasCred/KeyID, never returned.
-func (o *Ops) Get(id int64) (*JobRow, error) {
+func (o *Ops) Get(ctx context.Context, id int64) (*JobRow, error) {
 	var (
 		r     JobRow
 		raw   []byte
 		done  sql.NullTime
 		keyID sql.NullInt16
 	)
-	err := o.DB.QueryRow(`
+	err := o.DB.QueryRowContext(ctx, `
 SELECT id, queue, worker, state, args,
        coalesce(args->>'recipient',''), coalesce(args->>'method',''), coalesce(args->>'uid',''),
        coalesce(args->>'username',''), attempt, max_attempts, scheduled_at, inserted_at,
@@ -150,8 +150,8 @@ var ErrJobExecuting = errors.New("job is executing; wait for it to settle")
 // (ErrJobExecuting). For a per-user
 // job whose credential was purged, the worker will fail-safe discard on the next
 // run — callers that know the semantics (calctl imip resend) check HasCred first.
-func (o *Ops) Retry(id int64) error {
-	return o.requeue(id, `
+func (o *Ops) Retry(ctx context.Context, id int64) error {
+	return o.requeue(ctx, id, `
 UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL
  WHERE id=$1`)
 }
@@ -168,8 +168,8 @@ var ErrNewerPending = errors.New("a newer job for the same key is already pendin
 // sibling the way the queue's own retry does (reconcileSibling): a sibling of
 // the same or a newer generation wins (ErrNewerPending); an older one is
 // retired as superseded.
-func (o *Ops) requeue(id int64, update string) error {
-	tx, err := o.DB.Begin()
+func (o *Ops) requeue(ctx context.Context, id int64, update string) error {
+	tx, err := o.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (o *Ops) requeue(id int64, update string) error {
 	var worker, state string
 	var key sql.NullString
 	var gen sql.NullInt64
-	err = tx.QueryRow(`
+	err = tx.QueryRowContext(ctx, `
 SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM jobs WHERE id = $1 FOR UPDATE`,
 		id).Scan(&worker, &state, &key, &gen)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -193,7 +193,7 @@ SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM 
 		return ErrJobExecuting
 	}
 	if key.Valid {
-		superseded, err := reconcileSibling(context.Background(), tx, worker, key.String, id, gen.Int64,
+		superseded, err := reconcileSibling(ctx, tx, worker, key.String, id, gen.Int64,
 			"superseded by a newer generation re-queued via calctl")
 		if err != nil {
 			return err
@@ -202,7 +202,7 @@ SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM 
 			return ErrNewerPending
 		}
 	}
-	if _, err := tx.Exec(update, id); err != nil {
+	if _, err := tx.ExecContext(ctx, update, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -213,12 +213,12 @@ SELECT worker, state, args->>'coalesce_key', (args->>'generation')::bigint FROM 
 // unmetered `calctl imip resend --relay` fallback for a per-user send whose
 // credential is gone. Refuses a completed or executing job. It never decrypts anything; it
 // only clears the credential columns and resets state.
-func (o *Ops) RelayOverride(id int64) error {
+func (o *Ops) RelayOverride(ctx context.Context, id int64) error {
 	// The identity is rewritten explicitly: the worker refuses a per-user job
 	// without a credential (it means the credential was purged, not that a
 	// relay was intended), so dropping the secret alone would have the job
 	// discarded instead of relayed.
-	return o.requeue(id, `
+	return o.requeue(ctx, id, `
 UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=NULL, last_error=NULL,
        enc_credential=NULL, enc_nonce=NULL, key_id=NULL,
        args = args || '{"identity":"relay"}'::jsonb
@@ -227,24 +227,24 @@ UPDATE jobs SET state='available', scheduled_at=now(), attempt=0, attempted_at=N
 
 // Cancel stops delivery: marks the job discarded and NULLs any retained
 // credential (drop the secret now). Refuses a completed job.
-func (o *Ops) Cancel(id int64) error {
-	res, err := o.DB.Exec(`
+func (o *Ops) Cancel(ctx context.Context, id int64) error {
+	res, err := o.DB.ExecContext(ctx, `
 UPDATE jobs SET state='discarded', completed_at=now(),
        enc_credential=NULL, enc_nonce=NULL, key_id=NULL, last_error='cancelled via calctl'
  WHERE id=$1 AND state <> 'completed'`, id)
-	return o.mutated(id, res, err)
+	return o.mutated(ctx, id, res, err)
 }
 
 // Reschedule moves an available job's next-run time (delay it, or bring it
 // forward). Only meaningful for an available job.
-func (o *Ops) Reschedule(id int64, at time.Time) error {
-	res, err := o.DB.Exec(`UPDATE jobs SET scheduled_at=$2 WHERE id=$1 AND state='available'`, id, at)
+func (o *Ops) Reschedule(ctx context.Context, id int64, at time.Time) error {
+	res, err := o.DB.ExecContext(ctx, `UPDATE jobs SET scheduled_at=$2 WHERE id=$1 AND state='available'`, id, at)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		// Distinguish "no such job" from "not available".
-		j, gerr := o.Get(id)
+		j, gerr := o.Get(ctx, id)
 		if gerr != nil {
 			return gerr
 		}
@@ -258,8 +258,8 @@ func (o *Ops) Reschedule(id int64, at time.Time) error {
 
 // Delete hard-deletes the row (also erasing any retained credential); for pruning
 // or a mistaken enqueue.
-func (o *Ops) Delete(id int64) error {
-	res, err := o.DB.Exec(`DELETE FROM jobs WHERE id=$1`, id)
+func (o *Ops) Delete(ctx context.Context, id int64) error {
+	res, err := o.DB.ExecContext(ctx, `DELETE FROM jobs WHERE id=$1`, id)
 	if err != nil {
 		return err
 	}
@@ -271,14 +271,14 @@ func (o *Ops) Delete(id int64) error {
 
 // mutated maps a guarded (state <> 'completed') UPDATE's result to ErrNoJob /
 // ErrJobCompleted / nil.
-func (o *Ops) mutated(id int64, res sql.Result, err error) error {
+func (o *Ops) mutated(ctx context.Context, id int64, res sql.Result, err error) error {
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		return nil
 	}
-	j, gerr := o.Get(id)
+	j, gerr := o.Get(ctx, id)
 	if gerr != nil {
 		return gerr
 	}

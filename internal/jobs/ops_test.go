@@ -41,7 +41,7 @@ func TestOpsListAndRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := ops.List(ListFilter{Worker: "imip_send"})
+	rows, err := ops.List(t.Context(), ListFilter{Worker: "imip_send"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestOpsListAndRedaction(t *testing.T) {
 		t.Fatalf("List returned %d rows, want 2", len(rows))
 	}
 
-	j, err := ops.Get(id)
+	j, err := ops.Get(t.Context(), id)
 	if err != nil || j == nil {
 		t.Fatalf("Get(%d) = %v, %v", id, j, err)
 	}
@@ -81,7 +81,7 @@ func TestOpsListFailedFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := ops.List(ListFilter{Failed: true})
+	rows, err := ops.List(t.Context(), ListFilter{Failed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestOpsRetry(t *testing.T) {
 	if _, err := db.Exec(`UPDATE jobs SET state='discarded', attempt=6, last_error='gave up' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.Retry(id); err != nil {
+	if err := ops.Retry(t.Context(), id); err != nil {
 		t.Fatalf("Retry: %v", err)
 	}
 	r := getJob(t, db, id)
@@ -124,10 +124,10 @@ func TestOpsRetryRefusesCompleted(t *testing.T) {
 	if _, err := db.Exec(`UPDATE jobs SET state='completed', completed_at=now() WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.Retry(id); err != ErrJobCompleted {
+	if err := ops.Retry(t.Context(), id); err != ErrJobCompleted {
 		t.Fatalf("Retry on completed = %v, want ErrJobCompleted", err)
 	}
-	if err := ops.Retry(999999); err != ErrNoJob {
+	if err := ops.Retry(t.Context(), 999999); err != ErrNoJob {
 		t.Fatalf("Retry on missing = %v, want ErrNoJob", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestOpsRelayOverride(t *testing.T) {
 	if _, err := db.Exec(`UPDATE jobs SET state='discarded', attempt=6 WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.RelayOverride(id); err != nil {
+	if err := ops.RelayOverride(t.Context(), id); err != nil {
 		t.Fatalf("RelayOverride: %v", err)
 	}
 	r := getJob(t, db, id)
@@ -166,7 +166,7 @@ func TestOpsCancelDropsCredential(t *testing.T) {
 	ops := &Ops{DB: db}
 
 	id := enqueuePerUser(t, q, "u1", "mailto:a@x.test", "pw")
-	if err := ops.Cancel(id); err != nil {
+	if err := ops.Cancel(t.Context(), id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	r := getJob(t, db, id)
@@ -185,7 +185,7 @@ func TestOpsReschedule(t *testing.T) {
 
 	id := enqueuePerUser(t, q, "u1", "mailto:a@x.test", "pw")
 	when := time.Now().Add(90 * time.Minute).Truncate(time.Second)
-	if err := ops.Reschedule(id, when); err != nil {
+	if err := ops.Reschedule(t.Context(), id, when); err != nil {
 		t.Fatalf("Reschedule: %v", err)
 	}
 	var got time.Time
@@ -200,7 +200,7 @@ func TestOpsReschedule(t *testing.T) {
 	if _, err := db.Exec(`UPDATE jobs SET state='completed' WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.Reschedule(id, when); err == nil {
+	if err := ops.Reschedule(t.Context(), id, when); err == nil {
 		t.Error("Reschedule of a completed job should error")
 	}
 }
@@ -211,13 +211,13 @@ func TestOpsDelete(t *testing.T) {
 	ops := &Ops{DB: db}
 
 	id := enqueuePerUser(t, q, "u1", "mailto:a@x.test", "pw")
-	if err := ops.Delete(id); err != nil {
+	if err := ops.Delete(t.Context(), id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if j, _ := ops.Get(id); j != nil {
+	if j, _ := ops.Get(t.Context(), id); j != nil {
 		t.Error("row still present after Delete")
 	}
-	if err := ops.Delete(id); err != ErrNoJob {
+	if err := ops.Delete(t.Context(), id); err != ErrNoJob {
 		t.Fatalf("Delete on missing = %v, want ErrNoJob", err)
 	}
 }
@@ -233,10 +233,10 @@ func TestOpsRequeueRefusesExecuting(t *testing.T) {
 	if _, err := q.store.claim(context.Background(), "default"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.Retry(id); err != ErrJobExecuting {
+	if err := ops.Retry(t.Context(), id); err != ErrJobExecuting {
 		t.Errorf("Retry on executing = %v, want ErrJobExecuting", err)
 	}
-	if err := ops.RelayOverride(id); err != ErrJobExecuting {
+	if err := ops.RelayOverride(t.Context(), id); err != ErrJobExecuting {
 		t.Errorf("RelayOverride on executing = %v, want ErrJobExecuting", err)
 	}
 	if r := getJob(t, db, id); r.state != "executing" || r.attempt != 1 || !r.credSet {
