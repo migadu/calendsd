@@ -7,8 +7,8 @@
 // The calendar home is used (not the principal) because it is unambiguously
 // owner-writable: CalendarHome grants {DAV:}write, which aggregates
 // write-properties, so a PROPPATCH of a dead property there is permitted. The
-// property lives in calclient's private namespace, so other DAV clients (and
-// sabre) round-trip it untouched.
+// property lives in calclient's private namespace, so other DAV clients
+// round-trip it untouched.
 
 import * as dav from '../dav.js';
 import { state, bus, savePrefs } from './core.js';

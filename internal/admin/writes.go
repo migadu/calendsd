@@ -309,8 +309,7 @@ func (a *App) propPatch(w http.ResponseWriter, r *http.Request) {
 
 // propstatsOK reports whether a PROPPATCH multistatus body carries only 2xx
 // propstats. The chain answers a successful set with "200 OK" but a
-// successful remove with "204 No Content" (sabre's convention, see
-// dav.PropPatch), so checking for one literal status is wrong.
+// successful remove with "204 No Content" (see dav.PropPatch), so checking for one literal status is wrong.
 func propstatsOK(body []byte) bool {
 	var ms xmlMultistatus
 	if err := xml.Unmarshal(body, &ms); err != nil {

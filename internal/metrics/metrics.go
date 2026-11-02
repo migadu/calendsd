@@ -175,7 +175,7 @@ func (s *Set) RegisterDBStats(db *sql.DB) {
 // state (calserver_jobs_total{state}), queried once per scrape. A rising
 // 'available' depth means the workers are falling behind; a rising 'discarded'
 // count means sends are giving up. Safe when the jobs table is absent (a
-// sabre-only database): the query fails and the collector reports nothing.
+// database the migrations have not reached): the query fails and the collector reports nothing.
 func (s *Set) RegisterJobDepth(db *sql.DB) {
 	if s == nil {
 		return

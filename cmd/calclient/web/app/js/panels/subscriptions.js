@@ -13,8 +13,8 @@ export default {
   render(main) {
     main.append(html`<div>
       <h2>Webcal subscriptions</h2>
-      <p class="hint">The Postgres storage backend does not store subscriptions
-      (sabre PDO parity): expect a 403 "backend does not support subscriptions"
+      <p class="hint">The Postgres storage backend does not store subscriptions:
+      expect a 403 "backend does not support subscriptions"
       in the drawer — the request itself is the demonstration.</p>
       <fieldset><legend>Create (MKCALENDAR with {cs}subscribed + {cs}source)</legend>
         <label class="fld">uri name<input id="su-name" value="holidays"></label>
