@@ -35,6 +35,27 @@ func sha512Hash() []byte {
 	return h.Sum(nil)
 }
 
+const (
+	sha512CryptHash = "$6$Zx9.saltsalt$9Uq3l32gUnpxduLogyYsUQaSQH5hrAQs5R5tKEbMTST9TZOL1kKP0PgIPV6eKpkkKp93XSWWjzB2q6Vt5u4W1."
+	sha256CryptHash = "$5$Zx9.saltsalt$poUSdv8wxS8gsx6YwmkTJf.O1XZfg20R/QLH6z2TTJD"
+)
+
+// TestShaCryptSpecVectors pins the test vectors of Drepper's SHA-crypt spec,
+// including salts longer than 16 bytes and custom rounds.
+func TestShaCryptSpecVectors(t *testing.T) {
+	for _, tt := range []struct{ hash, pass string }{
+		{"$5$saltstring$5B8vYYiY.CVt1RlTTf8KbXBH3hsxY/GNooZaBBGWEc5", "Hello world!"},
+		{"$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1", "Hello world!"},
+		{"$6$saltstringsaltstring$e.3mR68CqZEpesEX1HlFZT6sEanSOjM/b5UoDyDo00a8syek2cJldMjrbtKP86.FJvzluVR7nc3DNzelAwTxj.", "Hello world!"},
+		{"$5$rounds=10000$saltstringsaltstring$3xv.VbSHBb41AL9AvLeujZkZRBAwqFMz2.opqey6IcA", "Hello world!"},
+		{"$6$rounds=10000$saltstringsaltstring$OW1/O6BYHV6BcXZu8QVeXbDWra3Oeqh0sbHbbMCVNSnCM/UrjmM0Dp8vOuZeHBy/YTBmSK6H9qs/y3RnOaw5v.", "Hello world!"},
+	} {
+		if err := Verify(tt.hash, tt.pass); err != nil {
+			t.Errorf("Verify(%q) = %v, want nil", tt.hash, err)
+		}
+	}
+}
+
 func TestVerifyMatch(t *testing.T) {
 	bc := bcryptHash(t)
 	tests := []struct {
@@ -53,6 +74,13 @@ func TestVerifyMatch(t *testing.T) {
 		{"SHA512 explicit b64", "{SHA512.b64}" + base64.StdEncoding.EncodeToString(sha512Hash())},
 		{"SHA512 hex lowercase", "{SHA512.hex}" + hex.EncodeToString(sha512Hash())},
 		{"SHA512 HEX uppercase", "{SHA512.HEX}" + hex.EncodeToString(sha512Hash())},
+		// SHA-crypt vectors from `openssl passwd -6/-5 -salt Zx9.saltsalt`.
+		{"SHA512-CRYPT", "{SHA512-CRYPT}" + sha512CryptHash},
+		{"SHA256-CRYPT", "{SHA256-CRYPT}" + sha256CryptHash},
+		{"bare SHA512-CRYPT", sha512CryptHash},
+		{"CRYPT SHA512", "{CRYPT}" + sha512CryptHash},
+		{"CRYPT bcrypt", "{CRYPT}" + bc},
+		{"SHA512-CRYPT explicit default rounds", "{SHA512-CRYPT}$6$rounds=5000$Zx9.saltsalt$" + sha512CryptHash[len("$6$Zx9.saltsalt$"):]},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,9 +97,11 @@ func TestVerifyMatch(t *testing.T) {
 func TestVerifyUnsupportedScheme(t *testing.T) {
 	for _, hash := range []string{
 		"{MD5-CRYPT}$1$salt$digest",
-		"{CRYPT}$2y$10$abcdefghijklmnopqrstuv", // Dovecot {CRYPT}-wrapped bcrypt is not recognized
-		"{SSHA512.plain}whatever",              // unknown encoding suffix
-		"{BLF-CRYPT.b64}whatever",              // encoding suffix on a crypt-format scheme
+		"{CRYPT}$1$salt$digest",        // MD5 crypt under {CRYPT}
+		"{CRYPT}abJnggxhB/yWI",         // traditional DES crypt
+		"{SHA512-CRYPT}$5$salt$digest", // payload of the other variant
+		"{SSHA512.plain}whatever",      // unknown encoding suffix
+		"{BLF-CRYPT.b64}whatever",      // encoding suffix on a crypt-format scheme
 		"plaintext",
 		"{unterminated",
 		"",
@@ -92,6 +122,8 @@ func TestVerifyMalformed(t *testing.T) {
 		{"{SSHA512}" + base64.StdEncoding.EncodeToString([]byte("too short")), "SSHA512"},
 		{"{SHA512}" + base64.StdEncoding.EncodeToString([]byte("wrong length")), "SHA512"},
 		{"$2a$xx$garbage", "bcrypt"},
+		{"{SHA512-CRYPT}$6$saltonly", "SHA-crypt"},
+		{"$6$rounds=many$salt$digest", "SHA-crypt"},
 	}
 	for _, tt := range tests {
 		err := Verify(tt.hash, password)

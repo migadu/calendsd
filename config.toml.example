@@ -79,7 +79,8 @@ token = ""              # Bearer token rcptd requires (its auth_token). May also
 # format, one "user:{SCHEME}hash[:uid:gid:gecos:home:shell:extra]" line per
 # account (only the first two fields are read; generate hashes with
 # `doveadm pw -s BLF-CRYPT`). Supported schemes: BLF-CRYPT / bare $2y$ bcrypt,
-# SSHA512, SHA512. The file is re-read when it changes. Like rcptd this is
+# SHA512-CRYPT ($6$), SHA256-CRYPT ($5$), CRYPT with either of those, SSHA512,
+# SHA512 (DES and MD5 crypt are not). The file is re-read when it changes. Like rcptd this is
 # Basic-only — front it with TLS and pair with calendarserver.auto_provision.
 # Mutually exclusive with [server.rcptd] url. Set it in [server] above:
 #   passwd_file = "/usr/local/etc/dovecot/users"

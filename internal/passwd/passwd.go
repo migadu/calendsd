@@ -1,5 +1,5 @@
 // Package passwd verifies passwords against Dovecot-style password hashes
-// (bcrypt/BLF-CRYPT, SSHA512, SHA512), as served by rcptd or read from a
+// (bcrypt/BLF-CRYPT, SHA512-CRYPT, SHA256-CRYPT, SSHA512, SHA512), as served by rcptd or read from a
 // Dovecot passwd-file for the hash-verifying authentication backend.
 package passwd
 
@@ -34,6 +34,10 @@ func Verify(hashedPassword, password string) error {
 		strings.HasPrefix(hashedPassword, "$2y$") {
 		return verifyBcrypt(hashedPassword, password)
 	}
+	// So does a bare SHA-crypt one, as in /etc/shadow.
+	if strings.HasPrefix(hashedPassword, "$5$") || strings.HasPrefix(hashedPassword, "$6$") {
+		return verifyShaCrypt(hashedPassword, password)
+	}
 	scheme, encoding, payload := splitScheme(hashedPassword)
 	switch scheme {
 	case "SSHA512":
@@ -46,6 +50,20 @@ func Verify(hashedPassword, password string) error {
 			return ErrUnsupportedScheme
 		}
 		return verifyBcrypt(payload, password)
+	case "SHA512-CRYPT", "SHA256-CRYPT", "CRYPT":
+		// The payload names its own algorithm ($6$, $5$, or bcrypt's $2…$
+		// under CRYPT); DES and MD5 crypt are not supported.
+		if encoding != "" {
+			return ErrUnsupportedScheme
+		}
+		if strings.HasPrefix(payload, "$2") && scheme == "CRYPT" {
+			return verifyBcrypt(payload, password)
+		}
+		if (scheme == "SHA512-CRYPT" && !strings.HasPrefix(payload, "$6$")) ||
+			(scheme == "SHA256-CRYPT" && !strings.HasPrefix(payload, "$5$")) {
+			return ErrUnsupportedScheme
+		}
+		return verifyShaCrypt(payload, password)
 	default:
 		// Includes the empty scheme from inputs like "{}..." or no prefix at all.
 		return ErrUnsupportedScheme
