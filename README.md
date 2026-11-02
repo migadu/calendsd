@@ -56,8 +56,9 @@ calendsd -db "$DSN" -auto-provision     # listens on :8080
 
 Point a CalDAV/CardDAV client at `http://localhost:8080/` and log in as
 `alice`. `-auto-provision` gives each user a default calendar and address
-book on first login. Without `-db`, calendsd runs on an in-memory store, which is handy
-for a quick look and loses everything on exit.
+book on first login. calendsd needs Postgres for calendars and contacts;
+without `-db` it serves only a bare in-memory WebDAV tree for protocol test
+suites such as litmus.
 
 For anything beyond a quick look:
 
