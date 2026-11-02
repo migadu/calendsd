@@ -4,7 +4,6 @@ package storage_test
 // bounds, NULL-safe) against real Postgres. Skips when the dev DB is absent.
 
 import (
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -79,15 +78,6 @@ func TestCalendarQueryPrefilter(t *testing.T) {
 	if len(objs) != 2 {
 		t.Errorf("Objects with a bound past 2038 = %d rows, want 2", len(objs))
 	}
-}
-
-func mustGlob(t *testing.T, pattern string) []string {
-	t.Helper()
-	files, _ := filepath.Glob(pattern)
-	if len(files) == 0 {
-		t.Fatalf("no files match %s", pattern)
-	}
-	return files
 }
 
 func equalStrings(a, b []string) bool {

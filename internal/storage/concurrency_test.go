@@ -4,7 +4,7 @@ package storage_test
 // calendar must produce unique, contiguous sync-tokens. A lost-update on the
 // synctoken counter — the race the row lock in recordChange prevents —
 // would duplicate a token and skip a value, silently losing a change from a
-// client's sync. Postgres-only (no php/sabre needed):
+// client's sync. Needs the dev Postgres:
 //
 //	go test ./internal/storage/ -run TestSyncTokenConcurrency
 //
@@ -13,8 +13,6 @@ package storage_test
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"sync"
 	"testing"
@@ -95,27 +93,10 @@ func TestSyncTokenConcurrency(t *testing.T) {
 	}
 }
 
-// pgOnlyPrereqsMissing reports why the Postgres-only test can't run: it needs
-// the psql tooling and the dev Postgres, but not php/sabre.
 // mustExec runs SQL (several statements are fine) against a test database.
 func mustExec(t *testing.T, db *sql.DB, query string) {
 	t.Helper()
 	if _, err := db.Exec(query); err != nil {
 		t.Fatalf("%v\n%s", err, query)
 	}
-}
-
-func pgOnlyPrereqsMissing() string {
-	for _, bin := range []string{"psql", "createdb", "dropdb"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			return bin + " not on PATH"
-		}
-	}
-	if os.Getenv("PGHOST") == "" {
-		return "PGHOST not set"
-	}
-	if err := exec.Command("pg_isready", "-h", os.Getenv("PGHOST")).Run(); err != nil {
-		return "postgres not reachable (run scripts/dev-db.sh start)"
-	}
-	return ""
 }
