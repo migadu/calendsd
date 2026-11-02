@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 // TestMockBackendConcurrentUse: every mock method takes the same lock, so

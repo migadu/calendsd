@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/contactsapi"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/contactsapi"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // stalledDB returns a *sql.DB whose every query hangs until its context ends.

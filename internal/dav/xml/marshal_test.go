@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/dav/xml/xmltest"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/dav/xml/xmltest"
 )
 
 // TestMultistatusMarshal: our writer's output must be semantically equal to

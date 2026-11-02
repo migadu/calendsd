@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
 )
 
 func proxyServer(t *testing.T, backend *acl.MemoryBackend, loginAs string) *dav.Server {

@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"strings"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // Free-busy visibility (VAVAILABILITY-PLAN.md §10): who may see the owner's

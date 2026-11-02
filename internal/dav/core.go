@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/pathutil"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // CorePlugin implements the baseline WebDAV protocol behavior, mirroring

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 // DomainPolicy reads domain_scheduling_policy.

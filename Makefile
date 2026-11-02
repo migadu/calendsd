@@ -11,9 +11,9 @@ REALM ?= SabreDAV
 VERSION   ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS    = -ldflags "-X calendsd/internal/version.Version=$(VERSION) \
-             -X calendsd/internal/version.Commit=$(COMMIT) \
-             -X calendsd/internal/version.Date=$(BUILDTIME)"
+LDFLAGS    = -ldflags "-X github.com/migadu/calendsd/internal/version.Version=$(VERSION) \
+             -X github.com/migadu/calendsd/internal/version.Commit=$(COMMIT) \
+             -X github.com/migadu/calendsd/internal/version.Date=$(BUILDTIME)"
 # DSN for the shared dev Postgres started by scripts/dev-db.sh.
 DB    ?= postgres://$(USER)@/calserver?host=$(CURDIR)/.dev/pg
 

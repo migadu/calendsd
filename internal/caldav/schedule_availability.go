@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // Working hours (VAVAILABILITY-PLAN.md §3): the inbox's calendar-availability

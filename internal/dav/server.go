@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/metrics"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // Server is the WebDAV protocol engine: an http.Handler dispatching methods

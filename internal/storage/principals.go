@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/acl"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/acl"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // Principals is the principal backend over the sabre schema. Port of

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // SimpleFile is a read-only file: deletion and renaming are forbidden, like

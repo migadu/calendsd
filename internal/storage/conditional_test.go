@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // UpdateCalendarObjectIfMatch folds the ETag check into the UPDATE predicate

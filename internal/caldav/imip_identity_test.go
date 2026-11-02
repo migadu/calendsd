@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/jobs"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 func identityPlugin(mailer *spyMailer, um *spyUserMailer, wb *writeBackRec) *caldav.IMipPlugin {

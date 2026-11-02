@@ -25,10 +25,10 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/contactsapi"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/contactsapi"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func repoRoot() string {

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/caldav"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
 )
 
 // sharedSharing builds two servers (one per actor) over one shared backend,

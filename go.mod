@@ -1,4 +1,4 @@
-module calendsd
+module github.com/migadu/calendsd
 
 go 1.26.10
 

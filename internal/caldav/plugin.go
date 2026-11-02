@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 var (

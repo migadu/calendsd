@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav/ical"
 )
 
 // objectColumns surfaces a legacy row's NULL etag as the md5 of its data, the

@@ -4,10 +4,10 @@ import (
 	"encoding/xml"
 	"testing"
 
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // PropFindMany reads what PropFind reads for each path, in one query, and

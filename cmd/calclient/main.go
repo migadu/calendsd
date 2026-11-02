@@ -18,8 +18,8 @@ import (
 	"path"
 	"time"
 
-	"calendsd/internal/logging"
-	"calendsd/internal/version"
+	"github.com/migadu/calendsd/internal/logging"
+	"github.com/migadu/calendsd/internal/version"
 )
 
 // Only the three served asset trees — never `web` wholesale, which would pull

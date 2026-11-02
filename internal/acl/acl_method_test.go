@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/acl"
 )
 
 // TestACLMethodEmptyBody: an ACL request with no body is a 400, matching

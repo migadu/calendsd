@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // lookupsDB builds a scratch database with the full schema, runs seed, and

@@ -18,16 +18,16 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/caldav"
-	"calendsd/internal/carddav"
-	"calendsd/internal/contactsapi"
-	"calendsd/internal/dav"
-	"calendsd/internal/jobs"
-	"calendsd/internal/metrics"
-	"calendsd/internal/push"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/contactsapi"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/push"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // DefaultRealm is the auth realm when none is configured. It must never

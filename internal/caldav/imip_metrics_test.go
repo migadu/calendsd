@@ -9,9 +9,9 @@ import (
 	goical "github.com/emersion/go-ical"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 type failingMailer struct{}

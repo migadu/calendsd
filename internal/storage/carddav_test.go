@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"testing"
 
-	"calendsd/internal/dav"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // openCardDAVScratchDB creates a fresh database from sabre's schema files and

@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // --- Dashboard (§3.1) ---

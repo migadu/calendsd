@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/caldav/ical"
 )
 
 // An RDATE-only event recurs, so a VALARM time-range must look at the alarms

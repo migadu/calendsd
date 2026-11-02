@@ -12,8 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"calendsd/internal/config"
-	"calendsd/internal/version"
+	"github.com/migadu/calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/version"
 )
 
 // globalConfig holds the loaded config file; all-zero when no file was found

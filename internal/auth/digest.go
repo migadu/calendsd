@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // DigestBackend authenticates HTTP Digest credentials (RFC 2617, MD5 +

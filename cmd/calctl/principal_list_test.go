@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/acl"
 )
 
 // `principal list` pages: one page with the cursor of the next, or with

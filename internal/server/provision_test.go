@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // stalledPrincipals is a Principals store whose every query hangs until its

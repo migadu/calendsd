@@ -14,11 +14,11 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/schema"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/schema"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 const metaEvent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +

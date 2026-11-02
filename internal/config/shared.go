@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // DefaultConfigPaths are the locations searched, in order, for a config file

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/carddav"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
 )
 
 // twoUserServer builds a CardDAV server where user1 and user2 each own an

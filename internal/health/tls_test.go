@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/config"
 )
 
 // TestCheckServerVerifiesCertName serves the DAV listener with a certificate

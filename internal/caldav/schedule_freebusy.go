@@ -15,9 +15,9 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // HandleMethod implements the outbox POST (RFC 6638 §5).

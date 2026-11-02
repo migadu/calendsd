@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"calendsd/internal/health"
+	"github.com/migadu/calendsd/internal/health"
 )
 
 // healthTimeout bounds the one-shot database work of the read-only commands

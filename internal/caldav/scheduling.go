@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // SchedulingObjectInfo is one message in a principal's schedule inbox.

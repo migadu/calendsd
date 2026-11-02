@@ -3,8 +3,8 @@ package storage_test
 import (
 	"testing"
 
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // Deleting an account also drops its share notifications (received and

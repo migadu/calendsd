@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // AddressBookRoot is the /addressbooks collection: one home per principal.

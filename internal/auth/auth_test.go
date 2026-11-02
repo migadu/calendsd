@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // TestDigestA1SeedCompatibility pins the digesta1 convention against the

@@ -20,10 +20,10 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/caldav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // sharingDB builds a scratch database (sabre schema + calendsd extensions)

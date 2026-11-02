@@ -13,7 +13,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 func openLockDB(t *testing.T, dbName string) *sql.DB {

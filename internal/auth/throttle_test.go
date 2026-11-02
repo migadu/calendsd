@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // rejecting is a Basic backend that accepts one password.

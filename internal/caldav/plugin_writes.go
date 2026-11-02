@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // InterceptWrite implements dav.WriteInterceptor for calendar-object PUTs,

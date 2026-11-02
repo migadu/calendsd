@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"calendsd/internal/metrics"
-	"calendsd/internal/passwd"
+	"github.com/migadu/calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/passwd"
 )
 
 // RcptdBackend authenticates HTTP Basic credentials against an rcptd daemon's

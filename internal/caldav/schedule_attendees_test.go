@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/caldav/ical"
 )
 
 func TestAttendeesOverCap(t *testing.T) {

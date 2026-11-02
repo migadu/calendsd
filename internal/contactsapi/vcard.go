@@ -6,7 +6,7 @@ import (
 
 	vcard "github.com/emersion/go-vcard"
 
-	"calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/carddav"
 )
 
 // parsedCard is what the API needs out of a vCard: enough to search, sort,

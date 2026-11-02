@@ -1,7 +1,6 @@
 package corpus
 
 import (
-	"calendsd/internal/dav/xml/xmltest"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -12,7 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/xml/xmltest"
 )
 
 // unreplayable lists tests whose behavior depends on event listeners the PHP

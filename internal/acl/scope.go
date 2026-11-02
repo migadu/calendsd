@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"calendsd/internal/dav"
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 var _ dav.ChildScopeHook = (*Plugin)(nil)

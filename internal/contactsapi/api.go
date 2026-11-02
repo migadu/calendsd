@@ -29,8 +29,8 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // Options tune the API. Zero values take the documented defaults.

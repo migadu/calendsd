@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // suggestions is GetSuggestions: ranked {email, name} pairs for the address

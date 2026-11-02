@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	davxml "calendsd/internal/dav/xml"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // TempFileFilterPlugin intercepts the garbage files operating systems and

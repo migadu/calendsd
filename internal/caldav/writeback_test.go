@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 const writeBackEvent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n" +

@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"calendsd/internal/dav"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // Backend verifies request credentials. Port of sabre's

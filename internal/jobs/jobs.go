@@ -29,7 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calendsd/internal/pgdial"
+	"github.com/migadu/calendsd/internal/pgdial"
 )
 
 // notifyChannel is the LISTEN/NOTIFY channel an Enqueue pings so an idle worker

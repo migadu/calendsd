@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 const domainCorpus = `

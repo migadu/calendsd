@@ -14,8 +14,8 @@ import (
 	"net/http/httptest"
 	"strings"
 
-	"calendsd/internal/acl"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/acl"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // adminViewPrincipal matches the AdminPrincipals list hardcoded in

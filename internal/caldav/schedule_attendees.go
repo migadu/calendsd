@@ -6,9 +6,9 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // DefaultMaxAttendees caps the distinct ATTENDEEs one calendar object may

@@ -16,9 +16,9 @@ import (
 	"sync"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/jobs"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // fakeDurable records Enqueue calls without a database, to assert the enqueue-

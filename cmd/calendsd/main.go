@@ -16,16 +16,16 @@ import (
 	"syscall"
 	"time"
 
-	"calendsd/internal/config"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
-	"calendsd/internal/jobs"
-	"calendsd/internal/logging"
-	"calendsd/internal/metrics"
-	"calendsd/internal/push"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/version"
+	"github.com/migadu/calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/logging"
+	"github.com/migadu/calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/push"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/version"
 )
 
 func main() {

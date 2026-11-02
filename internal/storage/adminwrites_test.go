@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // TestPurgeExpiredKeepsTombstoneOnFailedCascade covers PurgeExpired claiming

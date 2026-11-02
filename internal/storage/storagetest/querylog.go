@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"calendsd/internal/pgdial"
+	"github.com/migadu/calendsd/internal/pgdial"
 )
 
 // QueryLog records the text of every statement run on a database opened by

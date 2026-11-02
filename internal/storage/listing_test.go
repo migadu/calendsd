@@ -6,10 +6,10 @@ package storage_test
 import (
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/metrics"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestListingsAreTimedAndSingleQuery(t *testing.T) {

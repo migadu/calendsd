@@ -10,8 +10,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"calendsd/internal/dav"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // stubBackend authenticates every request as a fixed principal when ok.

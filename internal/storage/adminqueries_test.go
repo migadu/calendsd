@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/caldav"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestAdminQueries(t *testing.T) {

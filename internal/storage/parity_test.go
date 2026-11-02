@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/schema"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/schema"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 const (

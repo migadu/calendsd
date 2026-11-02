@@ -13,7 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/jobs"
 )
 
 // handleJobs dispatches the generic `calctl jobs` subcommands: read-only

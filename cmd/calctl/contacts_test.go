@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // A report that cannot be written must surface from close, not vanish: the

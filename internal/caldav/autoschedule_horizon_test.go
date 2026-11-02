@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 func pinClock(srv *dav.Server, at time.Time) {

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // The query log sees every statement a test runs through the logged handle,

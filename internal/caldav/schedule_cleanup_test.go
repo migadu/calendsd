@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/caldav/ical"
 )
 
 // A PUT that stashes a deferred send in InterceptWrite but never reaches

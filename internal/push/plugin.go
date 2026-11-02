@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/carddav"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // subscriptionsPrefix is the base-relative path space subscription resources

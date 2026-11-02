@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"testing"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 type mappedWrites struct {

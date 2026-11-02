@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // CalendarRoot is the /calendars collection: one CalendarHome per principal.

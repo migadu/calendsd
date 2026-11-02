@@ -10,8 +10,8 @@ import (
 	"errors"
 	"strconv"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // changeLog names the tables behind one kind of synced collection.

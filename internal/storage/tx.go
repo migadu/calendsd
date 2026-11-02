@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // ErrNotFound is returned when an update or delete matched no row — the

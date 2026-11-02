@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestPrincipalsPage(t *testing.T) {

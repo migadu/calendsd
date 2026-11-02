@@ -20,10 +20,10 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
-	"calendsd/internal/jobs"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // Mailer sends an email. Implementations wrap SMTP or a test spy.

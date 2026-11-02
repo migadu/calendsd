@@ -25,7 +25,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 func handleContacts(ctx context.Context, args []string) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // DepthInfinity is the parsed value of "Depth: infinity".

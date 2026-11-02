@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // Share access levels and invite statuses, mirroring sabre's

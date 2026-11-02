@@ -9,7 +9,6 @@ package jobs
 
 import (
 	"bytes"
-	"calendsd/internal/storage/storagetest"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -21,6 +20,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver
+
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func testDSN(dbName string) string {

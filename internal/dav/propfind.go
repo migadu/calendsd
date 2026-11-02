@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	davxml "calendsd/internal/dav/xml"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // PropFind tracks requested properties and their resolved values for one

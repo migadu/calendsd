@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // TestPrincipalsByPrefix pins the listing now filtered in SQL: direct

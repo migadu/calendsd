@@ -2,7 +2,6 @@ package admin
 
 import (
 	"bufio"
-	"calendsd/internal/auth"
 	"context"
 	"fmt"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/migadu/calendsd/internal/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 

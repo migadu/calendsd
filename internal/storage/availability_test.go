@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/schema"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/schema"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestCalendarAvailability(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 
 	goical "github.com/emersion/go-ical"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // maxFilterDepth caps element nesting in a REPORT filter body. Real CalDAV

@@ -19,9 +19,9 @@ import (
 	"sync"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestSyncTokenConcurrency(t *testing.T) {

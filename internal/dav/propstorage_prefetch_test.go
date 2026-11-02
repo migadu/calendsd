@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	davxml "calendsd/internal/dav/xml"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // prefetchStore is memPropStore as a PropPrefetcher, counting both kinds of

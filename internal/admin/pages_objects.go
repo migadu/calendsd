@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/caldav/ical"
-	"calendsd/internal/carddav"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/caldav/ical"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // --- Object browser (§3.4) ---

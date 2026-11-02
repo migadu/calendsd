@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // CalendarID addresses a calendar by the sabre backend convention: the

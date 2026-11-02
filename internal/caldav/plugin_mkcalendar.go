@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // mkcalendar creates a calendar collection (RFC 4791 §5.3.1).

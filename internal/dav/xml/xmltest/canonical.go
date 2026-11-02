@@ -3,13 +3,14 @@
 package xmltest
 
 import (
-	davxml "calendsd/internal/dav/xml"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // Canonicalize reduces an XML document to a deterministic textual form for

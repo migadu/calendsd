@@ -7,13 +7,13 @@ import (
 	"os"
 	"time"
 
-	"calendsd/internal/admin"
-	"calendsd/internal/config"
-	"calendsd/internal/dav"
-	"calendsd/internal/logging"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/version"
+	"github.com/migadu/calendsd/internal/admin"
+	"github.com/migadu/calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/logging"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/version"
 )
 
 // defaultPanelAddr is loopback and clear of calendsd's own listeners: 8080

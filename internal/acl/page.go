@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"calendsd/internal/pathutil"
+	"github.com/migadu/calendsd/internal/pathutil"
 )
 
 // DefaultPageSize is the page a PageRequest without a Limit gets.

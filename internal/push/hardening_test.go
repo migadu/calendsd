@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 func TestUpsertEnforcesPerPrincipalCap(t *testing.T) {

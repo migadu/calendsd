@@ -9,12 +9,12 @@ import (
 	"context"
 	"net/http"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/caldav"
-	"calendsd/internal/carddav"
-	"calendsd/internal/dav"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // Store is the read-only aggregate access the panel needs beyond the

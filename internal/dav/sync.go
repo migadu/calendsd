@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	davxml "calendsd/internal/dav/xml"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // SyncTokenPrefix is the client-facing token prefix, identical to sabre's

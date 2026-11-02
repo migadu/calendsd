@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // BasicBackend authenticates HTTP Basic credentials. The validator receives

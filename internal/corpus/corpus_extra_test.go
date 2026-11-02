@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/carddav"
 )
 
 // --- corpus.go ---

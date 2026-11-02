@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // TestDoctorScanCapInSQL pins the scan cap at its boundaries now that the

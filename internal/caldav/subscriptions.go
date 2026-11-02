@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 
-	davxml "calendsd/internal/dav/xml"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
 )
 
 // SubscriptionInfo is one calendar subscription (a server-stored reference

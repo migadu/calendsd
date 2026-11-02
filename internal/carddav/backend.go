@@ -10,7 +10,7 @@ import (
 	"encoding/xml"
 	"sort"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // AddressBookInfo describes one address book of a principal.

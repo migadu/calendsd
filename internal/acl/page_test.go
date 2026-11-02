@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/acl"
 )
 
 // The Go paging that PagePrincipals applies over a backend without keyset

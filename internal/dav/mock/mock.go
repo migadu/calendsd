@@ -11,7 +11,7 @@ import (
 	"io"
 	"time"
 
-	"calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav"
 )
 
 // Collection is an in-memory collection. Port of Sabre\DAV\Mock\Collection.

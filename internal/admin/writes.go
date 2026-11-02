@@ -17,10 +17,10 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/config"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/config"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // Writes is the §1 carve-out surface; *storage.AdminWrites implements it,

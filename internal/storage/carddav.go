@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/carddav"
-	"calendsd/internal/dav"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/dav"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // CardDAV is the address book backend over the sabre schema. Port of

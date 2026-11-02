@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 // CalDAV satisfies the CalDAV sharing backends so the SharingPlugin's

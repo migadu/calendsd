@@ -9,8 +9,8 @@ import (
 	"errors"
 	"strings"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 var (

@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 // openContactsScratchDB creates a fresh database from sabre's schema files plus

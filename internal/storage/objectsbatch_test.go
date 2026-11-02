@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
-	"calendsd/internal/storage/storagetest"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage/storagetest"
 )
 
 func TestQueryObjectsIsBatchedAndOrdered(t *testing.T) {

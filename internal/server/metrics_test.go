@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 func TestWrapMetricsNilSet(t *testing.T) {

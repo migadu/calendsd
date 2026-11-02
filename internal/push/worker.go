@@ -13,9 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calendsd/internal/caldav"
-	"calendsd/internal/dav"
-	"calendsd/internal/pgdial"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/pgdial"
 )
 
 // coalesceWindow batches a burst of notifications for one collection into a

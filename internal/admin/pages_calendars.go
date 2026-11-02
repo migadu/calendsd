@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // --- Calendar & address book inspectors (§3.3) ---

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/auth"
-	"calendsd/internal/contactsapi"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/contactsapi"
 )
 
 // passwordAuth rejects with the backends' real bad-credentials error, the

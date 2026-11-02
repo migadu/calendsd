@@ -30,10 +30,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"calendsd/internal/config"
-	"calendsd/internal/pgdial"
-	"calendsd/internal/schema"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/pgdial"
+	"github.com/migadu/calendsd/internal/schema"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // DefaultTimeout bounds each check.

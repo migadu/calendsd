@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/auth"
-	"calendsd/internal/caldav"
-	"calendsd/internal/dav"
-	"calendsd/internal/dav/mock"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/dav"
+	"github.com/migadu/calendsd/internal/dav/mock"
 )
 
 // freeBusyServer builds a server where user1 and user2 share a mail domain,

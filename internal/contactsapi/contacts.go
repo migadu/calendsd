@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"calendsd/internal/carddav"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/carddav"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // contact is the wire form of one card. id is the cards row's serial — a

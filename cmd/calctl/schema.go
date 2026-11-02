@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"calendsd/internal/schema"
+	"github.com/migadu/calendsd/internal/schema"
 )
 
 // handleSchema runs the schema migrations embedded in this binary

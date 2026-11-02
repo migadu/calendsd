@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // openAdminQueries connects to the shared Postgres database and returns the

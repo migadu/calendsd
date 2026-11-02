@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/config"
 )
 
 func TestOptionsFromConfig(t *testing.T) {

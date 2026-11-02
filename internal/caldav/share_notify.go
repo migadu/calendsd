@@ -27,10 +27,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"calendsd/internal/acl"
-	davxml "calendsd/internal/dav/xml"
-	"calendsd/internal/jobs"
-	"calendsd/internal/metrics"
+	"github.com/migadu/calendsd/internal/acl"
+	davxml "github.com/migadu/calendsd/internal/dav/xml"
+	"github.com/migadu/calendsd/internal/jobs"
+	"github.com/migadu/calendsd/internal/metrics"
 )
 
 // ShareNotifier emails a local principal that a calendar was shared with them.

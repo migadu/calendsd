@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"calendsd/internal/caldav"
+	"github.com/migadu/calendsd/internal/caldav"
 )
 
 // selfSignedTLS returns a *tls.Config usable as both server (Certificates) and

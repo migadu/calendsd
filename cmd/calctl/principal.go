@@ -9,12 +9,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"calendsd/internal/acl"
-	"calendsd/internal/admin"
-	"calendsd/internal/auth"
-	"calendsd/internal/config"
-	"calendsd/internal/server"
-	"calendsd/internal/storage"
+	"github.com/migadu/calendsd/internal/acl"
+	"github.com/migadu/calendsd/internal/admin"
+	"github.com/migadu/calendsd/internal/auth"
+	"github.com/migadu/calendsd/internal/config"
+	"github.com/migadu/calendsd/internal/server"
+	"github.com/migadu/calendsd/internal/storage"
 )
 
 // handlePrincipal dispatches the principal subcommands. Reads go through the
