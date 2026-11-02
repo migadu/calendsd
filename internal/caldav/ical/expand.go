@@ -11,9 +11,8 @@ import (
 // Expand rewrites a calendar so every VEVENT occurrence within [start, end)
 // becomes a standalone instance: recurrence rules stripped, overridden
 // instances merged in, all touched date-times converted to UTC, VTIMEZONEs
-// dropped. Port of vobject's VCalendar::expand, which backs calendar-data
-// <C:expand> (RFC 4791 §9.6.5). loc resolves floating times (the calendar's
-// timezone).
+// dropped. It backs calendar-data <C:expand> (RFC 4791 §9.6.5). loc resolves
+// floating times (the calendar's timezone).
 func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*goical.Calendar, error) {
 	// Resolve Outlook-style non-IANA TZIDs from any embedded VTIMEZONE before
 	// expanding, since go-ical cannot load them by name.
@@ -23,7 +22,7 @@ func Expand(cal *goical.Calendar, start, end time.Time, loc *time.Location) (*go
 	out.Props.SetText(goical.PropProductID, "-//calendsd//calendsd//EN")
 	out.Props.SetText("CALSCALE", "GREGORIAN")
 	// Other calendar-level properties (X-WR-CALNAME, ...) survive
-	// expansion, like vobject.
+	// expansion.
 	for name, props := range cal.Props {
 		switch name {
 		case goical.PropVersion, goical.PropProductID, "CALSCALE":

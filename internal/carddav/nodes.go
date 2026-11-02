@@ -13,7 +13,6 @@ import (
 )
 
 // AddressBookRoot is the /addressbooks collection: one home per principal.
-// Port of sabre's CardDAV\AddressBookRoot.
 type AddressBookRoot struct {
 	name            string
 	principals      acl.Backend
@@ -92,8 +91,7 @@ func (r *AddressBookRoot) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in this collection is not supported")
 }
 
-// AddressBookHome holds one principal's address books. Port of sabre's
-// CardDAV\AddressBookHome.
+// AddressBookHome holds one principal's address books.
 type AddressBookHome struct {
 	backend       Backend
 	principalURI  string
@@ -118,9 +116,9 @@ func (h *AddressBookHome) Delete(ctx context.Context) error {
 func (h *AddressBookHome) LastModified() time.Time { return time.Time{} }
 func (h *AddressBookHome) Owner() string           { return h.principalURI }
 
-// ACL mirrors sabre's AddressBookHome (ACLTrait::getACL): {DAV:}owner holds
-// {DAV:}all. Being an ACLHolder also puts {DAV:}write-acl in the home's
-// supported-privilege set, matching sabre's current-user-privilege-set.
+// ACL gives {DAV:}owner {DAV:}all. Being an ACLHolder also puts
+// {DAV:}write-acl in the home's supported-privilege set, so its
+// current-user-privilege-set matches what sabre/dav reports.
 func (h *AddressBookHome) ACL() []acl.ACE {
 	return []acl.ACE{
 		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
@@ -182,7 +180,7 @@ func (h *AddressBookHome) CreateFile(context.Context, string, io.Reader) (string
 }
 
 func (h *AddressBookHome) CreateDirectory(ctx context.Context, name string) error {
-	// Plain MKCOL creates an address book (sabre allows this on the home).
+	// Plain MKCOL on the home creates an address book.
 	_, err := h.backend.CreateAddressBook(ctx, h.principalURI, name, map[xml.Name]any{})
 	return err
 }
@@ -194,8 +192,7 @@ func (h *AddressBookHome) CreateExtendedCollection(ctx context.Context, name str
 	return err
 }
 
-// AddressBook is one address book collection. Port of sabre's
-// CardDAV\AddressBook.
+// AddressBook is one address book collection.
 type AddressBook struct {
 	backend Backend
 	Info    AddressBookInfo
@@ -273,11 +270,11 @@ func (a *AddressBook) PropPatch(ctx context.Context, pp *dav.PropPatch) {
 	a.backend.UpdateAddressBook(ctx, a.Info.ID, pp)
 }
 
-// ACL grants the owner full access, like sabre's AddressBook::getACL.
+// ACL grants the owner full access.
 func (a *AddressBook) ACL() []acl.ACE {
-	// sabre's AddressBook uses ACLTrait::getACL — {DAV:}owner gets {DAV:}all
-	// (which aggregates read+write, so authorization is unchanged, but the
-	// reported privilege set now includes {DAV:}all like sabre).
+	// {DAV:}owner gets {DAV:}all rather than read+write: authorization is
+	// the same, but the reported privilege set includes {DAV:}all, as in
+	// sabre/dav.
 	return []acl.ACE{
 		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
 	}
@@ -295,7 +292,7 @@ func (a *AddressBook) Changes(ctx context.Context, syncToken string, syncLevel, 
 	return a.backend.ChangesForAddressBook(ctx, a.Info.ID, syncToken, syncLevel, limit)
 }
 
-// Card is one vCard object. Port of sabre's CardDAV\Card.
+// Card is one vCard object.
 type Card struct {
 	backend     Backend
 	addressBook AddressBookInfo
@@ -309,8 +306,8 @@ func NewCard(backend Backend, addressBook AddressBookInfo, info CardInfo) *Card 
 
 func (c *Card) Name() string { return c.info.URI }
 func (c *Card) SetName(context.Context, string) error {
-	// Sabre's Card inherits DAV\Node::setName (via File), which forbids
-	// renaming; a MOVE-rename of a card therefore gets 403, matching sabre.
+	// Cards cannot be renamed, so a MOVE-rename of a card gets 403, as in
+	// sabre/dav.
 	return dav.ErrForbidden("Permission denied to rename file")
 }
 func (c *Card) Delete(ctx context.Context) error {
@@ -341,8 +338,8 @@ func (c *Card) ETag() string        { return c.info.QuotedETag() }
 func (c *Card) Data() []byte        { return c.info.CardData }
 func (c *Card) Owner() string       { return c.addressBook.PrincipalURI }
 
-// ACL grants the address book's owner full access, like sabre's
-// Card::getACL. Without it the card fell back to the ACL plugin's default.
+// ACL grants the address book's owner full access. Without it the card fell
+// back to the ACL plugin's default.
 func (c *Card) ACL() []acl.ACE {
 	return []acl.ACE{
 		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},

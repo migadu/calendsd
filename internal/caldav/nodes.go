@@ -16,7 +16,6 @@ import (
 )
 
 // CalendarRoot is the /calendars collection: one CalendarHome per principal.
-// Port of sabre's CalDAV\CalendarRoot.
 type CalendarRoot struct {
 	name       string
 	principals acl.Backend
@@ -24,7 +23,7 @@ type CalendarRoot struct {
 	// principalPrefix scopes which principals get homes.
 	principalPrefix string
 	// AutoProvision recreates the default "calendar" when a principal has
-	// none left (Calendar-Server behavior); off by default (sabre parity).
+	// none left (Calendar-Server behavior); off by default.
 	AutoProvision bool
 	// PerUserProps marks Calendar-Server per-user-properties mode (see
 	// Calendar.PerUserProps); off by default.
@@ -102,8 +101,7 @@ func (r *CalendarRoot) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in this collection is not supported")
 }
 
-// CalendarHome holds one principal's calendars. Port of sabre's
-// CalDAV\CalendarHome.
+// CalendarHome holds one principal's calendars.
 type CalendarHome struct {
 	backend       Backend
 	principalURI  string
@@ -140,8 +138,7 @@ func (h *CalendarHome) Children(ctx context.Context) ([]dav.Node, error) {
 		cal.PerUserProps = h.perUserProps
 		out = append(out, cal)
 	}
-	// Scheduling-capable backends expose the inbox and outbox, like
-	// sabre's CalendarHome.
+	// Scheduling-capable backends expose the inbox and outbox.
 	if sb, ok := h.backend.(SchedulingBackend); ok {
 		out = append(out, NewInbox(sb, h.principalURI), NewOutbox(h.principalURI))
 	}
@@ -221,8 +218,7 @@ func (h *CalendarHome) CreateCalendar(ctx context.Context, name string, props ma
 }
 
 // CreateExtendedCollection implements dav.ExtendedCollection: calendars and
-// subscriptions, depending on the resource types. Port of sabre's
-// CalendarHome::createExtendedCollection.
+// subscriptions, depending on the resource types.
 func (h *CalendarHome) CreateExtendedCollection(ctx context.Context, name string, resourceTypes []xml.Name, props map[xml.Name]any) error {
 	isSubscription := false
 	isCalendar := false
@@ -252,10 +248,8 @@ func (h *CalendarHome) CreateExtendedCollection(ctx context.Context, name string
 // Owner returns the owning principal.
 func (h *CalendarHome) Owner() string { return h.principalURI }
 
-// ACL grants the owning principal full access, like sabre's ACLTrait
-// default on CalendarHome.
-// ACL mirrors sabre CalendarHome::getACL: the owner plus their calendar-proxy
-// groups (write proxies read+write, read proxies read).
+// ACL grants the owner plus their calendar-proxy groups (write proxies
+// read+write, read proxies read).
 func (h *CalendarHome) ACL() []acl.ACE {
 	return []acl.ACE{
 		{Privilege: "{DAV:}read", Principal: h.principalURI, Protected: true},
@@ -266,7 +260,7 @@ func (h *CalendarHome) ACL() []acl.ACE {
 	}
 }
 
-// Calendar is one calendar collection. Port of sabre's CalDAV\Calendar.
+// Calendar is one calendar collection.
 type Calendar struct {
 	backend Backend
 	Info    CalendarInfo
@@ -429,7 +423,7 @@ var supportedComponentRe = regexp.MustCompile(`name="([A-Za-z]+)"`)
 
 // SupportedComponents lists the component types this calendar accepts, parsed
 // from supported-calendar-component-set. Absent the property it defaults to all
-// three, matching sabre's validateICalendar.
+// three.
 func (c *Calendar) SupportedComponents() []string {
 	name := xml.Name{Space: davxml.NSCalDAV, Local: "supported-calendar-component-set"}
 	if raw, ok := c.Info.Props[name].(davxml.Raw); ok {
@@ -470,7 +464,7 @@ func (c *Calendar) Props(ctx context.Context, names []xml.Name) (map[xml.Name]an
 
 // inviteProperty renders the {http://calendarserver.org/ns/}invite property: a
 // <cs:user> per sharee with their address, name, invite status, and access
-// level. Port of sabre's SharingPlugin invite serialization. Returns ok=false
+// level. Returns ok=false
 // when the backend does not support sharing (the property is then omitted); an
 // empty (but supported) roster yields ok=true with no <cs:user> children.
 func (c *Calendar) inviteProperty(ctx context.Context) (davxml.Raw, bool) {
@@ -530,8 +524,7 @@ func (c *Calendar) Changes(ctx context.Context, syncToken string, syncLevel, lim
 	return c.backend.ChangesForCalendar(ctx, c.Info.ID, syncToken, syncLevel, limit)
 }
 
-// SupportedPrivileges extends the default tree with read-free-busy, like
-// sabre Calendar::getSupportedPrivilegeSet.
+// SupportedPrivileges extends the default tree with read-free-busy.
 func (c *Calendar) SupportedPrivileges() *acl.Privilege {
 	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
 		{Name: "{DAV:}read", Aggregates: []acl.Privilege{
@@ -548,13 +541,12 @@ func (c *Calendar) SupportedPrivileges() *acl.Privilege {
 			{Name: "{DAV:}write-acl"},
 		}},
 		// {DAV:}share is a sibling of write (not aggregated by it), so
-		// write access alone does not grant re-sharing — like sabre's
-		// Sharing\Plugin::getSupportedPrivilegeSet.
+		// write access alone does not grant re-sharing.
 		{Name: "{DAV:}share"},
 	}}
 }
 
-// readOnly reports sabre's {http://sabredav.org/ns}read-only marker, set on
+// readOnly reports the {http://sabredav.org/ns}read-only marker, set on
 // calendars shared with ACCESS_READ.
 func (c *Calendar) readOnly() bool {
 	v, ok := c.Info.Props[xml.Name{Space: "http://sabredav.org/ns", Local: "read-only"}]
@@ -587,9 +579,9 @@ func (c *Calendar) transparent() bool {
 	return false
 }
 
-// ACL mirrors sabre Calendar::getACL — owner + proxies read, and write only
-// when the view is not read-only — except for free-busy: sabre grants
-// read-free-busy to {DAV:}authenticated, while we grant it to the owner's
+// ACL grants the owner + proxies read, and write only when the view is not
+// read-only. read-free-busy goes not to {DAV:}authenticated (as in sabre/dav)
+// but to the owner's
 // free-busy audience: their email domain by default, so users cannot probe
 // availability across domains, narrowed or extended by the owner's
 // free-busy visibility (docs/design/VAVAILABILITY-PLAN.md §10). Both the free-busy-query
@@ -613,15 +605,14 @@ func (c *Calendar) ACL() []acl.ACE {
 			Principal: owner + "/calendar-proxy-read", Protected: true})
 	}
 	// {DAV:}share is granted only on the owner's own view (not-shared or
-	// shared-owner), so a sharee cannot re-share, like sabre.
+	// shared-owner), so a sharee cannot re-share.
 	if c.Info.ShareAccess == AccessNotShared || c.Info.ShareAccess == AccessSharedOwner {
 		aces = append(aces, acl.ACE{Privilege: "{DAV:}share", Principal: owner, Protected: true})
 	}
 	return aces
 }
 
-// CalendarObject is a single stored event/todo. Port of sabre's
-// CalDAV\CalendarObject.
+// CalendarObject is a single stored event/todo.
 type CalendarObject struct {
 	backend  Backend
 	calendar CalendarInfo
@@ -641,8 +632,8 @@ func NewCalendarObject(backend Backend, calendar CalendarInfo, obj ObjectInfo) *
 
 func (o *CalendarObject) Name() string { return o.obj.URI }
 func (o *CalendarObject) SetName(context.Context, string) error {
-	// Sabre's CalendarObject inherits DAV\Node::setName, which forbids
-	// renaming a file; match that exactly (a MOVE-rename gets 403, not 405).
+	// Renaming a file is forbidden, as in sabre/dav: a MOVE-rename gets
+	// 403, not 405.
 	return dav.ErrForbidden("Permission denied to rename file")
 }
 func (o *CalendarObject) Delete(ctx context.Context) error {
@@ -678,7 +669,7 @@ func (o *CalendarObject) readOnlyView() bool {
 // busy blocks, enforcing RFC 5545's restricted access classes; the owner, the
 // owner's proxies, and read-write sharees (who can edit, so must see the real
 // object to round-trip it) get the full payload. The read-only view is
-// identified by sabre's read-only marker — the same signal the object ACL keys
+// identified by the read-only marker — the same signal the object ACL keys
 // off (storage sets it for ACCESS_READ). The result is memoized because Get,
 // Data, and Size each ask for it within one request.
 func (o *CalendarObject) viewData() []byte {
@@ -736,7 +727,7 @@ func (o *CalendarObject) stored(raw []byte, etag string) {
 	o.view = nil
 }
 
-// ContentType includes the component hint, like sabre's CalendarObject.
+// ContentType includes the component hint.
 func (o *CalendarObject) ContentType() string {
 	ct := "text/calendar; charset=utf-8"
 	if o.obj.Component != "" {
@@ -765,7 +756,7 @@ func (o *CalendarObject) Data() []byte { return o.viewData() }
 // Owner returns the owning principal.
 func (o *CalendarObject) Owner() string { return o.calendar.PrincipalURI }
 
-// ACL mirrors sabre Calendar::getChildACL: the calendar's owner (and its
+// ACL lets the calendar's owner (and its
 // proxies) read the objects; write only on non-read-only views.
 func (o *CalendarObject) ACL() []acl.ACE {
 	owner := o.Owner()

@@ -10,9 +10,8 @@ import (
 )
 
 // checkPreconditions evaluates If-Match / If-None-Match / If-Modified-Since /
-// If-Unmodified-Since before method dispatch. Port of sabre's
-// Server::checkPreconditions. proceed=false with nil error means a 304 was
-// written.
+// If-Unmodified-Since before method dispatch. proceed=false with nil error
+// means a 304 was written.
 func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (proceed bool, err error) {
 	path, pathErr := s.Path(r)
 	if pathErr != nil {
@@ -181,7 +180,7 @@ func etagMatches(clientTag, nodeETag string) bool {
 // under the strong comparison If-Match normally requires, could never match the
 // origin's strong `"x"`, so every save 412s. The underlying entity is the same,
 // so matching them is the correct intent for a whole-body conditional write.
-// The \" unescape works around an Evolution bug, like sabre.
+// The \" unescape works around an Evolution bug.
 func normalizeETag(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 && (s[0] == 'W' || s[0] == 'w') && s[1] == '/' {
@@ -206,13 +205,12 @@ type IfToken struct {
 }
 
 // TokenValidator lets plugins mark state tokens in If conditions as valid.
-// Replaces sabre's validateTokens event.
 type TokenValidator interface {
 	ValidateTokens(ctx context.Context, conditions []IfCondition)
 }
 
 // checkIfConditions evaluates the If header: for each condition, at least
-// one clause must hold. Port of the tail of sabre's checkPreconditions.
+// one clause must hold.
 func (s *Server) checkIfConditions(r *http.Request, path string) error {
 	conditions := s.parseIfConditions(r, path)
 	if len(conditions) == 0 {
@@ -220,7 +218,7 @@ func (s *Server) checkIfConditions(r *http.Request, path string) error {
 	}
 	// A tagged URI the principal may not read fails the whole header before
 	// any token or ETag is looked at, so the response reveals nothing about
-	// that resource (audit 6.4). Sabre resolves them unchecked; divergence.
+	// that resource (audit 6.4).
 	for _, cond := range conditions {
 		if cond.URI == path {
 			continue
@@ -256,7 +254,8 @@ nextCondition:
 	return nil
 }
 
-// ifHeaderRe is sabre's getIfConditions regex, verbatim.
+// ifHeaderRe matches the lists of an If header. It is sabre/dav's pattern
+// verbatim, so it accepts the same inputs.
 var ifHeaderRe = regexp.MustCompile(`(?i)(?:<(?P<uri>.*?)>\s)?\((?P<not>Not\s)?(?:<(?P<token>[^>]*)>)?(?:\s?)(?:\[(?P<etag>[^\]]*)\])?\)`)
 
 func (s *Server) parseIfConditions(r *http.Request, requestPath string) []IfCondition {

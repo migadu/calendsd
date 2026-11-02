@@ -28,9 +28,8 @@ var (
 	addressBookLog = changeLog{"addressbooks", "addressbookchanges", "cards", "addressbookid", "addressbook:"}
 )
 
-// ChangesForCalendar transcribes sabre's PDO getChangesForCalendar: the
-// deduplicated change log since a token (last operation per uri wins), or
-// the full object list for an initial sync.
+// ChangesForCalendar returns the deduplicated change log since a token (last
+// operation per uri wins), or the full object list for an initial sync.
 func (b *CalDAV) ChangesForCalendar(ctx context.Context, id caldav.CalendarID, syncToken string, syncLevel, limit int) (*dav.ChangeSet, error) {
 	defer b.Metrics.DBOpTimer("changes_for_calendar")()
 	return changesSince(ctx, b.DB, calendarLog, id.Calendar, syncToken, limit)
@@ -81,7 +80,7 @@ func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, 
 	query := `SELECT uri, operation, synctoken FROM ` + log.changes + `
 	           WHERE synctoken >= $1 AND ` + log.idColumn + ` = $2 ORDER BY synctoken`
 	if limit > 0 {
-		// One extra row detects truncation, like sabre.
+		// One extra row detects truncation.
 		query += " LIMIT " + strconv.Itoa(limit+1)
 	}
 	rows, err := db.QueryContext(ctx, query, since, collectionID)
@@ -94,7 +93,7 @@ func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, 
 		operation int
 		synctoken int64
 	}
-	// Last change per uri wins, in first-seen order (PHP assoc semantics).
+	// Last change per uri wins, in first-seen order.
 	changes := map[string]change{}
 	var order []string
 	for rows.Next() {
@@ -149,13 +148,10 @@ func changesSince(ctx context.Context, db *sql.DB, log changeLog, collectionID, 
 	return out, nil
 }
 
-// recordChange transcribes sabre's addChange (record at the current
-// synctoken, then increment) as one UPDATE … RETURNING, which takes the
-// collection's row lock for the rest of the transaction: two concurrent
-// writers must not stamp two changes with the same token, or sync clients
-// past that token skip one forever. Sabre's unwrapped statements race here;
-// the lock serializes all Go-side writers and any sabre writer that reaches
-// its UPDATE while we hold the row.
+// recordChange records a change at the current synctoken and increments it,
+// in one UPDATE … RETURNING, which takes the collection's row lock for the
+// rest of the transaction: two concurrent writers must not stamp two changes
+// with the same token, or sync clients past that token skip one forever.
 func recordChange(ctx context.Context, tx *sql.Tx, log changeLog, collectionID, uri string, operation int) error {
 	var token int64
 	if err := tx.QueryRowContext(ctx, `UPDATE `+log.collections+` SET synctoken = synctoken + 1

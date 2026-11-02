@@ -1,6 +1,5 @@
 // Package auth implements HTTP authentication for the DAV server: a plugin
-// running in the beforeMethod phase plus Basic and Digest backends. Port of
-// sabre's lib/DAV/Auth.
+// running in the beforeMethod phase plus Basic and Digest backends.
 package auth
 
 import (
@@ -14,8 +13,7 @@ import (
 	"github.com/migadu/calendsd/internal/metrics"
 )
 
-// Backend verifies request credentials. Port of sabre's
-// Auth\Backend\BackendInterface.
+// Backend verifies request credentials.
 type Backend interface {
 	// Check returns the authenticated principal path (e.g.
 	// "principals/admin"), or an error saying why not: ErrBadCredentials for
@@ -59,25 +57,20 @@ func ClientMessage(err error) string {
 }
 
 // Plugin authenticates every request before dispatch, recording the
-// principal in the request context (sabre keeps it on the per-request plugin
-// instance; a long-lived Go server must scope it per request). Port of
-// sabre's Auth\Plugin.
+// principal in the request context.
 type Plugin struct {
 	backends []Backend
 
-	// AutoRequireLogin rejects unauthenticated requests with a 401, like
-	// sabre's autoRequireLogin.
+	// AutoRequireLogin rejects unauthenticated requests with a 401.
 	AutoRequireLogin bool
 
 	// fixedPrincipal, when set, authenticates every request as that
-	// principal (the autoLogin mechanism of sabre's test harness).
+	// principal (see NewLoggedInPlugin).
 	fixedPrincipal string
 
 	// Logger records authentication outcomes: rejected logins at Warn (with
 	// the attempted username and client address, never the password) and
-	// successful ones at Debug. Nil uses slog.Default(). sabre logged none of
-	// this, so a brute-force or a misconfigured client was previously
-	// invisible on the server side.
+	// successful ones at Debug. Nil uses slog.Default().
 	Logger *slog.Logger
 
 	// Metrics counts credential-less probes (backend="none",
@@ -108,8 +101,8 @@ func NewPlugin(backends ...Backend) *Plugin {
 	return &Plugin{backends: backends, AutoRequireLogin: true}
 }
 
-// NewLoggedInPlugin creates a pre-authenticated plugin, mirroring the
-// autoLogin mechanism of sabre's test harness. An empty principal would
+// NewLoggedInPlugin creates a pre-authenticated plugin for tests that need a
+// fixed principal without credentials. An empty principal would
 // otherwise fall through to an unauthenticated, require-login-disabled state
 // (an accidental open server), so it panics instead.
 func NewLoggedInPlugin(principal string) *Plugin {

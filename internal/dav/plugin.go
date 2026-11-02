@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// Plugin extends the server, mirroring sabre's ServerPlugin. The core WebDAV
+// Plugin extends the server. The core WebDAV
 // behavior is itself a plugin (CorePlugin), so CalDAV, ACL, Sync and Auth all
 // hang off the same mechanism.
 type Plugin interface {
@@ -37,7 +37,7 @@ type FeatureProvider interface {
 }
 
 // MethodProvider contributes HTTP methods to the Allow header and receives a
-// chance to handle them. Replaces sabre's beforeMethod/method:* events.
+// chance to handle them.
 type MethodProvider interface {
 	// Methods returns the HTTP methods this plugin can handle for the node
 	// at path. Called for Allow headers; path may not exist.
@@ -48,14 +48,13 @@ type MethodProvider interface {
 }
 
 // PropFindHook lets a plugin contribute property values during PROPFIND.
-// Replaces sabre's propFind event.
 type PropFindHook interface {
 	// PropFind may resolve properties on the PropFind object.
 	PropFind(pf *PropFind, node Node) error
 }
 
 // BeforeMethodHook runs before method dispatch (and before precondition
-// checks), like sabre's beforeMethod event. Auth lives here.
+// checks). Auth lives here.
 type BeforeMethodHook interface {
 	// BeforeMethod returns proceed=false to stop processing (having
 	// written the response itself), or an error to abort.
@@ -63,27 +62,26 @@ type BeforeMethodHook interface {
 }
 
 // WriteInterceptor inspects (and may rewrite) a file body before PUT writes
-// it. Replaces sabre's beforeWriteContent/beforeCreateFile events — the
-// scheduling broker lives here.
+// it. The scheduling broker lives here.
 type WriteInterceptor interface {
 	InterceptWrite(r *http.Request, path string, data []byte, isNew bool) ([]byte, error)
 }
 
-// BeforeUnbindHook fires before a DELETE removes a node (sabre's
-// beforeUnbind; scheduling sends CANCELs from it).
+// BeforeUnbindHook fires before a DELETE removes a node (scheduling sends
+// CANCELs from it).
 type BeforeUnbindHook interface {
 	BeforeUnbind(r *http.Request, path string) error
 }
 
-// AfterWriteHook fires after a PUT body has been persisted (sabre's
-// afterWriteContent/afterCreateFile). Auto-scheduling delivers queued REPLYs
-// here, once the written object is visible to tree lookups.
+// AfterWriteHook fires after a PUT body has been persisted. Auto-scheduling
+// delivers queued REPLYs here, once the written object is visible to tree
+// lookups.
 type AfterWriteHook interface {
 	AfterWrite(r *http.Request, path string)
 }
 
 // GetHandlerHook lets a plugin take over serving a resolved GET target
-// (e.g. content-type transforms). Replaces sabre's afterMethod:GET usage.
+// (e.g. content-type transforms).
 type GetHandlerHook interface {
 	HandleGet(node Node, w http.ResponseWriter, r *http.Request) (handled bool, err error)
 }
@@ -96,14 +94,13 @@ type PrePropPatchHook interface {
 }
 
 // PropPatchHook lets a plugin claim PROPPATCH mutations after the node's own
-// handlers ran (sabre's propPatch event at priority 300, where property
-// storage lives).
+// handlers ran (property storage lives here).
 type PropPatchHook interface {
 	PropPatch(ctx context.Context, path string, pp *PropPatch) error
 }
 
-// LatePropFindHook runs after node-supplied dead properties (sabre's
-// priority-130 propFind listeners, i.e. property storage).
+// LatePropFindHook runs after node-supplied dead properties (property
+// storage lives here).
 type LatePropFindHook interface {
 	PropFindLate(pf *PropFind, node Node) error
 }
@@ -119,8 +116,7 @@ type PrefetchHook interface {
 
 // ChildFilterHook lets a plugin drop children from a Depth:1 listing before
 // they are enumerated into the multistatus, so a collection can hide the very
-// existence of siblings the requester may not see. This has no sabre
-// equivalent; it backs domain-scoped principal and home-collection listings
+// existence of siblings the requester may not see. It backs domain-scoped principal and home-collection listings
 // (property-level gating alone still leaks child hrefs). Filters run in plugin
 // registration order and compose.
 type ChildFilterHook interface {
@@ -156,25 +152,24 @@ type ScopedLister interface {
 	ChildrenScoped(ctx context.Context, scope ChildScope) ([]Node, error)
 }
 
-// AfterUnbindHook fires after a node was removed (sabre's afterUnbind).
+// AfterUnbindHook fires after a node was removed.
 type AfterUnbindHook interface {
 	AfterUnbind(ctx context.Context, path string) error
 }
 
-// AfterMoveHook fires after a MOVE completed (sabre's afterMove; runs before
-// AfterUnbind so listeners can transfer state).
+// AfterMoveHook fires after a MOVE completed (before AfterUnbind, so
+// listeners can transfer state).
 type AfterMoveHook interface {
 	AfterMove(ctx context.Context, source, destination string) error
 }
 
 // ReportSetProvider advertises the REPORTs a plugin supports on a node, for
-// {DAV:}supported-report-set. Replaces sabre's getSupportedReportSet.
+// {DAV:}supported-report-set.
 type ReportSetProvider interface {
 	SupportedReports(node Node, path string) []xml.Name
 }
 
-// ReportHandler lets a plugin implement REPORT methods. Replaces sabre's
-// report event.
+// ReportHandler lets a plugin implement REPORT methods.
 type ReportHandler interface {
 	// Report handles the named report if it can; body is the full request
 	// body. handled=false passes the report to the next plugin.

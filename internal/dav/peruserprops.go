@@ -11,13 +11,11 @@ import (
 // nodes the requester does not own, like Calendar Server: a delegate's
 // PROPPATCH of displayname/calendar-color/anything lands in their own view
 // and never clobbers the owner's values, and their PROPFIND sees their own
-// values over the shared ones. Off unless registered (-per-user-props);
-// sabre has no such feature.
+// values over the shared ones. Off unless registered (-per-user-props).
 //
 // Values live in the regular property-storage backend under a synthetic
 // path "<path>/\n<principal>" — the newline cannot occur in request paths,
-// so the rows never collide with real ones and a co-existing sabre never
-// resolves them. The "/" makes them look like children of the node, so the
+// so the rows never collide with real ones. The "/" makes them look like children of the node, so the
 // PropertyStoragePlugin's AfterUnbind/AfterMove prefix queries clean and
 // rename them together with the node (a recreated collection must NOT
 // resurrect a previous life's per-user values). Register AFTER the

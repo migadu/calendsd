@@ -17,8 +17,7 @@ import (
 	"github.com/migadu/calendsd/internal/pathutil"
 )
 
-// CorePlugin implements the baseline WebDAV protocol behavior, mirroring
-// sabre's CorePlugin.
+// CorePlugin implements the baseline WebDAV protocol behavior.
 type CorePlugin struct {
 	server *Server
 }
@@ -34,8 +33,8 @@ func (c *CorePlugin) Features() []string {
 	return []string{"1", "3", "extended-mkcol"}
 }
 
-// Methods implements MethodProvider. Matches sabre's getAllowedMethods:
-// MKCOL is only advertised on unmapped URIs.
+// Methods implements MethodProvider. MKCOL is only advertised on unmapped
+// URIs.
 func (c *CorePlugin) Methods(ctx context.Context, path string) []string {
 	methods := []string{
 		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND",
@@ -82,8 +81,8 @@ func (c *CorePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (bool,
 	return true, err
 }
 
-// report parses the report's root element name and dispatches to plugins,
-// like sabre's httpReport + the report event.
+// report parses the report's root element name and dispatches it to the
+// ReportHandler plugins.
 func (c *CorePlugin) report(w http.ResponseWriter, r *http.Request) error {
 	path, err := c.server.Path(r)
 	if err != nil {
@@ -148,7 +147,7 @@ func rootElementName(body []byte) (xml.Name, error) {
 // options answers OPTIONS with the DAV and Allow headers.
 func (c *CorePlugin) options(w http.ResponseWriter, r *http.Request) error {
 	// Resolve to the server-relative path (BaseURI stripped, decoded) so
-	// MKCOL is only advertised on genuinely unmapped URIs, like sabre.
+	// MKCOL is only advertised on genuinely unmapped URIs.
 	path, err := c.server.Path(r)
 	if err != nil {
 		path = ""
@@ -164,8 +163,8 @@ func (c *CorePlugin) options(w http.ResponseWriter, r *http.Request) error {
 }
 
 // get serves file bodies with Range support. With headOnly the body is
-// omitted (sabre's X-Sabre-Original-Method mechanism). handled=false means
-// the node is not a file, so another plugin may serve it.
+// omitted. handled=false means the node is not a file, so another plugin may
+// serve it.
 func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) (handled bool, err error) {
 	path, err := c.server.Path(r)
 	if err != nil {
@@ -177,9 +176,8 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	}
 
 	// Plugins may take over serving (content-type transforms and
-	// non-file nodes like notifications; sabre's afterMethod:GET
-	// equivalents). Consulted before the File check so a plugin can
-	// serve a node that is not an IFile.
+	// non-file nodes like notifications). Consulted before the File
+	// check so a plugin can serve a node that is not a File.
 	if !headOnly {
 		for hook := range Hooks[GetHandlerHook](c.server) {
 			handled, err := hook.HandleGet(node, w, r)
@@ -219,7 +217,7 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 	}
 
 	// A negative size means unknown (streaming nodes): no Content-Length
-	// and no range support, like sabre with a null getSize().
+	// and no range support.
 	size := file.Size()
 	if headOnly {
 		if size >= 0 {
@@ -255,7 +253,7 @@ func (c *CorePlugin) get(w http.ResponseWriter, r *http.Request, headOnly bool) 
 }
 
 // head runs GET without a body; 501 (no handler) converts to an empty 200
-// for client compatibility, like sabre.
+// for client compatibility.
 func (c *CorePlugin) head(w http.ResponseWriter, r *http.Request) error {
 	handled, err := c.get(w, r, true)
 	if err != nil {
@@ -327,7 +325,7 @@ func (c *CorePlugin) propfind(w http.ResponseWriter, r *http.Request) error {
 
 	h := w.Header()
 	h.Set("Vary", "Brief,Prefer")
-	// iCal depends on DAV headers on PROPFIND responses, like sabre notes.
+	// iCal depends on DAV headers on PROPFIND responses.
 	h.Set("DAV", strings.Join(c.server.Features(), ", "))
 	return c.server.WriteMultiStatus(w, &davxml.MultiStatus{Responses: responses})
 }
@@ -394,8 +392,8 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	body := io.Reader(r.Body)
-	// Finder's chunked PUTs can arrive empty; sabre fails them to protect
-	// the user (X-Expected-Entity-Length announces the intended size).
+	// Finder's chunked PUTs can arrive empty; fail them to protect the
+	// user (X-Expected-Entity-Length announces the intended size).
 	if expected := r.Header.Get("X-Expected-Entity-Length"); expected != "" && expected != "0" {
 		first := make([]byte, 1)
 		n, _ := io.ReadFull(r.Body, first)
@@ -426,7 +424,7 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	body = bytes.NewReader(raw)
 	// RFC 4791 §5.3.4: a server that stores something other than the body it
 	// was sent must not return a strong ETag for it — the client would take
-	// the tag to describe its own bytes. (sabre does the same.)
+	// the tag to describe its own bytes.
 	modified := !bytes.Equal(sent, raw)
 
 	if !isNew {
@@ -492,8 +490,8 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// fireAfterWrite notifies plugins that a PUT has been persisted (sabre's
-// afterWriteContent/afterCreateFile events).
+// fireAfterWrite notifies AfterWriteHook plugins that a PUT has been
+// persisted.
 func (c *CorePlugin) fireAfterWrite(r *http.Request, path string) {
 	for hook := range Hooks[AfterWriteHook](c.server) {
 		hook.AfterWrite(r, path)
@@ -553,7 +551,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		return ErrConflict("Parent node is not a collection")
 	}
 	// Non-plain resource types go to extended-collection parents
-	// (calendars, subscriptions), like sabre's createCollection.
+	// (calendars, subscriptions).
 	if len(resourceTypes) > 1 {
 		ext, isExt := parent.(ExtendedCollection)
 		if !isExt {
@@ -571,8 +569,7 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// Extended MKCOL properties apply to the fresh collection; on failure
-	// the collection is rolled back and the failed statuses reported,
-	// mirroring sabre's createCollection.
+	// the collection is rolled back and the failed statuses reported.
 	if len(extraProps) > 0 {
 		names := sortedNames(extraProps)
 		result, err := c.server.UpdateProperties(r.Context(), path, &davxml.PropertyUpdate{
@@ -657,8 +654,8 @@ func (c *CorePlugin) move(w http.ResponseWriter, r *http.Request) error {
 	if err := c.server.Tree.Move(r.Context(), path, info.destination); err != nil {
 		return err
 	}
-	// afterMove before afterUnbind, so listeners can transfer state
-	// (sabre's ordering note for property storage).
+	// AfterMove before AfterUnbind, so listeners such as property storage
+	// can transfer state.
 	c.server.fireAfterMove(r.Context(), path, info.destination)
 	c.server.fireAfterUnbind(r.Context(), path)
 	w.Header().Set("Content-Length", "0")
@@ -694,7 +691,8 @@ type copyMoveInfo struct {
 	depth             int
 }
 
-// copyMoveInfo ports sabre's Server::getCopyAndMoveInfo validation chain.
+// copyMoveInfo validates the Destination, Depth and Overwrite headers of a
+// COPY or MOVE and resolves the destination.
 func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMoveInfo, error) {
 	// Resolve the source first, so a missing source is a 404 before
 	// anything at the destination is touched.
@@ -759,7 +757,7 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 	if destination == "" || strings.HasPrefix(sourcePath, destination+"/") {
 		// The converse: a COPY/MOVE of an object onto its own collection with
 		// Overwrite would delete the collection (and the source with it)
-		// before the copy could fail (audit 6.19). Same bug in sabre.
+		// before the copy could fail (audit 6.19).
 		return nil, ErrForbidden("The destination may not be an ancestor of the source path.")
 	}
 	return &copyMoveInfo{destination: destination, destinationExists: destinationExists, depth: depth}, nil
@@ -809,8 +807,8 @@ func stripStatus(propstats []davxml.Propstat, status int) []davxml.Propstat {
 	return out
 }
 
-// parseDepth interprets the Depth header, defaulting like sabre's
-// getHTTPDepth.
+// parseDepth interprets the Depth header: "infinity" is DepthInfinity, and
+// a missing or invalid value yields def.
 func parseDepth(header string, def int) int {
 	if header == "" {
 		return def
@@ -825,8 +823,7 @@ func parseDepth(header string, def int) int {
 	return n
 }
 
-// corePropFind supplies the standard {DAV:} properties, mirroring sabre
-// CorePlugin::propFind.
+// corePropFind supplies the standard {DAV:} properties.
 func corePropFind(s *Server, pf *PropFind, node Node) {
 	dav := func(local string) xml.Name { return xml.Name{Space: davxml.NSDav, Local: local} }
 
@@ -838,8 +835,8 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 	})
 	if file, isFile := node.(File); isFile {
 		pf.Handle(dav("getcontentlength"), func() any {
-			// A negative size means unknown (streaming nodes); sabre omits
-			// the property, leaving it a 404 propstat, like GET.
+			// A negative size means unknown (streaming nodes); omit the
+			// property, leaving it a 404 propstat, like GET.
 			if size := file.Size(); size >= 0 {
 				return size
 			}
@@ -873,8 +870,8 @@ func corePropFind(s *Server, pf *PropFind, node Node) {
 	})
 }
 
-// unescapePath decodes percent-encoding in a URL path, matching sabre's
-// decodePath (which decodes each segment but keeps "/" literal).
+// unescapePath decodes percent-encoding in a URL path, segment by segment,
+// keeping "/" literal.
 func unescapePath(p string) (string, error) {
 	if !strings.Contains(p, "%") {
 		return p, nil

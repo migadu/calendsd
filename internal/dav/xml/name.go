@@ -1,6 +1,6 @@
 // Package davxml implements the WebDAV XML layer: clark-notation names,
 // request parsing, multistatus serialization, and the canonicalizer used by
-// corpus comparison. Port of the sabre/xml usage in sabre/dav.
+// corpus comparison.
 package davxml
 
 import (
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Well-known namespaces, matching sabre's default namespaceMap.
+// Well-known namespaces.
 const (
 	NSDav            = "DAV:"
 	NSCalDAV         = "urn:ietf:params:xml:ns:caldav"

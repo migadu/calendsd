@@ -85,7 +85,7 @@ func handleStats(ctx context.Context, args []string) {
 	w.Flush()
 }
 
-// operationName translates sabre's change-log operation codes.
+// operationName translates the change-log operation codes.
 func operationName(op int) string {
 	switch op {
 	case 1:

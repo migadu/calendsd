@@ -1,8 +1,7 @@
-// Package storage implements the backends against the shared sabre/dav
-// Postgres schema (docs/design/PLAN.md §5). Every query is transcribed from sabre's
-// Backend\PDO classes; every value written must be readable by a live sabre
-// instance on the same database, and vice versa. The schema is the
-// compatibility contract — no DDL lives here.
+// Package storage implements the backends against the Postgres schema. The
+// base tables come from sabre/dav's schema; calendsd has since extended it, so
+// a sabre instance can no longer share the database. No DDL lives here: the
+// schema is owned by the migrations in internal/schema.
 package storage
 
 import (
@@ -26,7 +25,7 @@ import (
 	"github.com/migadu/calendsd/internal/pgdial"
 )
 
-// syncTokenPrefix is sabre's Sync\Plugin::SYNCTOKEN_PREFIX; the ctag/token
+// syncTokenPrefix is the sync-token prefix sabre/dav used; the ctag/token
 // format existing clients have stored.
 const syncTokenPrefix = "http://sabre.io/ns/sync/"
 
@@ -34,9 +33,8 @@ const syncTokenPrefix = "http://sabre.io/ns/sync/"
 // DefaultPool value, so callers can override only the knobs they care about.
 type Pool struct {
 	// MaxOpen caps total connections. The database/sql default is unlimited,
-	// which lets a load spike open arbitrarily many connections against the
-	// Postgres we share with a live sabre instance and starve it — so we
-	// always set a bound.
+	// which lets a load spike open arbitrarily many connections against a
+	// shared Postgres and starve its other users — so we always set a bound.
 	MaxOpen int
 	// MaxIdle caps idle connections kept for reuse (database/sql default 2).
 	MaxIdle int
@@ -48,7 +46,7 @@ type Pool struct {
 
 // DefaultPool is the conservative bound applied when a field is left zero.
 // Sized to leave headroom under a shared Postgres's max_connections for the
-// live sabre instance, the admin panel, and calctl.
+// admin panel, calctl, and other services.
 var DefaultPool = Pool{MaxOpen: 20, MaxIdle: 5, ConnMaxLifetime: 5 * time.Minute}
 
 // Open connects to the shared Postgres database with DefaultPool bounds —
@@ -82,8 +80,7 @@ func OpenPool(dsn string, pool Pool) (*sql.DB, error) {
 	return db, nil
 }
 
-// CalDAV is the calendar backend over the sabre schema. Port of
-// CalDAV\Backend\PDO.
+// CalDAV is the calendar backend over the sabre schema.
 type CalDAV struct {
 	DB *sql.DB
 	// Metrics times the named expensive operations (calendar_objects,
@@ -93,8 +90,8 @@ type CalDAV struct {
 	Metrics *metrics.Set
 }
 
-// propertyMap mirrors sabre's PDO::$propertyMap: calendar properties stored
-// as real columns on calendarinstances.
+// propertyMap lists the calendar properties stored as real columns on
+// calendarinstances.
 var propertyMap = []struct {
 	name   xml.Name
 	column string
@@ -142,15 +139,14 @@ SELECT calendarinstances.id as id, displayname, description, timezone,
 			Props:        map[xml.Name]any{},
 			ShareAccess:  int(access),
 		}
-		// An orphaned instance (no calendars row) degrades to token "0",
-		// like sabre's ?: '0' fallback.
+		// An orphaned instance (no calendars row) degrades to token "0".
 		token := "0"
 		if synctoken.Valid {
 			token = strconv.FormatInt(synctoken.Int64, 10)
 		}
 		info.Props[xml.Name{Space: davxml.NSCalendarServer, Local: "getctag"}] = syncTokenPrefix + token
 		info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "sync-token"}] = token
-		// Sharee views carry sabre's read-only marker; the calendar ACLs
+		// Sharee views carry the {sabredav}read-only marker; the calendar ACLs
 		// drop write privileges from it.
 		if access == caldav.AccessRead {
 			info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "read-only"}] = "1"
@@ -241,9 +237,9 @@ func (b *CalDAV) CreateCalendar(ctx context.Context, principalURI, calendarURI s
 	}, nil
 }
 
-// UpdateCalendar transcribes sabre's updateCalendar: the propertyMap columns
-// plus schedule-calendar-transp update calendarinstances (by instance ID)
-// and bump the synctoken with an empty-uri change record.
+// UpdateCalendar writes the propertyMap columns plus schedule-calendar-transp
+// to calendarinstances (by instance ID) and bumps the synctoken with an
+// empty-uri change record.
 func (b *CalDAV) UpdateCalendar(ctx context.Context, id caldav.CalendarID, pp *dav.PropPatch) {
 	transp := xml.Name{Space: davxml.NSCalDAV, Local: "schedule-calendar-transp"}
 	supported := []xml.Name{transp}
@@ -302,7 +298,7 @@ func toNullString(v any) any {
 	}
 }
 
-// DeleteCalendar transcribes sabre's access-aware deleteCalendar: only the
+// DeleteCalendar is access-aware: only the
 // shared owner (access=1) removes the calendar with all its data; a sharee
 // merely drops their own instance row, leaving the owner's calendar intact.
 func (b *CalDAV) DeleteCalendar(ctx context.Context, id caldav.CalendarID) error {
@@ -312,7 +308,7 @@ func (b *CalDAV) DeleteCalendar(ctx context.Context, id caldav.CalendarID) error
 			`SELECT access FROM calendarinstances WHERE id = $1`, id.Instance).Scan(&access); err != nil {
 			return err
 		}
-		if access == 1 { // Sharing\Plugin::ACCESS_SHAREDOWNER
+		if access == 1 { // shared owner
 			return deleteCalendarRows(ctx, tx, id.Calendar)
 		}
 		_, err := tx.ExecContext(ctx,

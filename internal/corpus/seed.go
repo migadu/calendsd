@@ -21,7 +21,7 @@ type xmlName = xml.Name
 
 // BuildServer constructs a Go server equivalent to the sabre test setup of a
 // record: seeded tree, principal/calendar backends, auth (autoLogin), ACL and
-// CalDAV plugins. Mirrors AbstractDAVServerTestCase::initializeEverything.
+// CalDAV plugins.
 func BuildServer(rec *Record) (*dav.Server, error) {
 	principals, err := seedPrincipals(rec.Setup.Principals)
 	if err != nil {

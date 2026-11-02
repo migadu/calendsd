@@ -16,8 +16,7 @@ import (
 	"github.com/migadu/calendsd/internal/metrics"
 )
 
-// CardDAV is the address book backend over the sabre schema. Port of
-// CardDAV\Backend\PDO.
+// CardDAV is the address book backend over the sabre schema.
 type CardDAV struct {
 	DB *sql.DB
 	// Metrics times changes_for_addressbook, the one expensive named
@@ -48,10 +47,8 @@ func (b *CardDAV) AddressBooksForUser(ctx context.Context, principalURI string) 
 			Props: map[xml.Name]any{},
 		}
 		token := strconv.FormatInt(synctoken, 10)
-		// sabre's CardDAV PDO backend serves getctag as the bare synctoken
-		// (CardDAV/Backend/PDO.php), unlike CalDAV which prefixes it with the
-		// sync-URL. Match that so address-book ctags are identical to a stock
-		// sabre instance sharing the same database.
+		// An address book's getctag is the bare synctoken, as sabre/dav
+		// served it, unlike CalDAV which prefixes it with the sync-URL.
 		info.Props[xml.Name{Space: davxml.NSCalendarServer, Local: "getctag"}] = token
 		info.Props[xml.Name{Space: davxml.NSSabreDAV, Local: "sync-token"}] = token
 		if displayname.Valid && displayname.String != "" {

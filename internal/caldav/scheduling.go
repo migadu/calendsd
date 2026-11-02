@@ -19,7 +19,7 @@ type SchedulingObjectInfo struct {
 }
 
 // SchedulingBackend stores schedule inbox messages (the schedulingobjects
-// table). Port of sabre's Backend\SchedulingSupport.
+// table).
 type SchedulingBackend interface {
 	SchedulingObjects(ctx context.Context, principalURI string) ([]SchedulingObjectInfo, error)
 	SchedulingObject(ctx context.Context, principalURI, objectURI string) (*SchedulingObjectInfo, error)
@@ -124,8 +124,7 @@ func (i *Inbox) CreateDirectory(context.Context, string) error {
 	return dav.ErrMethodNotAllowed("Creating collections in the inbox is not allowed")
 }
 
-// ACL grants the owner full access and authenticated users delivery rights,
-// like sabre's Inbox::getACL.
+// ACL grants the owner full access and authenticated users delivery rights.
 func (i *Inbox) ACL() []acl.ACE {
 	return []acl.ACE{
 		{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true},
@@ -139,8 +138,7 @@ func (i *Inbox) SupportedPrivileges() *acl.Privilege {
 	return &acl.Privilege{Name: "{DAV:}all", Abstract: true, Aggregates: []acl.Privilege{
 		{Name: "{DAV:}read"},
 		// write-properties lets the owner PROPPATCH the inbox's own
-		// properties; like sabre's default set, which its
-		// Inbox extends with schedule-deliver.
+		// properties.
 		{Name: "{DAV:}write", Aggregates: []acl.Privilege{
 			{Name: "{DAV:}write-properties"}, {Name: "{DAV:}write-content"},
 			{Name: "{DAV:}bind"}, {Name: "{DAV:}unbind"},
@@ -254,7 +252,7 @@ func (o *Outbox) CreateDirectory(context.Context, string) error {
 }
 
 // MockSchedulingBackend adds in-memory scheduling storage to the mock
-// calendar backend, like sabre's Backend\MockScheduling.
+// calendar backend.
 type MockSchedulingBackend struct {
 	MockBackend
 	// Scheduling maps principal → uri → data.

@@ -11,7 +11,7 @@ import (
 	"github.com/migadu/calendsd/internal/pathutil"
 )
 
-// PrincipalHolder marks nodes representing a principal (sabre's IPrincipal).
+// PrincipalHolder marks nodes representing a principal.
 type PrincipalHolder interface {
 	PrincipalURL() string
 	AlternateURISet() []string
@@ -29,7 +29,7 @@ type ACE struct {
 	Protected bool
 }
 
-// SameDomain is a calendsd extension pseudo-principal (not in sabre): it
+// SameDomain is a calendsd extension pseudo-principal: it
 // matches an authenticated principal whose email-address domain equals the
 // node owner's email-address domain. A principal without an email address
 // never matches (and never grants), so the ACE fails closed on principals
@@ -61,13 +61,12 @@ type FreeBusyPolicy interface {
 	FreeBusyVisibility(ctx context.Context, ownerPrincipal string) (FreeBusyVisibility, error)
 }
 
-// ACLHolder is a node carrying its own ACL (sabre's IACL subset).
+// ACLHolder is a node carrying its own ACL.
 type ACLHolder interface {
 	ACL() []ACE
 }
 
-// PrincipalNode is a principal in the DAV tree. Port of sabre's
-// DAVACL\Principal.
+// PrincipalNode is a principal in the DAV tree.
 type PrincipalNode struct {
 	backend   Backend
 	principal Principal
@@ -130,8 +129,7 @@ func (p *PrincipalNode) Props(ctx context.Context, names []xml.Name) (map[xml.Na
 
 func (p *PrincipalNode) PropPatch(ctx context.Context, pp *dav.PropPatch) {}
 
-// ACL implements ACLHolder: the principal itself has full access, mirroring
-// sabre's ACLTrait default.
+// ACL implements ACLHolder: the principal itself has full access.
 func (p *PrincipalNode) ACL() []ACE {
 	return []ACE{{Privilege: "{DAV:}all", Principal: "{DAV:}owner", Protected: true}}
 }
@@ -139,8 +137,7 @@ func (p *PrincipalNode) ACL() []ACE {
 // Owner returns the owner principal path (the principal itself).
 func (p *PrincipalNode) Owner() string { return p.principal.URI }
 
-// PrincipalCollection exposes all principals under a prefix. Port of sabre's
-// PrincipalCollection/AbstractPrincipalCollection.
+// PrincipalCollection exposes all principals under a prefix.
 type PrincipalCollection struct {
 	backend Backend
 	// prefix is the principal path prefix, conventionally "principals".

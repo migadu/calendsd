@@ -45,8 +45,8 @@ type AdminWrites struct {
 }
 
 // CreateUser inserts the users row and the principal triple (the principal
-// plus its calendar-proxy-read/-write sub-principals, matching sabre's
-// seed convention so delegation works). digestA1 is the precomputed
+// plus its calendar-proxy-read/-write sub-principals, so delegation
+// works). digestA1 is the precomputed
 // md5(user:realm:pass); the caller owns the realm.
 func (w *AdminWrites) CreateUser(ctx context.Context, username, digestA1, email, displayName string) error {
 	if username == "" || strings.ContainsAny(username, "/\n") {

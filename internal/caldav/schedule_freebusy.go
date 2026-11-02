@@ -82,7 +82,7 @@ func (p *SchedulePlugin) HandleMethod(w http.ResponseWriter, r *http.Request) (b
 }
 
 // freeBusyOutboxRequest answers a free-busy request for each attendee with
-// their aggregated availability. Subset of sabre's handleFreeBusyRequest.
+// their aggregated availability.
 func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Request, vcal *goical.Calendar) error {
 	var vfb *goical.Component
 	for _, comp := range vcal.Children {
@@ -120,9 +120,8 @@ func (p *SchedulePlugin) freeBusyOutboxRequest(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// Identity properties echoed into each recipient's VFREEBUSY, matching
-	// sabre's generateFreeBusyResponse (UID + ORGANIZER from the request,
-	// ATTENDEE set to the recipient).
+	// Identity properties echoed into each recipient's VFREEBUSY: UID +
+	// ORGANIZER from the request, ATTENDEE set to the recipient.
 	var idProps []string
 	if uid := vfb.Props.Get("UID"); uid != nil && uid.Value != "" {
 		idProps = appendPropLine(idProps, uid)
@@ -189,8 +188,7 @@ type scheduleResponseItemXML struct {
 }
 
 // freeBusyForPrincipal aggregates free-busy across the principal's calendars
-// the requesting user holds read-free-busy on (like sabre's
-// getFreeBusyForEmail, which skips calendars that fail that check). The
+// the requesting user holds read-free-busy on, skipping the others. The
 // returned readable flag is false when no calendar was readable at all, so
 // the caller can distinguish "denied" from "free".
 func (p *SchedulePlugin) freeBusyForPrincipal(ctx context.Context, checker PrivilegeChecker, principalURI string, start, end time.Time, extraProps ...string) (fb []byte, readable bool, err error) {

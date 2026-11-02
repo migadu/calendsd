@@ -1,5 +1,5 @@
-// Command calendsd runs the Go CalDAV server against the shared sabre
-// Postgres database.
+// Command calendsd runs the CalDAV/CardDAV server against its Postgres
+// database.
 package main
 
 import (
@@ -30,7 +30,7 @@ import (
 )
 
 func main() {
-	resolve := config.SharedServerFlags("Postgres DSN of the shared sabre database (e.g. postgres://localhost/calserver); empty runs an in-memory server")
+	resolve := config.SharedServerFlags("Postgres DSN of the calendsd database (e.g. postgres://localhost/calserver); empty runs an in-memory server")
 	addr := flag.String("addr", ":8080", "listen address")
 	metricsAddr := flag.String("metrics-addr", "", "listen address for Prometheus /metrics and /debug/pprof (plain HTTP, no auth — bind loopback or a firewalled interface, e.g. 127.0.0.1:9464); empty disables")
 	apiAddr := flag.String("api-addr", "", "listen address for the webmail contacts JSON API (plain HTTP, Basic auth with mailbox credentials via the same backend as DAV; loopback only, e.g. 127.0.0.1:8081); empty disables. Needs -db")

@@ -20,8 +20,7 @@ func IsJCal(data []byte) bool {
 
 // DecodeJCal parses a jCal document into a calendar, the inverse of JCal.
 // It is deliberately strict: any structural problem returns an error so the
-// caller rejects the request rather than storing an unusable body. sabre
-// performs the same jCal-to-iCalendar conversion on PUT.
+// caller rejects the request rather than storing an unusable body.
 func DecodeJCal(data []byte) (*goical.Calendar, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()

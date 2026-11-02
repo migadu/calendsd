@@ -42,7 +42,7 @@ type propfindXML struct {
 }
 
 // ParsePropfind parses a PROPFIND request body. An empty body means allprop
-// (RFC 4918 §9.1), matching sabre's behavior.
+// (RFC 4918 §9.1).
 func ParsePropfind(r io.Reader) (*Propfind, error) {
 	var body propfindXML
 	err := xml.NewDecoder(r).Decode(&body)

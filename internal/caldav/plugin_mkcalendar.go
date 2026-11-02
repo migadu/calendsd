@@ -23,7 +23,7 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// iCal abuses MKCALENDAR to create subscriptions: a resourcetype in
-	// the body overrides the default, like sabre.
+	// the body overrides the default.
 	resourceTypes := []xml.Name{
 		{Space: davxml.NSDav, Local: "collection"}, nameCalendar,
 	}

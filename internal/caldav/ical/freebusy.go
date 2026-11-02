@@ -18,16 +18,16 @@ type busyPeriod struct {
 }
 
 // GenerateFreeBusy computes a VFREEBUSY response for the objects' VEVENTs
-// within [start, end). Subset of vobject's FreeBusyGenerator: transparent and
-// cancelled events are skipped, TENTATIVE maps to BUSY-TENTATIVE, recurring
-// events expand within the range with each override replacing its
-// occurrence, and overlapping same-type periods coalesce
+// within [start, end). Transparent and cancelled events are skipped,
+// TENTATIVE maps to BUSY-TENTATIVE, recurring events expand within the range
+// with each override replacing its occurrence, and overlapping same-type
+// periods coalesce
 // (pinned against sabre's output in testdata/freebusy-golden.ics).
 //
 // extraProps are additional pre-formatted iCalendar property lines (unfolded,
 // no CRLF) injected into the VFREEBUSY component. The outbox POST free-busy
 // handler passes UID/ORGANIZER/ATTENDEE so the response echoes the queried
-// recipient, matching sabre; the free-busy-query REPORT passes none.
+// recipient; the free-busy-query REPORT passes none.
 func GenerateFreeBusy(objects [][]byte, start, end time.Time, loc *time.Location, now time.Time, extraProps ...string) ([]byte, error) {
 	return generateFreeBusy(objects, nil, start, end, loc, now, extraProps...)
 }
@@ -87,7 +87,7 @@ func generateFreeBusy(objects [][]byte, extra []busyPeriod, start, end time.Time
 
 // collectBusy gathers the busy periods of every object within [start, end):
 // VEVENT instances (expanded, bounded; see eventBusyPeriods) and stored
-// VFREEBUSY periods. Unparseable objects contribute nothing, like sabre.
+// VFREEBUSY periods. Unparseable objects contribute nothing.
 func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]busyPeriod, error) {
 	var periods []busyPeriod
 	for _, data := range objects {
@@ -116,7 +116,7 @@ func collectBusy(objects [][]byte, start, end time.Time, loc *time.Location) ([]
 				periods = append(periods, p...)
 			case "VFREEBUSY":
 				// A stored VFREEBUSY object contributes its own FREEBUSY
-				// periods, like vobject's FreeBusyGenerator::calculateBusy.
+				// periods.
 				p, err := freeBusyComponentPeriods(comp, start, end)
 				if err != nil {
 					logSkippedObject("freebusy", err)
@@ -186,8 +186,7 @@ func InstancePeriods(cal *goical.Calendar, start, end time.Time, loc *time.Locat
 }
 
 // coalesce merges overlapping or touching periods of the same FBTYPE and
-// returns the result in chronological order, like vobject's FreeBusyData
-// timeline.
+// returns the result in chronological order.
 func coalesce(periods []busyPeriod) []busyPeriod {
 	byType := map[string][]busyPeriod{}
 	for _, p := range periods {
@@ -214,7 +213,7 @@ func coalesce(periods []busyPeriod) []busyPeriod {
 
 // freeBusyComponentPeriods extracts the busy intervals from a stored VFREEBUSY
 // component's FREEBUSY properties, clamped to [start, end). FBTYPE=FREE periods
-// are skipped, mirroring vobject's FreeBusyGenerator.
+// are skipped.
 func freeBusyComponentPeriods(comp *goical.Component, start, end time.Time) ([]busyPeriod, error) {
 	var out []busyPeriod
 	for _, prop := range comp.Props["FREEBUSY"] {

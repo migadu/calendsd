@@ -28,8 +28,7 @@ var (
 	nameMultiget    = xml.Name{Space: NSCardDAV, Local: "addressbook-multiget"}
 )
 
-// Plugin implements the CardDAV protocol layer. Port of sabre's
-// CardDAV\Plugin.
+// Plugin implements the CardDAV protocol layer.
 type Plugin struct {
 	server *dav.Server
 }
@@ -241,8 +240,7 @@ func (p *Plugin) multigetReport(body []byte, w http.ResponseWriter, r *http.Requ
 }
 
 // convertResponseAddressData rewrites the {CARDDAV:}address-data property of a
-// response with its version-converted / property-filtered form, mirroring
-// sabre's post-processing of getPropertiesForPath output.
+// response with its version-converted / property-filtered form.
 func convertResponseAddressData(resp *davxml.Response, spec *addressDataSpec) error {
 	for pi := range resp.Propstats {
 		ps := &resp.Propstats[pi]

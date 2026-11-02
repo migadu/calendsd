@@ -46,8 +46,8 @@ func RequirePrivilegeChecker(server *dav.Server) (PrivilegeChecker, error) {
 
 // maxFreeBusySpan bounds the window of a free-busy-query REPORT and of an
 // outbox VFREEBUSY request. Free-busy expands every recurring event of every
-// readable calendar across the window, and the window is client-chosen (sabre
-// defaults an open end to the year 3000), so without a bound one request
+// readable calendar across the window, and the window is client-chosen (an
+// open end defaults to the year 3000), so without a bound one request
 // over a few dense rules is an allocation storm. 366 days covers every client
 // default (Apple asks for about a month, Thunderbird for six weeks) with room
 // for a leap year. A wider window is refused, never silently truncated: a
@@ -73,7 +73,7 @@ func freeBusyWindow(start, end time.Time) (time.Time, time.Time, error) {
 }
 
 // freeBusyQueryReport implements the free-busy-query REPORT (RFC 4791
-// §7.10), answering 200 with a text/calendar VFREEBUSY body like sabre.
+// §7.10), answering 200 with a text/calendar VFREEBUSY body.
 func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWriter, r *http.Request) error {
 	var req freeBusyQueryXML
 	if err := xml.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
@@ -137,7 +137,7 @@ func (p *Plugin) freeBusyQueryReport(body []byte, path string, w http.ResponseWr
 }
 
 // calendarTimeZone resolves a calendar's timezone from its
-// calendar-timezone property; UTC when unset, like sabre.
+// calendar-timezone property; UTC when unset.
 func (p *Plugin) calendarTimeZone(ctx context.Context, calendarPath string) *time.Location {
 	node, err := p.server.Tree.NodeForPath(ctx, calendarPath)
 	if err != nil {
@@ -188,7 +188,7 @@ func (p *Plugin) calendarQueryReport(body []byte, path string, w http.ResponseWr
 	if d := r.Header.Get("Depth"); d == "1" || strings.EqualFold(d, "infinity") {
 		depth = 1
 	}
-	// Microsoft clients send Depth: 0 but mean 1, like sabre notes.
+	// Microsoft clients send Depth: 0 but mean 1.
 	if depth == 0 && strings.HasPrefix(r.Header.Get("User-Agent"), "MSFT-") {
 		if _, isCal := node.(*Calendar); isCal {
 			depth = 1
@@ -452,8 +452,7 @@ func jsonResponseData(resp *davxml.Response) error {
 }
 
 // HandleGet implements dav.GetHandlerHook: calendar objects negotiate to
-// jCal when the client asks for application/calendar+json (sabre's
-// httpAfterGet transform).
+// jCal when the client asks for application/calendar+json.
 func (p *Plugin) HandleGet(node dav.Node, w http.ResponseWriter, r *http.Request) (bool, error) {
 	obj, isObject := node.(*CalendarObject)
 	if !isObject || negotiateExportFormat(r.Header.Get("Accept")) != "application/calendar+json" {

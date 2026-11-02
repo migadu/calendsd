@@ -55,12 +55,12 @@ func (p *SchedulePlugin) asyncSendsOffloaded() bool {
 }
 
 // deliver routes one iTIP message: local delivery first, then any external
-// deliverers (iMip). Port of sabre's deliver() + the schedule listeners. When
-// async is set, external sends are handed to a background queue so the triggering
-// request does not block on SMTP, and the deliverer writes the terminal
-// SCHEDULE-STATUS back onto the object at objectPath ("" when nothing is stored)
-// once the send settles; local delivery stays synchronous either way (it is a
-// fast storage write, and a local attendee should see the change at once).
+// deliverers (iMip). When async is set, external sends are handed to a
+// background queue so the triggering request does not block on SMTP, and the
+// deliverer writes the terminal SCHEDULE-STATUS back onto the object at
+// objectPath ("" when nothing is stored) once the send settles; local
+// delivery stays synchronous either way (it is a fast storage write, and a
+// local attendee should see the change at once).
 func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool, objectPath string) {
 	if principalForAddress(r.Context(), p.server, msg.Recipient) != "" {
 		p.scheduleLocalDelivery(r, msg)
@@ -85,7 +85,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool,
 		msg.ScheduleStatus = "5.2;There was no system capable of delivering the scheduling message"
 	}
 	// Insignificant messages that couldn't be delivered don't taint the
-	// object, like sabre's deliver().
+	// object.
 	code, _, _ := strings.Cut(msg.ScheduleStatus, ".")
 	if !msg.SignificantChange && (code == "3" || code == "5") {
 		msg.ScheduleStatus = ""
@@ -93,7 +93,7 @@ func (p *SchedulePlugin) deliver(r *http.Request, msg *ical.Message, async bool,
 }
 
 // scheduleLocalDelivery drops the message into the recipient's inbox and
-// updates their calendar copy. Port of sabre's scheduleLocalDelivery.
+// updates their calendar copy.
 func (p *SchedulePlugin) scheduleLocalDelivery(r *http.Request, msg *ical.Message) {
 	principalURI := principalForAddress(r.Context(), p.server, msg.Recipient)
 	if principalURI == "" {

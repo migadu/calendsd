@@ -15,7 +15,7 @@ import (
 	"github.com/migadu/calendsd/internal/dav"
 )
 
-// handleExport implements sabre's ICSExportPlugin: GET ?export on a calendar
+// handleExport implements calendar export: GET ?export on a calendar
 // streams the merged calendar as iCalendar or jCal, with optional
 // start/end/expand/componentType filtering.
 func (p *Plugin) handleExport(w http.ResponseWriter, r *http.Request) (bool, error) {
@@ -113,7 +113,7 @@ var exportFilenameRe = regexp.MustCompile(`[^a-zA-Z0-9-_ ]`)
 
 // negotiateExportFormat picks between text/calendar and
 // application/calendar+json from the Accept header; anything else defaults
-// to text/calendar, like sabre.
+// to text/calendar.
 func negotiateExportFormat(accept string) string {
 	for _, part := range strings.Split(accept, ",") {
 		mediaType, _, _ := strings.Cut(strings.TrimSpace(part), ";")
@@ -182,7 +182,7 @@ func (p *Plugin) exportBlobs(ctx context.Context, calNode *Calendar, path string
 
 // mergeCalendars builds one VCALENDAR from many objects: calendar-level
 // X-WR-CALNAME/X-APPLE-CALENDAR-COLOR, VTIMEZONEs deduplicated by TZID, then
-// every VEVENT/VTODO/VJOURNAL. Port of ICSExportPlugin::mergeObjects.
+// every VEVENT/VTODO/VJOURNAL.
 func mergeCalendars(info CalendarInfo, blobs [][]byte) (*goical.Calendar, error) {
 	merged := goical.NewCalendar()
 	setPlain(merged.Props, goical.PropVersion, "2.0")
@@ -225,7 +225,7 @@ func mergeCalendars(info CalendarInfo, blobs [][]byte) (*goical.Calendar, error)
 }
 
 // setPlain writes a property without forcing a VALUE parameter (SetText
-// would tag X- properties with VALUE=TEXT, which sabre does not emit).
+// would tag X- properties with VALUE=TEXT, which clients do not expect).
 func setPlain(props goical.Props, name, value string) {
 	prop := goical.NewProp(name)
 	prop.Value = value

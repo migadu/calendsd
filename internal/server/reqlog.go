@@ -23,8 +23,8 @@ const maxLoggedBody = 1 << 20 // 1 MiB
 
 // requestLogger writes one file per request — method, path, headers, and
 // (bounded) request and response bodies — to a directory, for debugging DAV
-// clients. It is the Go analogue of the sabre beforeMethod/afterMethod file
-// logger, but as outer http middleware so it can capture the response too.
+// clients. It runs as outer http middleware so it can capture the response
+// too.
 // Authorization headers are never written.
 type requestLogger struct {
 	dir string

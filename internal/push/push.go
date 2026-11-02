@@ -17,7 +17,7 @@ const NS = "https://bitfire.at/webdav-push"
 // signals on (see internal/storage addChange/abAddChange).
 const notifyChannel = "dav_push"
 
-// syncTokenPrefix mirrors sabre's Sync\Plugin::SYNCTOKEN_PREFIX, the form a
+// syncTokenPrefix is the sync-token prefix (kept from sabre/dav), the form a
 // client stores; the push-message carries the changed collection's token in
 // this shape so it matches what a following sync-collection REPORT returns.
 const syncTokenPrefix = "http://sabre.io/ns/sync/"

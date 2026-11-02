@@ -81,9 +81,8 @@ func (m *SMTPMailer) Send(from string, to []string, msg []byte) error {
 }
 
 // IMipPlugin delivers scheduling messages to external (mailto:) recipients
-// by email. Port of sabre's Schedule\IMipPlugin. It runs as an
-// ExternalDeliverer consulted by the SchedulePlugin when local delivery
-// doesn't apply.
+// by email. It runs as an ExternalDeliverer consulted by the SchedulePlugin
+// when local delivery doesn't apply.
 type IMipPlugin struct {
 	// SenderEmail is the server's own address. It is always the SMTP envelope
 	// sender (MAIL FROM), so bounces return to the server and SPF aligns on the

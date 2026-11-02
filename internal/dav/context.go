@@ -6,7 +6,7 @@ import "context"
 // submission credential used to send mail as them — through one request. It is
 // a mutable holder injected by ServeHTTP before the beforeMethod hooks run, so
 // the auth plugin can set them and later hooks can read them — per request,
-// unlike sabre's per-request plugin instances.
+// since plugin instances are shared across requests.
 type principalState struct {
 	principal string
 	// secret is the plaintext credential the principal presented (the Basic

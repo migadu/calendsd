@@ -7,8 +7,7 @@ import (
 	"github.com/migadu/calendsd/internal/dav"
 )
 
-// SimpleFile is a read-only file: deletion and renaming are forbidden, like
-// sabre's SimpleFile (which inherits DAV\Node's forbidding defaults).
+// SimpleFile is a read-only file: deletion and renaming are forbidden.
 type SimpleFile struct {
 	File
 }
@@ -34,9 +33,9 @@ type ChangeEntry struct {
 	Deleted  []string
 }
 
-// SyncCollection is an in-memory sync-capable collection. Port of sabre's
-// test MockSyncCollection, including its quirky limit accounting (only
-// modified+deleted count toward the limit).
+// SyncCollection is an in-memory sync-capable collection. It keeps the
+// quirky limit accounting of sabre/dav's test mock, which the corpus was
+// recorded against (only modified+deleted count toward the limit).
 type SyncCollection struct {
 	Collection
 	Token     int
@@ -95,8 +94,8 @@ func (sc *SyncCollection) Changes(ctx context.Context, syncToken string, syncLev
 		out.Deleted = append(out.Deleted, entry.Deleted...)
 
 		if limit > 0 {
-			// Sabre's mock counts only modified+deleted toward the limit
-			// and truncates in that order; ported verbatim.
+			// Only modified+deleted count toward the limit, truncated in
+			// that order, as sabre/dav's mock does.
 			left := limit - (len(out.Modified) + len(out.Deleted))
 			if left > 0 {
 				continue
@@ -105,9 +104,8 @@ func (sc *SyncCollection) Changes(ctx context.Context, syncToken string, syncLev
 				break
 			}
 			out.Truncated = true
-			// PHP's array_slice tolerates a negative length that exceeds
-			// the slice; Go's slice bound would panic, so clamp to 0 when
-			// deletions alone already exceed the limit.
+			// When deletions alone already exceed the limit, left reaches
+			// past the start of Modified; clamp to 0 rather than panic.
 			out.Modified = out.Modified[:max(0, len(out.Modified)+left)]
 			left = limit - (len(out.Modified) + len(out.Deleted))
 			if left == 0 {

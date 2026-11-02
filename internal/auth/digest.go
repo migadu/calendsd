@@ -20,12 +20,12 @@ import (
 )
 
 // DigestBackend authenticates HTTP Digest credentials (RFC 2617, MD5 +
-// qop=auth) against stored A1 hashes — the digesta1 column convention shared
-// with sabre. Port of sabre's Backend\AbstractDigest + sabre/http's Digest.
+// qop=auth) against stored A1 hashes, as the users table's digesta1 column
+// holds them.
 type DigestBackend struct {
 	// Realm must match the realm baked into the stored A1 hashes.
 	Realm string
-	// PrincipalPrefix is prepended to the username, like sabre.
+	// PrincipalPrefix is prepended to the username.
 	PrincipalPrefix string
 	// HashA1 returns the stored md5(user:realm:pass) hex digest for a
 	// user, "" if the user is unknown, or an error if the store failed.
@@ -57,9 +57,8 @@ func (b *DigestBackend) Check(r *http.Request) (string, error) {
 	start := time.Now()
 	defer func() { b.Metrics.ObserveAuthCheck("digest", time.Since(start).Seconds()) }()
 	// Only qop=auth is accepted; the RFC 2069 qop-less form is a
-	// downgrade path sabre's Digest also rejects. Checked before the user
-	// lookup so the answer does not differ between known and unknown users
-	// (audit 6.16).
+	// downgrade path. Checked before the user lookup so the answer does not
+	// differ between known and unknown users (audit 6.16).
 	if params["qop"] != "auth" {
 		// A protocol problem, not wrong credentials: "error", so a
 		// misbehaving client doesn't read as a brute force.

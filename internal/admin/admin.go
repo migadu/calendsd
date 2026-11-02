@@ -1,5 +1,5 @@
 // Package admin implements the calendsd admin panel (docs/design/ADMIN-PLAN.md): a
-// read-first debugging UI over the shared sabre database. Every page is a
+// read-first debugging UI over the calendsd database. Every page is a
 // thin HTML layer over a JSON endpoint; data comes from the same backend
 // interfaces the DAV server uses plus the read-only storage.AdminQueries
 // aggregates.

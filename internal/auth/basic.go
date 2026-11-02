@@ -13,11 +13,11 @@ import (
 )
 
 // BasicBackend authenticates HTTP Basic credentials. The validator receives
-// the cleartext username/password. Port of sabre's Backend\AbstractBasic.
+// the cleartext username/password.
 type BasicBackend struct {
 	// Realm is the authentication realm advertised in challenges.
 	Realm string
-	// PrincipalPrefix is prepended to the username, like sabre.
+	// PrincipalPrefix is prepended to the username.
 	PrincipalPrefix string
 	// Validate checks a username/password pair.
 	Validate func(ctx context.Context, username, password string) bool
@@ -28,7 +28,7 @@ type BasicBackend struct {
 }
 
 // principalPath is a backend's principal for username: its PrincipalPrefix,
-// by default "principals/", like sabre, plus the username.
+// by default "principals/", plus the username.
 func principalPath(prefix, username string) string {
 	if prefix == "" {
 		prefix = "principals/"
@@ -64,9 +64,9 @@ func (b *BasicBackend) Check(r *http.Request) (string, error) {
 
 func (b *BasicBackend) Challenge(h http.Header, _ *http.Request) { basicChallenge(h, b.Realm) }
 
-// DigestA1 computes md5(username:realm:password) — the digesta1 convention
-// shared with sabre's users table (docs/design/PLAN.md §5). It lets Basic credentials be
-// verified against the stored Digest hash.
+// DigestA1 computes md5(username:realm:password), the form the users table's
+// digesta1 column stores (docs/design/PLAN.md §5). It lets Basic credentials
+// be verified against the stored Digest hash.
 func DigestA1(username, realm, password string) string {
 	sum := md5.Sum([]byte(username + ":" + realm + ":" + password))
 	return hex.EncodeToString(sum[:])

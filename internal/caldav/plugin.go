@@ -21,12 +21,11 @@ var (
 	nameFreeBusy      = xml.Name{Space: davxml.NSCalDAV, Local: "free-busy-query"}
 )
 
-// Plugin implements the CalDAV protocol layer. Port of sabre's
-// CalDAV\Plugin.
+// Plugin implements the CalDAV protocol layer.
 type Plugin struct {
 	// AddVTimezones attaches a generated VTIMEZONE to a PUT that uses an IANA
 	// TZID without defining it (RFC 5545 §3.6.5; docs/dst-recurring-events.md
-	// §5). Off by default, matching sabre, which stores such bodies as sent;
+	// §5). Off by default, storing such bodies as sent;
 	// the calendsd composition turns it on.
 	AddVTimezones bool
 	// MaxAttendees caps the distinct ATTENDEEs an object may carry on PUT
@@ -49,8 +48,8 @@ func (p *Plugin) Init(s *dav.Server) {
 	})
 }
 
-// Features matches sabre's CalDAV\Plugin::getFeatures (calendar-proxy is the
-// calendarserver delegation extension, RFC-less but advertised by sabre).
+// Features lists the DAV compliance classes (calendar-proxy is the
+// calendarserver delegation extension, which has no RFC).
 func (p *Plugin) Features() []string { return []string{"calendar-access", "calendar-proxy"} }
 
 func (p *Plugin) Methods(ctx context.Context, path string) []string { return []string{"MKCALENDAR"} }
@@ -84,7 +83,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 		pf.Handle(xml.Name{Space: davxml.NSDav, Local: "add-member"}, func() any {
 			return davxml.Href{p.server.Href(pf.Path()) + "/" + addMemberSegment}
 		})
-		// Constant per-calendar properties sabre emits on every calendar.
+		// Constant per-calendar properties emitted on every calendar.
 		pf.Handle(cal("max-resource-size"), func() any { return MaxResourceSize })
 		pf.Handle(cal("max-attendees-per-instance"), func() any {
 			return strconv.Itoa(effectiveMaxAttendees(p.MaxAttendees))
@@ -103,8 +102,7 @@ func (p *Plugin) PropFind(pf *dav.PropFind, node dav.Node) error {
 
 	if obj, isObject := node.(*CalendarObject); isObject {
 		pf.Handle(nameCalendarData, func() any {
-			// Sabre strips \r so the raw payload doesn't disturb XML
-			// output.
+			// Strip \r so the raw payload doesn't disturb XML output.
 			return strings.ReplaceAll(string(obj.Data()), "\r", "")
 		})
 	}

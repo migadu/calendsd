@@ -6,8 +6,7 @@ import (
 	"net/http"
 )
 
-// PropStorageBackend persists arbitrary dead properties per path. Port of
-// sabre's PropertyStorage\Backend\BackendInterface.
+// PropStorageBackend persists arbitrary dead properties per path.
 type PropStorageBackend interface {
 	// PropFind resolves stored properties onto the PropFind object.
 	PropFind(ctx context.Context, path string, pf *PropFind) error
@@ -37,7 +36,6 @@ type PropPrefetcher interface {
 }
 
 // PropertyStoragePlugin persists any property no other subsystem claimed.
-// Port of sabre's PropertyStorage\Plugin.
 type PropertyStoragePlugin struct {
 	Backend PropStorageBackend
 	// PathFilter, when set, limits which paths get stored properties.
@@ -90,8 +88,8 @@ func (p *PropertyStoragePlugin) Prefetch(ctx context.Context, paths []string) er
 	return nil
 }
 
-// PropFindLate implements LatePropFindHook (sabre priority 130: after node
-// dead properties).
+// PropFindLate implements LatePropFindHook: it runs after node dead
+// properties.
 func (p *PropertyStoragePlugin) PropFindLate(pf *PropFind, node Node) error {
 	ctx := pf.Context()
 	if !p.allowed(pf.Path()) {
@@ -108,8 +106,7 @@ func (p *PropertyStoragePlugin) PropFindLate(pf *PropFind, node Node) error {
 	return p.Backend.PropFind(ctx, pf.Path(), pf)
 }
 
-// PropPatch implements PropPatchHook (sabre priority 300: after the node's
-// own handlers).
+// PropPatch implements PropPatchHook: it runs after the node's own handlers.
 func (p *PropertyStoragePlugin) PropPatch(ctx context.Context, path string, pp *PropPatch) error {
 	if !p.allowed(path) {
 		return nil

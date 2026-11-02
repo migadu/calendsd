@@ -1,5 +1,5 @@
 // Package dav implements the WebDAV core: server, tree, node interfaces,
-// property system. It is a Go port of sabre/dav's lib/DAV.
+// property system.
 package dav
 
 import (
@@ -11,7 +11,6 @@ import (
 )
 
 // Node is the base interface for every entry in the DAV tree.
-// Port of sabre's INode.
 type Node interface {
 	// Name returns the last path segment of the node.
 	Name() string
@@ -24,7 +23,7 @@ type Node interface {
 	LastModified() time.Time
 }
 
-// Collection is a node containing child nodes. Port of sabre's ICollection.
+// Collection is a node containing child nodes.
 type Collection interface {
 	Node
 	// Child returns the child node with the given name, or ErrNotFound.
@@ -41,7 +40,7 @@ type Collection interface {
 	CreateDirectory(ctx context.Context, name string) error
 }
 
-// File is a leaf node carrying a payload. Port of sabre's IFile.
+// File is a leaf node carrying a payload.
 type File interface {
 	Node
 	// Get returns the file payload. A payload that is also an io.Seeker
@@ -60,7 +59,7 @@ type File interface {
 }
 
 // ExtendedCollection can create children with non-standard resource types
-// (extended MKCOL / MKCALENDAR bodies). Port of sabre's IExtendedCollection.
+// (extended MKCOL / MKCALENDAR bodies).
 type ExtendedCollection interface {
 	Collection
 	// CreateExtendedCollection creates a child with the given resource
@@ -69,7 +68,6 @@ type ExtendedCollection interface {
 }
 
 // PropNode is a node with custom (dead or protected) properties.
-// Port of sabre's IProperties.
 type PropNode interface {
 	Node
 	// Props returns values for the requested properties; absent entries
