@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/migadu/calendsd/internal/auth"
 	"github.com/migadu/calendsd/internal/config"
 	"github.com/migadu/calendsd/internal/dav"
 	"github.com/migadu/calendsd/internal/dav/mock"
@@ -92,6 +93,15 @@ func main() {
 		}
 		set.RegisterDBStats(db)
 		set.RegisterJobDepth(db)
+		// The passwd-file is read here, not in Config.Validate: calctl panel
+		// shares the config but never authenticates against the file, and
+		// typically runs as a user that cannot read it.
+		if m.Server.PasswdFile != "" {
+			if err := auth.CheckPasswdFile(m.Server.PasswdFile); err != nil {
+				slog.Error("reading passwd_file", "err", err)
+				os.Exit(1)
+			}
+		}
 		// Same line `calctl panel` logs: drift shows as a string diff.
 		slog.Info("effective config", "config", m.Server.Canonical())
 		built := server.Build(db, m.Server, m.DSN)

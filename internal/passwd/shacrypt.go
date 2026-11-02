@@ -77,7 +77,9 @@ func verifyShaCrypt(hashed, password string) error {
 			return errors.New("invalid SHA-crypt hash: unterminated rounds")
 		}
 		parsed, err := strconv.ParseUint(n, 10, 64)
-		if err != nil {
+		if errors.Is(err, strconv.ErrRange) {
+			parsed = shaCryptRoundsMax // the spec clamps, it does not reject
+		} else if err != nil {
 			return errors.New("invalid SHA-crypt hash: bad rounds")
 		}
 		rounds = int(min(max(parsed, shaCryptRoundsMin), shaCryptRoundsMax))

@@ -110,6 +110,13 @@ func parsePasswdFile(path string) (map[string]string, error) {
 	return hashes, nil
 }
 
+// CheckPasswdFile reports whether path is a readable passwd-file, so a
+// server can refuse to start before it builds the backend.
+func CheckPasswdFile(path string) error {
+	_, err := parsePasswdFile(path)
+	return err
+}
+
 // NewPasswdFileBackend builds a Basic backend that verifies logins against a
 // Dovecot passwd-file at path, with the same credential cache, CPU bound and
 // unknown-user timing equalization as the rcptd backend. The file is read

@@ -201,13 +201,6 @@ func (c Config) Validate() error {
 	if c.RcptdURL != "" && c.PasswdFile != "" {
 		return errors.New("[server] rcptd.url and passwd_file are mutually exclusive")
 	}
-	if c.PasswdFile != "" {
-		f, err := os.Open(c.PasswdFile)
-		if err != nil {
-			return fmt.Errorf("[server] passwd_file: %w", err)
-		}
-		f.Close()
-	}
 	return nil
 }
 
@@ -439,8 +432,8 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		if cfg.PasswdFile != "" {
 			var err error
 			if rb, err = auth.NewPasswdFileBackend(cfg.Realm, cfg.PasswdFile, 5*time.Minute); err != nil {
-				// Validate already checked the file is readable; reaching
-				// here means it vanished since, or a caller skipped Validate.
+				// calendsd reads the file before Build (cmd/calendsd), so
+				// reaching here means a caller skipped that check.
 				panic("server: " + err.Error())
 			}
 		} else {

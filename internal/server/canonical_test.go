@@ -50,3 +50,17 @@ func TestCanonicalIMipDurable(t *testing.T) {
 		t.Error("Canonical leaked the credential key bytes")
 	}
 }
+
+// Validate rejects rcptd and a passwd-file together, but never reads the
+// file: calctl panel validates the same config and usually cannot.
+func TestValidatePasswdFile(t *testing.T) {
+	if err := (Config{RcptdURL: "http://127.0.0.1:8090", PasswdFile: "/etc/dovecot/users"}).Validate(); err == nil {
+		t.Error("Validate accepted rcptd.url and passwd_file together")
+	}
+	if err := (Config{PasswdFile: "/nonexistent/passwd"}).Validate(); err != nil {
+		t.Errorf("Validate(missing passwd_file) = %v, want nil (calendsd checks the file at startup)", err)
+	}
+	if got := (Config{PasswdFile: "/etc/dovecot/users"}).Canonical(); !strings.Contains(got, "passwdfile=true") {
+		t.Errorf("Canonical = %q, want passwdfile=true", got)
+	}
+}
