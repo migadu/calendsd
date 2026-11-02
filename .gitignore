@@ -8,6 +8,8 @@ dav/vendor/
 # go
 /calendsd
 /calserver
+/calctl
+/calclient
 /bin/
 *.test
 
