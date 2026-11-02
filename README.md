@@ -1,81 +1,108 @@
 # calendsd
 
-A Go CalDAV server ported from [sabre/dav](https://sabre.io/). It still stores
-its data in sabre's tables, but sabre is no longer a rollback target: the
-schema is calendsd's own now (`internal/schema/migrations/`, applied by
-`calctl schema apply`). See [docs/design/PLAN.md](docs/design/PLAN.md) for the porting plan; `dav/` is
-the reference sabre/dav checkout the port is derived from.
+A CalDAV and CardDAV server in Go, backed by Postgres. It began as a port of
+[sabre/dav](https://sabre.io/) and still reads and writes sabre's table
+layout, so it can take over an existing sabre/dav database in place. The schema is calendsd's own now: it adds
+its own tables through versioned migrations (`calctl schema apply`) and no
+longer treats sabre as a rollback target.
 
-## Dev environment
+It runs in production at [Migadu](https://www.migadu.com/), serving calendars
+and contacts for every mailbox.
 
-Everything is provided by the Nix flake; with [direnv](https://direnv.net/)
-installed, `direnv allow` once and the toolchain (Go, PHP+pdo_pgsql, composer,
-Postgres 16, sqlc) is on PATH.
+## Features
 
-## Local server
+- **CalDAV** (RFC 4791) with `sync-collection` (RFC 6578) and `add-member`
+  (RFC 5995).
+- **Scheduling** (RFC 6638): free-busy, auto-scheduling between local users,
+  and email invitations (iMIP) to everyone else, sent from a durable job queue
+  through your SMTP submission server.
+- **Availability** (RFC 7953): working hours that shape free-busy answers.
+- **CardDAV** (RFC 6352).
+- **Calendar sharing** and subscriptions, with optional share-invite emails.
+- **WebDAV-Push**, so clients that support it learn about changes without
+  polling.
+- **Authentication** against the database, a Dovecot passwd-file, or an rcptd
+  hash service. The last two share your mail server's passwords.
+- **Operations:** a management CLI (`calctl`), a read-mostly admin panel,
+  Prometheus metrics and pprof, `/health`, soft-delete with delayed purge, and
+  multi-host Postgres failover.
+- **A webmail contacts API** (`docs/webmail-contacts.md`), so a webmail and a
+  phone share one address book.
+- **calclient**, a small web calendar and contacts UI that proxies to
+  calendsd.
+
+## Binaries
+
+| Binary | What it is |
+| --- | --- |
+| `calendsd` | The DAV server. |
+| `calctl` | Management CLI: schema migrations, principals, health, consistency checks, the admin panel. |
+| `calclient` | Web UI. It serves the embedded client and reverse-proxies DAV requests to a calendsd, so the browser talks to a single origin. |
+
+## Quickstart
+
+You need Go (see `go.mod` for the version) and Postgres (developed against 16).
 
 ```sh
-scripts/dev-db.sh start          # local Postgres (unix socket under .dev/), schema migrated, dev accounts seeded
-go run ./cmd/calendsd -db "postgres:///calserver?host=$PGHOST"  # default :8080
+go install github.com/migadu/calendsd/cmd/...@latest
+
+createdb calendsd
+export DSN="postgres:///calendsd?sslmode=disable"
+calctl schema apply --db "$DSN"
+calctl principal add alice --email alice@example.org --password-stdin --db "$DSN" <<< 'correct horse'
+
+calendsd -db "$DSN" -auto-provision     # listens on :8080
 ```
 
-Credentials: `admin` / `admin` (Basic or Digest, realm `SabreDAV` — the realm
-is baked into `users.digesta1`, see docs/design/PLAN.md §5).
+Point a CalDAV/CardDAV client at `http://localhost:8080/` and log in as
+`alice`. `-auto-provision` gives each user a default calendar and address
+book on first login. Without `-db`, calendsd runs on an in-memory store, which is handy
+for a quick look and loses everything on exit.
 
-The **live parity test** (the §5 acceptance gate during the migration) spins
-up a fresh database, a real sabre instance, and the Go server, then
-cross-reads/writes through both. It is opt-in and no longer runs in CI; it
-goes away with `scripts/sabre-server.php` after one release:
+For anything beyond a quick look:
 
-```sh
-PARITY=1 go test ./internal/storage/ -run TestParity -v
-```
+1. Copy [`config.toml.example`](config.toml.example) to `config.toml`. Every
+   key is documented there and every one is optional. calendsd and calctl
+   look for it in `/etc/calendsd/config.toml` and
+   `/usr/local/etc/calendsd/config.toml`, or take `-config PATH`.
+2. **Serve it over TLS**, either with `[server.tls]` or behind a reverse
+   proxy. The Basic auth that the passwd-file and rcptd modes require sends
+   the password with every request.
+3. **Pick how users log in:**
+   - **Database** (the default): users live in the `users` table and are
+     managed with `calctl principal …`. Supports Basic and Digest.
+   - **Dovecot passwd-file**: set `server.passwd_file` to the file your IMAP
+     server already uses (`user:{SCHEME}hash` lines; bcrypt, SHA512-CRYPT,
+     SHA256-CRYPT, SSHA512 and SHA512 are understood). The file is re-read
+     when it changes. Pair it with `calendarserver.auto_provision = true` so a
+     first login creates the user's principal, calendar and address book.
+   - **rcptd**: `[server.rcptd]` fetches hashes from an rcptd service instead
+     of a local file; same verification, same pairing with auto-provisioning.
+4. **Email invitations** (optional): configure `[scheduling.imip]` with your
+   SMTP submission server. See [docs/imip.md](docs/imip.md).
 
-## Admin panel
+## Operations
 
-`calctl panel` serves a debugging UI over the same shared database
-(see [docs/design/ADMIN-PLAN.md](docs/design/ADMIN-PLAN.md)): principal/calendar/object inspectors, a
-privilege simulator that answers "what can user X do on path Y" through the
-production plugin chain, a scheduling/sync debugger, a consistency doctor,
-and (behind `-readonly=false`) gated setup actions — every page doubles as a
-JSON endpoint under `/api/`.
+### calctl
 
-```sh
-htpasswd -cB admin-auth.htpasswd root   # bcrypt admin credentials
-go run ./cmd/calctl panel -db "postgres:///calserver?host=$PGHOST" \
-  -admin-auth admin-auth.htpasswd       # binds 127.0.0.1:8092
-```
-
-Run it with the **same config file / Calendar-Server flags as calendsd**
-(both processes resolve them through the same code and log an identical
-`effective config` line — the dashboard echoes it so drift is a string
-diff). Basic auth resends the password on every request: keep the listener
-on loopback/LAN or behind TLS. Write actions are off by default, need the
-`X-Admin-Request: 1` header, and audit-log every mutation.
-
-## CLI
-
-`calctl` is the management CLI (same shape as `mqctl`/`rcptctl` in the
-sibling services). It reads the server's `config.toml` (`-config`, falling
-back to `/etc/calendsd/config.toml`, `/usr/local/etc/calendsd/config.toml`,
-then the pre-rename `/etc/calserver` and `/usr/local/etc/calserver` paths;
-the working directory is never searched) and exposes the admin panel's read
-paths from the command
-line:
+`calctl` reads the same `config.toml` as the server. Every command takes
+`--json`.
 
 ```sh
 calctl health                 # every dependency, probed concurrently (see below)
 calctl panel                  # serve the admin panel (127.0.0.1:8092)
-calctl stats                  # dashboard row counts + recent change-log activity
-calctl doctor                 # §3.7 consistency checks; exit 1 on any finding
+calctl stats                  # row counts + recent change-log activity
+calctl doctor                 # consistency checks; exit 1 on any finding
+calctl schema apply           # apply pending schema migrations
 calctl principal list         # principals with email/displayname/login capability
 calctl principal add bob --email bob@example.org --password-stdin < pw
 calctl principal edit bob --name "Robert"        # --email "" clears; --password resets
 calctl principal remove bob --confirm            # refuses while collections exist
-calctl principal auth bob --password-stdin < pw  # verify against digesta1; exit 0 on match
-calctl health --json          # every command takes --json for scripts/monitoring
-calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
+calctl principal auth bob --password-stdin < pw  # verify a password; exit 0 on match
+calctl principal purge-expired                   # purge soft-deleted principals (run daily)
 ```
+
+`calctl help` lists everything else (jobs, iMIP resends, contact import).
 
 `health` reports one row per component, all derived from `config.toml`:
 
@@ -89,33 +116,38 @@ calctl health --url http://127.0.0.1:8080/ --db postgres://localhost/calserver
 | `jobs` | due, stuck-executing and discarded rows in the job queue | degraded when due work is >10m old or a claim is >15m old |
 | `rcptd` | `/auth` with a probe address (404 is healthy) | token rejected or no answer; degraded on 503 |
 
-The per-node rows exist because calendsd tries a multi-host DSN in order:
-a node that silently drops traffic costs each new connection a full
-`connect_timeout`, which the `database` row (some host answered) hides.
+`health` exits 1 on an unhealthy component (degraded only warns), and `doctor`
+exits 1 on any finding, so both slot straight into monitoring.
 
-`health` exits 1 on an unhealthy component (degraded only warns), `doctor` on
-any finding, so both slot straight into monitoring. The `principal` writes go through the same
-`storage.AdminWrites` carve-out as the admin panel (digesta1 computed under
-the configured realm; override with `--realm`).
+### Admin panel
 
-## /health
-
-The DAV listener answers an unauthenticated `GET`/`HEAD /health` (at the
-root, whatever the base URI) for load balancers and uptime monitors:
-`200 {"status":"ok","database":"ok"}` while the database answers a ping
-within 2s, `503 {"status":"unavailable","database":"unreachable"}` otherwise.
-The database error is logged, never returned. Probes are counted in metrics
-(`route="health"`) but kept out of the access and request logs.
+`calctl panel` serves a debugging UI over the same database: inspectors for
+principals, calendars and objects; a privilege simulator that answers "what
+can user X do on path Y" through the production plugin chain; a scheduling
+and sync debugger; the consistency doctor; and, behind `-readonly=false`,
+gated write actions. Every page doubles as a JSON endpoint under `/api/`.
 
 ```sh
-curl -fsS http://127.0.0.1:8080/health
+htpasswd -cB admin-auth.htpasswd root   # bcrypt admin credentials
+calctl panel -admin-auth admin-auth.htpasswd   # binds 127.0.0.1:8092
 ```
 
-## Metrics
+Run it with the same config as calendsd. Keep the listener on loopback or
+behind TLS. Write actions are off by default, need the
+`X-Admin-Request: 1` header, and audit-log every mutation.
+
+### /health
+
+The DAV listener answers an unauthenticated `GET`/`HEAD /health` (at the root,
+whatever the base URI) for load balancers: `200 {"status":"ok","database":"ok"}`
+while the database answers a ping within 2s, and
+`503 {"status":"unavailable","database":"unreachable"}` otherwise.
+
+### Metrics
 
 Set `-metrics-addr` (or `[server].metrics_addr`) to serve Prometheus metrics
-and Go pprof on a second plain-HTTP listener (docs/design/METRICS-PLAN.md has the full
-design and metric inventory):
+and Go pprof on a second plain-HTTP listener. It has no TLS and no auth, so
+bind it to loopback or a firewalled interface.
 
 ```sh
 calendsd -config config.toml -metrics-addr 127.0.0.1:9464
@@ -123,41 +155,26 @@ curl -s http://127.0.0.1:9464/metrics | grep calserver_
 go tool pprof http://127.0.0.1:9464/debug/pprof/profile
 ```
 
-The listener has no TLS and no auth — bind loopback or a firewalled
-interface, never the public one. Empty (the default) disables it entirely.
-All series are named `calserver_*`; every label comes from a closed set
-(normalized method, route pattern, typed auth outcome, …), never from
-request data, so cardinality stays bounded. Sample scrape config:
+All series are named `calserver_*`, and every label comes from a closed set,
+so cardinality stays bounded. The metric inventory is in
+[docs/design/METRICS-PLAN.md](docs/design/METRICS-PLAN.md).
 
-```yaml
-scrape_configs:
-  - job_name: calendsd
-    static_configs:
-      - targets: ["127.0.0.1:9464"]
-```
+## Documentation
 
-## Test corpus
+- [`config.toml.example`](config.toml.example): every setting.
+- [`docs/`](docs/): feature notes (iMIP, share emails, webmail contacts, DST
+  handling, slow-query work, audit findings).
+- [`docs/design/`](docs/design/): the design notes behind each subsystem,
+  starting with the porting plan in [PLAN.md](docs/design/PLAN.md).
 
-The port is driven red→green against fixtures extracted from sabre's own test
-suite into `testdata/corpus/` (see docs/design/PLAN.md §7). Regenerate after bumping the
-sabre checkout:
+## Contributing
 
-```sh
-cd dav && composer install
-CORPUS_DIR=../testdata/corpus vendor/bin/phpunit \
-  --configuration tests/phpunit.xml tests/Sabre/CalDAV tests/Sabre/DAV
-```
-
-The Go corpus runner (`go test ./internal/corpus/ -v -run TestCorpus`) replays
-each record and reports coverage. Porting a feature moves its records into the
-`passing` set in `internal/corpus/runner_test.go`.
-
-Parity of the PUT-time denormalization (etag, occurrence bounds) is separately
-pinned against sabre via `internal/caldav/ical/testdata/golden.json`,
-regenerated with `scripts/denormalize-golden.php`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and tests,
+and [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The reference sabre/dav checkout in
-`dav/` (and the test corpus extracted from it) keeps its own BSD license, see
-[dav/LICENSE](dav/LICENSE).
+MIT, see [LICENSE](LICENSE). The reference sabre/dav checkout in `dav/` (and
+the test corpus extracted from it) keeps its own BSD license, see
+[dav/LICENSE](dav/LICENSE). The bundled IBM Plex fonts are under the SIL Open
+Font License.
