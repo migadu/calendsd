@@ -29,7 +29,7 @@ CLIENT_ADDR ?= 127.0.0.1:8091
 # `make` with no target starts the DB and both servers.
 .DEFAULT_GOAL := dev
 
-.PHONY: help dev run client seed all build freebsd test vet fmt corpus parity \
+.PHONY: help dev run client seed all build freebsd test test-client vet fmt corpus parity \
         db-start db-stop db-reset \
         caldavtester caldavtester-full clean
 
@@ -78,6 +78,9 @@ freebsd: ## Cross-compile the binaries for FreeBSD/amd64 (bin/*-freebsd-amd64)
 
 test: ## Run the full Go test suite
 	$(GO) test ./...
+
+test-client: ## Run the calclient unit tests and eslint
+	cd cmd/calclient && npm test && npm run lint
 
 vet: ## Run go vet over everything
 	$(GO) vet ./...

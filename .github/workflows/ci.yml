@@ -48,3 +48,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # The calclient web apps' unit tests (node --test) and eslint. The apps
+  # have no build step; npm only fetches eslint.
+  calclient:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cmd/calclient
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run lint
