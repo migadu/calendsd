@@ -45,6 +45,9 @@ web_url = ""            # calclient origin that emails link to, e.g.
                         # which also needs [scheduling.imip] smtp and a
                         # domain_scheduling_policy row with share_notify =
                         # 'email' for the recipient's domain.
+passwd_file = ""        # Dovecot passwd-file to authenticate against instead
+                        # of the users table; see "AUTHENTICATION VIA A DOVECOT
+                        # PASSWD-FILE" below. Empty = disabled.
 
 # TLS / HTTPS. Leave both empty to serve plain HTTP (terminate TLS in front,
 # e.g. behind a reverse proxy). Basic/Digest send credentials, so if calendsd
@@ -69,6 +72,17 @@ url = ""                # rcptd base URL, e.g. "http://127.0.0.1:8090". Empty
 token = ""              # Bearer token rcptd requires (its auth_token). May also
                         # be supplied via the $RCPTD_AUTH_TOKEN environment
                         # variable, which keeps the secret out of the file.
+
+# AUTHENTICATION VIA A DOVECOT PASSWD-FILE (optional)
+# -----------------------------------------------------------------------------
+# Alternatively, verify Basic logins against a local passwd-file in Dovecot's
+# format, one "user:{SCHEME}hash[:uid:gid:gecos:home:shell:extra]" line per
+# account (only the first two fields are read; generate hashes with
+# `doveadm pw -s BLF-CRYPT`). Supported schemes: BLF-CRYPT / bare $2y$ bcrypt,
+# SSHA512, SHA512. The file is re-read when it changes. Like rcptd this is
+# Basic-only — front it with TLS and pair with calendarserver.auto_provision.
+# Mutually exclusive with [server.rcptd] url. Set it in [server] above:
+#   passwd_file = "/usr/local/etc/dovecot/users"
 
 
 # DATABASE

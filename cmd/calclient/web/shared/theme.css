@@ -1,6 +1,6 @@
-/* theme.css — shared design system for calclient, matching the migadu static
-   site: IBM Plex Sans/Mono, a cool-blue palette with a light/dark scheme, sharp
-   corners, and mono uppercase labels. Linked before each app's own stylesheet;
+/* theme.css — shared design system for calclient: IBM Plex Sans/Mono, a
+   cool-blue palette with a light/dark scheme, sharp corners, and mono
+   uppercase labels. Linked before each app's own stylesheet;
    cal.css and app.css map their semantic vars (--bg, --panel, --accent, …) onto
    the --color-* tokens defined here. */
 
@@ -88,7 +88,7 @@ body {
   text-rendering: optimizelegibility;
 }
 
-/* Sharp, blueprint-like corners everywhere (migadu --layout-radius: 0). This is
+/* Sharp, blueprint-like corners everywhere (--layout-radius: 0). This is
    deliberately heavy-handed; genuinely circular primitives (avatars, dots,
    spinners) must restore their radius with !important — see cal.css. */
 *, *::before, *::after { border-radius: 0 !important; }
@@ -106,7 +106,7 @@ body {
 ::-webkit-scrollbar-track { background: var(--color-background-alt); }
 ::-webkit-scrollbar-thumb { background: var(--color-border-active); }
 
-/* Mono, uppercase, letter-spaced labels — the migadu "label" style. Opt-in
+/* Mono, uppercase, letter-spaced labels — the "label" style. Opt-in
    utilities for markup; cal.css also applies this treatment to specific
    label-like elements via its own selectors, sharing --label-letter-spacing. */
 .u-label {

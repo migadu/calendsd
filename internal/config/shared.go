@@ -117,6 +117,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 	expandGroups := flag.Bool("expand-groups", false, "expand group ATTENDEEs into per-member invitations (Calendar-Server behavior)")
 	rcptdURL := flag.String("rcptd-url", "", "base URL of an rcptd daemon (e.g. http://127.0.0.1:8090); when set, authenticate Basic logins against its /auth endpoint (Dovecot passwd hashes) instead of the users table. Basic-only (no digesta1) — front with TLS; pair with -auto-provision")
 	rcptdToken := flag.String("rcptd-token", "", "bearer token for rcptd /auth (its auth_token); falls back to $RCPTD_AUTH_TOKEN")
+	passwdFile := flag.String("passwd-file", "", "path to a Dovecot passwd-file (user:{SCHEME}hash:... lines, re-read on change); when set, authenticate Basic logins against it instead of the users table. Basic-only — front with TLS; pair with -auto-provision. Mutually exclusive with -rcptd-url")
 	requestLogDir := flag.String("request-log-dir", "", "debug: dump every request/response (headers + bounded bodies, Authorization redacted) to one file per request under this directory; empty disables. Do not use in production")
 	accessLog := flag.Bool("access-log", false, "log one line per request (method, path, status, bytes, duration) into the main log; overrides [logging].access_log")
 	webURL := flag.String("web-url", "", "calclient origin that emails link to (e.g. https://calendar.example.org); empty disables share-invite emails (docs/share-invite-email.md)")
@@ -213,6 +214,7 @@ func SharedServerFlags(dbUsage string) func() (*Merged, error) {
 			MaxAttendees:              m.File.Scheduling.MaxAttendees,
 			RcptdURL:                  m.Str("rcptd-url", *rcptdURL, m.File.Server.Rcptd.URL),
 			RcptdToken:                rcptdTok,
+			PasswdFile:                m.Str("passwd-file", *passwdFile, m.File.Server.PasswdFile),
 			RequestLogDir:             m.Str("request-log-dir", *requestLogDir, m.File.Logging.RequestDir),
 			AccessLog:                 m.Bool("access-log", *accessLog, m.File.Logging.AccessLog),
 			WebURL:                    m.Str("web-url", *webURL, m.File.Server.WebURL),

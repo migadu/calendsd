@@ -256,7 +256,7 @@ func (s *Set) ReportRequest(reportType string) {
 }
 
 // AuthAttempt counts one authentication attempt. backend is basic, digest,
-// rcptd, or none (a credential-less probe); outcome is one of ok,
+// rcptd, passwdfile, or none (a credential-less probe); outcome is one of ok,
 // bad_credentials, unavailable, no_credentials, provision_error, error.
 func (s *Set) AuthAttempt(backend, outcome string) {
 	if s == nil {

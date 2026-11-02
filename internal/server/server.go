@@ -99,6 +99,11 @@ type Config struct {
 	// kept out of Canonical()).
 	RcptdURL   string
 	RcptdToken string
+	// PasswdFile, when non-empty, authenticates against a local Dovecot
+	// passwd-file ("user:{SCHEME}hash:..." lines) with the same Basic-only
+	// verification as RcptdURL. The file is re-read when it changes.
+	// Mutually exclusive with RcptdURL.
+	PasswdFile string
 	// RequestLogDir, when non-empty, dumps every request/response (method,
 	// path, headers, bounded bodies; Authorization redacted) to one file per
 	// request under this directory. A debugging aid for DAV clients — off by
@@ -180,10 +185,10 @@ func (c Config) Canonical() string {
 	if realm == "" {
 		realm = DefaultRealm
 	}
-	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t imip-durable=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t reqlog=%t accesslog=%t push=%t",
+	return fmt.Sprintf("base-uri=%s realm=%s imip=%t imip-as-organizer=%t imip-submission=%t imip-durable=%t auto-provision=%t per-user-props=%t expand-groups=%t principals-readable=%t auto-schedule=%s browser=%t tempfilter=%t rcptd=%t passwdfile=%t reqlog=%t accesslog=%t push=%t",
 		base, realm, c.IMipSMTP != "" || c.IMipSubmission != "", c.IMipSendAsOrganizer, c.IMipSubmission != "", len(c.IMipQueue.CredentialKey) > 0, c.AutoProvision, c.PerUserProps,
 		c.ExpandGroups, c.PrincipalsReadable,
-		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
+		strings.Join(c.AutoSchedulePrefixes, ","), c.Browser, c.TempFileFilter, c.RcptdURL != "", c.PasswdFile != "", c.RequestLogDir != "", c.AccessLog, c.Push.Enabled)
 }
 
 // Validate reports a configuration the server cannot run with. [push]
@@ -192,6 +197,16 @@ func (c Config) Canonical() string {
 func (c Config) Validate() error {
 	if c.Push.Enabled && !c.pushConfig().Valid() {
 		return errors.New("[push] enabled but vapid_public_key, vapid_private_key or topic_secret is empty")
+	}
+	if c.RcptdURL != "" && c.PasswdFile != "" {
+		return errors.New("[server] rcptd.url and passwd_file are mutually exclusive")
+	}
+	if c.PasswdFile != "" {
+		f, err := os.Open(c.PasswdFile)
+		if err != nil {
+			return fmt.Errorf("[server] passwd_file: %w", err)
+		}
+		f.Close()
 	}
 	return nil
 }
@@ -409,17 +424,28 @@ func compose(db *sql.DB, cfg Config, authOverride *auth.Plugin) (*dav.Server, au
 		// The injected-plugin/test path (NewLoggedIn) is left ungated on
 		// purpose, matching how BeforeMethod skips fixedPrincipal.
 		srv.AddPlugin(authOverride)
-	case cfg.RcptdURL != "":
-		// Authenticate against rcptd's /auth (Dovecot hashes verified locally
-		// via internal/passwd). Basic-only: rcptd serves no digesta1, so Digest
-		// can't work. First-time logins get a principal from the provisioner.
+	case cfg.RcptdURL != "" || cfg.PasswdFile != "":
+		// Authenticate against rcptd's /auth or a local Dovecot passwd-file
+		// (hashes verified locally via internal/passwd). Basic-only: neither
+		// source has a digesta1, so Digest can't work. First-time logins get
+		// a principal from the provisioner.
 		prov := &provisioner{
 			principals: principals,
 			writes:     &storage.AdminWrites{DB: db},
 			realm:      cfg.Realm,
 			seen:       map[string]time.Time{},
 		}
-		rb := auth.NewRcptdBackend(cfg.Realm, cfg.RcptdURL, cfg.RcptdToken, 5*time.Minute)
+		var rb *auth.RcptdBackend
+		if cfg.PasswdFile != "" {
+			var err error
+			if rb, err = auth.NewPasswdFileBackend(cfg.Realm, cfg.PasswdFile, 5*time.Minute); err != nil {
+				// Validate already checked the file is readable; reaching
+				// here means it vanished since, or a caller skipped Validate.
+				panic("server: " + err.Error())
+			}
+		} else {
+			rb = auth.NewRcptdBackend(cfg.Realm, cfg.RcptdURL, cfg.RcptdToken, 5*time.Minute)
+		}
 		rb.Provision = prov.ensure
 		rb.Logger = slog.Default()
 		rb.Metrics = cfg.Metrics

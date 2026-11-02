@@ -3,7 +3,7 @@
 /* The `hidden` attribute must win over the explicit `display` rules below
    (an ID selector like #login{display:flex} otherwise beats [hidden]). */
 [hidden] { display: none !important; }
-/* Semantic vars mapped onto the shared migadu palette (see /shared/theme.css),
+/* Semantic vars mapped onto the shared palette (see /shared/theme.css),
    so the whole UI picks up the blue scheme and its dark-mode variant. */
 :root {
   --bg: var(--color-background-base); --panel: var(--color-background-active);
@@ -37,7 +37,7 @@ button {
   color: var(--ink); padding: .35rem .8rem; cursor: pointer;
 }
 button:hover { background: var(--color-background-alt); }
-/* Primary inverts on hover — the migadu button behaviour. */
+/* Primary inverts on hover — the theme's button behaviour. */
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 button.primary:hover { background: transparent; color: var(--accent); }
 button.ghost { border: none; background: none; color: var(--accent); }
@@ -692,7 +692,7 @@ a.join-btn:hover { filter: brightness(1.08); }
 .task-row.done .task-title { text-decoration: line-through; color: var(--dim); }
 .task-done-toggle, .task-new-list { display: block; margin: .6rem 0; }
 
-/* ---- migadu label treatment: mono, uppercase, letter-spaced ---- */
+/* ---- label treatment: mono, uppercase, letter-spaced ---- */
 .ct-side-h > span, .fg-head > span, .detail-row .dl {
   font-family: var(--font-mono); text-transform: uppercase; letter-spacing: var(--label-letter-spacing);
 }

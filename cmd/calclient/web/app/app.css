@@ -1,7 +1,7 @@
 /* calclient — minimal hand-written styles, no CDN. Corners stay square
    (theme.css's global radius:0); no border-radius is written here. */
 * { box-sizing: border-box; }
-/* Semantic vars mapped onto the shared migadu palette (see /shared/theme.css). */
+/* Semantic vars mapped onto the shared palette (see /shared/theme.css). */
 :root {
   --bg: var(--color-background-base); --panel: var(--color-background-active);
   --line: var(--color-border-subtle); --ink: var(--color-text-primary);

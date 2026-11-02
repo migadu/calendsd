@@ -31,6 +31,9 @@ import (
 // the same implementation Mizu uses at SMTP AUTH. The plaintext password never
 // leaves this process. The passwd source of truth is the same Dovecot file the
 // mail stack uses, so DAV logins and mail logins stay in lock-step.
+//
+// The same backend serves a local Dovecot passwd-file instead of rcptd when
+// built with NewPasswdFileBackend; only the hash lookup differs.
 type RcptdBackend struct {
 	// Realm is advertised in Basic challenges.
 	Realm string
@@ -59,6 +62,10 @@ type RcptdBackend struct {
 	// hash verify is eating the CPU"), and counts credential-cache hits and
 	// misses. A nil Set records nothing.
 	Metrics *metrics.Set
+
+	// file, when set, replaces the rcptd /auth lookup with a passwd-file one
+	// (NewPasswdFileBackend); URL, Token and HTTP are then unused.
+	file *passwdFile
 
 	// Positive-credential cache: skips the /auth round-trip and the (bcrypt)
 	// verification for repeat logins, which chatty CalDAV clients produce in
@@ -182,6 +189,14 @@ func (b *RcptdBackend) client() *http.Client {
 	return &http.Client{Timeout: 5 * time.Second}
 }
 
+// name is the backend label in the auth metrics.
+func (b *RcptdBackend) name() string {
+	if b.file != nil {
+		return "passwdfile"
+	}
+	return "rcptd"
+}
+
 func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 	username, password, ok := r.BasicAuth()
 	if !ok {
@@ -190,9 +205,9 @@ func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 	username = strings.ToLower(username)
 	start := time.Now()
 	outcome, err := b.verify(r.Context(), username, password)
-	b.Metrics.ObserveAuthCheck("rcptd", time.Since(start).Seconds())
+	b.Metrics.ObserveAuthCheck(b.name(), time.Since(start).Seconds())
 	if err != nil {
-		b.Metrics.AuthAttempt("rcptd", outcome)
+		b.Metrics.AuthAttempt(b.name(), outcome)
 		return "", err
 	}
 	principal := principalPath(b.PrincipalPrefix, username)
@@ -203,11 +218,11 @@ func (b *RcptdBackend) Check(r *http.Request) (string, error) {
 			// Operationally nothing like bad_credentials: a first-login DB
 			// write failed, so it gets its own outcome. The database error is
 			// logged, never sent to the client.
-			b.Metrics.AuthAttempt("rcptd", "provision_error")
+			b.Metrics.AuthAttempt(b.name(), "provision_error")
 			return "", &serverError{msg: "provisioning failed", err: err}
 		}
 	}
-	b.Metrics.AuthAttempt("rcptd", "ok")
+	b.Metrics.AuthAttempt(b.name(), "ok")
 	return principal, nil
 }
 
@@ -229,7 +244,13 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 		b.Metrics.AuthCacheEvent("miss")
 	}
 
-	hashes, status, err := b.lookup(ctx, username)
+	var hashes []string
+	var status int
+	if b.file != nil {
+		hashes, status, err = b.file.lookup(username)
+	} else {
+		hashes, status, err = b.lookup(ctx, username)
+	}
 	if err != nil {
 		return "unavailable", &serverError{msg: "authentication service is unreachable",
 			err: errors.Join(ErrUnavailable, err)}
@@ -266,7 +287,7 @@ func (b *RcptdBackend) verify(ctx context.Context, username, password string) (o
 
 	res := passwd.VerifyAny(hashes, password)
 	if b.Logger != nil && (res.Unsupported > 0 || len(res.Malformed) > 0) {
-		b.Logger.Warn("rcptd auth: unusable stored hash(es)",
+		b.Logger.Warn(b.name()+" auth: unusable stored hash(es)",
 			"user", username, "unsupported", res.Unsupported, "malformed", res.Malformed)
 	}
 	if !res.Matched {

@@ -61,6 +61,9 @@ type Config struct {
 			URL   string
 			Token string
 		}
+		// PasswdFile authenticates against a local Dovecot passwd-file
+		// instead of the users table (see [server] passwd_file).
+		PasswdFile string
 		// TempFileFilter intercepts OS junk files (._*, .DS_Store, ...) into a
 		// scratch directory instead of the backend, like sabre's
 		// TemporaryFileFilterPlugin. TempFileDir is that directory (defaults to
@@ -304,6 +307,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.TLS.Key = str("server.tls.key")
 	cfg.Server.Rcptd.URL = str("server.rcptd.url")
 	cfg.Server.Rcptd.Token = str("server.rcptd.token")
+	cfg.Server.PasswdFile = str("server.passwd_file")
 	cfg.Server.TempFileFilter = boolean("server.temp_file_filter")
 	cfg.Server.TempFileDir = str("server.temp_file_dir")
 	cfg.Server.WebURL = str("server.web_url")
