@@ -218,9 +218,9 @@ func (c *PrincipalCollection) wrapAll(principals []Principal) []dav.Node {
 	return out
 }
 
-func (c *PrincipalCollection) ChildExists(ctx context.Context, name string) bool {
-	p, err := c.backend.PrincipalByPath(ctx, c.prefix+"/"+name)
-	return err == nil && p != nil
+func (c *PrincipalCollection) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := c.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (c *PrincipalCollection) CreateFile(context.Context, string, io.Reader) (string, error) {

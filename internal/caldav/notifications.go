@@ -93,9 +93,9 @@ func (n *Notifications) Child(ctx context.Context, name string) (dav.Node, error
 	return nil, dav.ErrNotFound("Notification not found")
 }
 
-func (n *Notifications) ChildExists(ctx context.Context, name string) bool {
+func (n *Notifications) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := n.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 func (n *Notifications) CreateFile(context.Context, string, io.Reader) (string, error) {

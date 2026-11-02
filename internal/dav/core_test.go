@@ -73,9 +73,19 @@ func (c *memColl) Child(ctx context.Context, name string) (Node, error) {
 	return nil, ErrNotFound("File not found: %s", name)
 }
 
-func (c *memColl) ChildExists(ctx context.Context, name string) bool {
-	_, err := c.Child(context.Background(), name)
-	return err == nil
+// childExists is ChildExists for tests: a lookup error fails the test.
+func childExists(t testing.TB, c Collection, name string) bool {
+	t.Helper()
+	ok, err := c.ChildExists(t.Context(), name)
+	if err != nil {
+		t.Fatalf("ChildExists(%q): %v", name, err)
+	}
+	return ok
+}
+
+func (c *memColl) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := c.Child(ctx, name)
+	return Found(err)
 }
 
 func (c *memColl) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
@@ -261,7 +271,7 @@ func TestPutRejectsPercentEncodedDotDotSegment(t *testing.T) {
 	if rec.Code < 400 {
 		t.Errorf("PUT /coll/%%2e%%2e = %d, want a 4xx rejection", rec.Code)
 	}
-	if coll.ChildExists(req.Context(), "..") {
+	if childExists(t, coll, "..") {
 		t.Errorf(`PUT created a node literally named ".." in the collection`)
 	}
 }
@@ -280,7 +290,7 @@ func TestPutRejectsEncodedSlashInSegment(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("PUT with an encoded slash = %d, want 403", rec.Code)
 	}
-	if len(coll.children) != 0 || root.ChildExists(req.Context(), "x") {
+	if len(coll.children) != 0 || childExists(t, root, "x") {
 		t.Errorf("PUT with an encoded slash created a node")
 	}
 }
@@ -454,5 +464,41 @@ func TestAfterUnbindErrorIsLogged(t *testing.T) {
 	if out := logs.String(); !strings.Contains(out, "after-unbind hook failed") ||
 		!strings.Contains(out, "failing-unbind") || !strings.Contains(out, "property cleanup failed") {
 		t.Errorf("hook error not logged; log:\n%s", out)
+	}
+}
+
+// failingColl is a collection whose storage is down: every lookup fails.
+type failingColl struct {
+	memColl
+	created bool
+}
+
+var errStorageDown = errors.New("storage down")
+
+func (c *failingColl) Child(context.Context, string) (Node, error) { return nil, errStorageDown }
+
+func (c *failingColl) ChildExists(context.Context, string) (bool, error) {
+	return false, errStorageDown
+}
+
+func (c *failingColl) CreateFile(context.Context, string, io.Reader) (string, error) {
+	c.created = true
+	return "", nil
+}
+
+// A failed existence check must fail the request, not read as "absent": PUT
+// would take the create path for a resource it could not look up.
+func TestPutFailsWhenExistenceCheckFails(t *testing.T) {
+	coll := &failingColl{memColl: memColl{name: "coll"}}
+	s := NewServer("/", newMemColl("root", coll))
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("PUT", "/coll/x.txt", strings.NewReader("data")))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("PUT with a failing lookup = %d, want 500", rec.Code)
+	}
+	if coll.created {
+		t.Error("PUT created the resource although its existence could not be checked")
 	}
 }

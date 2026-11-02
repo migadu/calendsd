@@ -31,8 +31,9 @@ type Collection interface {
 	Child(ctx context.Context, name string) (Node, error)
 	// Children lists all child nodes.
 	Children(ctx context.Context) ([]Node, error)
-	// ChildExists reports whether a child with the given name exists.
-	ChildExists(ctx context.Context, name string) bool
+	// ChildExists reports whether a child with the given name exists. A
+	// failed lookup is an error, not a false.
+	ChildExists(ctx context.Context, name string) (bool, error)
 	// CreateFile creates a new file node. The returned etag, if non-empty,
 	// must be surrounded by double-quotes.
 	CreateFile(ctx context.Context, name string, data io.Reader) (etag string, err error)

@@ -272,7 +272,7 @@ func (p *Plugin) writeCardResponses(ctx context.Context, w http.ResponseWriter, 
 	for _, cardPath := range paths {
 		responses, err := p.server.PropertiesForPath(ctx, cardPath, props, 0)
 		if err != nil {
-			if dav.AsError(err).Status == http.StatusNotFound {
+			if dav.IsNotFound(err) {
 				ms.Responses = append(ms.Responses, davxml.Response{
 					Href:   p.server.Href(cardPath),
 					Status: http.StatusNotFound,

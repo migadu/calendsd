@@ -41,9 +41,9 @@ func (r *Root) Child(ctx context.Context, name string) (Node, error) {
 
 func (r *Root) Children(ctx context.Context) ([]Node, error) { return slices.Clone(r.children), nil }
 
-func (r *Root) ChildExists(ctx context.Context, name string) bool {
+func (r *Root) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := r.Child(ctx, name)
-	return err == nil
+	return Found(err)
 }
 
 func (r *Root) CreateFile(ctx context.Context, name string, _ io.Reader) (string, error) {

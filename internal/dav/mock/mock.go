@@ -65,9 +65,9 @@ func (c *Collection) Child(ctx context.Context, name string) (dav.Node, error) {
 
 func (c *Collection) Children(ctx context.Context) ([]dav.Node, error) { return c.children, nil }
 
-func (c *Collection) ChildExists(ctx context.Context, name string) bool {
+func (c *Collection) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := c.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 func (c *Collection) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {

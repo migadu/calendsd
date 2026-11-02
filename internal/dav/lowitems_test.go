@@ -90,7 +90,7 @@ func TestCopyMoveOntoAncestorRefused(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s onto ancestor = %d, want 403: %s", method, rec.Code, rec.Body.String())
 		}
-		if !root.ChildExists(t.Context(), "calendars") || !home.ChildExists(t.Context(), "e.ics") {
+		if !childExists(t, root, "calendars") || !childExists(t, home, "e.ics") {
 			t.Errorf("%s onto ancestor destroyed the collection or the source", method)
 		}
 	}

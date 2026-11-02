@@ -107,9 +107,9 @@ func (i *Inbox) Child(ctx context.Context, name string) (dav.Node, error) {
 	return &SchedulingObject{backend: i.backend, info: *obj}, nil
 }
 
-func (i *Inbox) ChildExists(ctx context.Context, name string) bool {
-	obj, err := i.backend.SchedulingObject(ctx, i.principalURI, name)
-	return err == nil && obj != nil
+func (i *Inbox) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := i.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (i *Inbox) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {
@@ -245,7 +245,7 @@ func (o *Outbox) SupportedPrivileges() *acl.Privilege {
 		}},
 	}}
 }
-func (o *Outbox) ChildExists(context.Context, string) bool { return false }
+func (o *Outbox) ChildExists(context.Context, string) (bool, error) { return false, nil }
 func (o *Outbox) CreateFile(context.Context, string, io.Reader) (string, error) {
 	return "", dav.ErrMethodNotAllowed("Creating files in the outbox is not allowed")
 }

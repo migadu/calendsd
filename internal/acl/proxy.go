@@ -45,8 +45,8 @@ func (u *UserPrincipalNode) Children(ctx context.Context) ([]dav.Node, error) {
 	return []dav.Node{read, write}, nil
 }
 
-func (u *UserPrincipalNode) ChildExists(ctx context.Context, name string) bool {
-	return name == proxyReadName || name == proxyWriteName
+func (u *UserPrincipalNode) ChildExists(ctx context.Context, name string) (bool, error) {
+	return name == proxyReadName || name == proxyWriteName, nil
 }
 
 func (u *UserPrincipalNode) CreateFile(context.Context, string, io.Reader) (string, error) {

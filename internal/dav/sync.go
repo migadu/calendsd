@@ -193,8 +193,8 @@ func (p *SyncPlugin) writeResponse(ctx context.Context, w http.ResponseWriter, c
 		itemPath := joinPath(item)
 		responses, err := p.server.PropertiesForPath(ctx, itemPath, props, 0)
 		if err != nil {
-			if AsError(err).Status == http.StatusNotFound {
-				continue // changed then deleted; skip like sabre's multi-path fetch
+			if IsNotFound(err) {
+				continue // changed then deleted; skip it
 			}
 			return err
 		}

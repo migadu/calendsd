@@ -39,7 +39,9 @@ func (p *Plugin) mkcalendar(w http.ResponseWriter, r *http.Request) error {
 		props = parsed
 	}
 
-	if p.server.Tree.NodeExists(r.Context(), path) {
+	if exists, err := p.server.Tree.NodeExists(r.Context(), path); err != nil {
+		return err
+	} else if exists {
 		return dav.ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
 	parentPath, name := pathutil.Split(path)

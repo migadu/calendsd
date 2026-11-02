@@ -343,8 +343,7 @@ func (p *Plugin) writeObjectResponses(ctx context.Context, w http.ResponseWriter
 			responses, err = p.server.PropertiesForPath(ctx, objPath, props, 0)
 		}
 		if err != nil {
-			var davErr *dav.Error
-			if errors.As(err, &davErr) && davErr.Status == http.StatusNotFound {
+			if dav.IsNotFound(err) {
 				ms.Responses = append(ms.Responses, davxml.Response{
 					Href:   p.server.Href(objPath),
 					Status: http.StatusNotFound,

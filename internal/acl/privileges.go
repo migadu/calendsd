@@ -363,7 +363,10 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 	if err != nil {
 		return true, nil // URI errors surface in the method handler
 	}
-	exists := p.server.Tree.NodeExists(ctx, path)
+	exists, err := p.server.Tree.NodeExists(ctx, path)
+	if err != nil {
+		return false, err
+	}
 	parent := func() string {
 		parentPath, _ := pathutil.Split(path)
 		return parentPath
@@ -423,7 +426,9 @@ func (p *Plugin) BeforeMethod(w http.ResponseWriter, r *http.Request) (bool, err
 			return true, nil // handler reports the bad destination
 		}
 		destParent, _ := pathutil.Split(dest)
-		if p.server.Tree.NodeExists(ctx, dest) {
+		if destExists, err := p.server.Tree.NodeExists(ctx, dest); err != nil {
+			return false, err
+		} else if destExists {
 			if ok, err := check(destParent, "{DAV:}unbind"); !ok {
 				return ok, err
 			}

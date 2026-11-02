@@ -80,9 +80,9 @@ func (r *AddressBookRoot) Child(ctx context.Context, name string) (dav.Node, err
 	return home, nil
 }
 
-func (r *AddressBookRoot) ChildExists(ctx context.Context, name string) bool {
-	p, err := r.principals.PrincipalByPath(ctx, r.principalPrefix+"/"+name)
-	return err == nil && p != nil
+func (r *AddressBookRoot) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := r.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (r *AddressBookRoot) CreateFile(context.Context, string, io.Reader) (string, error) {
@@ -152,9 +152,9 @@ func (h *AddressBookHome) Child(ctx context.Context, name string) (dav.Node, err
 	return nil, dav.ErrNotFound("Node with name '%s' could not be found", name)
 }
 
-func (h *AddressBookHome) ChildExists(ctx context.Context, name string) bool {
+func (h *AddressBookHome) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := h.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 // provisioned lists the principal's address books, recreating the default
@@ -235,9 +235,9 @@ func (a *AddressBook) Child(ctx context.Context, name string) (dav.Node, error) 
 	return NewCard(a.backend, a.Info, *card), nil
 }
 
-func (a *AddressBook) ChildExists(ctx context.Context, name string) bool {
-	card, err := a.backend.Card(ctx, a.Info.ID, name)
-	return err == nil && card != nil
+func (a *AddressBook) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := a.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (a *AddressBook) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {

@@ -40,7 +40,11 @@ func (c *CorePlugin) Methods(ctx context.Context, path string) []string {
 		"OPTIONS", "GET", "HEAD", "DELETE", "PROPFIND",
 		"PUT", "PROPPATCH", "COPY", "MOVE", "REPORT",
 	}
-	if c.server.Tree == nil || !c.server.Tree.NodeExists(ctx, path) {
+	if c.server.Tree == nil {
+		return append(methods, "MKCOL")
+	}
+	// The Allow header is advisory: a failed lookup still offers MKCOL.
+	if exists, err := c.server.Tree.NodeExists(ctx, path); err != nil || !exists {
 		methods = append(methods, "MKCOL")
 	}
 	return methods
@@ -400,7 +404,11 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 		body = io.MultiReader(strings.NewReader(string(first[:n])), r.Body)
 	}
 
-	isNew := !c.server.Tree.NodeExists(r.Context(), path)
+	exists, err := c.server.Tree.NodeExists(r.Context(), path)
+	if err != nil {
+		return err
+	}
+	isNew := !exists
 
 	// Write interceptors (the scheduling broker) may rewrite the payload.
 	raw, err := io.ReadAll(body)
@@ -458,7 +466,9 @@ func (c *CorePlugin) put(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	parentPath, name := pathutil.Split(path)
-	if !c.server.Tree.NodeExists(r.Context(), parentPath) {
+	if parentExists, err := c.server.Tree.NodeExists(r.Context(), parentPath); err != nil {
+		return err
+	} else if !parentExists {
 		return ErrConflict("Files can not be created in non-existent collections")
 	}
 	parent, err := c.server.Tree.NodeForPath(r.Context(), parentPath)
@@ -524,13 +534,15 @@ func (c *CorePlugin) mkcol(w http.ResponseWriter, r *http.Request) error {
 		resourceTypes = resourceType
 	}
 
-	if c.server.Tree.NodeExists(r.Context(), path) {
+	if exists, err := c.server.Tree.NodeExists(r.Context(), path); err != nil {
+		return err
+	} else if exists {
 		return ErrMethodNotAllowed("The resource you tried to create already exists")
 	}
 	parentPath, name := pathutil.Split(path)
 	parent, err := c.server.Tree.NodeForPath(r.Context(), parentPath)
 	if err != nil {
-		if AsError(err).Status == http.StatusNotFound {
+		if IsNotFound(err) {
 			return ErrConflict("Parent node does not exist")
 		}
 		return err
@@ -720,7 +732,7 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 	destDir, _ := pathutil.Split(destination)
 	destParent, err := c.server.Tree.NodeForPath(r.Context(), destDir)
 	if err != nil {
-		if AsError(err).Status == http.StatusNotFound {
+		if IsNotFound(err) {
 			return nil, ErrConflict("The destination node is not found")
 		}
 		return nil, err
@@ -729,7 +741,10 @@ func (c *CorePlugin) copyMoveInfo(r *http.Request, sourcePath string) (*copyMove
 		return nil, ErrUnsupportedMediaType("The destination node is not a collection")
 	}
 
-	destinationExists := c.server.Tree.NodeExists(r.Context(), destination)
+	destinationExists, err := c.server.Tree.NodeExists(r.Context(), destination)
+	if err != nil {
+		return nil, err
+	}
 	if destinationExists && !overwrite {
 		return nil, ErrPreconditionFailed("The destination node already exists, and the overwrite header is set to false")
 	}

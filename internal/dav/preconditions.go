@@ -33,7 +33,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
 		node, err = s.Tree.NodeForPath(r.Context(), path)
 		if err != nil {
-			if AsError(err).Status == http.StatusNotFound {
+			if IsNotFound(err) {
 				return false, ErrPreconditionFailed("An If-Match header was specified and the resource did not exist")
 			}
 			return false, err
@@ -70,7 +70,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 			switch {
 			case err == nil:
 				exists = true
-			case AsError(err).Status == http.StatusNotFound:
+			case IsNotFound(err):
 				exists = false
 			default:
 				return false, err
@@ -106,7 +106,7 @@ func (s *Server) checkPreconditions(w http.ResponseWriter, r *http.Request) (pro
 		if node == nil {
 			node, err = s.Tree.NodeForPath(r.Context(), path)
 			if err != nil {
-				if AsError(err).Status == http.StatusNotFound {
+				if IsNotFound(err) {
 					return time.Time{}, nil
 				}
 				return time.Time{}, err

@@ -89,9 +89,9 @@ func (r *CalendarRoot) Child(ctx context.Context, name string) (dav.Node, error)
 	return home, nil
 }
 
-func (r *CalendarRoot) ChildExists(ctx context.Context, name string) bool {
-	p, err := r.principals.PrincipalByPath(ctx, r.principalPrefix+"/"+name)
-	return err == nil && p != nil
+func (r *CalendarRoot) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := r.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (r *CalendarRoot) CreateFile(context.Context, string, io.Reader) (string, error) {
@@ -193,9 +193,9 @@ func (h *CalendarHome) provisioned(ctx context.Context) ([]CalendarInfo, error) 
 	return h.backend.CalendarsForUser(ctx, h.principalURI)
 }
 
-func (h *CalendarHome) ChildExists(ctx context.Context, name string) bool {
+func (h *CalendarHome) ChildExists(ctx context.Context, name string) (bool, error) {
 	_, err := h.Child(ctx, name)
-	return err == nil
+	return dav.Found(err)
 }
 
 func (h *CalendarHome) CreateFile(context.Context, string, io.Reader) (string, error) {
@@ -403,9 +403,9 @@ func (c *Calendar) ObjectByUID(ctx context.Context, uid string) (*CalendarObject
 	return nil, nil
 }
 
-func (c *Calendar) ChildExists(ctx context.Context, name string) bool {
-	obj, err := c.backend.CalendarObject(ctx, c.Info.ID, name)
-	return err == nil && obj != nil
+func (c *Calendar) ChildExists(ctx context.Context, name string) (bool, error) {
+	_, err := c.Child(ctx, name)
+	return dav.Found(err)
 }
 
 func (c *Calendar) CreateFile(ctx context.Context, name string, data io.Reader) (string, error) {

@@ -48,18 +48,22 @@ func (t *Tree) NodeForPath(ctx context.Context, path string) (Node, error) {
 	return node, nil
 }
 
-// NodeExists reports whether a node exists at path.
-func (t *Tree) NodeExists(ctx context.Context, path string) bool {
+// NodeExists reports whether a node exists at path. A missing parent is a
+// false; a failed lookup is an error.
+func (t *Tree) NodeExists(ctx context.Context, path string) (bool, error) {
 	if strings.Trim(path, "/") == "" {
-		return true
+		return true, nil
 	}
 	parent, base := pathutil.Split(strings.Trim(path, "/"))
 	parentNode, err := t.NodeForPath(ctx, parent)
 	if err != nil {
-		return false
+		return Found(err)
 	}
 	coll, isColl := parentNode.(Collection)
-	return isColl && coll.ChildExists(ctx, base)
+	if !isColl {
+		return false, nil
+	}
+	return coll.ChildExists(ctx, base)
 }
 
 // Delete removes the node at path.

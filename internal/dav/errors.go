@@ -53,7 +53,25 @@ func davError(status int, exception, format string, args ...any) *Error {
 	}
 }
 
-// The constructors below mirror sabre's lib/DAV/Exception/* classes.
+// IsNotFound reports whether err is a 404 protocol error.
+func IsNotFound(err error) bool {
+	var de *Error
+	return errors.As(err, &de) && de.Status == http.StatusNotFound
+}
+
+// Found turns the error of a lookup into an existence check: nil means
+// found, a 404 means not found, and any other error is returned.
+func Found(err error) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+// The constructors below pair each status with its sabre/dav exception name.
 
 func ErrNotFound(format string, args ...any) *Error {
 	return davError(http.StatusNotFound, "NotFound", format, args...)

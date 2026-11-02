@@ -460,7 +460,7 @@ func (p *Plugin) expandProperties(ctx context.Context, path string, requested []
 						// An href may point anywhere; one that resolves to
 						// nothing yields nothing for that href rather than
 						// failing the whole report.
-						if dav.AsError(err).Status == http.StatusNotFound {
+						if dav.IsNotFound(err) {
 							continue
 						}
 						return nil, err
