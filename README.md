@@ -155,3 +155,9 @@ each record and reports coverage. Porting a feature moves its records into the
 Parity of the PUT-time denormalization (etag, occurrence bounds) is separately
 pinned against sabre via `internal/caldav/ical/testdata/golden.json`,
 regenerated with `scripts/denormalize-golden.php`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The reference sabre/dav checkout in
+`dav/` (and the test corpus extracted from it) keeps its own BSD license, see
+[dav/LICENSE](dav/LICENSE).

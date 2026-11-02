@@ -21,13 +21,13 @@ import (
 	"time"
 
 	"calendsd/internal/metrics"
-	"shared/passwd"
+	"calendsd/internal/passwd"
 )
 
 // RcptdBackend authenticates HTTP Basic credentials against an rcptd daemon's
 // /auth endpoint. Unlike an IMAP backend (send password, get yes/no), rcptd is
 // a hash *provider*: GET /auth?email=<user> returns the user's Dovecot
-// password hashes, and verification happens here, locally, via shared/passwd —
+// password hashes, and verification happens here, locally, via internal/passwd —
 // the same implementation Mizu uses at SMTP AUTH. The plaintext password never
 // leaves this process. The passwd source of truth is the same Dovecot file the
 // mail stack uses, so DAV logins and mail logins stay in lock-step.
